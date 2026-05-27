@@ -1,0 +1,153 @@
+# =====================================================================
+# Layer 4 · Chain-level defence rules  (v3 DSL)
+# Full v3 TRACE bindings for multi-hop attack path detection
+# =====================================================================
+
+
+# ── 4.1  Sensitive data → unapproved external sink (graph-aware) ─────
+
+RULE: builtin_chain_sensitive_data_no_external_exfiltration
+ON: tool_call.requested
+CONDITION: tool.name IN {"email.send", "http.post", "slack.post", "send_email", "http_post"}
+           AND exists_path(
+                 source.label IN {"finance/*", "hr/*", "customer_private/*", "pii/*", "secret/*"},
+                 sink = current_call,
+                 max_hops = 6
+               )
+           AND (caller.scope_missing("sensitive_export")
+             OR goal_drift_detected()
+             OR scope_expansion_detected())
+POLICY: DENY
+Severity: high
+Category: data_exfiltration
+Reason: "Sensitive data flowing to unapproved external sink"
+
+
+# ── 4.2  PII / secret in any external egress — session label ─────────
+
+RULE: builtin_chain_pii_session_label_external_deny
+ON: tool_call.requested
+CONDITION: tool.boundary == "external"
+           AND input.has_any_label({"pii/*", "secret/*", "finance/*", "hr/*"})
+           AND caller.scope_missing("sensitive_export")
+POLICY: DENY
+Severity: critical
+Category: data_exfiltration
+Reason: "Session provenance labels indicate sensitive data; external call blocked"
+
+
+# ── 4.3  PII → external HTTP: redact before sending ──────────────────
+
+RULE: builtin_chain_redact_pii_on_external_http
+ON: tool_call.requested
+CONDITION: tool.name == "http.post"
+           AND upstream_contains_any_tool({"db.query", "fs.read", "database_query", "file_read"})
+POLICY: ALLOW WITH REDACT(fields={"email", "phone", "ssn", "token", "password"}),
+               AUDIT(severity="medium", category="pii_egress")
+
+
+# ── 4.4  Burst of external calls → LLM review ────────────────────────
+
+RULE: builtin_chain_repeated_external_calls_llm_review
+ON: tool_call.requested
+CONDITION: tool.name IN {"http.post", "http_post", "email.send"}
+           AND repeated_attempts(tool="http.post", window="5m") > 4
+POLICY: LLM_CHECK
+Severity: medium
+Category: behavioural_anomaly
+Reason: "Burst of external calls detected; LLM review required"
+
+
+# ── 4.5  Secret-read → external sink  (v3 TRACE) ─────────────────────
+
+RULE: builtin_chain_secrets_any_external_deny
+TRACE: SecReader ->...?-> Sink
+CONDITION: SecReader.name IN {"read_secrets", "secret.read"}
+           AND Sink.name IN {"http.post", "email.send", "slack.post", "http_post"}
+POLICY: DENY
+Severity: critical
+Category: secret_exfiltration
+Reason: "Tool chain reads secrets then contacts external sink"
+
+
+# ── 4.6  Secret-read → external without redact  (v3 TRACE) ──────────
+
+RULE: builtin_chain_secret_no_redact_deny
+ON: tool_call.requested
+CONDITION: tool.boundary == "external"
+           AND trace("secret.read ->...? -> http.post")
+           AND NOT trace("secret.read ->...? -> redact ->...? -> http.post")
+POLICY: DENY
+Severity: critical
+Category: missing_sanitizer
+Reason: "Secret data reaching external sink without redactor in the chain"
+
+
+# ── 4.7  Adjacent DB → email  (v3 TRACE adjacent) ────────────────────
+
+RULE: builtin_chain_adjacent_db_to_email_llm
+TRACE: DbOp -> Mailer
+CONDITION: DbOp.name IN {"db.query", "database_query"}
+           AND Mailer.name == "email.send"
+POLICY: LLM_CHECK
+Severity: medium
+Category: suspicious_adjacency
+Reason: "Database query immediately followed by email send"
+
+
+# ── 4.8  Two-hop db → external  (v3 TRACE exactly-one) ───────────────
+
+RULE: builtin_chain_two_hop_exfiltration_llm
+TRACE: DbOp -> * -> Sink
+CONDITION: DbOp.name IN {"db.query", "database_query"}
+           AND Sink.boundary == "external"
+POLICY: LLM_CHECK
+Severity: high
+Category: two_hop_exfil
+Reason: "Two-hop pattern: db.query → <one tool> → external sink"
+
+
+# ── 4.9  LLM plan injection → HTTP POST ──────────────────────────────
+
+RULE: builtin_chain_llm_plan_injection_to_http
+ON: tool_call(http.post)
+CONDITION: history_result("llm.plan") MATCHES ".*(?i)(ignore (all |previous |prior )?(instructions?|rules?)|jailbreak|DAN).*"
+POLICY: DENY
+Severity: critical
+Category: prompt_injection_exfil
+Reason: "LLM plan result contains injection pattern; subsequent HTTP POST denied"
+
+
+# ── 4.10 Goal drift / scope expansion → external call ────────────────
+
+RULE: builtin_chain_goal_drift_external_llm
+ON: tool_call.requested
+CONDITION: tool.boundary == "external"
+           AND (goal_drift_detected() OR scope_expansion_detected())
+POLICY: LLM_CHECK
+Severity: high
+Category: behavioural_anomaly
+Reason: "Goal drift or scope expansion detected; external call requires LLM review"
+
+
+# ── 4.11 Unfiltered input → privileged tool  (v3 TRACE) ──────────────
+
+RULE: builtin_chain_unfiltered_to_privileged_llm
+TRACE: Src ->...?-> Priv
+CONDITION: Src.integrity == "unfiltered" AND Priv.boundary == "privileged"
+POLICY: LLM_CHECK
+Severity: high
+Category: integrity_violation
+Reason: "Unfiltered data reached a privileged-boundary tool"
+
+
+# ── 4.12 External input → shell  (v3 TRACE) ──────────────────────────
+
+RULE: builtin_chain_external_to_shell_deny
+TRACE: ExtSrc ->...?-> Shell
+CONDITION: ExtSrc.boundary == "external"
+           AND Shell.name IN {"shell.exec", "shell_exec", "subprocess.run"}
+POLICY: DENY
+Severity: critical
+Category: prompt_injection
+Reason: "External-boundary data flowing into shell execution"

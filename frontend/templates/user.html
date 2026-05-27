@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgentGuard Frontend Preview</title>
+  <link rel="stylesheet" href="/static/common/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+{{ shared:sidebar }}
+
+    <main class="app-main home-main">
+      <section class="page-intro-card home-hero">
+        <div class="home-hero-copy">
+          <p class="page-kicker">User Studio</p>
+          <h1><span class="home-hero-name">User Centre</span></h1>
+          <p class="subtle">
+            Manage your personal information and settings on this page.
+          </p>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="heading-row">
+          <h3>User Management</h3>
+        </div>
+        <p class="subtle">Coming soon.</p>
+        <p class="subtle">
+          basic user management features to be added...
+        </p>
+      </section>
+    </main>
+
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <script src="/static/common/messages.js"></script>
+  <script src="/static/common/page-shell.js"></script>
+  <script>
+    window.AgentGuardShell?.setPageContext({
+      title: "User",
+      description: "Manage frontend user identities and related configuration.",
+    });
+  </script>
+</body>
+</html>

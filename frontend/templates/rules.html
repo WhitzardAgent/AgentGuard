@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgentGuard Frontend Preview</title>
+  <script>
+    (function () {
+      try {
+        if (!String(window.localStorage.getItem("agentguard.selectedAgentId") || "").trim()) {
+          window.location.replace("/agents.html");
+        }
+      } catch {
+        window.location.replace("/agents.html");
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/common/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+{{ shared:sidebar }}
+
+    <main class="app-main">
+      <section class="page-intro-card">
+        <div>
+          <p class="page-kicker">Rule Studio</p>
+          <h1>Rule Builder</h1>
+          <p class="subtle">
+            Build DSL rules from structured inputs and manage rule publication.
+          </p>
+        </div>
+      </section>
+
+      <section class="stack-section rules-page">
+        <div class="card rule-generator-card">
+          <div class="heading-row">
+            <div>
+              <h3 id="rule-builder-title">Guided Rule Builder</h3>
+              <p class="subtle section-intro" id="rule-builder-subtitle">
+                Create a new rule step by step, or load an existing rule into the editor for modification.
+              </p>
+            </div>
+            <div class="heading-actions">
+              <button class="btn" id="return-to-wizard-button" type="button" hidden>Back To Guided Create</button>
+            </div>
+          </div>
+
+          <div class="rule-builder-layout">
+            <div class="rule-pane">
+              <div class="rule-builder-stepper" id="rule-builder-stepper">
+                <button class="rule-step-chip active" data-step="1" type="button">1. Name</button>
+                <button class="rule-step-chip" data-step="2" type="button">2. Match</button>
+                <button class="rule-step-chip" data-step="3" type="button">3. Condition</button>
+                <button class="rule-step-chip" data-step="4" type="button">4. Details</button>
+              </div>
+
+              <section class="wizard-step-card is-active" id="wizard-step-1" data-step="1">
+                <div class="wizard-step-header">
+                  <div>
+                    <p class="wizard-step-kicker">Step 1</p>
+                    <h4>Rule Name</h4>
+                    <p class="subtle">Start rule construction with a rule name.</p>
+                  </div>
+                </div>
+                <div class="field">
+                  <input id="rule-name-input" type="text" value="">
+                </div>
+                <div class="wizard-step-actions">
+                  <button class="btn primary rule-step-next-button" data-next-step="2" type="button">Continue To Match Mode</button>
+                </div>
+              </section>
+
+              <section class="wizard-step-card" id="wizard-step-2" data-step="2">
+                <div class="wizard-step-header">
+                  <div>
+                    <p class="wizard-step-kicker">Step 2</p>
+                    <h4>Formal Match Mode</h4>
+                    <p class="subtle">Choose the ideal path matching approach for your rule.</p>
+                  </div>
+                </div>
+                <div class="field">
+                  <div class="match-mode-grid" id="match-mode-grid">
+                    <label class="match-mode-card">
+                      <input id="match-mode-on" name="rule-match-mode" type="radio" value="on">
+                      <span class="match-mode-title">Single Tool</span>
+                      <span class="subtle">I just want constraints on a single tool.</span>
+                    </label>
+                    <label class="match-mode-card">
+                      <input id="match-mode-trace" name="rule-match-mode" type="radio" value="trace" checked>
+                      <span class="match-mode-title">Tool Trace</span>
+                      <span class="subtle">I want to monitor an execution chain.</span>
+                    </label>
+                  </div>
+                </div>
+                <div class="field" id="on-field">
+                  <label for="rule-on-subtype-input">Select Target Tool and Trigger Stage</label>
+                  <div class="on-filter-row">
+                    <div class="on-filter-help-row">
+                      <span class="subtle">Trigger Stage</span>
+                      <div class="hint-wrap">
+                        <span class="hint-dot">i</span>
+                        <div class="hint-bubble">
+                          Choose when the rule should trigger in the tool invocation lifecycle.
+                        </div>
+                      </div>
+                    </div>
+                    <select id="rule-on-subtype-input">
+                      <option value="" selected>Trigger stage (optional)</option>
+                      <option value="requested">requested</option>
+                      <option value="attempted">attempted</option>
+                      <option value="attempt">attempt</option>
+                      <option value="completed">completed</option>
+                      <option value="result">result</option>
+                      <option value="failed">failed</option>
+                    </select>
+                  </div>
+                  <div class="on-filter-row">
+                    <div class="on-filter-help-row">
+                      <span class="subtle">Tool</span>
+                      <div class="hint-wrap">
+                        <span class="hint-dot">i</span>
+                        <div class="hint-bubble">
+                          Optionally narrow the rule to one specific tool under the selected trigger stage.
+                        </div>
+                      </div>
+                    </div>
+                    <select id="rule-on-input">
+                      <option value="" selected>Select tool (optional)</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="field" id="path-field">
+                  <label>Construct the Trace format you want to monitor. <strong>e.g. A -> * -> C</strong></label>
+                  <div class="path-builder" id="path-builder">
+                    <div class="path-builder-segments" id="path-builder-segments"></div>
+                    <div class="path-builder-controls">
+                      <p class="subtle path-builder-hint" id="path-builder-hint">
+                        TRACE is required in trace mode. The first PATH segment must be concrete, and the final segment cannot be a wildcard.
+                      </p>
+                      <button class="icon-label" id="path-continue-button" type="button" aria-label="Add path segment" title="Add path segment">
+                        <img class="btn-icon-image" src="/assets/add.png" alt="">
+                      </button>
+                      <button class="icon-label" id="path-finish-button" type="button" aria-label="Confirm path" title="Confirm path">
+                        <img class="btn-icon-image" src="/assets/confirm.png" alt="">
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div class="wizard-step-actions">
+                  <button class="btn" data-prev-step="1" type="button">Back</button>
+                  <button class="btn primary rule-step-next-button" data-next-step="3" type="button">Continue To Condition</button>
+                </div>
+              </section>
+
+              <section class="wizard-step-card" id="wizard-step-3" data-step="3">
+                <div class="wizard-step-header">
+                  <div>
+                    <p class="wizard-step-kicker">Step 3</p>
+                    <h4>Condition Builder</h4>
+                    <p class="subtle">Craft your condition logic</p>
+                  </div>
+                </div>
+                <div class="condition-builder" id="condition-builder">
+                  <div class="condition-builder-topbar">
+                    <div class="condition-builder-mode-switch" id="condition-builder-mode-switch" role="tablist" aria-label="Condition builder mode">
+                      <button class="condition-builder-mode-chip active" id="condition-builder-step-mode-button" type="button" data-builder-mode="step" aria-pressed="true">Step Condition Builder</button>
+                      <button class="condition-builder-mode-chip" id="condition-builder-direct-mode-button" type="button" data-builder-mode="direct" aria-pressed="false">Direct Condition Builder</button>
+                    </div>
+                    <p class="subtle condition-builder-mode-copy" id="condition-builder-mode-copy">
+                      Step mode builds reusable single rules first, then combines saved rules into a larger condition.
+                    </p>
+                    <div class="condition-builder-flow" id="condition-builder-flow" aria-label="Guided builder flow" hidden>
+                      <div class="condition-builder-flow-step">
+                        <span class="condition-builder-flow-index">1</span>
+                        <div>
+                          <strong>Choose tool node</strong>
+                        </div>
+                      </div>
+                      <div class="condition-builder-flow-step">
+                        <span class="condition-builder-flow-index">2</span>
+                        <div>
+                          <strong>Select target field</strong>
+                        </div>
+                      </div>
+                      <div class="condition-builder-flow-step">
+                        <span class="condition-builder-flow-index">3</span>
+                        <div>
+                          <strong>Set value</strong>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="condition-builder-grid" id="condition-builder-grid"></div>
+                  <div class="condition-builder-actions">
+                    <p class="subtle condition-builder-hint" id="condition-builder-hint">Build one single rule from either a TRACE symbol or the current-call context, then combine saved rules.</p>
+                    <button class="icon-label condition-add-button" id="add-condition-button" type="button" aria-label="Add condition" title="Add condition">
+                      <img class="condition-add-icon" src="/assets/add.png" alt="">
+                    </button>
+                  </div>
+                </div>
+                <div class="wizard-step-actions">
+                  <button class="btn" data-prev-step="2" type="button">Back</button>
+                  <button class="btn primary rule-step-next-button" data-next-step="4" type="button">Continue To Details</button>
+                </div>
+              </section>
+
+              <section class="wizard-step-card" id="wizard-step-4" data-step="4">
+                <div class="wizard-step-header">
+                  <div>
+                    <p class="wizard-step-kicker">Step 4</p>
+                    <h4>Additional Details</h4>
+                    <p class="subtle">Finish the optional metadata that helps operators understand and manage the rule later.</p>
+                  </div>
+                </div>
+                <div class="field">
+                  <label for="rule-action-input">ACTION</label>
+                  <select id="rule-action-input">
+                    <option value="" selected disabled hidden>SELECT ACTION</option>
+                    <option value="DENY">DENY</option>
+                    <option value="HUMAN_CHECK">HUMAN_CHECK</option>
+                    <option value="LLM_CHECK">LLM_CHECK</option>
+                    <option value="ALLOW">ALLOW</option>
+                    <option value="DEGRADE">DEGRADE</option>
+                  </select>
+                </div>
+                <div class="field" id="prompt-field">
+                  <label for="rule-prompt-input">Prompt</label>
+                  <textarea id="rule-prompt-input" placeholder="LLM review system prompt for this rule."></textarea>
+                </div>
+                <div class="field" id="degrade-target-field">
+                  <label for="rule-degrade-target-input">DEGRADE Target</label>
+                  <select id="rule-degrade-target-input">
+                    <option value="" selected disabled hidden>Select target tool</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="rule-severity-input">Severity</label>
+                  <select id="rule-severity-input">
+                    <option value="" selected hidden>Select severity</option>
+                    <option value="critical">critical</option>
+                    <option value="high">high</option>
+                    <option value="medium">medium</option>
+                    <option value="low">low</option>
+                    <option value="info">info</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="rule-category-input">Category</label>
+                  <input id="rule-category-input" type="text" value="" placeholder="egress_review">
+                </div>
+                <div class="field">
+                  <label for="rule-reason-input">Reason</label>
+                  <textarea id="rule-reason-input" placeholder="Explain why this rule exists."></textarea>
+                </div>
+                <div class="field">
+                  <label for="rule-description-input">DESCRIPTION</label>
+                  <textarea id="rule-description-input">Use this field to capture the operator-facing explanation for the rule.</textarea>
+                </div>
+                <div class="wizard-step-actions">
+                  <button class="btn" data-prev-step="3" type="button">Back</button>
+                </div>
+              </section>
+            </div>
+
+            <div class="rule-pane">
+              <div class="preview-header">
+                <strong>Preview Result</strong>
+              </div>
+              <pre class="code-block rule-preview-block" id="rule-preview-block"></pre>
+            </div>
+          </div>
+
+          <div class="toolbar rule-builder-actions">
+            <button class="btn primary" id="generate-rule-button" type="button">Generate Rule</button>
+            <button class="btn" id="check-rule-button" type="button">Check Rule</button>
+            <button class="btn warn" id="clear-rule-form-button" type="button">Clear Form</button>
+          </div>
+        </div>
+
+        <div class="card rule-list-card">
+          <div class="heading-row">
+            <h3>Rule List</h3>
+            <div class="heading-actions rule-list-filter" aria-label="Rule status filters">
+              <button class="filter-chip active" type="button">All</button>
+              <button class="filter-chip" type="button">Published</button>
+              <button class="filter-chip" type="button">Unpublished</button>
+            </div>
+          </div>
+          <div id="rule-list" class="rule-list"></div>
+        </div>
+      </section>
+    </main>
+
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <script src="/static/common/messages.js"></script>
+  <script src="/static/common/page-shell.js"></script>
+  <script src="/static/common/app.js"></script>
+  <script src="/static/common/tool-catalog.js"></script>
+  <script src="/static/common/ui-helpers.js"></script>
+  <script src="/static/pages/rules/rule-storage.js"></script>
+  <script src="/static/pages/rules/rule-dsl.js"></script>
+  <script src="/static/pages/rules/rule-parser.js"></script>
+  <script src="/static/pages/rules/rule-utils.js"></script>
+  <script src="/static/pages/rules/rule-on-clause.js"></script>
+  <script src="/static/pages/rules/path-builder.js"></script>
+  <script src="/static/pages/rules/condition-builder.js"></script>
+  <script src="/static/pages/rules/rule-model.js"></script>
+  <script src="/static/pages/rules/rule-validation.js"></script>
+  <script src="/static/pages/rules/rule-preview.js"></script>
+  <script src="/static/pages/rules/rule-service.js"></script>
+  <script src="/static/pages/rules/rule-store.js"></script>
+  <script src="/static/pages/rules/rule-form-controller.js"></script>
+  <script src="/static/pages/rules/rule-list-controller.js"></script>
+  <script src="/static/pages/rules/rules.js"></script>
+</body>
+</html>

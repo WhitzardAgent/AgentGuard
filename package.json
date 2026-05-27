@@ -1,0 +1,13 @@
+{
+  "private": true,
+  "name": "agentguard-docs",
+  "version": "0.0.0",
+  "description": "Local tooling for AgentGuard docs.",
+  "scripts": {
+    "docs:build": "NODE_PATH=./node_modules npx -y honkit@6.0.3 build docs docs/_book",
+    "docs:serve": "NODE_PATH=./node_modules npx -y honkit@6.0.3 serve docs --port 4000"
+  },
+  "dependencies": {
+    "honkit-plugin-doc-lang-switcher": "file:./docs/honkit-plugin-doc-lang-switcher"
+  }
+}

@@ -1,0 +1,483 @@
+# =============================================================================
+# 00_dsl_examples.rules  —  AgentGuard DSL v3 Tutorial
+#
+# Read this file to learn the complete DSL syntax.
+# Every section is self-contained and runnable.
+#
+# Table of contents
+# ─────────────────
+#   §1  Rule skeleton
+#   §2  ON clause — event subtypes and tool patterns
+#   §3  CONDITION — principal, tool params, target
+#   §4  POLICY — four actions
+#   §5  Obligations — AUDIT, REDACT, RATE_LIMIT
+#   §6  Metadata — Severity, Category, Reason
+#   §7  TRACE — call-chain detection
+#   §8  Tool labels — boundary, sensitivity, integrity
+#   §9  History functions — history_arg, history_result
+#   §10 Provenance — exists_path, input.has_any_label
+#   §11 Allowlists — IN allowlist.*
+#   §12 Regex matching — MATCHES "..."
+# =============================================================================
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §1  Rule skeleton
+#
+# Every rule must have RULE: and POLICY:.
+# ON: and CONDITION: are optional.
+# Omitting ON:        matches all event subtypes (requested / completed / failed).
+# Omitting CONDITION: means the rule always fires (unconditional).
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Minimal rule — unconditionally deny one specific tool.
+RULE: ex1-unconditional-deny
+ON:        tool_call(dangerous_tool)
+POLICY:    DENY
+
+# Minimal rule — unconditionally allow a tool (useful after a more general deny).
+RULE: ex1-unconditional-allow
+ON:        tool_call(safe_read_tool)
+POLICY:    ALLOW
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §2  ON clause — event subtypes and tool patterns
+#
+# Syntax: ON: tool_call[.subtype][(tool_pattern)]
+#
+# Subtypes
+#   (none)          — matches all three phases (default)
+#   .requested      — fires BEFORE the tool executes  → use for pre-execution DENY
+#   .completed      — fires AFTER the tool returns successfully
+#   .failed         — fires AFTER the tool raises an error
+#
+# Tool patterns
+#   (shell_exec)    — exact match on the registered tool name
+#   (omitted)       — matches any tool name
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Fire before execution — the only phase where DENY can block the call.
+RULE: ex2-requested-phase
+ON:        tool_call.requested(shell_exec)
+CONDITION: principal.role == "basic"
+POLICY:    DENY
+Severity:  high
+Category:  capability
+
+# Fire after the tool completes — useful for output inspection or audit.
+RULE: ex2-completed-phase-audit
+ON:        tool_call.completed(database_query)
+POLICY:    ALLOW WITH AUDIT(severity="low", category="db_access")
+
+# Fire when the tool fails — useful for error alerting.
+RULE: ex2-failed-phase-alert
+ON:        tool_call.failed(http_post)
+POLICY:    ALLOW WITH AUDIT(severity="medium", category="http_error")
+
+# Match any tool (no pattern) — useful for catch-all rules.
+RULE: ex2-any-tool-low-trust
+ON:        tool_call.requested
+CONDITION: principal.trust_level == 0
+POLICY:    DENY
+Severity:  critical
+Category:  capability
+Reason:    "Zero-trust agents are not allowed to call any tool"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §3  CONDITION — principal, tool params, target
+#
+# Access fields with dotted paths.
+#
+# principal.*
+#   principal.role          string    "basic" | "default" | "privileged" | "system"
+#   principal.trust_level   int       0–5 (higher = more trusted)
+#   principal.agent_id      string    unique agent identifier
+#
+# tool.*
+#   tool.name               string    registered tool name
+#   tool.<param>            any       args passed to the tool call
+#   tool.boundary           string    static label: "internal" | "external" | "privileged"
+#   tool.sensitivity        string    static label: "low" | "moderate" | "high"
+#   tool.integrity          string    static label: "trusted" | "unfiltered"
+#
+# target.*
+#   target.domain           string    extracted from URL or email address
+#   target.url              string    raw URL (for HTTP tools)
+#
+# Comparison operators:  ==  !=  <  <=  >  >=
+# Logical operators:     AND  OR  NOT
+# Set membership:        IN  NOT IN  {"a", "b", "c"}
+# Regex:                 MATCHES "pattern"   (Python re.search semantics)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Role check.
+RULE: ex3-role-gate
+ON:        tool_call(secret.read)
+CONDITION: principal.role != "system"
+POLICY:    DENY
+Severity:  critical
+Category:  capability
+
+# Trust-level range check.
+RULE: ex3-trust-level-range
+ON:        tool_call.requested(http_post)
+CONDITION: principal.trust_level >= 2 AND principal.trust_level < 4
+POLICY:    HUMAN_CHECK
+Severity:  medium
+Category:  egress
+
+# Tool parameter check — tool.<param> accesses the call argument by name.
+RULE: ex3-tool-param-mode
+ON:        tool_call(database_query)
+CONDITION: tool.mode == "write"
+POLICY:    DENY
+Severity:  high
+Category:  data_integrity
+
+# Compound condition with set membership and NOT.
+RULE: ex3-compound
+ON:        tool_call(shell_exec)
+CONDITION: tool.cmd NOT IN {"ls", "pwd", "whoami", "date"}
+           AND principal.trust_level < 3
+POLICY:    HUMAN_CHECK
+Severity:  medium
+Category:  capability
+
+# Target domain check (for network tools that extract domain from the URL arg).
+RULE: ex3-target-domain
+ON:        tool_call(http_post)
+CONDITION: target.domain == "internal.corp"
+POLICY:    ALLOW WITH AUDIT(severity="low", category="internal_api")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §4  POLICY — four actions
+#
+#   DENY                      Block the call; raise DecisionDenied on the agent side.
+#   ALLOW                     Permit the call to proceed.
+#   HUMAN_CHECK               Pause and wait for a human to approve or reject.
+#   LLM_CHECK                 Send the call context to an LLM reviewer.
+#   DEGRADE(profile)          Redirect to a safer fallback tool.
+#   DEGRADE TO "tool_name"    Alternative syntax for DEGRADE.
+# ─────────────────────────────────────────────────────────────────────────────
+
+RULE: ex4-deny
+ON:        tool_call(file_delete)
+CONDITION: principal.role != "system"
+POLICY:    DENY
+Severity:  high
+Category:  filesystem
+
+RULE: ex4-allow
+ON:        tool_call(vector_search)
+CONDITION: principal.trust_level >= 3
+POLICY:    ALLOW
+
+RULE: ex4-human-check
+ON:        tool_call.requested(send_money)
+CONDITION: principal.trust_level < 4
+POLICY:    HUMAN_CHECK
+Severity:  critical
+Category:  financial_fraud
+
+RULE: ex4-llm-check
+ON:        tool_call(database_query)
+CONDITION: tool.sql MATCHES ".*(?i)(password|salary|credit_card).*"
+POLICY:    LLM_CHECK
+Severity:  high
+Category:  sensitive_data_access
+
+# DEGRADE: redirect the call to a different (safer) tool.
+# The guard will execute email.send_to_draft instead of email_send.
+RULE: ex4-degrade
+ON:        tool_call(email_send)
+CONDITION: principal.trust_level < 3
+POLICY:    DEGRADE TO "email.send_to_draft"
+Severity:  medium
+Category:  egress
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §5  Obligations — actions appended to ALLOW / DEGRADE
+#
+# Obligations run AFTER the decision but before (or alongside) execution.
+#
+#   WITH AUDIT(severity="low", category="...")
+#       Emit a structured audit record.
+#
+#   WITH REDACT(fields={"field1", "field2"})
+#       Strip named fields from the tool arguments before the call executes.
+#
+#   WITH RATE_LIMIT(max=N, window="Xm", rule_id="...")
+#       Enforce a rolling call-rate limit (blocks when exceeded).
+#
+# Multiple obligations can be chained with a comma.
+# ─────────────────────────────────────────────────────────────────────────────
+
+RULE: ex5-audit-only
+ON:        tool_call(email_send)
+CONDITION: principal.trust_level >= 3
+POLICY:    ALLOW WITH AUDIT(severity="low", category="egress")
+
+RULE: ex5-redact-pii
+ON:        tool_call(http_post)
+CONDITION: principal.trust_level >= 2
+POLICY:    ALLOW WITH REDACT(fields={"email", "phone", "ssn", "card_number"}),
+                      AUDIT(severity="medium", category="pii_egress")
+
+RULE: ex5-rate-limit
+ON:        tool_call(http_post)
+CONDITION: principal.role == "default"
+POLICY:    ALLOW WITH RATE_LIMIT(max=20, window="1m", rule_id="http-rate-default"),
+                      AUDIT(severity="low", category="rate_limited")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §6  Metadata
+#
+# Metadata keys are freeform; they appear in audit records and the dashboard.
+#
+#   Severity:   critical | high | medium | low
+#   Category:   dot-separated string, e.g. data_exfiltration, capability
+#   Reason:     human-readable explanation (shown in DecisionDenied.reason)
+# ─────────────────────────────────────────────────────────────────────────────
+
+RULE: ex6-full-metadata
+ON:        tool_call.requested(shell_exec)
+CONDITION: tool.cmd MATCHES ".*\\b(rm\\s+-rf|dd\\s+if=|mkfs)\\b.*"
+POLICY:    DENY
+Severity:  critical
+Category:  destructive_command
+Reason:    "Destructive shell command denied regardless of trust level"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §7  TRACE — call-chain detection
+#
+# TRACE rules inspect the sequence of tool calls in the current session.
+# Named placeholders are bound to calls that match the pattern; their attributes
+# can then be checked in CONDITION.
+#
+# When a rule has both TRACE: and ON:, the ON: clause constrains the LAST
+# placeholder only — so single-step interception and chain detection share the
+# same execution path.
+#
+# Separators
+#   A -> B          Strictly adjacent (no call between A and B)
+#   A -> * -> B     Exactly one call between A and B
+#   A ->...-> B     At least one call between A and B
+#   A ->...?-> B    A occurs anywhere before B (zero-or-more, most common)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Two-step adjacent: email read IMMEDIATELY followed by email send.
+RULE: ex7-adjacent-read-send
+TRACE:     Reader -> Sender
+CONDITION: Reader.name IN {"read_email", "get_inbox"}
+           AND Sender.name == "send_email"
+POLICY:    LLM_CHECK
+Severity:  high
+Category:  email_injection
+Reason:    "Email read immediately followed by send — possible injection forwarding"
+
+# Zero-or-more gap: secret read anywhere before external HTTP.
+RULE: ex7-secret-then-http
+TRACE:     SecRead ->...?-> Sink
+CONDITION: SecRead.name == "secret.read"
+           AND Sink.boundary == "external"
+POLICY:    DENY
+Severity:  critical
+Category:  secret_exfiltration
+
+# Three-hop: external input → privileged op → external output.
+RULE: ex7-three-hop-escalation
+TRACE:     ExtIn ->...?-> Priv ->...?-> Leak
+CONDITION: ExtIn.boundary == "external"
+           AND Priv.boundary == "privileged"
+           AND Leak.boundary == "external"
+POLICY:    DENY
+Severity:  critical
+Category:  privilege_escalation_exfil
+
+# ON: + TRACE: combined — ON: constrains the current (last) call by tool name,
+# TRACE: constrains the history.  This is equivalent to an ON: rule that also
+# looks backwards.
+RULE: ex7-on-and-trace
+ON:        tool_call.requested(email_send)
+TRACE:     DbOp ->...?-> Mailer
+CONDITION: DbOp.name == "database_query"
+           AND Mailer.name == "email_send"
+           AND principal.trust_level < 3
+POLICY:    LLM_CHECK
+Severity:  high
+Category:  data_exfiltration
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §8  Tool labels — boundary, sensitivity, integrity
+#
+# Labels are set when a tool is registered:
+#   @guard.tool("db.query", boundary="internal", sensitivity="high", integrity="trusted")
+#
+# They can then be referenced in CONDITION (tool.*) and TRACE (P.*).
+#
+#   boundary     "internal" | "external" | "privileged"
+#   sensitivity  "low" | "moderate" | "high"
+#   integrity    "trusted" | "unfiltered"
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Label-based deny: any external + high-sensitivity call needs scope.
+RULE: ex8-label-deny
+ON:        tool_call.requested
+CONDITION: tool.boundary == "external"
+           AND tool.sensitivity == "high"
+           AND caller.scope_missing("sensitive_export")
+POLICY:    DENY
+Severity:  high
+Category:  boundary_violation
+
+# Label-based TRACE: unfiltered data reaching a code-execution tool.
+RULE: ex8-label-trace
+TRACE:     Src ->...?-> Exec
+CONDITION: Src.integrity == "unfiltered"
+           AND Exec.name IN {"shell.exec", "shell_exec", "code_exec"}
+POLICY:    DENY
+Severity:  critical
+Category:  code_injection
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §9  History functions
+#
+# Access argument values or results from earlier calls in the session.
+#
+#   history_arg("tool_name", "param_name") == value
+#       True if an earlier call to tool_name passed param_name == value.
+#
+#   history_result("tool_name") == value
+#       True if an earlier call to tool_name returned value.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Deny email if a prior DB query targeted the system_config table.
+RULE: ex9-history-arg
+ON:        tool_call(send_email)
+CONDITION: principal.trust_level < 2
+           AND history_arg("database_query", "table") == "system_config"
+           AND tool.boundary == "external"
+POLICY:    DENY
+Severity:  critical
+Category:  data_exfiltration
+Reason:    "system_config table was queried; external email blocked"
+
+# Deny email if a document was classified as "restricted" earlier.
+RULE: ex9-history-result
+ON:        tool_call(send_email)
+CONDITION: history_result("classify_doc") == "restricted"
+           AND tool.addr != "admin@example.com"
+POLICY:    DENY
+Severity:  critical
+Category:  classified_data_exfiltration
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §10  Provenance — exists_path, input.has_any_label
+#
+# Provenance checks use the call-graph built by the runtime to ask:
+# "did any labelled data source contribute to the current tool call?"
+#
+#   exists_path(source.label IN {"pii/*", ...}, sink = current_call, max_hops = N)
+#       True if a graph path of at most N hops exists from a labelled source
+#       to the current call.
+#
+#   input.has_any_label({"label1/*", "label2"})
+#       True if ANY input label in the current call context matches.
+#
+#   input.has_label("label")
+#       True if the exact label is present.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Block any outbound call where PII/finance/secret data is traceable in the graph.
+RULE: ex10-exists-path
+ON:        tool_call.requested
+CONDITION: tool.boundary == "external"
+           AND exists_path(
+                 source.label IN {"pii/*", "finance/*", "secret/*"},
+                 sink = current_call,
+                 max_hops = 5
+               )
+           AND caller.scope_missing("sensitive_export")
+POLICY:    DENY
+Severity:  critical
+Category:  pii_exfiltration
+
+# Auto-redact finance fields on HTTP POST when finance data is in the input.
+RULE: ex10-input-has-label
+ON:        tool_call(http_post)
+CONDITION: input.has_label("finance/*") AND tool.boundary == "external"
+POLICY:    ALLOW WITH REDACT(fields={"amount", "account_id", "card_number", "balance"}),
+                      AUDIT(severity="high", category="finance_egress")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §11  Allowlists — IN allowlist.*
+#
+# Allowlists are maintained via the API or SDK and can be updated at runtime.
+#
+# Built-in allowlist namespaces (created automatically if not set):
+#   allowlist.http    set of approved HTTP/HTTPS domains
+#   allowlist.email   set of approved email addresses or domains
+#
+# Usage: value IN allowlist.<name>   /   value NOT IN allowlist.<name>
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Block HTTP POST to any domain not explicitly allowlisted.
+RULE: ex11-http-allowlist
+ON:        tool_call(http_post)
+CONDITION: target.domain NOT IN allowlist.http
+POLICY:    DENY
+Severity:  high
+Category:  egress
+Reason:    "HTTP POST to non-allowlisted domain"
+
+# LLM review if email recipient is not in the approved address book.
+RULE: ex11-email-allowlist
+ON:        tool_call(email_send)
+CONDITION: tool.to NOT IN allowlist.email
+POLICY:    LLM_CHECK
+Severity:  medium
+Category:  egress
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §12  Regex matching — MATCHES "pattern"
+#
+# Uses Python re.search() semantics (matches anywhere in the string).
+# Anchor with ^ / $ for full-string matching.
+# Escape backslashes:  \\b  \\d  etc.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Deny common destructive shell patterns.
+RULE: ex12-regex-shell
+ON:        tool_call(shell_exec)
+CONDITION: tool.cmd MATCHES ".*\\b(rm\\s+-rf|dd\\s+if=|mkfs|shred)\\b.*"
+POLICY:    DENY
+Severity:  critical
+Category:  destructive_command
+
+# LLM review for SQL queries touching sensitive tables.
+RULE: ex12-regex-sql
+ON:        tool_call(database_query)
+CONDITION: tool.sql MATCHES ".*(?i)\\b(DROP|TRUNCATE|ALTER TABLE|GRANT|REVOKE)\\b.*"
+POLICY:    DENY
+Severity:  critical
+Category:  data_integrity
+Reason:    "DDL statement denied"
+
+# Block SSRF: POST to any loopback or private-network address.
+RULE: ex12-regex-ssrf
+ON:        tool_call(http_post)
+CONDITION: tool.url MATCHES ".*(?:localhost|127\\.0\\.0\\.1|10\\.\\d+\\.|172\\.1[6-9]\\.|192\\.168\\.).*"
+POLICY:    DENY
+Severity:  critical
+Category:  ssrf

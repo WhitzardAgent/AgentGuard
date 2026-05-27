@@ -1,0 +1,98 @@
+# =====================================================================
+# Layer 3 · Sensitive data exfiltration (graph-aware + label-based)  (v3 DSL)
+# =====================================================================
+
+
+# ── 7.1  PII data → external sinks ───────────────────────────────────
+
+RULE: builtin_pii_http_export_block
+ON: tool_call(http.post)
+CONDITION: exists_path(source.label IN {"pii/*"}, sink = current_call, max_hops = 6)
+           AND target.domain NOT IN allowlist.http
+POLICY: DENY
+Severity: critical
+Category: pii_exfiltration
+Reason: "PII-labelled data flowing to non-allowlisted HTTP endpoint"
+
+RULE: builtin_pii_email_export_block
+ON: tool_call(email.send)
+CONDITION: exists_path(source.label IN {"pii/*"}, max_hops = 6)
+           AND target.domain NOT IN allowlist.email
+POLICY: DENY
+Severity: critical
+Category: pii_exfiltration
+Reason: "PII-labelled data flowing to non-allowlisted email address"
+
+
+# ── 7.2  Financial data → external sinks ─────────────────────────────
+
+RULE: builtin_finance_http_export_block
+ON: tool_call(http.post)
+CONDITION: exists_path(source.label IN {"finance/*"}, max_hops = 6)
+           AND target.domain NOT IN allowlist.http
+POLICY: DENY
+Severity: critical
+Category: financial_data_exfiltration
+
+RULE: builtin_finance_email_export_block
+ON: tool_call(email.send)
+CONDITION: exists_path(source.label IN {"finance/*"}, max_hops = 6)
+           AND target.domain NOT IN allowlist.email
+POLICY: DENY
+Severity: critical
+Category: financial_data_exfiltration
+
+
+# ── 7.3  HR data → external sinks ────────────────────────────────────
+
+RULE: builtin_hr_http_export_block
+ON: tool_call(http.post)
+CONDITION: exists_path(source.label IN {"hr/*"}, max_hops = 6)
+           AND target.domain NOT IN allowlist.http
+POLICY: DENY
+Severity: critical
+Category: hr_data_exfiltration
+
+
+# ── 7.4  Secrets → any external sink ─────────────────────────────────
+
+RULE: builtin_secret_any_http_export_block
+ON: tool_call(http.post)
+CONDITION: exists_path(source.label IN {"secret/*"}, max_hops = 8)
+POLICY: DENY
+Severity: critical
+Category: secret_exfiltration
+Reason: "Secret-labelled data detected in path to HTTP sink — hard deny"
+
+RULE: builtin_secret_email_export_block
+ON: tool_call(email.send)
+CONDITION: exists_path(source.label IN {"secret/*"}, max_hops = 8)
+POLICY: DENY
+Severity: critical
+Category: secret_exfiltration
+Reason: "Secret-labelled data detected in path to email sink — hard deny"
+
+
+# ── 7.5  Session-label fast-path (no graph lookup needed) ────────────
+
+RULE: builtin_session_pii_label_external_deny
+ON: tool_call.requested
+CONDITION: tool.boundary == "external"
+           AND input.has_any_label({"pii/*", "finance/*", "hr/*", "secret/*", "customer_private/*"})
+           AND caller.scope_missing("sensitive_export")
+POLICY: DENY
+Severity: critical
+Category: data_exfiltration
+Reason: "Sensitive provenance label in session; external call without sensitive_export scope"
+
+
+# ── 7.6  High-sensitivity tool label → external boundary LLM check ───
+
+# v3 TRACE: any high-sensitivity source eventually reaching external sink
+RULE: builtin_high_sensitivity_external_llm_review
+TRACE: Src ->...?-> Sink
+CONDITION: Src.sensitivity == "high" AND Sink.boundary == "external"
+POLICY: LLM_CHECK
+Severity: high
+Category: sensitivity_check
+Reason: "High-sensitivity tool data reaching external boundary; LLM review required"

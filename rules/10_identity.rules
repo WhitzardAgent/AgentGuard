@@ -1,0 +1,80 @@
+# =============================================================================
+# 10_identity.rules  —  Identity & capability baseline
+#
+# Question: "Does this principal have the basic right to call this tool?"
+# Covers:   role gates, trust-level gates, sub-agent spawning, secrets, process control
+# =============================================================================
+
+
+# ── Shell execution ───────────────────────────────────────────────────────────
+
+# Basic-role agents are never allowed to execute shell commands.
+RULE: deny-shell-basic
+ON:        tool_call(shell_exec)
+CONDITION: principal.role == "basic"
+POLICY:    DENY
+Severity:  high
+Category:  capability
+
+# Default-role agents with low trust need a human to approve shell commands.
+RULE: review-shell-default-low-trust
+ON:        tool_call.requested(shell_exec)
+CONDITION: principal.role == "default" AND principal.trust_level < 2
+POLICY:    HUMAN_CHECK
+Severity:  medium
+Category:  capability
+
+# Privileged agents with sufficient trust may execute shell freely.
+RULE: allow-shell-privileged
+ON:        tool_call(shell_exec)
+CONDITION: principal.role == "privileged" AND principal.trust_level >= 3
+POLICY:    ALLOW
+
+
+# ── Sub-agent spawning ───────────────────────────────────────────────────────
+
+# Zero-trust agents cannot spawn child agents at all.
+RULE: deny-spawn-zero-trust
+ON:        tool_call(agent.spawn)
+CONDITION: principal.trust_level < 1
+POLICY:    DENY
+Severity:  high
+Category:  capability
+
+# Low-trust agents need human approval to spawn sub-agents.
+RULE: review-spawn-low-trust
+ON:        tool_call.requested(agent.spawn)
+CONDITION: principal.trust_level < 3
+POLICY:    HUMAN_CHECK
+Severity:  medium
+Category:  capability
+
+
+# ── Secrets ──────────────────────────────────────────────────────────────────
+
+# Only trusted agents may read secrets.
+RULE: deny-secret-read-low-trust
+ON:        tool_call(secret.read)
+CONDITION: principal.trust_level < 3
+POLICY:    DENY
+Severity:  critical
+Category:  capability
+
+# Only system-role agents may write secrets.
+RULE: deny-secret-write-non-system
+ON:        tool_call(secret.write)
+CONDITION: principal.role != "system"
+POLICY:    DENY
+Severity:  critical
+Category:  capability
+
+
+# ── Process management ───────────────────────────────────────────────────────
+
+# Only system-role agents may kill processes.
+RULE: deny-process-kill-non-system
+ON:        tool_call(process.kill)
+CONDITION: principal.role != "system"
+POLICY:    DENY
+Severity:  high
+Category:  capability

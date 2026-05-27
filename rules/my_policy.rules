@@ -1,0 +1,139 @@
+# =============================================================================
+# my_policy.rules  —  Comprehensive demo policy
+#
+# Scenario: an agent that reads a database, runs shell commands, sends email,
+# and POSTs to HTTP endpoints.
+#
+# Tool signatures:
+#   database_query(sql: str, mode: str = "read") -> list
+#   shell_exec(cmd: str) -> str
+#   email_send(to: str, subject: str, body: str) -> str
+#   http_post(url: str, body: str) -> str
+# =============================================================================
+
+
+# ── Database ──────────────────────────────────────────────────────────────────
+
+# Write operations are not permitted for this agent.
+RULE: demo-deny-db-write
+ON:        tool_call(database_query)
+CONDITION: tool.mode == "write"
+POLICY:    DENY
+Severity:  high
+Category:  data_integrity
+Reason:    "Write operations to the database are not permitted for this agent"
+
+# DDL statements (DROP, TRUNCATE, ALTER, etc.) are unconditionally denied.
+RULE: demo-deny-db-ddl
+ON:        tool_call(database_query)
+CONDITION: tool.sql MATCHES ".*(?i)\\b(DROP|TRUNCATE|ALTER|GRANT|REVOKE)\\b.*"
+POLICY:    DENY
+Severity:  critical
+Category:  data_integrity
+Reason:    "DDL statement denied unconditionally"
+
+# Queries targeting sensitive tables are sent to an LLM for review.
+RULE: demo-llm-review-sensitive-table
+ON:        tool_call(database_query)
+CONDITION: tool.sql MATCHES ".*(?i)(user|password|credential|secret|payment|salary).*"
+POLICY:    LLM_CHECK
+Severity:  high
+Category:  sensitive_data_access
+Reason:    "Query targets a sensitive table; LLM review required"
+
+
+# ── Shell execution ───────────────────────────────────────────────────────────
+
+# Basic-role agents need LLM review before any shell command.
+RULE: demo-llm-review-shell-basic
+ON:        tool_call(shell_exec)
+CONDITION: principal.role == "basic"
+POLICY:    LLM_CHECK
+Severity:  medium
+Category:  capability
+Reason:    "Shell execution by basic-role agent requires LLM review"
+
+# Classic destructive patterns are hard-denied regardless of role.
+RULE: demo-deny-shell-destructive
+ON:        tool_call(shell_exec)
+CONDITION: tool.cmd MATCHES ".*\\b(rm\\s+-rf|dd\\s+if=|mkfs|curl.*-d.*http|wget.*--post)\\b.*"
+POLICY:    DENY
+Severity:  critical
+Category:  destructive_command
+
+# Shell immediately followed by email is suspicious — LLM review (TRACE adjacent).
+RULE: demo-llm-review-shell-then-email
+TRACE:     Shell -> Mailer
+CONDITION: Shell.name == "shell_exec" AND Mailer.name == "email_send"
+POLICY:    LLM_CHECK
+Severity:  high
+Category:  suspicious_adjacency
+Reason:    "Shell execution immediately followed by email send"
+
+
+# ── Email ─────────────────────────────────────────────────────────────────────
+
+# Low-trust agents' email goes to draft rather than being sent directly.
+RULE: demo-degrade-email-low-trust
+ON:        tool_call(email_send)
+CONDITION: principal.trust_level < 3
+POLICY:    DEGRADE TO "email.send_to_draft"
+Severity:  medium
+Category:  egress
+Reason:    "Low-trust agent email saved as draft for review"
+
+# Block email to known exfiltration domains.
+RULE: demo-deny-email-suspicious-recipient
+ON:        tool_call(email_send)
+CONDITION: tool.to MATCHES ".*@(evil|attacker|exfil|dump)\\..+"
+POLICY:    DENY
+Severity:  critical
+Category:  exfiltration
+
+# DB result flowing into an external email needs LLM review (TRACE).
+RULE: demo-llm-review-db-result-in-email
+TRACE:     DbOp ->...?-> Mailer
+CONDITION: DbOp.name == "database_query"
+           AND Mailer.name == "email_send"
+           AND Mailer.boundary == "external"
+POLICY:    LLM_CHECK
+Severity:  high
+Category:  data_exfiltration
+Reason:    "DB result potentially flowing to an external email recipient"
+
+# If a prior query hit a sensitive table, any subsequent email also needs review.
+RULE: demo-llm-review-sensitive-table-then-email
+ON:        tool_call(email_send)
+CONDITION: history_arg("database_query", "sql") MATCHES ".*(?i)(user|password|salary|secret).*"
+POLICY:    LLM_CHECK
+Severity:  high
+Category:  sensitive_data_egress
+Reason:    "Email follows a sensitive-table database query"
+
+
+# ── HTTP POST ────────────────────────────────────────────────────────────────
+
+# External HTTP POST is denied; only internal.corp endpoints are allowed.
+RULE: demo-deny-external-http
+ON:        tool_call(http_post)
+CONDITION: tool.url MATCHES ".*(?i)http.*"
+           AND NOT (tool.url MATCHES ".*\\.internal\\.corp.*")
+POLICY:    DENY
+Severity:  high
+Category:  egress
+Reason:    "HTTP POST to non-internal URL is not permitted"
+
+# HTTP POST bodies containing credentials are always blocked.
+RULE: demo-deny-http-post-credential-body
+ON:        tool_call(http_post)
+CONDITION: tool.body MATCHES ".*(?i)(password|api.?key|access.?token|private.?key|secret).*"
+POLICY:    DENY
+Severity:  critical
+Category:  credential_exfiltration
+Reason:    "HTTP POST body appears to contain credentials"
+
+# Internal endpoint posts are allowed and audited.
+RULE: demo-allow-internal-http
+ON:        tool_call(http_post)
+CONDITION: tool.url MATCHES ".*\\.internal\\.corp.*"
+POLICY:    ALLOW WITH AUDIT(severity="low", category="internal_api")

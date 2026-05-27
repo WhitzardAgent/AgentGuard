@@ -1,0 +1,69 @@
+# =============================================================================
+# 20_data_ops.rules  —  Data operation rules
+#
+# Covers:  database queries, file read/write/delete, vector search
+# =============================================================================
+
+
+# ── Database ─────────────────────────────────────────────────────────────────
+
+# Basic-role agents may not write to the database.
+RULE: deny-db-write-basic
+ON:        tool_call(database_query)
+CONDITION: tool.mode == "write" AND principal.role == "basic"
+POLICY:    DENY
+Severity:  high
+Category:  data_integrity
+
+# Low-trust write operations must be approved by a human.
+RULE: review-db-write-low-trust
+ON:        tool_call.requested(database_query)
+CONDITION: tool.mode == "write" AND principal.trust_level < 3
+POLICY:    HUMAN_CHECK
+Severity:  medium
+Category:  data_integrity
+
+# Read-only queries are allowed without further checks.
+RULE: allow-db-read
+ON:        tool_call(database_query)
+CONDITION: tool.mode == "read"
+POLICY:    ALLOW
+
+
+# ── File system ──────────────────────────────────────────────────────────────
+
+# Writing to sensitive system paths is always denied.
+RULE: deny-fs-write-system-paths
+ON:        tool_call(file_write)
+CONDITION: tool.path IN {"/etc/passwd", "/etc/shadow", "/etc/sudoers",
+                         "~/.ssh/authorized_keys", "/root/.bashrc"}
+POLICY:    DENY
+Severity:  critical
+Category:  filesystem
+
+# Only system-role agents may delete files.
+RULE: deny-file-delete-non-system
+ON:        tool_call(file_delete)
+CONDITION: principal.role != "system"
+POLICY:    DENY
+Severity:  high
+Category:  filesystem
+
+# Low-trust agents need human approval before writing files.
+RULE: review-file-write-low-trust
+ON:        tool_call.requested(file_write)
+CONDITION: principal.trust_level < 2
+POLICY:    HUMAN_CHECK
+Severity:  medium
+Category:  filesystem
+
+
+# ── Vector / knowledge-base search ──────────────────────────────────────────
+
+# Low-trust agents are restricted to the public-only search index.
+RULE: degrade-vector-search-low-trust
+ON:        tool_call(vector_search)
+CONDITION: principal.trust_level < 2
+POLICY:    DEGRADE TO "vector_search_public_only"
+Severity:  low
+Category:  data_access

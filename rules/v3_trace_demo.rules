@@ -1,0 +1,140 @@
+# =============================================================================
+# v3_trace_demo.rules  —  TRACE clause feature showcase
+#
+# Demonstrates every TRACE separator and multi-hop pattern.
+#
+# Trace separators
+# ────────────────
+#   A -> B            Strictly adjacent: A is immediately followed by B (no gap)
+#   A -> * -> B       Exactly one call between A and B
+#   A ->...-> B       At least one call between A and B (non-empty gap)
+#   A ->...?-> B      A occurs anywhere before B (zero-or-more gap)
+#
+# Named placeholder accessors
+# ────────────────────────────
+#   P.name            tool name matched by placeholder P
+#   P.boundary        tool label: "internal" | "external" | "privileged"
+#   P.sensitivity     tool label: "low" | "moderate" | "high"
+#   P.integrity       tool label: "trusted" | "unfiltered"
+#   P.result          return value of the matched call
+#   P.<param>         args[param] of the matched call  (e.g. P.cmd, P.url)
+# =============================================================================
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pattern 1 — zero-or-more gap (->...?->)
+# Most common: "does A eventually lead to B anywhere in the session?"
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Unfiltered data reaching code execution anywhere in the chain (prompt injection).
+RULE: trace-deny-unfiltered-to-exec
+TRACE:     Src ->...?-> Exec
+CONDITION: Src.integrity == "unfiltered"
+           AND Exec.name IN {"shell.exec", "shell_exec", "code_exec"}
+POLICY:    DENY
+Severity:  critical
+Category:  code_injection
+Reason:    "Unfiltered data reached a code-execution tool"
+
+# High-sensitivity data eventually reaching an external boundary → LLM review.
+RULE: trace-llm-high-sensitivity-to-external
+TRACE:     DataOp ->...?-> Egress
+CONDITION: DataOp.sensitivity == "high" AND Egress.boundary == "external"
+POLICY:    LLM_CHECK
+Severity:  high
+Category:  data_exfiltration
+Reason:    "High-sensitivity data flowing to an external boundary"
+
+# secret.read before any external sink → hard deny.
+RULE: trace-deny-secret-to-external
+TRACE:     SecRead ->...?-> Sink
+CONDITION: SecRead.name == "secret.read"
+           AND Sink.boundary == "external"
+POLICY:    DENY
+Severity:  critical
+Category:  secret_exfiltration
+Reason:    "Secret read followed by external sink"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pattern 2 — strictly adjacent (->)
+# Use when you need to detect an immediate, uninterrupted two-call sequence.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# External web fetch piped DIRECTLY into a shell command (no sanitiser in between).
+RULE: trace-llm-fetch-directly-to-exec
+TRACE:     Fetcher -> Executor
+CONDITION: Fetcher.boundary == "external" AND Executor.name == "shell_exec"
+POLICY:    LLM_CHECK
+Severity:  critical
+Category:  ssrf_exec
+Reason:    "External fetch immediately followed by shell execution"
+
+# DB query immediately followed by email send — suspicious adjacency.
+RULE: trace-deny-adjacent-db-to-email
+TRACE:     DbOp -> Mailer
+CONDITION: DbOp.name IN {"db.query", "database_query"}
+           AND Mailer.name IN {"send_email", "email.send"}
+           AND caller.scope_missing("sensitive_export")
+POLICY:    DENY
+Severity:  critical
+Category:  suspicious_adjacency
+Reason:    "Database read immediately followed by email send"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pattern 3 — exactly one intermediate (-> * ->)
+# Use when you require a mandatory middle step between two tools.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Privileged read → exactly one intermediate → external write → human approval.
+RULE: trace-review-privileged-read-one-hop-external
+TRACE:     Reader -> * -> Writer
+CONDITION: Reader.boundary == "privileged" AND Writer.boundary == "external"
+POLICY:    HUMAN_CHECK
+Severity:  high
+Category:  privilege_escalation
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pattern 4 — at-least-one intermediate (->...->)
+# Use when you specifically require at least one call between two tools
+# (i.e. they must NOT be adjacent).
+# ─────────────────────────────────────────────────────────────────────────────
+
+# secret.read must not reach an external sink even with intermediates.
+RULE: trace-deny-secret-non-adjacent-to-external
+TRACE:     SecRead ->...-> Sink
+CONDITION: SecRead.name == "secret.read" AND Sink.boundary == "external"
+POLICY:    DENY
+Severity:  critical
+Category:  secret_relay
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pattern 5 — multi-hop chain (three or more placeholders)
+# Each segment can use any separator independently.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# External input → privileged op → external sink: full escalation + exfil chain.
+RULE: trace-deny-external-to-privileged-to-sink
+TRACE:     ExtIn ->...?-> PrivOp ->...?-> Sink
+CONDITION: ExtIn.boundary == "external"
+           AND PrivOp.boundary == "privileged"
+           AND Sink.boundary == "external"
+POLICY:    DENY
+Severity:  critical
+Category:  privilege_escalation_exfil
+Reason:    "External input escalated through privileged op then leaked externally"
+
+# Four-hop escalation: external → elevated → DB write → external leak.
+RULE: trace-deny-four-hop-escalation
+TRACE:     External ->...?-> Elevated ->...?-> DbOp ->...?-> Leak
+CONDITION: External.boundary == "external"
+           AND Elevated.boundary == "privileged"
+           AND DbOp.name == "db_write"
+           AND Leak.boundary == "external"
+POLICY:    DENY
+Severity:  critical
+Category:  privilege_escalation_exfil
+Reason:    "External input escalated to DB write then leaked externally"

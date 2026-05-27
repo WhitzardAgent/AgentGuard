@@ -1,0 +1,9 @@
+{
+  "name": "honkit-plugin-doc-lang-switcher",
+  "version": "0.0.1",
+  "description": "Inject a bilingual language switcher into AgentGuard docs pages.",
+  "main": "index.js",
+  "engines": {
+    "honkit": ">=6.0.0"
+  }
+}

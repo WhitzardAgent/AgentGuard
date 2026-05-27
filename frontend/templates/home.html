@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgentGuard Frontend Preview</title>
+  <link rel="stylesheet" href="/static/common/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+{{ shared:sidebar }}
+
+    <main class="app-main home-main">
+      <section class="page-intro-card home-hero">
+        <div class="home-hero-copy">
+          <p class="page-kicker">AgentGuard Home</p>
+          <h1><span class="home-hero-name">AgentGuard</span> keeps your agent workflow in control.</h1>
+          <p class="subtle">
+            Start from labels, move into rules, and keep an eye on runtime behavior with a
+            single control surface.
+          </p>
+        </div>
+      </section>
+
+      <section class="grid home-link-grid">
+        <div class="card home-link-card">
+          <p class="page-kicker">01</p>
+          <h3>Labels</h3>
+          <p class="subtle">
+            Review tool metadata, inspect defaults, and update label values before policies rely on them.
+          </p>
+        </div>
+
+        <div class="card home-link-card">
+          <p class="page-kicker">02</p>
+          <h3>Rules</h3>
+          <p class="subtle">
+            Draft rule logic, preview the DSL, and publish the rule set without leaving the frontend shell.
+          </p>
+        </div>
+
+        <div class="card home-link-card">
+          <p class="page-kicker">03</p>
+          <h3>Runtime</h3>
+          <p class="subtle">
+            Watch traffic, approvals, and audit signals to understand how rules behave in live flows.
+          </p>
+        </div>
+      </section>
+
+      <section class="home-footer-link">
+        <a class="home-agent-link" href="/agents.html">
+          <span class="home-agent-link-label">Start WITH Agent Selection</span>
+          <span class="home-agent-link-arrow" aria-hidden="true">-></span>
+        </a>
+      </section>
+
+    </main>
+
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <script src="/static/common/messages.js"></script>
+  <script src="/static/common/page-shell.js"></script>
+  <script>
+    window.AgentGuardShell?.setPageContext({
+      title: "Home",
+      description: "Launch the core labels, rules, and runtime workflows.",
+    });
+  </script>
+</body>
+</html>

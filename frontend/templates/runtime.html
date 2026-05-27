@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgentGuard Frontend Preview</title>
+  <script>
+    (function () {
+      try {
+        if (!String(window.localStorage.getItem("agentguard.selectedAgentId") || "").trim()) {
+          window.location.replace("/agents.html");
+        }
+      } catch {
+        window.location.replace("/agents.html");
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/common/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+{{ shared:sidebar }}
+
+    <main class="app-main">
+      <section class="page-intro-card">
+        <div>
+          <p class="page-kicker">Runtime Monitor</p>
+          <h1>Runtime Overview</h1>
+          <p class="subtle">
+            Inspect runtime activity for the selected agent, with live runtime status shown alongside
+            the agent-scoped metrics below.
+          </p>
+        </div>
+      </section>
+
+      <section class="stack-section">
+        <div class="card">
+          <div class="runtime-header">
+            <div>
+              <h3>Runtime Overview</h3>
+            </div>
+            <div class="heading-actions">
+              <span class="pill" id="runtime-health-pill">Connecting</span>
+              <button class="btn primary" id="runtime-refresh-button" type="button">Refresh Now</button>
+            </div>
+          </div>
+          <div class="metric-row" id="runtime-overview-metrics">
+            <div class="metric">
+              <strong id="metric-total-requests">--</strong>
+              <span>Total Requests</span>
+            </div>
+            <div class="metric">
+              <strong id="metric-deny-count">--</strong>
+              <span>Denied</span>
+            </div>
+            <div class="metric">
+              <strong id="metric-pending-approvals">--</strong>
+              <span>Pending Approvals</span>
+            </div>
+            <div class="metric">
+              <strong id="metric-deny-rate">--</strong>
+              <span>Deny Rate</span>
+            </div>
+          </div>
+          <div class="runtime-meta-row" id="runtime-meta-row">
+            <span class="pill">Agent: <strong id="runtime-agent-id">--</strong></span>
+            <span class="pill">Rule Version: <strong id="runtime-rule-version">--</strong></span>
+            <span class="pill">Mode: <strong id="runtime-mode">--</strong></span>
+            <span class="pill">Runtime: <strong id="runtime-runtime-mode">--</strong></span>
+            <span class="pill">Uptime: <strong id="runtime-uptime">--</strong></span>
+          </div>
+        </div>
+
+          <div class="grid two">
+          <div class="card">
+            <div class="runtime-section-head">
+              <h3>Recent Traffic</h3>
+            </div>
+            <div class="timeline" id="runtime-timeline"></div>
+          </div>
+
+          <div class="card">
+            <div class="runtime-section-head">
+              <h3>Pending Approvals</h3>
+            </div>
+            <div class="list" id="runtime-approval-list"></div>
+          </div>
+        </div>
+
+        <div class="grid two">
+          <div class="card">
+            <div class="runtime-section-head">
+              <h3>Recent Audit</h3>
+            </div>
+            <div class="runtime-table-wrap">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Session</th>
+                    <th>Agent</th>
+                    <th>Tool</th>
+                    <th>Decision</th>
+                    <th>Risk</th>
+                    <th>Matched Rules</th>
+                  </tr>
+                </thead>
+                <tbody id="runtime-audit-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="runtime-section-head">
+              <h3>Selected Audit Detail</h3>
+            </div>
+            <div class="code-block runtime-audit-detail" id="runtime-audit-detail">Select an audit row to inspect event and decision JSON.</div>
+          </div>
+        </div>
+      </section>
+      
+    </main>
+
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <script src="/static/common/messages.js"></script>
+  <script src="/static/common/page-shell.js"></script>
+  <script src="/static/common/app.js"></script>
+  <script src="/static/common/ui-helpers.js"></script>
+  <script src="/static/pages/runtime/runtime.js"></script>
+</body>
+</html>

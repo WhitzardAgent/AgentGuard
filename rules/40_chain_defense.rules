@@ -1,0 +1,98 @@
+# =============================================================================
+# 40_chain_defense.rules  —  Call-chain defence rules
+#
+# Prevents compound attack paths that span multiple tool calls, e.g.:
+#   secret.read  → http.post  (secret exfiltration)
+#   db query     → email send (PII leak)
+#   LLM output   → shell exec (prompt injection to execution)
+# =============================================================================
+
+
+# ── Sensitive data flowing to external sinks ─────────────────────────────────
+#
+# Block any chain where a provenance-labelled source (PII, finance, secrets, HR)
+# reaches an outbound sink without the agent holding sensitive_export scope.
+
+RULE: chain-deny-sensitive-data-exfil
+ON:        tool_call.requested
+CONDITION: tool.name IN {"http_post", "email_send", "slack.post", "http.post", "email.send"}
+           AND exists_path(
+                 source.label IN {"pii/*", "finance/*", "secret/*", "hr/*"},
+                 sink = current_call,
+                 max_hops = 5
+               )
+           AND (caller.scope_missing("sensitive_export") OR goal_drift_detected())
+POLICY:    DENY
+Severity:  critical
+Category:  data_exfiltration
+Reason:    "Sensitive data detected in chain leading to external sink"
+
+
+# ── DB / file read → HTTP POST: auto-redact PII fields ───────────────────────
+#
+# When any prior read tool feeds into an outbound HTTP POST, automatically
+# strip known PII fields from the request body and emit an audit record.
+
+RULE: chain-redact-pii-on-http-post
+ON:        tool_call.requested
+CONDITION: tool.name IN {"http_post", "http.post"}
+           AND upstream_contains_any_tool({"database_query", "file_read", "db.query", "fs.read"})
+POLICY:    ALLOW WITH REDACT(fields={"email", "phone", "id_card", "ssn", "token", "password"}),
+                      AUDIT(severity="medium", category="pii_egress")
+
+
+# ── Secret read → external sink (TRACE) ──────────────────────────────────────
+#
+# Detect the classic secret-exfil pattern: secret.read anywhere before
+# an outbound network or messaging call.
+
+RULE: chain-deny-secret-to-external
+TRACE:     SecRead ->...?-> Sink
+CONDITION: SecRead.name == "secret.read"
+           AND Sink.name IN {"http_post", "http.post", "email_send", "email.send", "slack.post"}
+POLICY:    DENY
+Severity:  critical
+Category:  secret_exfiltration
+Reason:    "Tool chain reads a secret and then contacts an external sink"
+
+
+# ── Burst detection: >4 outbound calls in 5 min → review ─────────────────────
+
+RULE: chain-review-http-burst
+ON:        tool_call.requested
+CONDITION: tool.name IN {"http_post", "http.post"}
+           AND repeated_attempts(tool="http_post", window="5m") > 4
+POLICY:    HUMAN_CHECK
+Severity:  medium
+Category:  behavioural_anomaly
+
+
+# ── Goal drift + user input → sensitive tool ─────────────────────────────────
+#
+# When the agent appears to have drifted from its original goal AND user input
+# is traceable in the call chain, require a human to review high-risk calls.
+
+RULE: chain-review-goal-drift-with-user-input
+ON:        tool_call.requested
+CONDITION: tool.name IN {"shell_exec", "shell.exec", "http_post", "agent.spawn"}
+           AND goal_drift_detected()
+           AND exists_path(source.label IN {"user_input"}, sink = current_call, max_hops = 8)
+POLICY:    HUMAN_CHECK
+Severity:  high
+Category:  prompt_injection
+Reason:    "Goal drift detected with user_input in call chain"
+
+
+# ── LLM output → shell execution (TRACE) ─────────────────────────────────────
+#
+# Any chain where an LLM response immediately or eventually reaches a shell
+# without exec scope is a prompt-injection risk.
+
+RULE: chain-deny-llm-output-to-shell
+TRACE:     LLMOut ->...?-> Shell
+CONDITION: LLMOut.name IN {"llm.respond", "llm_respond"}
+           AND Shell.name IN {"shell_exec", "shell.exec"}
+POLICY:    DENY
+Severity:  critical
+Category:  prompt_injection
+Reason:    "LLM output is flowing into shell execution without exec scope"

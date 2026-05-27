@@ -1,0 +1,5 @@
+# Minimal policy for load testing: allow shell.exec("ls") unconditionally.
+RULE: loadtest-allow-ls
+ON:        tool_call(shell.exec)
+CONDITION: tool.cmd == "ls"
+POLICY:    ALLOW

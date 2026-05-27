@@ -1,0 +1,104 @@
+# =====================================================================
+# Layer 2 · Shell execution rules  (v3 DSL)
+# =====================================================================
+
+
+# ── 6.1  Instant DENY: destructive / exfiltration commands ───────────
+
+RULE: builtin_shell_destructive_cmd_deny
+ON: tool_call.requested
+CONDITION: tool.name IN {"shell.exec", "shell_exec", "subprocess.run"}
+           AND (tool.cmd MATCHES ".*\\brm\\s+-rf\\b.*"
+             OR tool.cmd MATCHES ".*\\bdd\\s+.*if=.*"
+             OR tool.cmd MATCHES ".*\\bmkfs\\b.*"
+             OR tool.cmd MATCHES ".*\\bformat\\b.*"
+             OR tool.cmd MATCHES ".*\\bshred\\b.*")
+POLICY: DENY
+Severity: critical
+Category: destructive_command
+Reason: "Command matches destructive pattern (rm -rf / dd / mkfs)"
+
+RULE: builtin_shell_reverse_shell_deny
+ON: tool_call.requested
+CONDITION: tool.name IN {"shell.exec", "shell_exec", "subprocess.run"}
+           AND (tool.cmd MATCHES ".*\\b(nc|ncat|netcat)\\s+.*-[el]\\b.*"
+             OR tool.cmd MATCHES ".*\\bsocat\\b.*TCP.*EXEC.*"
+             OR tool.cmd MATCHES ".*\\bbash\\s+-i.*>&.*"
+             OR tool.cmd MATCHES ".*\\b/dev/tcp/.*")
+POLICY: DENY
+Severity: critical
+Category: reverse_shell
+Reason: "Command matches reverse-shell pattern"
+
+RULE: builtin_shell_exfil_cmd_deny
+ON: tool_call.requested
+CONDITION: tool.name IN {"shell.exec", "shell_exec", "subprocess.run"}
+           AND (tool.cmd MATCHES ".*\\bcurl\\b.*(-d|--data|--upload-file).*http.*"
+             OR tool.cmd MATCHES ".*\\bwget\\b.*--post-data.*"
+             OR tool.cmd MATCHES ".*\\bscp\\b.*@.*:.*"
+             OR tool.cmd MATCHES ".*\\brsync\\b.*@.*:.*")
+           AND principal.trust_level < 3
+POLICY: DENY
+Severity: critical
+Category: data_exfiltration
+Reason: "Command matches data-upload/exfiltration pattern"
+
+
+# ── 6.2  Privilege escalation ─────────────────────────────────────────
+
+RULE: builtin_shell_privilege_escalation_deny
+ON: tool_call.requested
+CONDITION: tool.name IN {"shell.exec", "shell_exec", "subprocess.run"}
+           AND (tool.cmd MATCHES ".*\\bsudo\\b.*"
+             OR tool.cmd MATCHES ".*\\bsu\\s+.*"
+             OR tool.cmd MATCHES ".*\\bchmod\\s+[0-7]*7.*"
+             OR tool.cmd MATCHES ".*\\bchown\\s+root.*"
+             OR tool.cmd MATCHES ".*\\bsetuid\\b.*")
+           AND principal.trust_level < 4
+POLICY: DENY
+Severity: critical
+Category: privilege_escalation
+Reason: "Potential privilege escalation command; denied for non-admin principal"
+
+
+# ── 6.3  Network access via shell ─────────────────────────────────────
+
+RULE: builtin_shell_network_cmd_llm_review
+ON: tool_call.requested
+CONDITION: tool.name IN {"shell.exec", "shell_exec", "subprocess.run"}
+           AND tool.cmd MATCHES ".*\\b(curl|wget|nslookup|dig|ping|traceroute)\\b.*"
+           AND principal.trust_level < 3
+POLICY: LLM_CHECK
+Severity: high
+Category: network_via_shell
+Reason: "Shell command with network utility; LLM review required"
+
+
+# ── 6.4  General permission tiers ────────────────────────────────────
+
+RULE: builtin_shell_default_readonly
+ON: tool_call(shell.exec)
+CONDITION: principal.role == "default" AND principal.trust_level >= 2
+POLICY: DEGRADE(shell.readonly)
+Severity: low
+Category: capability
+
+RULE: builtin_shell_basic_role_deny
+ON: tool_call.requested
+CONDITION: tool.name IN {"shell.exec", "shell_exec", "subprocess.run"}
+           AND principal.role == "basic"
+POLICY: DENY
+Severity: critical
+Category: capability
+
+
+# ── 6.5  File read → shell execution chain  (v3 TRACE) ───────────────
+
+RULE: builtin_shell_after_fs_read_llm_review
+TRACE: Reader -> Executor
+CONDITION: Reader.name == "fs.read"
+           AND Executor.name IN {"shell.exec", "shell_exec"}
+POLICY: LLM_CHECK
+Severity: high
+Category: injection_risk
+Reason: "Shell exec immediately following file read; possible script injection"

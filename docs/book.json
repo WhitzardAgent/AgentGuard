@@ -1,0 +1,7 @@
+{
+  "title": "AgentGuard Documentation",
+  "description": "User documentation for AgentGuard.",
+  "plugins": [
+    "doc-lang-switcher"
+  ]
+}

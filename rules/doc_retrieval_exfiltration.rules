@@ -1,0 +1,65 @@
+# =============================================================================
+# doc_retrieval_exfiltration.rules  —  Document retrieval exfiltration defence
+#
+# Scenario: an agent that retrieves internal documents and may attempt to
+# email them externally.
+#
+# Tool signatures:
+#   retrieve_doc(id: int) -> str       boundary=internal, integrity=trusted
+#   classify_doc(doc_id: str) -> str   returns "public" | "sensitive" | "restricted"
+#   send_email(doc: str, addr: str)    boundary=external
+# =============================================================================
+
+
+# Low-trust agent fetching doc id=0 and emailing to a non-admin address → DENY.
+RULE: deny-restricted-doc-id-zero-exfil
+ON:        tool_call(send_email)
+CONDITION: principal.trust_level < 2
+           AND history_arg("retrieve_doc", "id") == 0
+           AND tool.addr != "admin@example.com"
+POLICY:    DENY
+Severity:  critical
+Category:  data_exfiltration
+Reason:    "Low-trust principal attempting to send restricted doc (id=0) to non-admin"
+
+
+# Any retrieve_doc anywhere before an external email by a low-trust agent → LLM review.
+RULE: llm-review-any-retrieve-then-email-external
+TRACE:     Retriever ->...?-> Mailer
+CONDITION: Retriever.name == "retrieve_doc"
+           AND Mailer.name == "send_email"
+           AND Mailer.boundary == "external"
+           AND principal.trust_level < 2
+POLICY:    LLM_CHECK
+Severity:  high
+Category:  data_exfiltration
+Reason:    "retrieve_doc chain to external email for low-trust principal"
+
+
+# A document classified as "restricted" must not be emailed to non-admin addresses.
+RULE: deny-classified-doc-external-email
+ON:        tool_call(send_email)
+CONDITION: history_result("classify_doc") == "restricted"
+           AND tool.addr != "admin@example.com"
+POLICY:    DENY
+Severity:  critical
+Category:  classified_data_exfiltration
+Reason:    "Classified document (restricted) may not be sent to a non-admin address"
+
+# A "sensitive" document being sent to an address not on the allowlist → LLM review.
+RULE: llm-review-sensitive-doc-email
+ON:        tool_call(send_email)
+CONDITION: history_result("classify_doc") == "sensitive"
+           AND tool.addr NOT IN allowlist.email
+POLICY:    LLM_CHECK
+Severity:  high
+Category:  sensitive_doc_egress
+Reason:    "Sensitive document; LLM review before external email send"
+
+
+# Sending to the admin address is always permitted.
+RULE: allow-doc-send-to-admin
+ON:        tool_call(send_email)
+CONDITION: tool.addr == "admin@example.com"
+POLICY:    ALLOW
+Reason:    "Sending to admin@example.com is always permitted"

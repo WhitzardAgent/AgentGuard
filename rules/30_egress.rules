@@ -1,0 +1,83 @@
+# =============================================================================
+# 30_egress.rules  —  Outbound communication rules
+#
+# Covers:  HTTP, email, webhooks, IM notifications
+# =============================================================================
+
+
+# ── HTTP ─────────────────────────────────────────────────────────────────────
+
+# Very low-trust agents can only perform GET, not POST, to external domains.
+RULE: degrade-http-post-external-low-trust
+ON:        tool_call(http_post)
+CONDITION: target.domain NOT IN allowlist.http AND principal.trust_level < 2
+POLICY:    DEGRADE TO "http_get_only"
+Severity:  medium
+Category:  egress
+
+# Higher-trust agents sending to non-allowlisted domains need human approval.
+RULE: review-http-post-external
+ON:        tool_call.requested(http_post)
+CONDITION: target.domain NOT IN allowlist.http AND principal.trust_level >= 2
+POLICY:    HUMAN_CHECK
+Severity:  medium
+Category:  egress
+
+# Block SSRF: POST to any loopback or private-network address.
+RULE: deny-http-ssrf
+ON:        tool_call(http_post)
+CONDITION: tool.url MATCHES ".*(?:localhost|127\\.0\\.0\\.1|10\\.|192\\.168\\.|172\\.16\\.).*"
+POLICY:    DENY
+Severity:  critical
+Category:  ssrf
+
+# Raw socket connections are denied for all but highly trusted agents.
+RULE: deny-raw-socket-low-trust
+ON:        tool_call(socket.connect)
+CONDITION: principal.trust_level < 3
+POLICY:    DENY
+Severity:  high
+Category:  egress
+
+
+# ── Email ────────────────────────────────────────────────────────────────────
+
+# Low-trust agents may not send email directly; save as draft instead.
+RULE: degrade-email-low-trust
+ON:        tool_call(email_send)
+CONDITION: principal.trust_level < 3
+POLICY:    DEGRADE TO "email.send_to_draft"
+Severity:  medium
+Category:  egress
+
+# Mass email (>50 recipients) is blocked unconditionally.
+RULE: deny-email-broadcast
+ON:        tool_call(email_send)
+CONDITION: tool.recipient_count > 50
+POLICY:    DENY
+Severity:  high
+Category:  egress
+Reason:    "Mass email requires manual approval via a separate workflow"
+
+# High-trust email sends are allowed but audited.
+RULE: allow-email-high-trust
+ON:        tool_call(email_send)
+CONDITION: principal.trust_level >= 3
+POLICY:    ALLOW WITH AUDIT(severity="low", category="egress")
+
+
+# ── Webhooks / IM notifications ──────────────────────────────────────────────
+
+# Posts to allowlisted internal domains are permitted with an audit trail.
+RULE: allow-webhook-internal
+ON:        tool_call(http_post)
+CONDITION: target.domain IN allowlist.http
+POLICY:    ALLOW WITH AUDIT(severity="low", category="internal_webhook")
+
+# Low-trust agents need approval to post IM notifications.
+RULE: review-im-notify-low-trust
+ON:        tool_call.requested(slack.post)
+CONDITION: principal.trust_level < 2
+POLICY:    HUMAN_CHECK
+Severity:  low
+Category:  egress

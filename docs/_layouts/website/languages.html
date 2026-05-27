@@ -1,0 +1,25 @@
+{% extends "website/layout.html" %}
+
+{% block title %}{{ super() }}{% endblock %}
+
+{% block head %}
+    {{ super() }}
+    <meta http-equiv="refresh" content="0; url=en/">
+    <link rel="canonical" href="en/">
+    <script>
+        window.location.replace("en/");
+    </script>
+{% endblock %}
+
+{% block body %}
+<div class="book-langs-index book-redirect" role="navigation">
+    <div class="inner">
+        <h3>Redirecting to English quick start</h3>
+        <p><a href="en/">Continue</a></p>
+        <ul class="languages">
+            <li><a href="zh/">中文</a></li>
+            <li><a href="en/">English</a></li>
+        </ul>
+    </div>
+</div>
+{% endblock %}

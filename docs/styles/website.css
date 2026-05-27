@@ -1,0 +1,68 @@
+.book-header h1 a {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-lang-switcher {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: fixed;
+  top: 16px;
+  right: 24px;
+  z-index: 40;
+  font-size: 14px;
+  line-height: 1;
+  padding: 6px 10px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+@media (max-width: 600px) {
+  .doc-lang-switcher {
+    top: 12px;
+    right: 12px;
+    padding: 5px 8px;
+    font-size: 13px;
+  }
+}
+
+.doc-lang-link {
+  color: #2d5bff;
+  text-decoration: none;
+}
+
+.doc-lang-link:hover,
+.doc-lang-link:focus {
+  text-decoration: underline;
+}
+
+.doc-lang-link.is-active {
+  color: #111;
+  font-weight: 700;
+}
+
+.doc-lang-separator {
+  color: #888;
+}
+
+.book-redirect {
+  padding: 56px 24px;
+}
+
+.book-redirect .inner {
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+.book-redirect h3 {
+  margin-bottom: 16px;
+}
+
+.book-redirect .languages {
+  margin-top: 24px;
+}

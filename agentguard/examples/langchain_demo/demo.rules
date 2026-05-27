@@ -1,0 +1,17 @@
+RULE: demo_complete_deny_destructive_shell
+ON: tool_call(shell.exec)
+TRACE: A->*->B
+CONDITION: tool.cmd == "rm -rf /"
+POLICY: DENY
+Severity: critical
+Category: command_safety
+Reason: "Destructive shell command blocked"
+
+RULE: demo_complete_review_external_http
+ON: tool_call(http.post)
+TRACE: A->*->B
+CONDITION: target.domain != "internal.corp"
+POLICY: HUMAN_CHECK
+Severity: high
+Category: egress_review
+Reason: "External webhook requires review"

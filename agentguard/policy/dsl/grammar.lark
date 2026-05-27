@@ -1,0 +1,136 @@
+// AgentGuard Rule DSL — Reference Grammar (v3)
+//
+// NOTE: Reference documentation only.  The actual parser is a hand-written
+//       recursive-descent parser in parser.py.  Lark is NOT used at runtime.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// Top-level
+// ─────────────────────────────────────────────────────────────────────────────
+//  rules    := rule+
+//  rule     := "RULE" ":" IDENT
+//               ("ON"        ":" event_match)?
+//               ("TRACE"     ":" trace_clause)?
+//               ("CONDITION" ":" expr)?
+//               "POLICY"     ":" action
+//               (meta_kv)*
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// Event match  (ON: clause)
+// ─────────────────────────────────────────────────────────────────────────────
+//  event_match  := "tool_call"
+//                  ("." subtype)?
+//                  ("(" tool_pattern ")")?
+//  subtype      := "requested" | "completed" | "failed"
+//  tool_pattern := IDENT ("." IDENT)* ("." "*")? | "*"
+//
+//  TRACE + ON unification:
+//    In a TRACE rule the current event is the last step.
+//    ON: therefore constrains the event type of that last step, e.g.
+//      ON: tool_call.requested  →  intercept before execution (DENY works here)
+//      ON: tool_call.completed  →  inspect the return value
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// TRACE clause  (chain detection)
+// ─────────────────────────────────────────────────────────────────────────────
+//  trace_clause := placeholder_name ("->" gap? "->" placeholder_name)*
+//
+//  A TRACE clause may have one or more named placeholder steps:
+//    TRACE: T                    single step — T binds to the current call
+//    TRACE: Src -> Dst           adjacent
+//    TRACE: Src -> * -> Dst      exactly one call between
+//    TRACE: Src -> ... -> Dst    at least one between
+//    TRACE: Src ->...?-> Dst     zero or more between (anywhere after)
+//
+//  Placeholder fields in CONDITION:
+//    P.name         tool_name of the matched entry
+//    P.integrity    label.integrity
+//    P.sensitivity  label.sensitivity
+//    P.boundary     label.boundary
+//    P.result       return value
+//    P.<param>      args[param]
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// Actions
+// ─────────────────────────────────────────────────────────────────────────────
+//  action      := basic_action ("WITH" obligation ("," obligation)*)?
+//  basic_action:= "DENY" | "ALLOW" | "HUMAN_CHECK" | "LLM_CHECK"
+//               | "DEGRADE" "(" dotted_ident ")"
+//  obligation  := IDENT "(" kv_list? ")"
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// Rule metadata  (after POLICY:)
+// ─────────────────────────────────────────────────────────────────────────────
+//  meta_kv  := MetaKey ":" value   (MetaKey is case-insensitive)
+//  Severity  := "critical" | "high" | "medium" | "low"
+//  Category  := free text
+//  Reason    := STRING
+//  Prompt    := STRING   (system prompt for LLM_CHECK rules)
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// Expressions / Predicates
+// ─────────────────────────────────────────────────────────────────────────────
+//  expr          := or_expr
+//  or_expr       := and_expr ("OR" and_expr)*
+//  and_expr      := not_expr ("AND" not_expr)*
+//  not_expr      := "NOT" not_expr | atom
+//  atom          := "(" expr ")"
+//                 | exists_path
+//                 | bare_or_compare
+//
+//  bare_or_compare := path_or_func compare_tail?
+//  compare_tail    := op value
+//                   | "IN" value
+//                   | "NOT" "IN" value
+//  path_or_func    := IDENT ("." IDENT)* ("(" call_args ")")?
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// exists_path predicate
+// ─────────────────────────────────────────────────────────────────────────────
+//  exists_path := ("EXISTS_PATH"|"exists_path") "(" path_args ")"
+//  path_arg    := ("source_label"|"source.label") "IN" set_lit
+//               | "max_hops" "=" NUMBER
+//               | "sink"     "=" value
+//               | "over"     "=" value
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// Terminals
+// ─────────────────────────────────────────────────────────────────────────────
+//  op      := "==" | "!=" | "<=" | ">=" | "<" | ">"
+//  value   := STRING | NUMBER | BOOL | set_lit | path_or_func
+//  set_lit := "{" (STRING | IDENT) ("," (STRING | IDENT))* "}"
+//  BOOL    := "true" | "false" | "TRUE" | "FALSE"
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// Path aliases  (resolved by compiler)
+// ─────────────────────────────────────────────────────────────────────────────
+//  caller.*         → principal.*
+//  tool.name        → tool_call.tool_name
+//  tool.*           → tool_call.*
+//  event.type       → event_type
+//  event.id         → event_id
+//  event.timestamp  → ts_ms
+//  event.session_id → principal.session_id
+//  input.labels     → session.labels
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// Built-in function predicates
+// ─────────────────────────────────────────────────────────────────────────────
+//  exists_path(source.label IN {...}, sink=current_call, max_hops=N)
+//  upstream_contains_tool("tool_name")
+//  upstream_contains_any_tool({"a","b"})
+//  derived_from_tool("tool_name")
+//  tool_sequence_matches({"step1","step2"})
+//  repeated_attempts(tool="name", window="5m")   → int  (use with > N)
+//  distinct_targets()                             → int
+//  path_length(source="tool_name")                → int
+//  goal_drift_detected()                          → bool
+//  scope_expansion_detected()                     → bool
+//  suspicious_exfil_pattern()                     → bool
+//  high_entropy_payload_detected()                → bool
+//  goal_changed_from_initial()                    → bool
+//  input.has_label("pattern")                     → bool
+//  input.has_any_label({"a/*","b"})               → bool
+//  caller.scope_missing("scope_name")             → bool
+//  tool.has_tag("tag_name")                       → bool
+//  whitelist("list_name")                         → set (use with IN / NOT IN)
+//  trace("A ->...?-> B")                          → bool

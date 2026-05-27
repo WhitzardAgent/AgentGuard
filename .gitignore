@@ -1,0 +1,73 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+.eggs/
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+.env
+
+# pytest / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.coveragerc
+
+# mypy / ruff / type checkers
+.mypy_cache/
+.ruff_cache/
+.dmypy.json
+dmypy.json
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# IDE / editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Logs & runtime artifacts
+*.log
+logs/
+audit_logs/
+*.sqlite
+*.db
+
+# Secrets / credentials
+.env.local
+.env.*.local
+secrets/
+*.key
+*.pem
+*.p12
+
+# Compiled C extensions
+*.so
+
+# Build tools
+*.pyc
+*.spec
+docs/_book/
+node_modules/
+package-lock.json

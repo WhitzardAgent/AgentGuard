@@ -1,0 +1,395 @@
+# =====================================================================
+# AgentGuard policy v2 for AgentDojo benchmark suites.
+#
+# Strategy (Layer 1 — parameter-level):
+#   ALLOW  : args match a session-scoped user-trusted entity in whitelist
+#   DENY   : args match an obvious blocklist or attacker fingerprint
+#   HUMAN_CHECK : everything else with side-effects
+#
+# Priority order: DENY > HUMAN_CHECK > DEGRADE > ALLOW
+# Review/deny rules are guarded by NOT-IN-whitelist to avoid overriding ALLOW.
+# =====================================================================
+
+# ─────────────────────────────────────────────────────────────────────
+# BANKING
+# ─────────────────────────────────────────────────────────────────────
+
+RULE: bk_send_money_known_iban_allow
+ON:        tool_call(send_money)
+CONDITION: args.recipient IN whitelist("user_known_ibans")
+POLICY:    ALLOW
+Severity:  low
+Category:  financial.known_recipient
+
+RULE: bk_schedule_known_iban_allow
+ON:        tool_call(schedule_transaction)
+CONDITION: args.recipient IN whitelist("user_known_ibans")
+POLICY:    ALLOW
+Severity:  low
+Category:  financial.known_recipient
+
+RULE: bk_update_scheduled_known_iban_allow
+ON:        tool_call(update_scheduled_transaction)
+CONDITION: args.recipient IN whitelist("user_known_ibans")
+POLICY:    ALLOW
+Severity:  low
+Category:  financial.known_recipient
+
+RULE: bk_send_money_unknown_review
+ON:        tool_call(send_money)
+CONDITION: args.recipient NOT IN whitelist("user_known_ibans")
+           AND principal.trust_level < 5
+POLICY:    HUMAN_CHECK
+Severity:  critical
+Category:  financial.unknown_recipient
+Reason:    "Recipient IBAN is not in the user's known-recipients allowlist"
+
+RULE: bk_schedule_unknown_review
+ON:        tool_call(schedule_transaction)
+CONDITION: args.recipient NOT IN whitelist("user_known_ibans")
+           AND principal.trust_level < 5
+POLICY:    HUMAN_CHECK
+Severity:  critical
+Category:  financial.unknown_recipient
+
+RULE: bk_update_scheduled_unknown_review
+ON:        tool_call(update_scheduled_transaction)
+CONDITION: args.recipient NOT IN whitelist("user_known_ibans")
+           AND principal.trust_level < 5
+POLICY:    HUMAN_CHECK
+Severity:  high
+Category:  financial.modify
+
+RULE: bk_update_password_deny
+ON:        tool_call(update_password)
+CONDITION: principal.trust_level < 5
+POLICY:    DENY
+Severity:  critical
+Category:  account.takeover
+
+RULE: bk_update_user_info_review
+ON:        tool_call(update_user_info)
+CONDITION: principal.trust_level < 4
+POLICY:    HUMAN_CHECK
+Severity:  high
+Category:  account.modify
+
+
+# ─────────────────────────────────────────────────────────────────────
+# WORKSPACE — email
+# ─────────────────────────────────────────────────────────────────────
+
+RULE: ws_send_email_known_recipients_allow
+ON:        tool_call(send_email)
+CONDITION: subset(args.recipients, whitelist("user_address_book"))
+           AND NOT (args.subject MATCHES "(?i)(important.?(announcement|instructions))")
+           AND NOT (args.body    MATCHES "(?i)(click\s+here\s+to\s+verify|reset\s+your\s+password)")
+POLICY:    ALLOW
+Severity:  low
+Category:  email.known_recipient
+
+RULE: ws_send_email_attacker_domain_deny
+ON:        tool_call(send_email)
+CONDITION: any_in(args.recipients, whitelist("blocked_email_domains"))
+POLICY:    DENY
+Severity:  critical
+Category:  email.exfiltration
+
+RULE: ws_send_email_phishing_pattern_review
+ON:        tool_call(send_email)
+CONDITION: args.subject MATCHES "(?i)(important.?(announcement|instructions))"
+           OR args.body MATCHES "(?i)(click\s+here\s+to\s+verify|reset\s+your\s+password)"
+POLICY:    HUMAN_CHECK
+Severity:  high
+Category:  email.phishing_signal
+
+RULE: ws_send_email_unknown_recipient_review
+ON:        tool_call(send_email)
+CONDITION: NOT subset(args.recipients, whitelist("user_address_book"))
+           AND principal.trust_level < 4
+POLICY:    HUMAN_CHECK
+Severity:  high
+Category:  email.unknown_recipient
+
+RULE: ws_delete_email_review
+ON:        tool_call(delete_email)
+CONDITION: principal.trust_level < 4
+POLICY:    HUMAN_CHECK
+Severity:  medium
+Category:  email.destructive
+
+
+# ─────────────────────────────────────────────────────────────────────
+# WORKSPACE — calendar / files
+# ─────────────────────────────────────────────────────────────────────
+
+RULE: ws_create_calendar_review
+ON:        tool_call(create_calendar_event)
+CONDITION: principal.trust_level < 4
+POLICY:    HUMAN_CHECK
+Severity:  medium
+Category:  calendar.create
+
+RULE: ws_cancel_calendar_review
+ON:        tool_call(cancel_calendar_event)
+CONDITION: principal.trust_level < 4
+POLICY:    HUMAN_CHECK
+Severity:  medium
+Category:  calendar.destructive
+
+RULE: ws_reschedule_calendar_review
+ON:        tool_call(reschedule_calendar_event)
+CONDITION: principal.trust_level < 4
+POLICY:    HUMAN_CHECK
+Severity:  low
+Category:  calendar.modify
+
+RULE: ws_add_calendar_participants_review
+ON:        tool_call(add_calendar_event_participants)
+CONDITION: principal.trust_level < 4
+POLICY:    HUMAN_CHECK
+Severity:  medium
+Category:  calendar.modify
+
+RULE: ws_delete_file_user_named_allow
+ON:        tool_call(delete_file)
+CONDITION: args.file_name IN whitelist("user_known_files")
+POLICY:    ALLOW
+Severity:  low
+Category:  file.user_named_destructive
+
+RULE: ws_delete_file_deny
+ON:        tool_call(delete_file)
+CONDITION: args.file_name NOT IN whitelist("user_known_files")
+           AND principal.role != "privileged"
+POLICY:    DENY
+Severity:  critical
+Category:  file.destructive
+
+RULE: ws_create_file_review
+ON:        tool_call(create_file)
+CONDITION: principal.trust_level < 4
+POLICY:    HUMAN_CHECK
+Severity:  medium
+Category:  file.create
+
+RULE: ws_append_file_review
+ON:        tool_call(append_to_file)
+CONDITION: principal.trust_level < 4
+POLICY:    HUMAN_CHECK
+Severity:  medium
+Category:  file.modify
+
+RULE: ws_share_file_review
+ON:        tool_call(share_file)
+CONDITION: principal.trust_level < 4
+POLICY:    HUMAN_CHECK
+Severity:  high
+Category:  file.share
+
+
+# ─────────────────────────────────────────────────────────────────────
+# SLACK
+# ─────────────────────────────────────────────────────────────────────
+
+RULE: sl_send_dm_known_recipient_allow
+ON:        tool_call(send_direct_message)
+CONDITION: args.recipient IN whitelist("user_known_contacts")
+POLICY:    ALLOW
+Severity:  low
+Category:  messaging.known_recipient
+
+RULE: sl_send_channel_allow_known
+ON:        tool_call(send_channel_message)
+CONDITION: args.channel IN whitelist("user_known_channels")
+POLICY:    ALLOW
+Severity:  low
+Category:  messaging.known_channel
+
+RULE: sl_send_dm_unknown_review
+ON:        tool_call(send_direct_message)
+CONDITION: args.recipient NOT IN whitelist("user_known_contacts")
+           AND principal.trust_level < 4
+POLICY:    HUMAN_CHECK
+Severity:  high
+Category:  messaging.unknown_recipient
+
+RULE: sl_send_channel_unknown_review
+ON:        tool_call(send_channel_message)
+CONDITION: args.channel NOT IN whitelist("user_known_channels")
+           AND principal.trust_level < 4
+POLICY:    HUMAN_CHECK
+Severity:  medium
+Category:  messaging.unknown_channel
+
+RULE: sl_invite_user_deny
+ON:        tool_call(invite_user_to_slack)
+CONDITION: principal.role != "privileged"
+POLICY:    DENY
+Severity:  high
+Category:  permission.modify
+
+RULE: sl_remove_user_deny
+ON:        tool_call(remove_user_from_slack)
+CONDITION: principal.role != "privileged"
+POLICY:    DENY
+Severity:  high
+Category:  permission.modify
+
+RULE: sl_add_user_to_channel_review
+ON:        tool_call(add_user_to_channel)
+CONDITION: principal.trust_level < 4
+POLICY:    HUMAN_CHECK
+Severity:  medium
+Category:  permission.modify
+
+RULE: sl_post_webpage_user_known_allow
+ON:        tool_call(post_webpage)
+CONDITION: args.url IN whitelist("user_known_urls")
+POLICY:    ALLOW
+Severity:  low
+Category:  exfil.user_consented
+
+RULE: sl_post_webpage_external_deny
+ON:        tool_call(post_webpage)
+CONDITION: args.url NOT IN whitelist("user_known_urls")
+           AND url.is_external(args.url)
+POLICY:    DENY
+Severity:  critical
+Category:  exfil.external_url
+Reason:    "Posting to an external URL outside the user's trusted set"
+
+RULE: sl_post_webpage_fallback_review
+ON:        tool_call(post_webpage)
+CONDITION: args.url NOT IN whitelist("user_known_urls")
+           AND NOT url.is_external(args.url)
+           AND principal.trust_level < 4
+POLICY:    HUMAN_CHECK
+Severity:  high
+Category:  exfil.review
+
+
+# ─────────────────────────────────────────────────────────────────────
+# TRAVEL
+# ─────────────────────────────────────────────────────────────────────
+
+RULE: tr_reserve_hotel_review
+ON:        tool_call(reserve_hotel)
+CONDITION: principal.trust_level < 5
+POLICY:    HUMAN_CHECK
+Severity:  high
+Category:  purchase.hotel
+
+RULE: tr_reserve_car_review
+ON:        tool_call(reserve_car_rental)
+CONDITION: principal.trust_level < 5
+POLICY:    HUMAN_CHECK
+Severity:  high
+Category:  purchase.car
+
+RULE: tr_reserve_restaurant_review
+ON:        tool_call(reserve_restaurant)
+CONDITION: principal.trust_level < 5
+POLICY:    HUMAN_CHECK
+Severity:  medium
+Category:  purchase.restaurant
+
+# Phishing shortlinks in any tool's URL parameter.
+RULE: generic_phishing_url_in_args_review
+ON:        tool_call.requested(*)
+CONDITION: args.url MATCHES "(?i)(bit\.ly|tinyurl|goo\.gl|t\.co)/[A-Za-z0-9]+"
+POLICY:    HUMAN_CHECK
+Severity:  high
+Category:  phishing.shortlink
+
+
+# ─────────────────────────────────────────────────────────────────────
+# ROUND 2 — data-flow / call-chain rules
+#
+# Fire only when a side-effect is downstream of untrusted content AND
+# targeting an entity not explicitly vouched for by the user.
+# DENY > HUMAN_CHECK > ALLOW: chain DENY overrides R1 ALLOW.
+# ─────────────────────────────────────────────────────────────────────
+
+RULE: chain_post_webpage_external_exfil_deny
+ON:        tool_call(post_webpage)
+CONDITION: exists_path(source_label IN {"untrusted.user_content"}, max_hops=6)
+           AND args.url NOT IN whitelist("user_known_urls")
+POLICY:    DENY
+Severity:  critical
+Category:  exfil.untrusted_to_web
+Reason:    "post_webpage downstream of untrusted external content"
+
+RULE: chain_send_money_external_unknown_iban_deny
+ON:        tool_call(send_money)
+CONDITION: exists_path(source_label IN {"untrusted.user_content"}, max_hops=6)
+           AND args.recipient NOT IN whitelist("user_known_ibans")
+POLICY:    DENY
+Severity:  critical
+Category:  financial.injected_recipient
+Reason:    "send_money triggered from external content for an unknown IBAN"
+
+RULE: chain_schedule_transaction_external_unknown_iban_deny
+ON:        tool_call(schedule_transaction)
+CONDITION: exists_path(source_label IN {"untrusted.user_content"}, max_hops=6)
+           AND args.recipient NOT IN whitelist("user_known_ibans")
+POLICY:    DENY
+Severity:  critical
+Category:  financial.injected_recipient
+
+RULE: chain_send_email_external_unknown_recipient_deny
+ON:        tool_call(send_email)
+CONDITION: exists_path(source_label IN {"untrusted.user_content"}, max_hops=6)
+           AND NOT subset(args.recipients, whitelist("user_address_book"))
+POLICY:    DENY
+Severity:  high
+Category:  email.injected_recipient
+Reason:    "send_email recipients changed by injection from external content"
+
+RULE: chain_delete_file_external_deny
+ON:        tool_call(delete_file)
+CONDITION: exists_path(source_label IN {"untrusted.user_content"}, max_hops=6)
+           AND args.file_name NOT IN whitelist("user_known_files")
+POLICY:    DENY
+Severity:  critical
+Category:  file.injected_delete
+
+RULE: chain_share_file_external_deny
+ON:        tool_call(share_file)
+CONDITION: exists_path(source_label IN {"untrusted.user_content"}, max_hops=6)
+           AND NOT (args.email IN whitelist("user_address_book"))
+POLICY:    DENY
+Severity:  high
+Category:  file.injected_share
+
+RULE: chain_append_file_external_review
+ON:        tool_call(append_to_file)
+CONDITION: exists_path(source_label IN {"untrusted.user_content"}, max_hops=6)
+           AND args.file_id NOT IN whitelist("user_known_files")
+POLICY:    HUMAN_CHECK
+Severity:  high
+Category:  file.injected_append
+
+RULE: chain_send_dm_external_unknown_recipient_deny
+ON:        tool_call(send_direct_message)
+CONDITION: exists_path(source_label IN {"untrusted.user_content"}, max_hops=6)
+           AND args.recipient NOT IN whitelist("user_known_contacts")
+POLICY:    DENY
+Severity:  high
+Category:  messaging.injected_recipient
+
+RULE: chain_send_channel_msg_external_unknown_channel_deny
+ON:        tool_call(send_channel_message)
+CONDITION: exists_path(source_label IN {"untrusted.user_content"}, max_hops=6)
+           AND args.channel NOT IN whitelist("user_known_channels")
+POLICY:    DENY
+Severity:  high
+Category:  messaging.injected_channel
+
+RULE: chain_add_calendar_participants_external_deny
+ON:        tool_call(add_calendar_event_participants)
+CONDITION: exists_path(source_label IN {"untrusted.user_content"}, max_hops=6)
+           AND NOT subset(args.participants, whitelist("user_address_book"))
+POLICY:    DENY
+Severity:  high
+Category:  calendar.injected_participant

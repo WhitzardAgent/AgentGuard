@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentguard"
+version = "0.2.0"
+description = "Runtime access control plane for agent tool-use (allow / deny / human_check / degrade)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "AgentGuard Team" }]
+keywords = ["ai", "agent", "security", "access-control", "llm"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Security",
+]
+dependencies = [
+    "pydantic>=2.5,<3.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/WhitzardAgent/AgentGuard"
+Documentation = "https://whitzardagent.github.io/AgentGuard/"
+Issues = "https://github.com/WhitzardAgent/AgentGuard/issues"
+Releases = "https://github.com/WhitzardAgent/AgentGuard/releases"
+
+[project.scripts]
+agentguard = "agentguard.__main__:main"
+
+[project.optional-dependencies]
+redis    = ["redis>=5.0"]
+postgres = ["psycopg[binary,pool]>=3.1"]
+neo4j    = ["neo4j>=5.15"]
+server   = ["fastapi>=0.110", "uvicorn>=0.27", "pyyaml>=6.0", "openai>=1.0"]
+dynamic = ["litellm>=1.40"]
+dify    = ["dify-sdk>=0.1.28"]
+dev     = ["pytest>=7.4", "pytest-asyncio>=0.23", "httpx>=0.27", "mypy>=1.8", "ruff>=0.4"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["agentguard*"]
+
+[tool.pytest.ini_options]
+testpaths = ["agentguard/tests"]
+asyncio_mode = "auto"
+markers = [
+    "load: throughput / concurrency suites (may be slow)",
+    "integration: requires a live TCP listener (serve_in_thread)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501", "B008", "B904"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true

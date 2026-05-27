@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgentGuard Frontend Preview</title>
+  <link rel="stylesheet" href="/static/common/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+{{ shared:sidebar }}
+
+    <main class="app-main home-main">
+      <section class="page-intro-card home-hero">
+        <div class="home-hero-copy">
+          <p class="page-kicker">Agent Monitoring</p>
+          <h1><span class="home-hero-name">Choose an agent</span> to focus the monitoring surface.</h1>
+          <p class="subtle">
+            Choose which registered agent to watch from the agent list.
+          </p>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="heading-row">
+          <h3>Available Agents</h3>
+          <div class="heading-actions">
+            <button class="icon-label" id="refresh-agents" type="button" aria-label="Refresh agent catalog" title="Refresh agent catalog">
+              <img class="btn-icon-image" src="/assets/refresh.png" alt="">
+            </button>
+          </div>
+        </div>
+        <p class="subtle" id="agent-sync-status">Preparing agent catalog...</p>
+        <div class="agent-list" id="agent-list"></div>
+      </section>
+    </main>
+
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <script src="/static/common/messages.js"></script>
+  <script src="/static/common/page-shell.js"></script>
+  <script src="/static/common/app.js"></script>
+  <script src="/static/pages/agents/agents.js"></script>
+</body>
+</html>
