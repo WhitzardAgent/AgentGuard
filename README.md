@@ -5,7 +5,7 @@
     <img src="https://img.shields.io/badge/Document-Docs-0ea5e9?style=for-the-badge&logo=gitbook&logoColor=white" alt="Document" />
   </a>
   <a href="https://github.com/WhitzardAgent/AgentGuard/releases">
-    <img src="https://img.shields.io/badge/Release-v0.1-111827?style=for-the-badge&logo=github&logoColor=white" alt="Release v1.0" />
+    <img src="https://img.shields.io/badge/Release-v1.0-111827?style=for-the-badge&logo=github&logoColor=white" alt="Release v1.0" />
   </a>
   <a href="./LICENSE">
     <img src="https://img.shields.io/badge/License-MIT-16a34a?style=for-the-badge&logo=open-source-initiative&logoColor=white" alt="License" />
