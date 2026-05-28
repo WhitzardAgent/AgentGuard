@@ -301,14 +301,10 @@ UI 界面还支持策略可视化配置和动态热更新。
 
 ## 🎬 演示视频
 
-<p align="center">
-  <a href="https://github.com/WhitzardAgent/AgentGuard/blob/main/docs/videos/Demo.mp4">
-    <img src="./docs/figs/dashboard.png" alt="点击观看 AgentGuard 演示视频" width="80%" />
-  </a>
-</p>
+https://github.com/user-attachments/assets/520d0b13-6464-4373-af53-aa9d28f8e709
 
 <p align="center">
-  <sub>点击上方图片即可在线播放演示视频（<a href="https://github.com/WhitzardAgent/AgentGuard/raw/main/docs/videos/Demo.mp4">直接下载</a>）。</sub>
+  <sub>上方为压缩版预览视频，完整高清版本请见 <a href="https://github.com/WhitzardAgent/AgentGuard/raw/main/docs/videos/Demo.mp4"><code>docs/videos/Demo.mp4</code></a>。</sub>
 </p>
 
 ## 🏆 相比于现有框架的能力优势

@@ -304,14 +304,10 @@ For additional deployment details, refer to the [Documentation](https://whitzard
 
 ## 🎬 Demo Video
 
-<p align="center">
-  <a href="https://github.com/WhitzardAgent/AgentGuard/blob/main/docs/videos/Demo.mp4">
-    <img src="./docs/figs/dashboard.png" alt="Watch the AgentGuard demo" width="80%" />
-  </a>
-</p>
+https://github.com/user-attachments/assets/520d0b13-6464-4373-af53-aa9d28f8e709
 
 <p align="center">
-  <sub>Click the image above to play the demo video (<a href="https://github.com/WhitzardAgent/AgentGuard/raw/main/docs/videos/Demo.mp4">direct download</a>).</sub>
+  <sub>The clip above is a compressed preview. For the full-quality version, see <a href="https://github.com/WhitzardAgent/AgentGuard/raw/main/docs/videos/Demo.mp4"><code>docs/videos/Demo.mp4</code></a>.</sub>
 </p>
 
 ## 🏆 Advantages over Existing Frameworks
