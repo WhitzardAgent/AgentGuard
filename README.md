@@ -304,7 +304,7 @@ For additional deployment details, refer to the [Documentation](https://whitzard
 
 ## 🎬 Demo Video
 
-https://github.com/user-attachments/assets/5e226203-910a-42cb-aeca-7a43ebcf51b1
+https://github.com/user-attachments/assets/75a17e37-7f51-4c59-96fa-ea449eb79859
 
 ## 🏆 Advantages over Existing Frameworks
 
