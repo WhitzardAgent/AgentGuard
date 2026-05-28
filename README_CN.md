@@ -366,6 +366,22 @@ UI 界面还支持策略可视化配置和动态热更新。
 - 添加更丰富的策略执行动作
 - 提供策略自动推荐的能力
 
+## 📚 引用
+
+如果你在研究工作中使用了 AgentGuard，请引用：
+
+```bibtex
+@misc{agentguard2026,
+      title={AgentGuard: An Attribute-Based Access Control Framework for Tool-Use LLM-Based Agent},
+      author={Jiaqi Luo* and Songyang Peng* and Jiarun Dai and Zhile Chen and Zhuoxiang Shen and Geng Hong and Xudong Pan and Yuan Zhang and Min Yang},
+      year={2026},
+      eprint={2605.28071},
+      archivePrefix={arXiv},
+      primaryClass={cs.CR},
+      url={https://arxiv.org/abs/2605.28071},
+}
+```
+
 ## 📜 许可证
 
 本项目基于 [MIT License](./LICENSE) 开源。

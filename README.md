@@ -369,6 +369,22 @@ Listed in no particular order. Thanks to everyone who helped shape AgentGuard.
 - Add more varied policy actions
 - Provide automatic security policy recommendations
 
+## 📚 Citation
+
+If you use AgentGuard in your research, please cite:
+
+```bibtex
+@misc{agentguard2026,
+      title={AgentGuard: An Attribute-Based Access Control Framework for Tool-Use LLM-Based Agent},
+      author={Jiaqi Luo* and Songyang Peng* and Jiarun Dai and Zhile Chen and Zhuoxiang Shen and Geng Hong and Xudong Pan and Yuan Zhang and Min Yang},
+      year={2026},
+      eprint={2605.28071},
+      archivePrefix={arXiv},
+      primaryClass={cs.CR},
+      url={https://arxiv.org/abs/2605.28071},
+}
+```
+
 ## 📜 License
 
 This project is licensed under the [MIT License](./LICENSE).
