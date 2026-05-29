@@ -48,6 +48,8 @@
 
 AgentGuard is an attribute-based access control framework for agent tool calls that sits between an LLM-based planning engine and the tools it invokes. Before each tool call is executed, and again after it completes, AgentGuard evaluates the agent's behavior against declarative policies to decide whether the action should proceed as-is, be blocked, or be routed for human check.
 
+Today, AgentGuard covers several key technical areas highlighted in Anthropic's [Zero Trust for AI Agents](https://claude.com/blog/zero-trust-for-ai-agents), including access control & privilege management, observability & auditing, and behavioral monitoring & response.
+
 ![AgentGuard Positioning](./docs/figs/positioning.png)
 
 AgentGuard can be integrated into existing agent frameworks without modifying the underlying execution logic. Currently, it supports LangChain, AutoGen, and OpenAI Agents SDK, and we are continuously expanding support for additional agent ecosystems and frameworks.
@@ -307,6 +309,12 @@ For additional deployment details, refer to the [Documentation](https://whitzard
 https://github.com/user-attachments/assets/75a17e37-7f51-4c59-96fa-ea449eb79859
 
 ## 🏆 Advantages over Existing Frameworks
+
+Current defenses for agent security mainly fall into two categories: **malicious-intent detection at the model layer** and **tool-call behavior interception**. The former strengthens the underlying LLM through fine-tuning or detects unsafe intent by analyzing the model's reasoning process; the latter enforces predefined security policies at tool invocation time based on call traces, arguments, and runtime context to identify, block, or escalate high-risk actions.
+
+Given that model fine-tuning is often expensive to train and deploy, and that many models do not expose a complete reasoning trace, AgentGuard focuses on the tool-call behavior layer. This approach does not require changing the underlying model. Instead, it places security controls around what the agent actually does, which makes it easier to integrate into existing agent stacks and more practical for production deployment.
+
+As illustrated below, existing tool-call-based defenses address parts of the problem, but they are often fragmented and optimized for narrow risk scenarios, such as dangerous command filtering, isolated prompt-injection mitigation, or limited auditing. In contrast, AgentGuard provides a unified framework that more systematically covers access control, runtime behavior monitoring, and execution auditing. This design is also more closely aligned with the enterprise agent-security goals emphasized in Anthropic's [Zero Trust for AI Agents](https://claude.com/blog/zero-trust-for-ai-agents), including least-privilege permissions, constrained tool use, observable execution, and auditable policy enforcement.
 
 ![Advantages over Existing Frameworks](./docs/figs/comparison_en.png)
 
