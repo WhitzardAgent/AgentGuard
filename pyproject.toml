@@ -8,12 +8,12 @@ version = "0.2.0"
 description = "Runtime access control plane for agent tool-use (allow / deny / human_check / degrade)."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = { file = "LICENSE" }
 authors = [{ name = "AgentGuard Team" }]
 keywords = ["ai", "agent", "security", "access-control", "llm"]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     "Topic :: Security",
 ]
 dependencies = [

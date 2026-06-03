@@ -8,7 +8,7 @@
     <img src="https://img.shields.io/badge/%E5%8F%91%E5%B8%83-v1.0-111827?style=for-the-badge&logo=github&logoColor=white" alt="发布 v1.0" />
   </a>
   <a href="./LICENSE">
-    <img src="https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF%E8%AF%81-MIT-16a34a?style=for-the-badge&logo=open-source-initiative&logoColor=white" alt="许可证" />
+    <img src="https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF%E8%AF%81-GPL%20v3-16a34a?style=for-the-badge&logo=open-source-initiative&logoColor=white" alt="许可证" />
   </a>
 </p>
 
@@ -392,4 +392,4 @@ https://github.com/user-attachments/assets/75a17e37-7f51-4c59-96fa-ea449eb79859
 
 ## 📜 许可证
 
-本项目基于 [MIT License](./LICENSE) 开源。
+本项目基于 [GNU 通用公共许可证 v3.0（GPLv3）](./LICENSE) 开源。

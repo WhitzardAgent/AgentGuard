@@ -8,7 +8,7 @@
     <img src="https://img.shields.io/badge/Release-v1.0-111827?style=for-the-badge&logo=github&logoColor=white" alt="Release v1.0" />
   </a>
   <a href="./LICENSE">
-    <img src="https://img.shields.io/badge/License-MIT-16a34a?style=for-the-badge&logo=open-source-initiative&logoColor=white" alt="License" />
+    <img src="https://img.shields.io/badge/License-GPL%20v3-16a34a?style=for-the-badge&logo=open-source-initiative&logoColor=white" alt="License" />
   </a>
 </p>
 
@@ -395,4 +395,4 @@ If you use AgentGuard in your research, please cite:
 
 ## 📜 License
 
-This project is licensed under the [MIT License](./LICENSE).
+This project is licensed under the [GNU General Public License v3.0 (GPLv3)](./LICENSE).
