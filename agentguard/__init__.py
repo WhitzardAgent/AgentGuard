@@ -15,8 +15,12 @@ from agentguard.policy.rules.dynamic_store import (
     DynamicRuleUpdater,
 )
 
+# ── Client-side Harness / PEP runtime (v2 architecture) ──────────────────────
+from agentguard.facade import AgentGuard
+
 __all__ = [
     "Guard",
+    "AgentGuard",
     "EventType",
     "Principal",
     "RuntimeEvent",
