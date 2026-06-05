@@ -19,6 +19,11 @@ if [ "$CMD" = "frontend" ]; then
     exec python /opt/agentguard/frontend/app.py "$@"
 fi
 
+# ── Client-side Harness e2e (dual-path PEP against the server PDP) ────────────
+if [ "$CMD" = "client" ]; then
+    exec python -m agentguard.examples.remote_client_e2e "$@"
+fi
+
 # ── Pass-through for other agentguard sub-commands (check, validate, …) ──────
 if [ "$CMD" != "serve" ]; then
     exec agentguard "$CMD" "$@"
