@@ -11,10 +11,15 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import unquote, urljoin, urlparse
 from urllib.request import Request, urlopen
 
+# The mock backend is an optional offline-preview helper. Production deployments
+# proxy to a real AgentGuard server and do not require it.
 try:
     from frontend.mock_backend import MOCK_BACKEND
 except ModuleNotFoundError:
-    from mock_backend import MOCK_BACKEND
+    try:
+        from mock_backend import MOCK_BACKEND
+    except ModuleNotFoundError:
+        MOCK_BACKEND = None
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -186,7 +191,7 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
         self.send_error(HTTPStatus.NOT_FOUND, "Not Found")
 
     def _maybe_handle_mock(self, method: str, path: str, query: str) -> bool:
-        if not USE_MOCK_BACKEND:
+        if not USE_MOCK_BACKEND or MOCK_BACKEND is None:
             return False
         if not path.startswith("/api/"):
             return False

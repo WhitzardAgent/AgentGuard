@@ -1,24 +1,18 @@
-# End-to-end topology: a real server (PDP) + a client (PEP/Harness) container.
+# End-to-end topology override: a real server (PDP) + a one-shot client (PEP).
 #
 # Usage:
 #   docker compose -f docker-compose.yml -f docker-compose.e2e.yml up --build \
 #     --abort-on-container-exit --exit-code-from client
 #
-# The `client` service runs the Harness dual-path e2e against the `agentguard`
-# server over the compose network and exits non-zero if any check fails.
+# The `client` service runs the AgentDoG dual-path exfiltration scenario against
+# the `server` container over the compose network and exits non-zero on failure.
 services:
   client:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: agentguard:latest
     command: ["client"]
+    profiles: []
     depends_on:
-      agentguard:
-        condition: service_started
+      server:
+        condition: service_healthy
     environment:
-      AGENTGUARD_API_BASE: http://agentguard:${AGENTGUARD_PORT:-38080}
-      AGENTGUARD_API_KEY: ${AGENTGUARD_API_KEY:-}
-      # Optional: point the sandbox at an OpenSandbox control plane.
-      AGENTGUARD_SANDBOX_BACKEND: ${AGENTGUARD_SANDBOX_BACKEND:-local}
+      AGENTGUARD_SERVER_URL: http://server:38080
     restart: "no"

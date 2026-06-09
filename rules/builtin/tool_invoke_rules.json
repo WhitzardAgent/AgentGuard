@@ -1,0 +1,40 @@
+{
+  "version": "builtin-tool-invoke",
+  "rules": [
+    {
+      "rule_id": "deny_external_send_with_secret",
+      "effect": "deny",
+      "reason": "External send carrying secret content.",
+      "priority": 100,
+      "event_types": ["tool_invoke"],
+      "capabilities": ["external_send"],
+      "risk_signals": ["secret_detected", "api_key_detected"],
+      "conditions": [],
+      "metadata": {}
+    },
+    {
+      "rule_id": "review_external_send_builtin",
+      "effect": "require_remote_review",
+      "reason": "External send requires remote review.",
+      "priority": 60,
+      "event_types": ["tool_invoke"],
+      "capabilities": ["external_send"],
+      "risk_signals": [],
+      "conditions": [],
+      "metadata": {}
+    },
+    {
+      "rule_id": "deny_dangerous_shell_builtin",
+      "effect": "deny",
+      "reason": "Destructive shell command.",
+      "priority": 110,
+      "event_types": ["tool_invoke"],
+      "capabilities": ["shell"],
+      "risk_signals": [],
+      "conditions": [
+        {"field": "payload.arguments.command", "op": "regex", "value": "rm\\s+-rf\\s+/|mkfs|dd\\s+if="}
+      ],
+      "metadata": {}
+    }
+  ]
+}

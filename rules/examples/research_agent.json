@@ -1,0 +1,27 @@
+{
+  "version": "research_agent",
+  "rules": [
+    {
+      "rule_id": "research_allow_read",
+      "effect": "log_only",
+      "reason": "Reading files and network fetches are allowed with logging.",
+      "priority": 10,
+      "event_types": ["tool_invoke"],
+      "capabilities": ["read_file", "network"],
+      "risk_signals": [],
+      "conditions": [],
+      "metadata": {}
+    },
+    {
+      "rule_id": "research_review_external_send",
+      "effect": "require_remote_review",
+      "reason": "External sends from a research agent need review.",
+      "priority": 60,
+      "event_types": ["tool_invoke"],
+      "capabilities": ["external_send"],
+      "risk_signals": [],
+      "conditions": [],
+      "metadata": {}
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "plugin_id": "agentdog",
+  "name": "AgentDoG",
+  "version": "0.1.0",
+  "client_component": "agentdog_proxy",
+  "server_component": "agentdog",
+  "requires_server": true,
+  "supports_online": true,
+  "supports_offline": true,
+  "required_event_types": [
+    "llm_input",
+    "llm_output",
+    "tool_invoke",
+    "tool_result",
+    "final_response"
+  ],
+  "request_extensions": [
+    "trajectory_window",
+    "tool_metadata",
+    "local_signals"
+  ],
+  "response_extensions": [
+    "diagnosis",
+    "risk_labels",
+    "decision_hints"
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "version": "code_agent",
+  "rules": [
+    {
+      "rule_id": "code_review_shell",
+      "effect": "require_remote_review",
+      "reason": "Shell execution from a code agent needs review.",
+      "priority": 70,
+      "event_types": ["tool_invoke"],
+      "capabilities": ["shell"],
+      "risk_signals": [],
+      "conditions": [],
+      "metadata": {}
+    },
+    {
+      "rule_id": "code_deny_destructive_shell",
+      "effect": "deny",
+      "reason": "Destructive shell commands are blocked.",
+      "priority": 110,
+      "event_types": ["tool_invoke"],
+      "capabilities": ["shell"],
+      "risk_signals": [],
+      "conditions": [
+        {"field": "payload.arguments.command", "op": "regex", "value": "rm\\s+-rf\\s+/|mkfs|dd\\s+if="}
+      ],
+      "metadata": {}
+    },
+    {
+      "rule_id": "code_approve_write",
+      "effect": "require_approval",
+      "reason": "File writes require approval.",
+      "priority": 55,
+      "event_types": ["tool_invoke"],
+      "capabilities": ["write_file"],
+      "risk_signals": [],
+      "conditions": [],
+      "metadata": {}
+    }
+  ]
+}

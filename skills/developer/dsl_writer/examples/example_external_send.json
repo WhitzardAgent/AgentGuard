@@ -1,0 +1,6 @@
+{
+  "instruction": "Block external email if the body contains API keys.",
+  "expected_effect": "deny",
+  "expected_capabilities": ["external_send"],
+  "expected_risk_signals": ["api_key_detected"]
+}

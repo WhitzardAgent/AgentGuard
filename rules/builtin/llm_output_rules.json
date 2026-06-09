@@ -1,0 +1,25 @@
+{
+  "version": "builtin-llm-output",
+  "rules": [
+    {
+      "rule_id": "sanitize_output_pii",
+      "effect": "sanitize",
+      "reason": "PII detected in model output.",
+      "priority": 40,
+      "event_types": ["llm_output", "final_response"],
+      "risk_signals": ["pii_email", "pii_detected", "pii_card"],
+      "conditions": [],
+      "metadata": {}
+    },
+    {
+      "rule_id": "deny_system_prompt_leak",
+      "effect": "deny",
+      "reason": "System prompt leakage in output.",
+      "priority": 85,
+      "event_types": ["llm_output", "final_response"],
+      "risk_signals": ["system_prompt_leak"],
+      "conditions": [],
+      "metadata": {}
+    }
+  ]
+}
