@@ -8,6 +8,7 @@ expose its metrics correctly.
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 
@@ -78,7 +79,25 @@ class _FakeLLMBackend:
     def chat(self, messages):
         self.calls += 1
         self.last_messages = messages
-        return _FakeLLMResponse(self.verdict)
+        severity = {
+            "allow": "none",
+            "human": "high",
+            "deny": "critical",
+        }.get(self.verdict, self.verdict)
+        findings = []
+        if severity != "none":
+            findings.append({
+                "threat_type": "trace_anomaly",
+                "severity": severity,
+                "confidence": 0.9,
+                "evidence": ["shell.exec cmd"],
+                "reason": "Suspicious command requires review.",
+            })
+        return _FakeLLMResponse(json.dumps({
+            "overall_severity": severity,
+            "findings": findings,
+            "summary": "Security reviewer classified the tool call.",
+        }))
 
 
 def _make_guard(dsl: str) -> Guard:
@@ -428,9 +447,9 @@ async def test_fastapi_async_runtime_resolves_llm_check_before_response():
         assert body["decision"]["client_action"] == "human_check"
         assert backend.calls == 1
         assert backend.last_messages is not None
-        assert "Trace summary:" in backend.last_messages[1]["content"]
-        assert 'shell.exec(cmd="ls")' in backend.last_messages[1]["content"]
-        assert 'shell.exec(cmd="rm -rf /")' not in backend.last_messages[1]["content"]
+        assert '"trace_rich"' in backend.last_messages[1]["content"]
+        assert '"cmd": "ls"' in backend.last_messages[1]["content"]
+        assert '"cmd": "rm -rf /"' in backend.last_messages[1]["content"]
 
     assert server.async_runtime is not None
     assert server.async_runtime.started is False
@@ -462,7 +481,8 @@ async def test_fastapi_async_runtime_uses_v3_prompt_for_llm_check_system_message
         assert system_prompt.startswith(
             "Treat destructive shell commands as high-risk. If intent is unclear, escalate to human review."
         )
-        assert "allow, deny, or human" in system_prompt
+        assert "strict JSON" in system_prompt
+        assert "prompt_injection" in system_prompt
 
     assert server.async_runtime is not None
     assert server.async_runtime.started is False

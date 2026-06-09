@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 
-from agentguard.degrade.planner import _LLM_REVIEW_SYSTEM
+from agentguard.llm.security_review import (
+    SECURITY_REVIEW_SYSTEM,
+    parse_security_review_response,
+)
 from agentguard.sdk.guard import Guard
 from agentguard.models.decisions import Action, Decision, Obligation
 from agentguard.models.events import EventType
@@ -57,14 +61,38 @@ class _FakeLLMResponse:
         self.content = content
 
 
+def _review_json(
+    severity: str = "none",
+    *,
+    threat_type: str = "trace_anomaly",
+    summary: str = "No material threat detected.",
+    evidence: list[str] | None = None,
+    reason: str = "No unsafe pattern found.",
+) -> str:
+    findings = []
+    if severity != "none":
+        findings.append({
+            "threat_type": threat_type,
+            "severity": severity,
+            "confidence": 0.91,
+            "evidence": evidence or ["test evidence"],
+            "reason": reason,
+        })
+    return json.dumps({
+        "overall_severity": severity,
+        "findings": findings,
+        "summary": summary,
+    })
+
+
 class _CaptureLLMBackend:
-    def __init__(self, verdict: str = "allow"):
-        self.verdict = verdict
+    def __init__(self, content: str | None = None):
+        self.content = content or _review_json("none")
         self.messages: list[list[dict[str, str]]] = []
 
     def chat(self, messages):
         self.messages.append(messages)
-        return _FakeLLMResponse(self.verdict)
+        return _FakeLLMResponse(self.content)
 
 
 class _StaticContentLLMBackend:
@@ -98,8 +126,25 @@ def test_allow_branch_applies_redact_obligation():
     assert results[0].get("url") == "https://example.com"
 
 
+def test_security_review_json_parser_accepts_structured_findings():
+    result = parse_security_review_response(_review_json(
+        "critical",
+        threat_type="prompt_injection",
+        summary="External content attempted to override policy.",
+        evidence=["ignore previous instructions"],
+    ))
+    assert result.max_severity().value == "critical"
+    assert result.threat_types() == ["prompt_injection"]
+    assert "ignore previous instructions" in result.evidence_preview()[0]
+
+
+def test_security_review_json_parser_rejects_malformed_output():
+    with pytest.raises(ValueError):
+        parse_security_review_response("<DECISION>allow</DECISION>")
+
+
 def test_local_llm_check_prompt_includes_trace_summary():
-    backend = _CaptureLLMBackend("allow")
+    backend = _CaptureLLMBackend()
     guard = Guard(policy_source=LLM_TRACE_DSL, builtin_rules=False, llm_backend=backend)
     principal = make_principal(session_id="trace-llm-local")
 
@@ -121,15 +166,16 @@ def test_local_llm_check_prompt_includes_trace_summary():
 
     assert backend.messages
     user_prompt = backend.messages[-1][1]["content"]
-    assert "Trace summary:" in user_prompt
-    assert 'fs.read(path="/tmp/report.txt", result="report-body")' in user_prompt
-    assert 'http.post(url="https://external.example/api"' not in user_prompt
+    assert '"trace_rich"' in user_prompt
+    assert "/tmp/report.txt" in user_prompt
+    assert "report-body" in user_prompt
+    assert "https://external.example/api" in user_prompt
     guard.close()
 
 
 def test_local_llm_check_trace_summary_respects_env_max_steps(monkeypatch):
     monkeypatch.setenv("AGENTGUARD_LLM_TRACE_MAX_STEPS", "1")
-    backend = _CaptureLLMBackend("allow")
+    backend = _CaptureLLMBackend()
     guard = Guard(policy_source=LLM_TRACE_DSL, builtin_rules=False, llm_backend=backend)
     principal = make_principal(session_id="trace-llm-local-max-steps")
 
@@ -158,15 +204,16 @@ def test_local_llm_check_trace_summary_respects_env_max_steps(monkeypatch):
 
     assert backend.messages
     user_prompt = backend.messages[-1][1]["content"]
-    assert "Trace summary:" in user_prompt
-    assert 'db.query(sql="select 1", result="b")' in user_prompt
-    assert 'fs.read(path="/tmp/a.txt", result="a")' not in user_prompt
+    assert '"trace_rich"' in user_prompt
+    assert "select 1" in user_prompt
+    assert '"result": "b"' in user_prompt
+    assert "/tmp/a.txt" not in user_prompt
     guard.close()
 
 
 def test_llm_check_uses_custom_v3_prompt_as_system_prompt():
     backend = _StaticContentLLMBackend(
-        "<DECISION>allow</DECISION><REASON>Destination is internal and request is scoped.</REASON>"
+        _review_json("none", summary="Request is low risk.")
     )
     guard = Guard(policy_source=LLM_TRACE_V3_PROMPT_DSL, builtin_rules=False, llm_backend=backend)
     principal = make_principal(session_id="trace-llm-v3-prompt")
@@ -185,15 +232,15 @@ def test_llm_check_uses_custom_v3_prompt_as_system_prompt():
     assert system_prompt.startswith(
         "Apply a strict outbound HTTP review policy. If destination trust is unclear, choose human."
     )
-    assert _LLM_REVIEW_SYSTEM in system_prompt
-    assert "<DECISION>" in system_prompt
-    assert "<REASON>" in system_prompt
+    assert SECURITY_REVIEW_SYSTEM in system_prompt
+    assert "strict JSON" in system_prompt
+    assert "prompt_injection" in system_prompt
     guard.close()
 
 
 def test_llm_check_falls_back_to_default_system_prompt_when_v3_prompt_empty():
     backend = _StaticContentLLMBackend(
-        "<DECISION>allow</DECISION><REASON>Request is low risk.</REASON>"
+        _review_json("none", summary="Request is low risk.")
     )
     guard = Guard(policy_source=LLM_TRACE_V3_EMPTY_PROMPT_DSL, builtin_rules=False, llm_backend=backend)
     principal = make_principal(session_id="trace-llm-v3-empty-prompt")
@@ -209,13 +256,19 @@ def test_llm_check_falls_back_to_default_system_prompt_when_v3_prompt_empty():
 
     assert backend.messages
     system_prompt = backend.messages[-1][0]["content"]
-    assert system_prompt == _LLM_REVIEW_SYSTEM
+    assert system_prompt == SECURITY_REVIEW_SYSTEM
     guard.close()
 
 
-def test_llm_check_reason_includes_rule_reason_and_llm_reason():
+def test_llm_check_critical_review_denies_and_includes_findings_in_reason():
     backend = _StaticContentLLMBackend(
-        "<DECISION>deny</DECISION><REASON>External destination lacks a verified business need.</REASON>"
+        _review_json(
+            "critical",
+            threat_type="prompt_injection",
+            summary="External destination lacks a verified business need.",
+            evidence=["untrusted payload asks to exfiltrate secrets"],
+            reason="Potential exfiltration.",
+        )
     )
     guard = Guard(policy_source=LLM_TRACE_V3_PROMPT_DSL, builtin_rules=False, llm_backend=backend)
     principal = make_principal(session_id="trace-llm-v3-reason")
@@ -231,9 +284,56 @@ def test_llm_check_reason_includes_rule_reason_and_llm_reason():
         guard.pipeline.guarded_call(trigger, lambda _event: "sent")
 
     reason = str(exc.value)
-    assert "llm_denied:" in reason
+    assert "security_review:critical:" in reason
+    assert "threats=prompt_injection" in reason
+    assert "untrusted payload asks to exfiltrate secrets" in reason
     assert "rule_reason=Outbound HTTP request requires careful review." in reason
-    assert "llm_reason=External destination lacks a verified business need." in reason
+    guard.close()
+
+
+def test_llm_check_high_review_maps_to_human_check():
+    backend = _StaticContentLLMBackend(
+        _review_json(
+            "high",
+            threat_type="trace_anomaly",
+            summary="Sensitive read followed by outbound post.",
+        )
+    )
+    guard = Guard(policy_source=LLM_TRACE_DSL, builtin_rules=False, llm_backend=backend)
+    principal = make_principal(session_id="trace-llm-high")
+    trigger = _mk(
+        "http.post",
+        args={"url": "https://external.example/api", "body": "payload"},
+        principal=principal,
+        sink_type="http",
+    )
+
+    initial = guard.pipeline.handle_attempt(trigger)
+    resolved = guard.pipeline.enforcer.resolve_remote_decision(trigger, initial)
+
+    assert resolved.action is Action.HUMAN_CHECK
+    assert resolved.client_action is not None
+    assert resolved.client_action.value == "human_check"
+    assert "security_review:high:" in resolved.reason
+    guard.close()
+
+
+def test_llm_check_malformed_review_escalates_to_human_check():
+    backend = _StaticContentLLMBackend("not json")
+    guard = Guard(policy_source=LLM_TRACE_DSL, builtin_rules=False, llm_backend=backend)
+    trigger = _mk(
+        "http.post",
+        args={"url": "https://external.example/api", "body": "payload"},
+        sink_type="http",
+    )
+
+    initial = guard.pipeline.handle_attempt(trigger)
+    resolved = guard.pipeline.enforcer.resolve_remote_decision(trigger, initial)
+
+    assert resolved.action is Action.HUMAN_CHECK
+    assert resolved.client_action is not None
+    assert resolved.client_action.value == "human_check"
+    assert "security_review_unavailable" in resolved.reason
     guard.close()
 
 

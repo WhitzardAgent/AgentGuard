@@ -25,6 +25,12 @@ from dataclasses import dataclass
 from typing import Any, Callable, Literal
 
 from agentguard.degrade.transformers import ActionExecutor
+from agentguard.llm.security_review import (
+    PromptSecurityReviewer,
+    SecurityReviewRequest,
+    SecurityReviewResult,
+    ThreatSeverity,
+)
 from agentguard.models.decisions import Action, ClientAction, Decision
 from agentguard.models.errors import DecisionDenied, HumanApprovalPending
 from agentguard.models.events import RuntimeEvent, ToolCall
@@ -221,6 +227,34 @@ def _merge_rule_and_llm_reason(rule_reason: str, llm_reason: str) -> str:
     return "; ".join(parts)
 
 
+_SECURITY_REVIEW_RISK = {
+    ThreatSeverity.NONE: 0.0,
+    ThreatSeverity.LOW: 0.2,
+    ThreatSeverity.MEDIUM: 0.5,
+    ThreatSeverity.HIGH: 0.8,
+    ThreatSeverity.CRITICAL: 1.0,
+}
+
+
+def _format_security_review_reason(
+    result: SecurityReviewResult,
+    *,
+    rule_reason: str = "",
+) -> str:
+    severity = result.max_severity()
+    summary = result.summary.strip() or "security reviewer completed"
+    parts = [f"security_review:{severity.value}:{summary}"]
+    threat_types = result.threat_types()
+    if threat_types:
+        parts.append(f"threats={','.join(threat_types)}")
+    evidence = result.evidence_preview()
+    if evidence:
+        parts.append(f"evidence={' | '.join(evidence)}")
+    if rule_reason:
+        parts.append(f"rule_reason={rule_reason}")
+    return "; ".join(parts)
+
+
 class Enforcer:
     def __init__(
         self,
@@ -348,45 +382,82 @@ class Enforcer:
             log.debug(
                 "LLM_CHECK fired but no llm_backend configured — escalating to HUMAN_CHECK"
             )
-            verdict: Literal["allow", "deny", "human"] = "human"
-        else:
-            try:
-                messages = _build_llm_review_messages(event, decision)
-                response = self._llm.chat(messages)
-                verdict, llm_reason = _parse_llm_review_response(response.content)
-            except Exception as exc:
-                log.warning(
-                    "LLM_CHECK: LLM call failed (%s) — escalating to HUMAN_CHECK", exc
-                )
-                verdict = "human"
-                llm_reason = f"llm_call_failed: {type(exc).__name__}"
-        if self._llm is None:
-            llm_reason = "llm_backend_not_configured"
-
-        tool_name = event.tool_call.tool_name if event.tool_call else "?"
-        log.info("LLM_CHECK verdict=%s  tool=%s  rules=%s",
-                 verdict, tool_name, decision.matched_rules)
-
-        merged_reason = _merge_rule_and_llm_reason(decision.reason, llm_reason)
-
-        if verdict == "allow":
             return decision.model_copy(update={
-                "action": Action.ALLOW,
-                "client_action": ClientAction.ALLOW,
-                "reason": _prefixed_reason("llm_approved", merged_reason),
+                "action": Action.HUMAN_CHECK,
+                "client_action": ClientAction.HUMAN_CHECK,
+                "reason": _prefixed_reason(
+                    "security_review_unavailable",
+                    _merge_rule_and_llm_reason(
+                        decision.reason,
+                        "llm_backend_not_configured",
+                    ),
+                ),
                 "llm_system_prompt": None,
             })
-        if verdict == "deny":
+
+        try:
+            reviewer = (
+                self._llm
+                if hasattr(self._llm, "review")
+                else PromptSecurityReviewer(self._llm)
+            )
+            result = reviewer.review(SecurityReviewRequest(
+                event=event,
+                decision=decision,
+                custom_prompt=decision.llm_system_prompt,
+            ))
+        except Exception as exc:
+            log.warning(
+                "LLM_CHECK: security review failed (%s) — escalating to HUMAN_CHECK",
+                exc,
+            )
+            return decision.model_copy(update={
+                "action": Action.HUMAN_CHECK,
+                "client_action": ClientAction.HUMAN_CHECK,
+                "reason": _prefixed_reason(
+                    "security_review_unavailable",
+                    _merge_rule_and_llm_reason(
+                        decision.reason,
+                        f"review_failed: {type(exc).__name__}",
+                    ),
+                ),
+                "llm_system_prompt": None,
+            })
+
+        severity = result.max_severity()
+        mapped_risk = _SECURITY_REVIEW_RISK[severity]
+        risk_score = max(decision.risk_score, mapped_risk)
+        reason = _format_security_review_reason(result, rule_reason=decision.reason)
+        tool_name = event.tool_call.tool_name if event.tool_call else "?"
+        log.info(
+            "LLM_CHECK security_review severity=%s tool=%s threats=%s rules=%s",
+            severity.value,
+            tool_name,
+            result.threat_types(),
+            decision.matched_rules,
+        )
+
+        if severity is ThreatSeverity.CRITICAL:
             return decision.model_copy(update={
                 "action": Action.DENY,
                 "client_action": ClientAction.DENY,
-                "reason": _prefixed_reason("llm_denied", merged_reason),
+                "risk_score": risk_score,
+                "reason": reason,
+                "llm_system_prompt": None,
+            })
+        if severity is ThreatSeverity.HIGH:
+            return decision.model_copy(update={
+                "action": Action.HUMAN_CHECK,
+                "client_action": ClientAction.HUMAN_CHECK,
+                "risk_score": risk_score,
+                "reason": reason,
                 "llm_system_prompt": None,
             })
         return decision.model_copy(update={
-            "action": Action.HUMAN_CHECK,
-            "client_action": ClientAction.HUMAN_CHECK,
-            "reason": _prefixed_reason("llm_escalated", merged_reason),
+            "action": Action.ALLOW,
+            "client_action": ClientAction.ALLOW,
+            "risk_score": risk_score,
+            "reason": reason,
             "llm_system_prompt": None,
         })
 

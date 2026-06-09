@@ -14,6 +14,14 @@ from agentguard.policy.rules.dynamic_store import (
     TriggerPolicy,
     DynamicRuleUpdater,
 )
+from agentguard.llm.security_review import (
+    PromptSecurityReviewer,
+    SecurityReviewRequest,
+    SecurityReviewResult,
+    ThreatFinding,
+    ThreatSeverity,
+    ThreatType,
+)
 
 __all__ = [
     "Guard",
@@ -32,4 +40,10 @@ __all__ = [
     "DynamicRuleConfig",
     "TriggerPolicy",
     "DynamicRuleUpdater",
+    "PromptSecurityReviewer",
+    "SecurityReviewRequest",
+    "SecurityReviewResult",
+    "ThreatFinding",
+    "ThreatSeverity",
+    "ThreatType",
 ]

@@ -78,7 +78,25 @@ class _FakeLLMBackend:
     def chat(self, messages):
         self.calls += 1
         self.last_messages = messages
-        return _FakeLLMResponse(self.verdict)
+        severity = {
+            "allow": "none",
+            "human": "high",
+            "deny": "critical",
+        }.get(self.verdict, self.verdict)
+        findings = []
+        if severity != "none":
+            findings.append({
+                "threat_type": "trace_anomaly",
+                "severity": severity,
+                "confidence": 0.9,
+                "evidence": ["shell.exec cmd"],
+                "reason": "Suspicious command requires review.",
+            })
+        return _FakeLLMResponse(json.dumps({
+            "overall_severity": severity,
+            "findings": findings,
+            "summary": "Security reviewer classified the tool call.",
+        }))
 
 
 @pytest.fixture()
@@ -153,9 +171,9 @@ def test_evaluate_resolves_llm_check_to_final_action():
     assert body["decision"]["client_action"] == "deny"
     assert backend.calls == 1
     assert backend.last_messages is not None
-    assert "Trace summary:" in backend.last_messages[1]["content"]
-    assert 'shell.exec(cmd="ls")' in backend.last_messages[1]["content"]
-    assert 'shell.exec(cmd="rm -rf /")' not in backend.last_messages[1]["content"]
+    assert '"trace_rich"' in backend.last_messages[1]["content"]
+    assert '"cmd": "ls"' in backend.last_messages[1]["content"]
+    assert '"cmd": "rm -rf /"' in backend.last_messages[1]["content"]
     guard.close()
 
 
@@ -175,9 +193,7 @@ def test_evaluate_only_runs_llm_review_for_matching_llm_check_rule():
 
 
 def test_evaluate_uses_v3_prompt_for_remote_llm_check_system_message():
-    backend = _FakeLLMBackend(
-        "<DECISION>human</DECISION><REASON>Command is destructive and intent is not clearly justified.</REASON>"
-    )
+    backend = _FakeLLMBackend("human")
     guard = Guard(policy_source=LLM_CHECK_V3_PROMPT_DSL, builtin_rules=False, llm_backend=backend)
 
     with TestClient(build_app(guard), raise_server_exceptions=True) as client:
@@ -190,11 +206,10 @@ def test_evaluate_uses_v3_prompt_for_remote_llm_check_system_message():
     assert system_prompt.startswith(
         "Treat destructive shell commands as high-risk. If intent is not clearly safe, escalate to human."
     )
-    assert "<DECISION>" in system_prompt
-    assert "<REASON>" in system_prompt
-    assert r.json()["decision"]["reason"].startswith("llm_escalated:")
+    assert "strict JSON" in system_prompt
+    assert "prompt_injection" in system_prompt
+    assert r.json()["decision"]["reason"].startswith("security_review:high:")
     assert "rule_reason=Potentially destructive shell command." in r.json()["decision"]["reason"]
-    assert "llm_reason=Command is destructive and intent is not clearly justified." in r.json()["decision"]["reason"]
     guard.close()
 
 

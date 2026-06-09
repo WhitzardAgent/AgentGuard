@@ -16,5 +16,25 @@ Quick usage::
 """
 
 from agentguard.llm.backend import LLMBackend, ChatResponse, ToolCallRequest
+from agentguard.llm.security_review import (
+    PromptSecurityReviewer,
+    SecurityReviewRequest,
+    SecurityReviewResult,
+    ThreatFinding,
+    ThreatSeverity,
+    ThreatType,
+    parse_security_review_response,
+)
 
-__all__ = ["LLMBackend", "ChatResponse", "ToolCallRequest"]
+__all__ = [
+    "LLMBackend",
+    "ChatResponse",
+    "ToolCallRequest",
+    "PromptSecurityReviewer",
+    "SecurityReviewRequest",
+    "SecurityReviewResult",
+    "ThreatFinding",
+    "ThreatSeverity",
+    "ThreatType",
+    "parse_security_review_response",
+]
