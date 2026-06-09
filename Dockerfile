@@ -26,7 +26,6 @@ COPY rules ./rules
 COPY plugins ./plugins
 COPY examples ./examples
 COPY scripts ./scripts
-COPY frontend ./frontend
 
 RUN chmod +x scripts/*.sh 2>/dev/null || true
 

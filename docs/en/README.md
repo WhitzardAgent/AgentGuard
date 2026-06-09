@@ -243,7 +243,7 @@ Docker deployment is straightforward — just run this command from the project 
 
 The control server listens on port `38080` by default.
 
-We also provide a web UI that lets you monitor agent runtime status, audit policy enforcement records, and configure policies interactively. For new users, we recommend using the UI to manage access control. Visit `http://localhost:8080` in your browser to access it.
+We also provide a web UI that lets you monitor agent runtime status, audit policy enforcement records, and configure policies interactively. For new users, we recommend using the UI to manage access control. Visit `http://localhost:38008` in your browser to access it.
 
 Below is a screenshot of the interactive policy configuration UI:
 
@@ -274,7 +274,7 @@ python -m agentguard serve \
 You can also start the UI:
 
 ```bash
-python frontend/app.py
+./scripts/run-frontend.sh
 ```
 
 Visit `http://localhost:8008` to access the UI.

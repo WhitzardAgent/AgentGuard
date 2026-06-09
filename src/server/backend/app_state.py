@@ -1,6 +1,8 @@
 """Process-wide shared singletons for the server (manager + console state)."""
 from __future__ import annotations
 
+import os
+
 from backend.console.state import ConsoleState
 from backend.runtime.manager import RuntimeManager
 from backend.skill_service.router import SkillServiceRouter
@@ -13,7 +15,11 @@ _skills: SkillServiceRouter | None = None
 def get_manager() -> RuntimeManager:
     global _manager
     if _manager is None:
-        _manager = RuntimeManager()
+        checker_config = (
+            os.getenv("AGENTGUARD_SERVER_CHECKER_CONFIG")
+            or os.getenv("AGENTGUARD_CHECKER_CONFIG")
+        )
+        _manager = RuntimeManager(checker_config=checker_config)
     return _manager
 
 

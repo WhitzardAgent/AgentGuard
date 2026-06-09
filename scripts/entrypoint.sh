@@ -22,12 +22,16 @@ case "$CMD" in
   frontend)
     export FRONTEND_HOST="${FRONTEND_HOST:-0.0.0.0}"
     export FRONTEND_PORT="${FRONTEND_PORT:-38008}"
-    exec python frontend/app.py
+    exec python src/server/frontend/app.py
     ;;
   client)
     exec python examples/remote_client_e2e.py "$@"
     ;;
   example)
+    if [ "$#" -lt 1 ]; then
+      echo "usage: example <name>" >&2
+      exit 2
+    fi
     exec python examples/"$1".py
     ;;
   *)

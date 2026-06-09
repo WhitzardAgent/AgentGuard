@@ -1,8 +1,8 @@
 """Management-console API consumed by the web frontend.
 
-Paths match the frontend proxy contract (frontend/app.py strips the /api/ prefix),
-so these are mounted at the server root. All data is backed by real server state
-(policy store, live traffic, approvals) via ConsoleState.
+Paths match the frontend proxy contract (src/server/frontend/app.py strips the
+/api/ prefix), so these are mounted at the server root. All data is backed by
+real server state (policy store, live traffic, approvals) via ConsoleState.
 """
 from __future__ import annotations
 

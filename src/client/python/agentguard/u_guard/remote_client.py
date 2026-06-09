@@ -100,6 +100,7 @@ class RemoteGuardClient:
         for s in payload.get("risk_signals") or []:
             if s not in gd.risk_signals:
                 gd.risk_signals.append(s)
+        gd.metadata.setdefault("checker_result", payload.get("checker_result") or {})
         gd.metadata.setdefault("plugin_results", payload.get("plugin_results") or {})
         gd.metadata.setdefault("source", "remote")
         return gd

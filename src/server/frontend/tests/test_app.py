@@ -6,12 +6,12 @@ import threading
 from contextlib import contextmanager
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 import sys
+from pathlib import Path
 
-ROOT_DIR = Path(__file__).resolve().parents[2]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
+SERVER_SRC_DIR = Path(__file__).resolve().parents[2]
+if str(SERVER_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SERVER_SRC_DIR))
 
 import frontend.app as frontend_app
 
@@ -350,12 +350,12 @@ def test_runtime_page_renders_shared_sidebar_and_active_nav():
         status, body = _text_request("GET", preview.url, "/runtime.html")
 
     assert status == 200
-    assert 'id="sidebar-toggle"' in body
     assert 'id="app-sidebar"' in body
+    assert 'id="sidebar-agent-panel"' in body
     assert 'href="/">Home</a>' in body
     assert 'href="/agents.html">Agents</a>' in body
     assert 'href="/user.html">User</a>' in body
-    assert 'class="sidebar-nav-item active"' in body
+    assert 'class="sidebar-nav-item sidebar-nav-item-child active"' in body
     assert 'href="/runtime.html"' in body
     assert 'href="/labels.html"' in body
     assert 'data-agent-required="true"' in body
@@ -381,7 +381,8 @@ def test_agents_page_renders_agent_selection_workspace():
 
     assert status == 200
     assert "Available Agents" in body
-    assert "Watching" in body
+    assert "Choose which registered agent to watch from the agent list." in body
+    assert 'id="agent-sync-status"' in body
     assert '<a class="sidebar-nav-item active" href="/agents.html">Agents</a>' in body
 
 

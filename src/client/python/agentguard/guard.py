@@ -51,6 +51,7 @@ class AgentGuard:
         audit_path: str | None = None,
         remote_timeout_s: float = 5.0,
         remote_retries: int = 2,
+        checker_config: str | dict[str, Any] | None = None,
     ) -> None:
         snapshot = self._load_snapshot(policy)
         self.context = RuntimeContext(
@@ -72,7 +73,7 @@ class AgentGuard:
         self._enforcer = UGuardEnforcer(
             snapshot=snapshot,
             remote=self._remote,
-            checker_manager=CheckerManager(),
+            checker_manager=CheckerManager(config=checker_config),
             cache=self._cache,
         )
         self._sandbox = SandboxExecutor(sandbox, sandbox_profile)
@@ -137,6 +138,48 @@ class AgentGuard:
     def wrap_llm(self, llm: Any) -> Any:
         adapter = select_llm_adapter(llm, self._llm_adapters)
         return adapter.wrap(llm, self.runtime)
+
+    def attach_autogen(
+        self,
+        agent: Any,
+        *,
+        wrap_tools: bool = True,
+        wrap_llm: bool = True,
+    ) -> dict[str, Any]:
+        """Patch an AutoGen agent in-place while preserving its native loop."""
+        from agentguard.adapters.agent.autogen import AutogenAgentAdapter  # noqa: PLC0415
+
+        return AutogenAgentAdapter().attach(
+            agent, self, wrap_tools=wrap_tools, wrap_llm=wrap_llm
+        )
+
+    def attach_langchain(
+        self,
+        agent: Any,
+        *,
+        wrap_tools: bool = True,
+        wrap_llm: bool = True,
+    ) -> dict[str, Any]:
+        """Patch a LangChain/LangGraph agent in-place while preserving its native loop."""
+        from agentguard.adapters.agent.langchain import LangChainAgentAdapter  # noqa: PLC0415
+
+        return LangChainAgentAdapter().attach(
+            agent, self, wrap_tools=wrap_tools, wrap_llm=wrap_llm
+        )
+
+    def attach_openai_agents(
+        self,
+        agent: Any,
+        *,
+        wrap_tools: bool = True,
+        wrap_llm: bool = True,
+    ) -> dict[str, Any]:
+        """Patch an OpenAI Agents SDK agent in-place while preserving Runner loop."""
+        from agentguard.adapters.agent.openai_agents import OpenAIAgentsAdapter  # noqa: PLC0415
+
+        return OpenAIAgentsAdapter().attach(
+            agent, self, wrap_tools=wrap_tools, wrap_llm=wrap_llm
+        )
 
     # ---- registration --------------------------------------------------
     def register_tool(self, fn: Callable[..., Any], **meta: Any) -> ToolMetadata:

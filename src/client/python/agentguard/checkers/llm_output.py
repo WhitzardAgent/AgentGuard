@@ -1,16 +1,6 @@
-"""Checker for LLM output events."""
+"""Compatibility import for LLM-after checker."""
 from __future__ import annotations
 
-from agentguard.checkers.base import BaseChecker, CheckResult
-from agentguard.checkers.patterns import find_signals, text_of
-from agentguard.schemas.context import RuntimeContext
-from agentguard.schemas.events import EventType, RuntimeEvent
+from agentguard.checkers.llm_after.llm_output import LLMOutputChecker
 
-
-class LLMOutputChecker(BaseChecker):
-    name = "llm_output"
-    event_types = [EventType.LLM_OUTPUT]
-
-    def check(self, event: RuntimeEvent, context: RuntimeContext) -> CheckResult:
-        text = text_of(event.payload.get("output"))
-        return CheckResult(risk_signals=find_signals(text))
+__all__ = ["LLMOutputChecker"]

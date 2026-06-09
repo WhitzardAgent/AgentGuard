@@ -41,10 +41,24 @@ dev     = ["pytest>=7.4", "pytest-asyncio>=0.23", "httpx>=0.27", "mypy>=1.8", "r
 
 [tool.setuptools.packages.find]
 where = ["src/client/python", "src", "src/server", "."]
-include = ["agentguard*", "shared*", "backend*", "skills*"]
+include = ["agentguard*", "shared*", "backend*", "frontend*", "skills*"]
+
+[tool.setuptools.package-data]
+frontend = [
+    "README.md",
+    "assets/*",
+    "static/common/*.css",
+    "static/common/*.js",
+    "static/pages/agents/*.js",
+    "static/pages/labels/*.js",
+    "static/pages/rules/*.js",
+    "static/pages/runtime/*.js",
+    "templates/*.html",
+    "templates/partials/*.html",
+]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "src/server/frontend/tests"]
 asyncio_mode = "auto"
 markers = [
     "load: throughput / concurrency suites (may be slow)",

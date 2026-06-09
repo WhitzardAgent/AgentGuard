@@ -19,6 +19,7 @@ class GuardDecideRequest(BaseModel):
 class GuardDecideResponse(BaseModel):
     decision: dict[str, Any]
     risk_signals: list[str] = Field(default_factory=list)
+    checker_result: dict[str, Any] = Field(default_factory=dict)
     plugin_results: dict[str, Any] = Field(default_factory=dict)
 
 

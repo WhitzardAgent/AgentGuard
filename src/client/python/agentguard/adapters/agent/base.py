@@ -31,6 +31,17 @@ class BaseAgentAdapter:
     def wrap(self, agent: Any, runtime: Any) -> GuardedAgent:
         return GuardedAgent(agent, self, runtime)
 
+    def attach(
+        self,
+        agent: Any,
+        guard: Any,
+        *,
+        wrap_tools: bool = True,
+        wrap_llm: bool = True,
+    ) -> dict[str, Any]:
+        """Patch a framework object in-place while preserving its native loop."""
+        raise AdapterError(f"{self.name}: attach is not implemented")
+
     def run(self, agent: Any, input_data: Any, context: RuntimeContext) -> Any:
         """Raw, unguarded run of the underlying agent (best effort)."""
         if callable(agent):

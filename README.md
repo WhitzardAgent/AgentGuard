@@ -152,9 +152,9 @@ Start the control server:
 ```
 
 The control server listens on port `38080`.
-The UI listens on port `8080`.
+The UI listens on port `38008`.
 
-Visit `http://localhost:8080` to see the UI.
+Visit `http://localhost:38008` to see the UI.
 
 ### 2. Agent-Side Setup
 

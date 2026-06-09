@@ -9,6 +9,7 @@ from agentguard.schemas.events import RuntimeEvent
 from backend.audit.audit_logger import AuditLogger
 from backend.plugins.loader import load_builtin_plugins
 from backend.plugins.manager import PluginManager
+from backend.runtime.checkers.base import CheckResult
 from backend.runtime.checkers import server_checker_manager
 from backend.runtime.degrade.planner import DegradePlanner
 from backend.runtime.policy.engine import PolicyEngine
@@ -24,12 +25,13 @@ class RuntimeManager:
         plugins: PluginManager | None = None,
         audit: AuditLogger | None = None,
         enable_agentdog: bool = True,
+        checker_config: str | dict[str, Any] | None = None,
     ) -> None:
         self.policy = policy or PolicyEngine()
         self.plugins = plugins or load_builtin_plugins(
             PluginManager(), enable_agentdog=enable_agentdog
         )
-        self.checkers = server_checker_manager()
+        self.checkers = server_checker_manager(checker_config)
         self.degrade = DegradePlanner()
         self.audit = audit or AuditLogger()
         # Observers receive (event, decision, request, plugin_results) after each
@@ -98,5 +100,17 @@ class RuntimeManager:
         return {
             "decision": decision.to_dict(),
             "risk_signals": risk_signals,
+            "checker_result": _checker_result_dict(check),
             "plugin_results": plugin_results,
         }
+
+
+def _checker_result_dict(check: CheckResult) -> dict[str, Any]:
+    return {
+        "risk_signals": list(check.risk_signals),
+        "is_final": check.is_final,
+        "decision_candidate": (
+            check.decision_candidate.to_dict() if check.decision_candidate else None
+        ),
+        "metadata": dict(check.metadata),
+    }

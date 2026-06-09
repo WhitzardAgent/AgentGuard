@@ -1,11 +1,11 @@
 # AgentGuard Frontend Preview
 
-This frontend preview is a small Python server that renders the static pages in `frontend/templates/` and serves JavaScript/CSS from `frontend/static/`.
+This frontend preview is a small Python server that renders the static pages in `src/server/frontend/templates/` and serves JavaScript/CSS from `src/server/frontend/static/`.
 
 Start it locally with:
 
-```powershell
-python frontend/app.py
+```bash
+./scripts/run-frontend.sh
 ```
 
 The default preview URL is:
@@ -22,15 +22,15 @@ http://127.0.0.1:38080
 
 You can point the preview at another upstream API with:
 
-```powershell
-$env:AGENTGUARD_API_BASE = "http://127.0.0.1:9000"
-python frontend/app.py
+```bash
+export AGENTGUARD_API_BASE="http://127.0.0.1:9000"
+./scripts/run-frontend.sh
 ```
 
 ## Structure
 
 ```text
-frontend/
+src/server/frontend/
   app.py
   mock_backend.py
   templates/
@@ -48,12 +48,12 @@ frontend/
 
 Use the detachable mock backend when the real API is inconvenient to run locally.
 
-```powershell
-$env:AGENTGUARD_USE_MOCK = "1"
-python frontend/app.py
+```bash
+export AGENTGUARD_USE_MOCK="1"
+./scripts/run-frontend.sh
 ```
 
-When mock mode is enabled, the frontend serves these API routes from `frontend/mock_backend.py` instead of proxying upstream:
+When mock mode is enabled, the frontend serves these API routes from `src/server/frontend/mock_backend.py` instead of proxying upstream:
 
 - `GET /api/tools`
 - `GET /api/rules`
@@ -64,7 +64,7 @@ When mock mode is enabled, the frontend serves these API routes from `frontend/m
 
 Notes:
 
-- The mock backend keeps state in memory only. Restarting `frontend/app.py` resets published rules back to the built-in sample data.
+- The mock backend keeps state in memory only. Restarting `src/server/frontend/app.py` resets published rules back to the built-in sample data.
 - Runtime monitor APIs are not mocked in this mode.
 - Labels still use the current frontend-local save behavior; there is no mock write API for labels.
 
@@ -72,6 +72,6 @@ Notes:
 
 The mock backend is intentionally easy to remove:
 
-1. Delete `frontend/mock_backend.py`.
-2. Remove the `AGENTGUARD_USE_MOCK` switch and `_maybe_handle_mock(...)` hook from `frontend/app.py`.
-3. Remove the mock-specific tests from `frontend/tests/test_app.py`.
+1. Delete `src/server/frontend/mock_backend.py`.
+2. Remove the `AGENTGUARD_USE_MOCK` switch and `_maybe_handle_mock(...)` hook from `src/server/frontend/app.py`.
+3. Remove the mock-specific tests from `src/server/frontend/tests/test_app.py`.

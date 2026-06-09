@@ -236,7 +236,7 @@ class HarnessRuntime:
             self.session.inc_step()
             self.guard(ev.llm_input(self.context, list(messages)))
             output = adapter.generate(agent, messages, self.context)
-            self.guard(ev.llm_output(self.context, output))
+            self.guard(ev.llm_output(self.context, output), phase="after")
             action = self.process_output(output)
 
             if action["kind"] == "tool_calls":

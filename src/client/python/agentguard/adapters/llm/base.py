@@ -22,7 +22,7 @@ class GuardedLLM:
         rt.guard(ev.llm_input(rt.context, norm_req))
         raw = self._adapter.complete(self._llm, request, **kwargs)
         norm_resp = self._adapter.normalize_response(raw)
-        decision = rt.guard(ev.llm_output(rt.context, norm_resp)).decision
+        decision = rt.guard(ev.llm_output(rt.context, norm_resp), phase="after").decision
         if decision.decision_type == DecisionType.DENY:
             return {"agentguard": "blocked", "reason": decision.reason}
         if decision.decision_type == DecisionType.SANITIZE:
