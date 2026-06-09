@@ -1,0 +1,15 @@
+{
+  "version": "builtin-llm-input",
+  "rules": [
+    {
+      "rule_id": "log_prompt_injection_input",
+      "effect": "log_only",
+      "reason": "Possible prompt injection in input.",
+      "priority": 15,
+      "event_types": ["user_input", "llm_input"],
+      "risk_signals": ["prompt_injection"],
+      "conditions": [],
+      "metadata": {}
+    }
+  ]
+}

@@ -1,68 +1,36 @@
 #!/usr/bin/env sh
 # AgentGuard container entrypoint.
 #
-# Translates the documented AGENTGUARD_* env vars into `agentguard` CLI flags
-# so docker-compose deployments can be configured purely via environment.
-#
 # Supported CMDs:
-#   serve     (default) — start the AgentGuard runtime API server
-#   frontend            — start the web UI (Python HTTP proxy on FRONTEND_PORT)
-#   *                   — passed directly to the `agentguard` CLI
-
+#   serve   (default) — start the server PDP (FastAPI via uvicorn)
+#   frontend          — start the management console web UI (proxies to the server)
+#   client            — run the AgentDoG paired e2e example against $AGENTGUARD_SERVER_URL
+#   example <name>    — run examples/<name>.py
+#   *                 — passed through to the `python -m agentguard.cli` CLI
 set -eu
 
 CMD="${1:-serve}"
 shift || true
 
-# ── Frontend web UI ──────────────────────────────────────────────────────────
-if [ "$CMD" = "frontend" ]; then
-    exec python /opt/agentguard/frontend/app.py "$@"
-fi
+HOST="${AGENTGUARD_HOST:-0.0.0.0}"
+PORT="${AGENTGUARD_PORT:-38080}"
 
-# ── Client-side Harness e2e (dual-path PEP against the server PDP) ────────────
-if [ "$CMD" = "client" ]; then
-    exec python -m agentguard.examples.remote_client_e2e "$@"
-fi
-
-# ── Pass-through for other agentguard sub-commands (check, validate, …) ──────
-if [ "$CMD" != "serve" ]; then
-    exec agentguard "$CMD" "$@"
-fi
-
-ARGS="--host ${AGENTGUARD_HOST:-0.0.0.0} --port ${AGENTGUARD_PORT:-38080}"
-ARGS="$ARGS --mode ${AGENTGUARD_MODE:-enforce}"
-ARGS="$ARGS --runtime-mode ${AGENTGUARD_RUNTIME_MODE:-sync}"
-ARGS="$ARGS --log-level ${AGENTGUARD_LOG_LEVEL:-info}"
-
-if [ -n "${AGENTGUARD_API_KEY:-}" ]; then
-    ARGS="$ARGS --api-key $AGENTGUARD_API_KEY"
-fi
-
-if [ "${AGENTGUARD_NO_BUILTIN:-0}" = "1" ]; then
-    ARGS="$ARGS --no-builtin"
-fi
-
-if [ -n "${AGENTGUARD_POLICY:-}" ]; then
-    for path in $AGENTGUARD_POLICY; do
-        ARGS="$ARGS --policy $path"
-    done
-fi
-
-if [ -n "${AGENTGUARD_RULE_PACK_CONFIG:-}" ]; then
-    ARGS="$ARGS --rule-pack-config $AGENTGUARD_RULE_PACK_CONFIG"
-fi
-
-if [ -n "${AGENTGUARD_STATE_CACHE:-}" ]; then
-    ARGS="$ARGS --state-cache $AGENTGUARD_STATE_CACHE"
-fi
-
-if [ -n "${AGENTGUARD_POSTGRES_URL:-}" ]; then
-    ARGS="$ARGS --postgres-url $AGENTGUARD_POSTGRES_URL"
-fi
-
-if [ "${AGENTGUARD_WATCH:-0}" = "1" ]; then
-    ARGS="$ARGS --watch"
-    ARGS="$ARGS --watch-interval ${AGENTGUARD_WATCH_INTERVAL:-5}"
-fi
-
-exec agentguard serve $ARGS "$@"
+case "$CMD" in
+  serve)
+    exec uvicorn backend.api.app:app --host "$HOST" --port "$PORT"
+    ;;
+  frontend)
+    export FRONTEND_HOST="${FRONTEND_HOST:-0.0.0.0}"
+    export FRONTEND_PORT="${FRONTEND_PORT:-38008}"
+    exec python frontend/app.py
+    ;;
+  client)
+    exec python examples/remote_client_e2e.py "$@"
+    ;;
+  example)
+    exec python examples/"$1".py
+    ;;
+  *)
+    exec python -m agentguard.cli "$CMD" "$@"
+    ;;
+esac

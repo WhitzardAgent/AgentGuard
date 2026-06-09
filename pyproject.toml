@@ -27,7 +27,7 @@ Issues = "https://github.com/WhitzardAgent/AgentGuard/issues"
 Releases = "https://github.com/WhitzardAgent/AgentGuard/releases"
 
 [project.scripts]
-agentguard = "agentguard.__main__:main"
+agentguard = "agentguard.cli:main"
 
 [project.optional-dependencies]
 redis    = ["redis>=5.0"]
@@ -40,11 +40,11 @@ sandbox = ["opensandbox"]
 dev     = ["pytest>=7.4", "pytest-asyncio>=0.23", "httpx>=0.27", "mypy>=1.8", "ruff>=0.4"]
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["agentguard*"]
+where = ["src/client/python", "src", "src/server", "."]
+include = ["agentguard*", "shared*", "backend*", "skills*"]
 
 [tool.pytest.ini_options]
-testpaths = ["agentguard/tests"]
+testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
     "load: throughput / concurrency suites (may be slow)",

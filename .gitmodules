@@ -1,0 +1,3 @@
+[submodule "third_party/AgentDoG"]
+	path = third_party/AgentDoG
+	url = git@github.com:AI45Lab/AgentDoG.git

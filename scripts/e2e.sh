@@ -35,8 +35,9 @@ docker_available() {
 }
 
 run_in_process() {
-  info "Running in-process real-HTTP dual-path e2e…"
-  python -m agentguard.examples.dual_path_e2e
+  info "Running in-process real-HTTP dual-path e2e (pytest + AgentDoG demo)…"
+  python -m pytest tests/test_e2e_http.py -q
+  python examples/agentdog_pair_demo.py
 }
 
 run_docker() {

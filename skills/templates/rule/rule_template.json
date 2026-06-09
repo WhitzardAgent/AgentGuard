@@ -1,0 +1,14 @@
+{
+  "rule_id": "TEMPLATE_rule_id",
+  "effect": "deny",
+  "reason": "Describe why this rule exists.",
+  "priority": 50,
+  "event_types": ["tool_invoke"],
+  "tool_names": [],
+  "capabilities": [],
+  "risk_signals": [],
+  "conditions": [
+    {"field": "payload.arguments.command", "op": "regex", "value": "PATTERN"}
+  ],
+  "metadata": {}
+}

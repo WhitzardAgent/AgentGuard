@@ -1,0 +1,27 @@
+{
+  "version": "browser_agent",
+  "rules": [
+    {
+      "rule_id": "browser_review_action",
+      "effect": "require_remote_review",
+      "reason": "Browser actions are reviewed remotely.",
+      "priority": 60,
+      "event_types": ["tool_invoke"],
+      "capabilities": ["browser_action"],
+      "risk_signals": [],
+      "conditions": [],
+      "metadata": {}
+    },
+    {
+      "rule_id": "browser_deny_injection_action",
+      "effect": "deny",
+      "reason": "Injected instruction leading to a browser action.",
+      "priority": 95,
+      "event_types": ["tool_invoke"],
+      "capabilities": ["browser_action"],
+      "risk_signals": ["prompt_injection", "tool_result_injection"],
+      "conditions": [],
+      "metadata": {}
+    }
+  ]
+}

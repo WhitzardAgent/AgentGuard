@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "rules": [
+    {
+      "rule_id": "example_deny_external_send_secret",
+      "effect": "deny",
+      "reason": "Block external send carrying secrets.",
+      "priority": 90,
+      "event_types": ["tool_invoke"],
+      "capabilities": ["external_send"],
+      "risk_signals": ["secret_detected", "api_key_detected"],
+      "conditions": [],
+      "metadata": {}
+    }
+  ]
+}
