@@ -1,6 +1,7 @@
 """AgentGuard: the public client facade."""
 from __future__ import annotations
 
+import secrets
 from pathlib import Path
 from typing import Any, Callable
 
@@ -51,8 +52,10 @@ class AgentGuard:
         remote_timeout_s: float = 5.0,
         remote_retries: int = 2,
         checker_config: str | dict[str, Any] | None = None,
+        session_key: str | None = None,
     ) -> None:
         snapshot = self._load_snapshot(policy)
+        self.session_key = session_key or _generate_session_key()
         self.context = RuntimeContext(
             session_id=session_id,
             user_id=user_id,
@@ -60,11 +63,14 @@ class AgentGuard:
             policy=policy,
             policy_version=snapshot.version,
             environment=environment,
+            metadata={"client_session_key": self.session_key},
         )
 
         self._remote = RemoteGuardClient(
             server_url,
             api_key=api_key,
+            session_id=self.context.session_id,
+            session_key=self.session_key,
             timeout_s=remote_timeout_s,
             retries=remote_retries,
         )
@@ -98,7 +104,14 @@ class AgentGuard:
 
         self._llm_adapters = default_llm_adapters()
         self._skills = SkillRegistryProxy(
-            remote=RemoteSkillRunner(server_url, api_key=api_key) if server_url else None
+            remote=RemoteSkillRunner(
+                server_url,
+                api_key=api_key,
+                session_id=self.context.session_id,
+                session_key=self.session_key,
+            )
+            if server_url
+            else None
         )
 
         if enable_agentdog:
@@ -131,13 +144,20 @@ class AgentGuard:
         """Start a local HTTP API for checker configuration updates."""
         if self._config_api is None:
             self._config_api = ClientConfigAPIServer(self, host=host, port=port)
-        return self._config_api.start()
+        url = self._config_api.start()
+        self.context.metadata["client_config_url"] = url
+        self.context.metadata["client_checker_list_url"] = self._config_api.checker_list_url
+        self.context.metadata["client_health_url"] = self._config_api.health_url
+        return url
 
     def stop_config_api(self) -> None:
         """Stop the local checker configuration HTTP API if it is running."""
         if self._config_api is not None:
             self._config_api.stop()
             self._config_api = None
+            self.context.metadata.pop("client_config_url", None)
+            self.context.metadata.pop("client_checker_list_url", None)
+            self.context.metadata.pop("client_health_url", None)
 
     # ---- wrapping ------------------------------------------------------
     def wrap_tool(self, fn: Callable[..., Any], **meta: Any) -> ToolWrapper:
@@ -228,6 +248,14 @@ class AgentGuard:
         return self.runtime.session.trace
 
     def close(self) -> None:
-        self.stop_config_api()
         self.runtime.sync_local_cache_now(reason="session_close")
         self._plugins.end_session(self.runtime.session.trace, self.context)
+        try:
+            self._remote.unregister_session()
+        except Exception:
+            pass
+        self.stop_config_api()
+
+
+def _generate_session_key() -> str:
+    return f"sk-{secrets.token_urlsafe(32)}"

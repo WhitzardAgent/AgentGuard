@@ -28,6 +28,7 @@ PARTIALS_DIR = TEMPLATES_DIR / "partials"
 STATIC_DIR = BASE_DIR / "static"
 ASSETS_DIR = BASE_DIR / "assets"
 API_BASE_URL = os.environ.get("AGENTGUARD_API_BASE", "http://127.0.0.1:38080").rstrip("/")
+BACKEND_API_PREFIX = "v1/backend"
 API_KEY = os.environ.get("AGENTGUARD_API_KEY", "").strip()
 USE_MOCK_BACKEND = os.environ.get("AGENTGUARD_USE_MOCK", "").strip().lower() in {
     "1",
@@ -284,7 +285,7 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
         return content
 
     def _proxy(self, upstream_path: str, *, method: str, query: str = "") -> None:
-        target_url = urljoin(f"{API_BASE_URL}/", upstream_path)
+        target_url = urljoin(f"{API_BASE_URL}/", self._backend_upstream_path(upstream_path))
         if query:
             target_url = f"{target_url}?{query}"
         body = self._read_request_body() if method in ("POST", "PUT", "PATCH", "DELETE") else None
@@ -325,6 +326,13 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(upstream_body)))
         self.end_headers()
         self.wfile.write(upstream_body)
+
+    @staticmethod
+    def _backend_upstream_path(upstream_path: str) -> str:
+        normalized = upstream_path.strip("/")
+        if normalized.startswith("v1/"):
+            return normalized
+        return f"{BACKEND_API_PREFIX}/{normalized}"
 
     def _read_request_body(self) -> bytes | None:
         raw_length = self.headers.get("Content-Length")
@@ -384,16 +392,16 @@ def serve(host: str | None = None, port: int | None = None) -> None:
     if USE_MOCK_BACKEND:
         print("Mocking agent/tool/rule frontend API routes from frontend.mock_backend")
     else:
-        print(f"Proxying /api/tools to {API_BASE_URL}/tools")
-        print(f"Proxying /api/rules to {API_BASE_URL}/rules")
-        print(f"Proxying /api/rules/reload to {API_BASE_URL}/rules/reload")
+        print(f"Proxying /api/tools to {API_BASE_URL}/v1/backend/tools")
+        print(f"Proxying /api/rules to {API_BASE_URL}/v1/backend/rules")
+        print(f"Proxying /api/rules/reload to {API_BASE_URL}/v1/backend/rules/reload")
         print("Proxying /api/agents/{agent_id}/rules to agent-scoped rule endpoints")
         print("Proxying /api/agents/{agent_id}/tools/{tool_name}/labels to tool-label patch endpoint")
-        print(f"Proxying /api/health to {API_BASE_URL}/health")
-        print(f"Proxying /api/stats to {API_BASE_URL}/stats")
-        print(f"Proxying /api/traffic to {API_BASE_URL}/traffic")
-        print(f"Proxying /api/audit/recent to {API_BASE_URL}/audit/recent")
-        print(f"Proxying /api/approvals to {API_BASE_URL}/approvals")
+        print(f"Proxying /api/health to {API_BASE_URL}/v1/backend/health")
+        print(f"Proxying /api/stats to {API_BASE_URL}/v1/backend/stats")
+        print(f"Proxying /api/traffic to {API_BASE_URL}/v1/backend/traffic")
+        print(f"Proxying /api/audit/recent to {API_BASE_URL}/v1/backend/audit/recent")
+        print(f"Proxying /api/approvals to {API_BASE_URL}/v1/backend/approvals")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

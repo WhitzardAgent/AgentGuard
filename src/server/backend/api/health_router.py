@@ -10,7 +10,7 @@ from backend.app_state import get_console
 router = APIRouter()
 
 
-@router.get("/health")
+@router.get("/v1/backend/health")
 def health() -> dict[str, Any]:
     data = get_console().health()
     data["status"] = "ok"

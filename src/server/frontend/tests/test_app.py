@@ -113,7 +113,7 @@ def test_rules_proxy_forwards_api_key_and_payload():
 
     assert status == 200
     assert payload == {"loaded": 2}
-    assert observed["path"] == "/rules/reload"
+    assert observed["path"] == "/v1/backend/rules/reload"
     assert observed["api_key"] == "test-secret"
     assert json.loads(str(observed["body"]))["source"].startswith("RULE test")
 
@@ -149,7 +149,7 @@ def test_rules_check_proxy_forwards_api_key_and_payload():
 
     assert status == 200
     assert payload["ok"] is True
-    assert observed["path"] == "/rules/check"
+    assert observed["path"] == "/v1/backend/rules/check"
     assert observed["api_key"] == "test-secret"
     assert json.loads(str(observed["body"]))["source"].startswith("RULE: test")
 
@@ -238,7 +238,7 @@ def test_agent_rules_proxy_lists_effective_rules():
 
     assert status == 200
     assert payload[0]["rule_id"] == "agent_rule"
-    assert observed["path"] == "/agents/agent-a/rules"
+    assert observed["path"] == "/v1/backend/agents/agent-a/rules"
 
 
 def test_agent_rule_create_proxy_forwards_payload_and_api_key():
@@ -272,7 +272,7 @@ def test_agent_rule_create_proxy_forwards_payload_and_api_key():
 
     assert status == 200
     assert payload["ok"] is True
-    assert observed["path"] == "/agents/agent-a/rules"
+    assert observed["path"] == "/v1/backend/agents/agent-a/rules"
     assert observed["api_key"] == "test-secret"
     assert json.loads(str(observed["body"]))["source"].startswith("RULE: agent_rule")
 
@@ -305,7 +305,7 @@ def test_agent_rule_delete_proxy_forwards_request():
 
     assert status == 200
     assert payload["ok"] is True
-    assert observed["path"] == "/agents/agent-a/rules/agent_rule"
+    assert observed["path"] == "/v1/backend/agents/agent-a/rules/agent_rule"
     assert observed["api_key"] == "test-secret"
 
 
@@ -340,7 +340,7 @@ def test_tool_label_patch_proxy_forwards_request():
 
     assert status == 200
     assert payload["ok"] is True
-    assert observed["path"] == "/agents/agent-a/tools/email.send/labels"
+    assert observed["path"] == "/v1/backend/agents/agent-a/tools/email.send/labels"
     assert observed["api_key"] == "test-secret"
     assert json.loads(str(observed["body"]))["boundary"] == "internal"
 

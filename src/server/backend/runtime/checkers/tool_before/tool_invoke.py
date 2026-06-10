@@ -10,12 +10,16 @@ from shared.tools.capability import (
 )
 from backend.runtime.checkers.base import BaseChecker, CheckResult
 from backend.runtime.checkers.common.patterns import SHELL_RE, find_signals, text_of
+from backend.runtime.checkers.registry import register
 
 _DANGEROUS_SHELL = ("rm -rf /", "mkfs", ":(){", "dd if=")
 
 
+@register(
+    name="tool_invoke",
+    description="Detect risky tool invocation arguments and dangerous capabilities.",
+)
 class ToolInvokeChecker(BaseChecker):
-    name = "tool_invoke"
     event_types = [EventType.TOOL_INVOKE]
 
     def check(

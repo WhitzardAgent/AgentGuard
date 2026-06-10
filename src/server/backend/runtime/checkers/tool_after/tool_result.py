@@ -5,10 +5,14 @@ from shared.schemas.context import RuntimeContext
 from shared.schemas.events import EventType, RuntimeEvent
 from backend.runtime.checkers.base import BaseChecker, CheckResult
 from backend.runtime.checkers.common.patterns import find_signals, text_of
+from backend.runtime.checkers.registry import register
 
 
+@register(
+    name="tool_result",
+    description="Detect secrets and prompt-injection content in tool results.",
+)
 class ToolResultChecker(BaseChecker):
-    name = "tool_result"
     event_types = [EventType.TOOL_RESULT]
 
     def check(

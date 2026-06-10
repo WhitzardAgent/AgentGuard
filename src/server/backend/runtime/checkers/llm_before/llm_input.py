@@ -5,10 +5,14 @@ from shared.schemas.context import RuntimeContext
 from shared.schemas.events import EventType, RuntimeEvent
 from backend.runtime.checkers.base import BaseChecker, CheckResult
 from backend.runtime.checkers.common.patterns import find_signals, text_of
+from backend.runtime.checkers.registry import register
 
 
+@register(
+    name="llm_input",
+    description="Detect prompt-injection and system-prompt leak attempts in LLM input.",
+)
 class LLMInputChecker(BaseChecker):
-    name = "llm_input"
     event_types = [EventType.LLM_INPUT]
 
     def check(

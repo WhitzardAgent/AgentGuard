@@ -4,10 +4,14 @@ from __future__ import annotations
 from shared.schemas.context import RuntimeContext
 from shared.schemas.events import RuntimeEvent
 from backend.runtime.checkers.base import BaseChecker, CheckResult
+from backend.runtime.checkers.registry import register
 
 
+@register(
+    name="memory",
+    description="Deprecated no-op checker for removed memory events.",
+)
 class MemoryChecker(BaseChecker):
-    name = "memory"
     event_types = []
 
     def applies(self, event: RuntimeEvent) -> bool:

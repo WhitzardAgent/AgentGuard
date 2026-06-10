@@ -10,10 +10,7 @@ from typing import Any
 from shared.schemas.context import RuntimeContext
 from shared.schemas.events import EventType, RuntimeEvent
 from backend.runtime.checkers.base import BaseChecker, CheckResult
-from backend.runtime.checkers.llm_after import LLMOutputChecker
-from backend.runtime.checkers.llm_before import LLMInputChecker
-from backend.runtime.checkers.tool_after import ToolResultChecker
-from backend.runtime.checkers.tool_before import RuleBasedChecker, ToolInvokeChecker
+from backend.runtime.checkers.registry import get_checker_class
 
 PHASE_ORDER = ("llm_before", "llm_after", "tool_before", "tool_after", "global")
 
@@ -23,15 +20,6 @@ _EVENT_PHASE = {
     EventType.TOOL_INVOKE: "tool_before",
     EventType.TOOL_RESULT: "tool_after",
 }
-
-_BUILTIN_CHECKERS = {
-    "llm_input": LLMInputChecker,
-    "llm_output": LLMOutputChecker,
-    "tool_invoke": ToolInvokeChecker,
-    "tool_result": ToolResultChecker,
-    "rule_based_check": RuleBasedChecker,
-}
-
 
 def default_checkers() -> list[BaseChecker]:
     return []
@@ -160,13 +148,13 @@ def _instantiate_checker(spec: Any) -> BaseChecker:
     if isinstance(spec, type) and issubclass(spec, BaseChecker):
         return spec()
     if isinstance(spec, str):
-        cls = _BUILTIN_CHECKERS.get(spec) or _load_checker_class(spec)
+        cls = get_checker_class(spec) or _load_checker_class(spec)
         return cls()
     if isinstance(spec, dict):
         target = spec.get("class") or spec.get("checker") or spec.get("name")
         kwargs = dict(spec.get("kwargs") or {})
         if isinstance(target, str):
-            cls = _BUILTIN_CHECKERS.get(target) or _load_checker_class(target)
+            cls = get_checker_class(target) or _load_checker_class(target)
         elif isinstance(target, type) and issubclass(target, BaseChecker):
             cls = target
         else:

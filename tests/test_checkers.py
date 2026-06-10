@@ -1,14 +1,22 @@
 from __future__ import annotations
 
 import json
+import urllib.error
 import urllib.request
+from pathlib import Path
 
 import pytest
 
 from agentguard import AgentGuard
-from agentguard.config_api import CHECKER_CONFIG_PATH
+from agentguard.config_api import (
+    CHECKER_CONFIG_PATH,
+    CHECKER_LIST_PATH,
+    CHECKER_UPDATE_PATH,
+    CLIENT_HEALTH_PATH,
+)
 from agentguard.checkers.base import BaseChecker, CheckResult
 from agentguard.checkers.manager import CheckerManager, load_checker_config
+from agentguard.checkers.registry import checker_descriptions, register
 from agentguard.schemas import events as ev
 from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.decisions import GuardDecision
@@ -27,6 +35,17 @@ def test_event_types_are_limited_to_runtime_phases():
         "tool_invoke",
         "tool_result",
     ]
+
+
+def test_agentguard_session_key_is_generated_or_configured():
+    generated = AgentGuard("generated-key")
+    configured = AgentGuard("configured-key", session_key="sk-test-session-key")
+
+    assert generated.session_key.startswith("sk-")
+    assert len(generated.session_key) > 20
+    assert generated.context.metadata["client_session_key"] == generated.session_key
+    assert configured.session_key == "sk-test-session-key"
+    assert configured.context.metadata["client_session_key"] == "sk-test-session-key"
 
 
 def test_tool_result_detects_secret_and_api_key():
@@ -86,6 +105,34 @@ def test_client_without_checker_config_loads_no_checkers():
 def test_client_rejects_legacy_checker_config_format():
     with pytest.raises(ValueError, match="phases"):
         load_checker_config({"llm_before": ["llm_input"]})
+
+
+def test_registered_checker_can_be_loaded_by_name():
+    @register(
+        name="test_registered_checker",
+        description="test checker registered by decorator",
+    )
+    class RegisteredChecker(BaseChecker):
+        event_types = [EventType.LLM_INPUT]
+
+        def check(self, event, context):
+            return CheckResult(risk_signals=["registered_checker_seen"])
+
+    mgr = CheckerManager(
+        config={
+            "phases": {
+                "llm_before": {"local": ["test_registered_checker"], "remote": []},
+            }
+        }
+    )
+    event = ev.llm_input(_ctx(), [{"role": "user", "content": "hello"}])
+
+    res = mgr.run(event, _ctx())
+
+    assert res.risk_signals == ["registered_checker_seen"]
+    assert checker_descriptions()["test_registered_checker"] == (
+        "test checker registered by decorator"
+    )
 
 
 def test_checker_config_file_controls_enabled_phases(tmp_path):
@@ -180,7 +227,10 @@ def test_checker_config_can_be_updated_over_local_http_api():
         req = urllib.request.Request(
             url,
             data=body,
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "X-AgentGuard-Session-Key": guard.session_key,
+            },
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=2) as resp:
@@ -195,6 +245,140 @@ def test_checker_config_can_be_updated_over_local_http_api():
         assert "prompt_injection" in event.risk_signals
     finally:
         guard.close()
+
+
+def test_local_http_api_lists_registered_checkers():
+    guard = AgentGuard("list-checkers-http")
+    try:
+        config_url = guard.start_config_api(port=0)
+        list_url = config_url.replace(CHECKER_CONFIG_PATH, CHECKER_LIST_PATH)
+        req = urllib.request.Request(
+            list_url,
+            headers={"X-AgentGuard-Session-Key": guard.session_key},
+            method="GET",
+        )
+
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+
+        checkers = {item["name"]: item for item in payload["checkers"]}
+        assert payload["status"] == "ok"
+        assert "llm_input" in checkers
+        assert "prompt-injection" in checkers["llm_input"]["description"]
+        assert checkers["llm_input"]["event_types"] == ["llm_input"]
+        assert "tool_result" in checkers
+        assert checkers["tool_result"]["event_types"] == ["tool_result"]
+    finally:
+        guard.close()
+
+
+def test_local_http_api_health_endpoint_reports_identity():
+    guard = AgentGuard("health-session", user_id="health-user", agent_id="health-agent")
+    try:
+        config_url = guard.start_config_api(port=0)
+        health_url = config_url.replace(CHECKER_CONFIG_PATH, CLIENT_HEALTH_PATH)
+        req = urllib.request.Request(
+            health_url,
+            headers={"X-AgentGuard-Session-Key": guard.session_key},
+            method="GET",
+        )
+
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+
+        assert payload["status"] == "ok"
+        assert payload["session_id"] == "health-session"
+        assert payload["agent_id"] == "health-agent"
+        assert payload["user_id"] == "health-user"
+        assert guard.context.metadata["client_health_url"] == health_url
+    finally:
+        guard.close()
+
+
+def test_local_http_api_rejects_missing_or_invalid_session_key():
+    guard = AgentGuard("client-api-key-check")
+    try:
+        config_url = guard.start_config_api(port=0)
+        list_url = config_url.replace(CHECKER_CONFIG_PATH, CHECKER_LIST_PATH)
+
+        with pytest.raises(urllib.error.HTTPError) as missing:
+            urllib.request.urlopen(list_url, timeout=2)
+        assert missing.value.code == 401
+
+        req = urllib.request.Request(
+            list_url,
+            headers={"X-AgentGuard-Session-Key": "sk-wrong-client-key"},
+            method="GET",
+        )
+        with pytest.raises(urllib.error.HTTPError) as invalid:
+            urllib.request.urlopen(req, timeout=2)
+        assert invalid.value.code == 403
+    finally:
+        guard.close()
+
+
+def test_local_http_api_updates_checker_code_and_registers_it():
+    guard = AgentGuard("client-checker-update")
+    dynamic_path: Path | None = None
+    try:
+        config_url = guard.start_config_api(port=0)
+        update_url = config_url.replace(CHECKER_CONFIG_PATH, CHECKER_UPDATE_PATH)
+        code = '''
+from agentguard.checkers.base import BaseChecker, CheckResult
+from agentguard.checkers.registry import register
+from agentguard.schemas.events import EventType
+
+
+@register(
+    name="uploaded_test_llm_input",
+    description="Uploaded test checker.",
+)
+class UploadedTestLLMInputChecker(BaseChecker):
+    event_types = [EventType.LLM_INPUT]
+
+    def check(self, event, context):
+        return CheckResult(risk_signals=["uploaded_checker_seen"])
+'''
+        body = json.dumps(
+            {
+                "event_type": "llm_input",
+                "filename": "uploaded_test_llm_input.py",
+                "code": code,
+            }
+        ).encode("utf-8")
+        req = urllib.request.Request(
+            update_url,
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-AgentGuard-Session-Key": guard.session_key,
+            },
+            method="POST",
+        )
+
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        dynamic_path = Path(payload["path"])
+
+        assert payload["status"] == "ok"
+        assert payload["event_type"] == "llm_input"
+        assert payload["phase"] == "llm_before"
+        assert "uploaded_test_llm_input" in payload["registered_checkers"]
+
+        guard.update_checker_config(
+            {
+                "phases": {
+                    "llm_before": {"local": ["uploaded_test_llm_input"], "remote": []},
+                }
+            }
+        )
+        event = ev.llm_input(guard.context, [{"role": "user", "content": "hello"}])
+        guard.runtime.guard(event)
+        assert "uploaded_checker_seen" in event.risk_signals
+    finally:
+        guard.close()
+        if dynamic_path and dynamic_path.exists():
+            dynamic_path.unlink()
 
 
 class _Breaker:

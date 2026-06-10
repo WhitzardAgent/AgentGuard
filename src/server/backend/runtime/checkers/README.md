@@ -1,7 +1,7 @@
 # Server Runtime Checkers
 
 `backend.runtime.checkers` is the server-side checker layer. It runs when the
-server receives a `/v1/guard/decide` request and inspects the request's
+server receives a `/v1/server/guard/decide` request and inspects the request's
 `current_event` before plugins and policy evaluation.
 
 Server checkers use the same event model as the client. The active runtime event
@@ -55,7 +55,7 @@ current tool_invoke tries to send externally."
 `trajectory_window` is built from both the request's normal `trajectory_window`
 and any `client_cached_entries` sent by the client. Those cached entries are
 local checker decisions from earlier events that skipped the server. The server
-also stores uploaded cached entries from `/v1/trace/upload` for audit.
+also stores uploaded cached entries from `/v1/server/trace/upload` for audit.
 
 ## Configured Phases
 
@@ -88,9 +88,11 @@ If multiple checkers are configured for the same phase, they run in order.
 
 ## Adding a New Checker
 
-Put the checker class in the matching phase folder and reference it by full
-import path in the checker config. With this mode, you do not need to modify
-`__init__.py` or `_BUILTIN_CHECKERS`.
+Put the checker class in the matching phase folder and decorate the class with
+`@register(name=..., description=...)`. The manager discovers checker modules
+under `backend.runtime.checkers`, runs the decorator, and then lets the config
+refer to the checker by `name`. With this mode, you do not need to modify
+`__init__.py` or a built-in checker map.
 
 The server rule matcher is also implemented as a checker at:
 
@@ -98,11 +100,10 @@ The server rule matcher is also implemented as a checker at:
 backend/runtime/checkers/tool_before/rule_based_check/checker.py
 ```
 
-It is available as `rule_based_check` or by full import path:
-`backend.runtime.checkers.tool_before.rule_based_check.RuleBasedChecker`.
-It is optional: include it in the checker config when you want server-side
-rule-based decisions. When enabled through `RuntimeManager`, it is bound to the
-same live policy store used by the console.
+It is registered as `rule_based_check`. It is optional: include that registered
+name in the checker config when you want server-side rule-based decisions. When
+enabled through `RuntimeManager`, it is bound to the same live policy store used
+by the console.
 
 Example file layout:
 
@@ -114,12 +115,16 @@ Example checker:
 
 ```python
 from backend.runtime.checkers.base import BaseChecker, CheckResult
+from backend.runtime.checkers.registry import register
 from shared.schemas.context import RuntimeContext
 from shared.schemas.events import EventType, RuntimeEvent
 
 
+@register(
+    name="my_server_checker",
+    description="Short description of what this server checker detects.",
+)
 class MyServerChecker(BaseChecker):
-    name = "my_server_checker"
     event_types = [EventType.TOOL_INVOKE]
 
     def check(
@@ -140,17 +145,15 @@ Config file:
       "local": [],
       "remote": [
         "tool_invoke",
-        "backend.runtime.checkers.tool_before.my_checker.MyServerChecker"
+        "my_server_checker"
       ]
     }
   }
 }
 ```
 
-The important part is the full path:
-`backend.runtime.checkers.tool_before.my_checker.MyServerChecker`. Because the
-config points directly to the module and class, the manager can import it
-without package re-export or built-in short-name registration.
+The important part is the registered name: `my_server_checker`. Checker configs
+should refer to registered names.
 
 ## Loading the Config
 
@@ -179,7 +182,7 @@ export AGENTGUARD_CHECKER_CONFIG=/path/to/server_checkers.json
 You can also update checker configuration at runtime through the backend API:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/v1/checkers/config \
+curl -X POST http://127.0.0.1:8000/v1/backend/checkers/config \
   -H 'Content-Type: application/json' \
   -d '{
     "config": {
@@ -198,8 +201,11 @@ curl -X POST http://127.0.0.1:8000/v1/checkers/config \
 
 The backend updates its own server checker manager first. If `client_config_urls`
 is provided, it forwards `{"config": ...}` to each client URL and returns the
-per-client result in `client_updates`. Use `client_config` when the client should
-receive a different config from the server:
+per-client result in `client_updates`. When forwarding to a client, the backend
+looks up the matching `client_key` in the session pool and sends it as
+`X-AgentGuard-Session-Key`. If the client is not registered in the session pool,
+or the key does not match, the client rejects the request. Use `client_config`
+when the client should receive a different config from the server:
 
 ```json
 {

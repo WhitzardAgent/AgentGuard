@@ -6,6 +6,7 @@ import pytest
 
 from backend.runtime.checkers.base import BaseChecker, CheckResult
 from backend.runtime.checkers.manager import load_checker_config
+from backend.runtime.checkers.registry import checker_descriptions, register
 from backend.runtime.checkers.tool_before.rule_based_check import RuleBasedChecker
 from backend.runtime.manager import RuntimeManager
 from shared.schemas.context import RuntimeContext
@@ -71,6 +72,50 @@ def test_manager_allows_benign_read():
     assert res["decision"]["decision_type"] in ("allow", "log_only")
 
 
+def test_manager_records_session_pool_metadata():
+    m = RuntimeManager(enable_agentdog=False)
+    m.decide(
+        {
+            "request_id": "session-pool",
+            "context": {
+                "session_id": "pool-session",
+                "agent_id": "agent-a",
+                "user_id": "user-a",
+                "task_id": "task-a",
+                "policy": "enterprise",
+                "policy_version": "v1",
+                "environment": "test",
+                "metadata": {
+                    "client_config_url": "http://client.local/v1/client/checkers/config",
+                    "client_checker_list_url": "http://client.local/v1/client/checkers/list",
+                    "custom": "value",
+                },
+            },
+            "current_event": {
+                "event_type": "tool_invoke",
+                "payload": {"tool_name": "read_file", "arguments": {}, "capabilities": []},
+                "risk_signals": [],
+                "metadata": {"principal": {"role": "tester"}},
+            },
+            "trajectory_window": [],
+            "local_signals": [],
+            "_transport": {"client_ip": "10.1.2.3"},
+        }
+    )
+
+    record = m.session_pool.get("pool-session")
+
+    assert record is not None
+    assert record["agent_id"] == "agent-a"
+    assert record["user_id"] == "user-a"
+    assert record["client_ip"] == "10.1.2.3"
+    assert record["client_config_url"] == "http://client.local/v1/client/checkers/config"
+    assert record["client_checker_list_url"] == "http://client.local/v1/client/checkers/list"
+    assert record["principal"] == {"role": "tester"}
+    assert record["metadata"]["custom"] == "value"
+    assert record["metadata"]["event_metadata"] == {"principal": {"role": "tester"}}
+
+
 def test_server_checker_config_loads_only_remote_scope():
     cfg = {
         "phases": {
@@ -92,6 +137,48 @@ def test_server_without_checker_config_loads_no_checkers():
 def test_server_rejects_legacy_checker_config_format():
     with pytest.raises(ValueError, match="phases"):
         load_checker_config({"tool_before": ["tool_invoke"]})
+
+
+def test_server_registered_checker_can_be_loaded_by_name():
+    @register(
+        name="test_server_registered_checker",
+        description="test server checker registered by decorator",
+    )
+    class RegisteredServerChecker(BaseChecker):
+        event_types = [EventType.TOOL_INVOKE]
+
+        def check(self, event, context, trajectory_window=None):
+            return CheckResult(risk_signals=["server_registered_checker_seen"])
+
+    m = RuntimeManager(
+        enable_agentdog=False,
+        checker_config={
+            "phases": {
+                "tool_before": {
+                    "local": [],
+                    "remote": ["test_server_registered_checker"],
+                }
+            }
+        },
+    )
+    req = {
+        "request_id": "registered-server-checker",
+        "context": {"session_id": "registered-server-checker"},
+        "current_event": {
+            "event_type": "tool_invoke",
+            "payload": {"tool_name": "read_file", "arguments": {}, "capabilities": []},
+            "risk_signals": [],
+        },
+        "trajectory_window": [],
+        "local_signals": [],
+    }
+
+    res = m.decide(req)
+
+    assert "server_registered_checker_seen" in res["checker_result"]["risk_signals"]
+    assert checker_descriptions()["test_server_registered_checker"] == (
+        "test server checker registered by decorator"
+    )
 
 
 def test_manager_returns_checker_result():

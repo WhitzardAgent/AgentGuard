@@ -25,6 +25,7 @@ class BaseChecker:
     """Local, non-networked risk checker for one or more event types."""
 
     name: str = "base"
+    description: str = ""
     event_types: list[EventType] = []
 
     def applies(self, event: RuntimeEvent) -> bool:

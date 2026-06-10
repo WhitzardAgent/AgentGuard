@@ -8,7 +8,7 @@ from typing import Any
 
 @dataclass
 class RemoteGuardRequest:
-    """POST /v1/guard/decide request body."""
+    """POST /v1/server/guard/decide request body."""
 
     current_event: dict[str, Any]
     context: dict[str, Any]
@@ -44,7 +44,7 @@ class RemoteGuardRequest:
 
 @dataclass
 class RemoteGuardResponse:
-    """POST /v1/guard/decide response body."""
+    """POST /v1/server/guard/decide response body."""
 
     decision: dict[str, Any]
     risk_signals: list[str] = field(default_factory=list)

@@ -1,6 +1,10 @@
 """Server RuntimeManager: orchestrate a remote guard decision."""
 from __future__ import annotations
 
+import urllib.error
+import urllib.parse
+import urllib.request
+import threading
 from typing import Any, Callable
 
 from shared.schemas.context import RuntimeContext
@@ -13,7 +17,9 @@ from backend.runtime.checkers.base import CheckResult
 from backend.runtime.checkers import server_checker_manager
 from backend.runtime.degrade.planner import DegradePlanner
 from backend.runtime.policy.engine import PolicyEngine
-from backend.runtime.storage import TraceStore
+from backend.runtime.storage import SessionPool, TraceStore
+from shared.utils.json import safe_loads
+from shared.utils.time import now_ts
 
 
 class RuntimeManager:
@@ -27,6 +33,9 @@ class RuntimeManager:
         audit: AuditLogger | None = None,
         enable_agentdog: bool = True,
         checker_config: str | dict[str, Any] | None = None,
+        session_health_interval_s: float = 1800.0,
+        session_health_max_age_s: float = 0.0,
+        enable_session_health_monitor: bool = True,
     ) -> None:
         self.policy = policy or PolicyEngine()
         self.plugins = plugins or load_builtin_plugins(
@@ -38,6 +47,13 @@ class RuntimeManager:
         self.degrade = DegradePlanner()
         self.audit = audit or AuditLogger()
         self.trace_store = TraceStore()
+        self.session_pool = SessionPool()
+        self._session_health_interval_s = session_health_interval_s
+        self._session_health_max_age_s = session_health_max_age_s
+        self._session_health_stop = threading.Event()
+        self._session_health_thread: threading.Thread | None = None
+        if enable_session_health_monitor:
+            self.start_session_health_monitor()
         # Observers receive (event, decision, request, plugin_results) after each
         # decision; used by the console for traffic/telemetry/approval tracking.
         self.observers: list[Callable[[RuntimeEvent, GuardDecision, dict, dict], None]] = []
@@ -58,10 +74,104 @@ class RuntimeManager:
         self._bind_rule_based_checkers()
         return [checker.name for checker in getattr(self.checkers, "checkers", [])]
 
+    def start_session_health_monitor(self) -> None:
+        """Start the background session health monitor if it is not running."""
+        if self._session_health_thread and self._session_health_thread.is_alive():
+            return
+        self._session_health_stop.clear()
+        self._session_health_thread = threading.Thread(
+            target=self._session_health_loop,
+            name="agentguard-session-health",
+            daemon=True,
+        )
+        self._session_health_thread.start()
+
+    def stop_session_health_monitor(self) -> None:
+        """Stop the background session health monitor."""
+        self._session_health_stop.set()
+        if self._session_health_thread and self._session_health_thread.is_alive():
+            self._session_health_thread.join(timeout=1.0)
+
+    def _session_health_loop(self) -> None:
+        while not self._session_health_stop.wait(self._session_health_interval_s):
+            try:
+                self.refresh_stale_sessions(max_age_s=self._session_health_max_age_s)
+            except Exception:
+                pass
+
+    def refresh_stale_sessions(
+        self,
+        *,
+        max_age_s: float = 3600.0,
+        timeout_s: float = 2.0,
+    ) -> list[dict[str, Any]]:
+        """Ping client health endpoints and refresh last_seen for live clients.
+
+        ``max_age_s`` controls which sessions are checked. The background
+        monitor uses ``0`` so every known session is checked every interval;
+        manual callers may pass a larger value to check only stale sessions.
+        """
+        now = now_ts()
+        results: list[dict[str, Any]] = []
+        for session in self.session_pool.list():
+            last_seen = float(session.get("last_seen") or 0)
+            if now - last_seen < max_age_s:
+                continue
+            health_url = _client_health_url(session)
+            if not health_url:
+                results.append(
+                    {
+                        "session_id": session.get("session_id"),
+                        "status": "skipped",
+                        "reason": "no client health url",
+                    }
+                )
+                continue
+            alive, payload_or_error = _check_client_health(
+                health_url,
+                timeout_s,
+                client_key=session.get("client_key"),
+            )
+            if alive:
+                refreshed = self.session_pool.touch(
+                    session.get("session_id"),
+                    metadata={
+                        "last_health_check_status": "ok",
+                        "last_health_check_url": health_url,
+                        "last_health_check_response": payload_or_error,
+                    },
+                )
+                results.append(
+                    {
+                        "session_id": session.get("session_id"),
+                        "status": "alive",
+                        "health_url": health_url,
+                        "last_seen": refreshed.get("last_seen") if refreshed else None,
+                    }
+                )
+            else:
+                results.append(
+                    {
+                        "session_id": session.get("session_id"),
+                        "status": "unreachable",
+                        "health_url": health_url,
+                        "error": payload_or_error,
+                    }
+                )
+        return results
+
     def decide(self, request: dict[str, Any]) -> dict[str, Any]:
         ctx_dict = request.get("context") or {}
         context = RuntimeContext.from_dict(ctx_dict)
-        event = RuntimeEvent.from_dict(request.get("current_event") or {})
+        event_dict = request.get("current_event") or {}
+        self.session_pool.upsert(
+            context,
+            client_ip=(request.get("_transport") or {}).get("client_ip"),
+            client_key=(request.get("_transport") or {}).get("client_key"),
+            enforce_key=bool((request.get("_transport") or {}).get("enforce_session_key")),
+            event_dict=event_dict,
+        )
+        event = RuntimeEvent.from_dict(event_dict)
         # Bind the request-level context to the event so audit/observers see the
         # correct session/agent identity (current_event rarely embeds context).
         if ctx_dict:
@@ -136,6 +246,13 @@ class RuntimeManager:
 
     def record_uploaded_trace(self, trace: dict[str, Any]) -> int:
         session_id = trace.get("session_id") or "unknown"
+        self.session_pool.touch(
+            session_id,
+            client_ip=(trace.get("_transport") or {}).get("client_ip"),
+            client_key=(trace.get("_transport") or {}).get("client_key"),
+            enforce_key=bool((trace.get("_transport") or {}).get("enforce_session_key")),
+            metadata={"last_trace_upload_reason": trace.get("reason")},
+        )
         count = 0
         for entry in trace.get("entries") or []:
             if not isinstance(entry, dict):
@@ -202,6 +319,36 @@ def _decision_from_checker_result(check: CheckResult) -> GuardDecision:
         risk_signals=list(check.risk_signals),
         metadata={"explanation": "no final checker decision"},
     )
+
+
+def _client_health_url(session: dict[str, Any]) -> str | None:
+    if session.get("client_health_url"):
+        return str(session["client_health_url"])
+    config_url = session.get("client_config_url")
+    if not config_url:
+        return None
+    parsed = urllib.parse.urlparse(str(config_url))
+    if not parsed.scheme or not parsed.netloc:
+        return None
+    return urllib.parse.urlunparse((parsed.scheme, parsed.netloc, "/v1/client/health", "", "", ""))
+
+
+def _check_client_health(
+    url: str,
+    timeout_s: float,
+    *,
+    client_key: str | None = None,
+) -> tuple[bool, Any]:
+    headers = {"Accept": "application/json"}
+    if client_key:
+        headers["X-AgentGuard-Session-Key"] = client_key
+    request = urllib.request.Request(url, headers=headers, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=max(timeout_s, 0.1)) as response:
+            payload = safe_loads(response.read(), fallback={}) or {}
+        return payload.get("status") == "ok", payload
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        return False, str(exc)
 
 
 def _events_from_cached_entries(entries: list[dict[str, Any]]) -> list[RuntimeEvent]:

@@ -50,19 +50,25 @@ class RemoteGuardClient:
         server_url: str | None,
         *,
         api_key: str | None = None,
+        session_id: str | None = None,
+        session_key: str | None = None,
         timeout_s: float = 5.0,
         retries: int = 2,
-        decide_path: str = "/v1/guard/decide",
-        snapshot_path: str = "/v1/policy/snapshot",
-        trace_path: str = "/v1/trace/upload",
+        decide_path: str = "/v1/server/guard/decide",
+        snapshot_path: str = "/v1/server/policy/snapshot",
+        trace_path: str = "/v1/server/trace/upload",
+        unregister_path: str = "/v1/server/session/unregister",
     ) -> None:
         self.server_url = (server_url or "").rstrip("/")
         self.api_key = api_key
+        self.session_id = session_id
+        self.session_key = session_key
         self.timeout_s = timeout_s
         self.retries = retries
         self.decide_path = decide_path
         self.snapshot_path = snapshot_path
         self.trace_path = trace_path
+        self.unregister_path = unregister_path
         self.breaker = CircuitBreaker()
 
     @property
@@ -118,6 +124,11 @@ class RemoteGuardClient:
             raise RemoteGuardError("no server_url configured")
         return self._post(self.trace_path, trace)
 
+    def unregister_session(self) -> dict[str, Any]:
+        if not self.enabled:
+            raise RemoteGuardError("no server_url configured")
+        return self._post(self.unregister_path, {})
+
     def upload_trace_async(
         self,
         trace: dict[str, Any],
@@ -146,6 +157,10 @@ class RemoteGuardClient:
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
+        if self.session_id:
+            headers["X-AgentGuard-Session-Id"] = self.session_id
+        if self.session_key:
+            headers["X-AgentGuard-Session-Key"] = self.session_key
         return headers
 
     def _request(self, method: str, path: str, body: dict | None) -> dict[str, Any]:

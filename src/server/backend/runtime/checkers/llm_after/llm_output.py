@@ -5,10 +5,14 @@ from shared.schemas.context import RuntimeContext
 from shared.schemas.events import EventType, RuntimeEvent
 from backend.runtime.checkers.base import BaseChecker, CheckResult
 from backend.runtime.checkers.common.patterns import find_signals, text_of
+from backend.runtime.checkers.registry import register
 
 
+@register(
+    name="llm_output",
+    description="Detect risky content, secrets, and injection patterns in LLM output.",
+)
 class LLMOutputChecker(BaseChecker):
-    name = "llm_output"
     event_types = [EventType.LLM_OUTPUT]
 
     def check(

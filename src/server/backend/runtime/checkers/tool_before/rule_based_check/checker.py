@@ -8,6 +8,7 @@ from shared.schemas.context import RuntimeContext
 from shared.schemas.decisions import GuardDecision
 from shared.schemas.events import RuntimeEvent
 from backend.runtime.checkers.base import BaseChecker, CheckResult
+from backend.runtime.checkers.registry import register
 from backend.runtime.checkers.tool_before.rule_based_check.matcher import (
     RuleMatch,
     effect_to_decision,
@@ -15,10 +16,13 @@ from backend.runtime.checkers.tool_before.rule_based_check.matcher import (
 )
 
 
+@register(
+    name="rule_based_check",
+    description="Evaluate server policy rules against the current event and trajectory window.",
+)
 class RuleBasedChecker(BaseChecker):
     """Evaluate PolicyRule objects and return the winning rule decision."""
 
-    name = "rule_based_check"
     event_types = []
 
     def __init__(

@@ -4,10 +4,14 @@ from __future__ import annotations
 from shared.schemas.context import RuntimeContext
 from shared.schemas.events import RuntimeEvent
 from backend.runtime.checkers.base import BaseChecker, CheckResult
+from backend.runtime.checkers.registry import register
 
 
+@register(
+    name="llm_thought",
+    description="Deprecated no-op checker for removed LLM thought events.",
+)
 class LLMThoughtChecker(BaseChecker):
-    name = "llm_thought"
     event_types = []
 
     def applies(self, event: RuntimeEvent) -> bool:

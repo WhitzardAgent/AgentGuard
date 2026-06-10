@@ -34,23 +34,61 @@ class _Handler(BaseHTTPRequestHandler):
         return safe_loads(raw, fallback={}) or {}
 
     def do_GET(self) -> None:  # noqa: N802
-        if self.path == "/health":
+        if self.path == "/v1/backend/health":
             self._send(200, {"status": "ok", "service": "agentguard-dev"})
-        elif self.path == "/v1/policy/snapshot":
+        elif self.path == "/v1/server/policy/snapshot":
+            if not self._validate_client_session():
+                return
             self._send(200, snapshot_dict(self.manager.policy.store))
+        elif self.path == "/v1/backend/sessions":
+            self._send(200, {"sessions": self.manager.session_pool.list()})
+        elif self.path.startswith("/v1/backend/sessions/"):
+            session_id = self.path.rsplit("/", 1)[-1]
+            record = self.manager.session_pool.get(session_id)
+            if record is None:
+                self._send(404, {"error": f"session not found: {session_id}"})
+            else:
+                self._send(200, record)
         else:
             self._send(404, {"error": "not found"})
 
     def do_POST(self) -> None:  # noqa: N802
         body = self._read_body()
-        if self.path == "/v1/guard/decide":
-            self._send(200, self.manager.decide(body))
-        elif self.path == "/v1/skills/run":
+        if self.path == "/v1/server/guard/decide":
+            body["_transport"] = self._transport_metadata(enforce_session_key=True)
+            try:
+                self._send(200, self.manager.decide(body))
+            except PermissionError as exc:
+                self._send_session_key_error(exc)
+        elif self.path == "/v1/server/skills/run":
+            if not self._validate_client_session():
+                return
             self._send(200, self.skills.run(body))
-        elif self.path == "/v1/trace/upload":
-            count = self.manager.record_uploaded_trace(body)
-            self._send(200, {"status": "received", "entries": count})
-        elif self.path == "/v1/checkers/config":
+        elif self.path == "/v1/server/trace/upload":
+            body["_transport"] = self._transport_metadata(enforce_session_key=True)
+            try:
+                count = self.manager.record_uploaded_trace(body)
+            except PermissionError as exc:
+                self._send_session_key_error(exc)
+                return
+            else:
+                self._send(200, {"status": "received", "entries": count})
+        elif self.path == "/v1/server/session/unregister":
+            session_id = self.headers.get("X-AgentGuard-Session-Id")
+            if not session_id:
+                self._send_session_key_error(PermissionError("missing client session id"))
+                return
+            try:
+                removed = self.manager.session_pool.remove(
+                    session_id,
+                    client_key=self.headers.get("X-AgentGuard-Session-Key"),
+                    enforce_key=True,
+                )
+            except PermissionError as exc:
+                self._send_session_key_error(exc)
+                return
+            self._send(200, {"status": "ok", "session_id": session_id, "removed": removed})
+        elif self.path == "/v1/backend/checkers/config":
             try:
                 loaded = self.manager.update_checker_config(body.get("config"))
             except Exception as exc:
@@ -59,7 +97,12 @@ class _Handler(BaseHTTPRequestHandler):
             client_config = body.get("client_config") or body.get("config")
             timeout_s = float(body.get("timeout_s", 2.0) or 2.0)
             client_updates = [
-                _push_client_checker_config(url, client_config, timeout_s)
+                _push_client_checker_config(
+                    url,
+                    client_config,
+                    timeout_s,
+                    client_key=_client_key_for_url(self.manager, url),
+                )
                 for url in body.get("client_config_urls") or []
             ]
             self._send(
@@ -70,8 +113,38 @@ class _Handler(BaseHTTPRequestHandler):
                     "client_updates": client_updates,
                 },
             )
+        elif self.path == "/v1/backend/sessions/refresh-stale":
+            self._send(200, {"results": self.manager.refresh_stale_sessions()})
         else:
             self._send(404, {"error": "not found"})
+
+    def _transport_metadata(self, *, enforce_session_key: bool) -> dict[str, Any]:
+        return {
+            "client_ip": self.client_address[0],
+            "client_key": self.headers.get("X-AgentGuard-Session-Key"),
+            "enforce_session_key": enforce_session_key,
+        }
+
+    def _validate_client_session(self) -> bool:
+        session_id = self.headers.get("X-AgentGuard-Session-Id")
+        if not session_id:
+            self._send_session_key_error(PermissionError("missing client session id"))
+            return False
+        try:
+            self.manager.session_pool.touch(
+                session_id,
+                client_ip=self.client_address[0],
+                client_key=self.headers.get("X-AgentGuard-Session-Key"),
+                enforce_key=True,
+            )
+        except PermissionError as exc:
+            self._send_session_key_error(exc)
+            return False
+        return True
+
+    def _send_session_key_error(self, exc: PermissionError) -> None:
+        message = str(exc)
+        self._send(401 if "missing" in message else 403, {"error": message})
 
 
 def start_dev_server(
@@ -97,12 +170,17 @@ def _push_client_checker_config(
     url: str,
     config: dict[str, Any],
     timeout_s: float,
+    *,
+    client_key: str | None = None,
 ) -> dict[str, Any]:
     body = safe_dumps({"config": config}).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    if client_key:
+        headers["X-AgentGuard-Session-Key"] = client_key
     request = urllib.request.Request(
         url,
         data=body,
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
     try:
@@ -123,3 +201,16 @@ def _push_client_checker_config(
         }
     except Exception as exc:
         return {"url": url, "status": "error", "error": str(exc)}
+
+
+def _client_key_for_url(manager: RuntimeManager, url: str) -> str | None:
+    for session in manager.session_pool.list():
+        known_urls = {
+            session.get("client_config_url"),
+            session.get("client_checker_list_url"),
+            session.get("client_health_url"),
+        }
+        if url in known_urls:
+            key = session.get("client_key")
+            return str(key) if key else None
+    return None

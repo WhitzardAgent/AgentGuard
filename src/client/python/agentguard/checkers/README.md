@@ -242,13 +242,17 @@ break the main runtime flow.
 
 ```python
 from agentguard.checkers.base import BaseChecker, CheckResult
+from agentguard.checkers.registry import register
 from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.decisions import GuardDecision
 from agentguard.schemas.events import EventType, RuntimeEvent
 
 
+@register(
+    name="block_private_tool",
+    description="Block calls to private/internal tools.",
+)
 class BlockPrivateToolChecker(BaseChecker):
-    name = "block_private_tool"
     event_types = [EventType.TOOL_INVOKE]
 
     def check(self, event: RuntimeEvent, context: RuntimeContext) -> CheckResult:
@@ -274,7 +278,7 @@ Configuration example:
     "tool_before": {
       "local": [
         "tool_invoke",
-        "my_package.checkers.BlockPrivateToolChecker"
+        "block_private_tool"
       ],
       "remote": []
     }
@@ -314,13 +318,40 @@ url = guard.start_config_api()
 # default: http://127.0.0.1:38181/v1/client/checkers/config
 ```
 
+List locally registered checkers:
+
+```bash
+curl http://127.0.0.1:38181/v1/client/checkers/list \
+  -H 'X-AgentGuard-Session-Key: sk-...'
+```
+
+Response:
+
+```json
+{
+  "status": "ok",
+  "checkers": [
+    {
+      "name": "llm_input",
+      "description": "Detect prompt-injection and system-prompt leak attempts in LLM input.",
+      "event_types": ["llm_input"]
+    }
+  ]
+}
+```
+
 Request:
 
 ```bash
 curl -X POST http://127.0.0.1:38181/v1/client/checkers/config \
   -H 'Content-Type: application/json' \
+  -H 'X-AgentGuard-Session-Key: sk-...' \
   -d '{"config":{"phases":{"llm_before":{"local":["llm_input"],"remote":[]},"llm_after":{"local":[],"remote":[]},"tool_before":{"local":["tool_invoke"],"remote":[]},"tool_after":{"local":["tool_result"],"remote":[]}}}}'
 ```
+
+All client-local API endpoints require `X-AgentGuard-Session-Key`. The value is
+the `session_key` on the `AgentGuard` instance; if none is provided explicitly,
+the client generates a `sk-...` key automatically.
 
 You can also pass a config file path:
 
@@ -328,11 +359,41 @@ You can also pass a config file path:
 {"path": "/path/to/checkers.json"}
 ```
 
+You can also upload new checker code through the local API:
+
+```bash
+curl -X POST http://127.0.0.1:38181/v1/client/checkers/update \
+  -H 'Content-Type: application/json' \
+  -H 'X-AgentGuard-Session-Key: sk-...' \
+  -d '{
+    "event_type": "llm_input",
+    "filename": "my_llm_input_checker.py",
+    "code": "from agentguard.checkers.base import BaseChecker, CheckResult\nfrom agentguard.checkers.registry import register\nfrom agentguard.schemas.events import EventType\n\n@register(name=\"my_llm_input\", description=\"My checker.\")\nclass MyLLMInputChecker(BaseChecker):\n    event_types = [EventType.LLM_INPUT]\n    def check(self, event, context):\n        return CheckResult(risk_signals=[\"my_signal\"])\n"
+  }'
+```
+
+`event_type` determines where the code is written:
+
+- `llm_input` -> `checkers/llm_before/`
+- `llm_output` -> `checkers/llm_after/`
+- `tool_invoke` -> `checkers/tool_before/`
+- `tool_result` -> `checkers/tool_after/`
+
+After writing the file, the client imports/reloads that module immediately so
+`@register(...)` updates the runtime registry. The newly registered `name` can
+then be used directly in checker config.
+
 ## Adding a New Checker
 
-To add a checker, put the checker class in the matching phase folder and refer to
-it by full import path in the checker config. With this mode, you do not need to
-modify `__init__.py` or `_BUILTIN_CHECKERS`.
+To add a checker, put the checker class in the matching phase folder and decorate
+the class with `@register(name=..., description=...)`. The manager discovers checker
+modules under `agentguard.checkers`, runs the decorator, and then lets the config
+refer to the checker by `name`. With this mode, you do not need to modify
+`__init__.py` or a built-in checker map.
+
+Each custom checker must also define `event_types`. This tells the manager which
+runtime event kinds the checker applies to. Use `EventType.LLM_INPUT`,
+`EventType.LLM_OUTPUT`, `EventType.TOOL_INVOKE`, or `EventType.TOOL_RESULT`.
 
 Example file layout:
 
@@ -344,12 +405,16 @@ Example checker:
 
 ```python
 from agentguard.checkers.base import BaseChecker, CheckResult
+from agentguard.checkers.registry import register
 from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.events import EventType, RuntimeEvent
 
 
+@register(
+    name="my_checker",
+    description="Short description of what this checker detects.",
+)
 class MyChecker(BaseChecker):
-    name = "my_checker"
     event_types = [EventType.LLM_INPUT]
 
     def check(self, event: RuntimeEvent, context: RuntimeContext) -> CheckResult:
@@ -363,7 +428,7 @@ Config:
   "phases": {
     "llm_before": {
       "local": [
-        "agentguard.checkers.llm_before.my_checker.MyChecker"
+        "my_checker"
       ],
       "remote": []
     }
@@ -380,7 +445,5 @@ guard = AgentGuard(
 )
 ```
 
-The important part is the full path:
-`agentguard.checkers.llm_before.my_checker.MyChecker`. Because the config points
-directly to the module and class, the manager can import it without any package
-re-export or built-in short-name registration.
+The important part is the registered name: `my_checker`. Checker configs should
+refer to registered names.

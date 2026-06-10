@@ -3,12 +3,16 @@ from __future__ import annotations
 
 from agentguard.checkers.base import BaseChecker, CheckResult
 from agentguard.checkers.common.patterns import find_signals, text_of
+from agentguard.checkers.registry import register
 from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.events import EventType, RuntimeEvent
 
 
+@register(
+    name="tool_result",
+    description="Detect secrets and prompt-injection content in tool results.",
+)
 class ToolResultChecker(BaseChecker):
-    name = "tool_result"
     event_types = [EventType.TOOL_RESULT]
 
     def check(self, event: RuntimeEvent, context: RuntimeContext) -> CheckResult:

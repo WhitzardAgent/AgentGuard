@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from agentguard.checkers.base import BaseChecker, CheckResult
 from agentguard.checkers.common.patterns import SHELL_RE, find_signals, text_of
+from agentguard.checkers.registry import register
 from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.decisions import GuardDecision
 from agentguard.schemas.events import EventType, RuntimeEvent
@@ -14,8 +15,11 @@ from agentguard.tools.capability import (
 _DANGEROUS_SHELL = ("rm -rf /", "mkfs", ":(){", "dd if=")
 
 
+@register(
+    name="tool_invoke",
+    description="Detect risky tool invocation arguments and dangerous capabilities.",
+)
 class ToolInvokeChecker(BaseChecker):
-    name = "tool_invoke"
     event_types = [EventType.TOOL_INVOKE]
 
     def check(self, event: RuntimeEvent, context: RuntimeContext) -> CheckResult:

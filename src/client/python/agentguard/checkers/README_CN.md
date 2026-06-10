@@ -225,13 +225,17 @@ TOOL_RESULT -> tool_after
 
 ```python
 from agentguard.checkers.base import BaseChecker, CheckResult
+from agentguard.checkers.registry import register
 from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.decisions import GuardDecision
 from agentguard.schemas.events import EventType, RuntimeEvent
 
 
+@register(
+    name="block_private_tool",
+    description="Block calls to private/internal tools.",
+)
 class BlockPrivateToolChecker(BaseChecker):
-    name = "block_private_tool"
     event_types = [EventType.TOOL_INVOKE]
 
     def check(self, event: RuntimeEvent, context: RuntimeContext) -> CheckResult:
@@ -257,7 +261,7 @@ class BlockPrivateToolChecker(BaseChecker):
     "tool_before": {
       "local": [
         "tool_invoke",
-        "my_package.checkers.BlockPrivateToolChecker"
+        "block_private_tool"
       ],
       "remote": []
     }
@@ -296,13 +300,39 @@ url = guard.start_config_api()
 # 默认: http://127.0.0.1:38181/v1/client/checkers/config
 ```
 
+列出本地已经注册的 checker：
+
+```bash
+curl http://127.0.0.1:38181/v1/client/checkers/list \
+  -H 'X-AgentGuard-Session-Key: sk-...'
+```
+
+返回：
+
+```json
+{
+  "status": "ok",
+  "checkers": [
+    {
+      "name": "llm_input",
+      "description": "Detect prompt-injection and system-prompt leak attempts in LLM input.",
+      "event_types": ["llm_input"]
+    }
+  ]
+}
+```
+
 请求示例：
 
 ```bash
 curl -X POST http://127.0.0.1:38181/v1/client/checkers/config \
   -H 'Content-Type: application/json' \
+  -H 'X-AgentGuard-Session-Key: sk-...' \
   -d '{"config":{"phases":{"llm_before":{"local":["llm_input"],"remote":[]},"llm_after":{"local":[],"remote":[]},"tool_before":{"local":["tool_invoke"],"remote":[]},"tool_after":{"local":["tool_result"],"remote":[]}}}}'
 ```
+
+client 本地 API 都需要 `X-AgentGuard-Session-Key`。这个值是 `AgentGuard`
+初始化时的 `session_key`；如果没有显式传入，client 会自动生成一个 `sk-...`。
 
 也可以传配置文件路径：
 
@@ -310,11 +340,39 @@ curl -X POST http://127.0.0.1:38181/v1/client/checkers/config \
 {"path": "/path/to/checkers.json"}
 ```
 
+也可以通过本地 API 上传新的 checker 代码：
+
+```bash
+curl -X POST http://127.0.0.1:38181/v1/client/checkers/update \
+  -H 'Content-Type: application/json' \
+  -H 'X-AgentGuard-Session-Key: sk-...' \
+  -d '{
+    "event_type": "llm_input",
+    "filename": "my_llm_input_checker.py",
+    "code": "from agentguard.checkers.base import BaseChecker, CheckResult\nfrom agentguard.checkers.registry import register\nfrom agentguard.schemas.events import EventType\n\n@register(name=\"my_llm_input\", description=\"My checker.\")\nclass MyLLMInputChecker(BaseChecker):\n    event_types = [EventType.LLM_INPUT]\n    def check(self, event, context):\n        return CheckResult(risk_signals=[\"my_signal\"])\n"
+  }'
+```
+
+`event_type` 决定代码写入的位置：
+
+- `llm_input` -> `checkers/llm_before/`
+- `llm_output` -> `checkers/llm_after/`
+- `tool_invoke` -> `checkers/tool_before/`
+- `tool_result` -> `checkers/tool_after/`
+
+写入后 client 会立即 import/reload 该模块，让 `@register(...)` 完成动态注册。
+之后可以在 checker config 中直接使用新注册的 `name`。
+
 ## 新增 checker 时如何配置
 
-新增 checker 时，把 checker 类放到对应阶段文件夹里，然后在配置文件中使用完整
-import path 引用它即可。使用这种方式，不需要修改 `__init__.py`，也不需要修改
-`manager.py` 里的 `_BUILTIN_CHECKERS`。
+新增 checker 时，把 checker 类放到对应阶段文件夹里，然后在 class 上添加
+`@register(name=..., description=...)`。manager 会自动 discovery `agentguard.checkers`
+下面的 checker 模块，让装饰器完成注册；配置文件里直接写注册的 `name` 即可。
+使用这种方式，不需要修改 `__init__.py`，也不需要维护内置 checker map。
+
+每个自定义 checker 还必须定义 `event_types`。它告诉 manager 这个 checker 适用于哪些
+runtime event。可用值包括 `EventType.LLM_INPUT`、`EventType.LLM_OUTPUT`、
+`EventType.TOOL_INVOKE` 和 `EventType.TOOL_RESULT`。
 
 示例文件位置：
 
@@ -326,12 +384,16 @@ agentguard/checkers/llm_before/my_checker.py
 
 ```python
 from agentguard.checkers.base import BaseChecker, CheckResult
+from agentguard.checkers.registry import register
 from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.events import EventType, RuntimeEvent
 
 
+@register(
+    name="my_checker",
+    description="Short description of what this checker detects.",
+)
 class MyChecker(BaseChecker):
-    name = "my_checker"
     event_types = [EventType.LLM_INPUT]
 
     def check(self, event: RuntimeEvent, context: RuntimeContext) -> CheckResult:
@@ -345,7 +407,7 @@ class MyChecker(BaseChecker):
   "phases": {
     "llm_before": {
       "local": [
-        "agentguard.checkers.llm_before.my_checker.MyChecker"
+        "my_checker"
       ],
       "remote": []
     }
@@ -362,6 +424,4 @@ guard = AgentGuard(
 )
 ```
 
-关键是配置里写完整路径：
-`agentguard.checkers.llm_before.my_checker.MyChecker`。因为这个路径已经精确到模块和类，
-manager 可以直接 import，不需要通过 `__init__.py` 转发，也不需要注册内置短名称。
+关键是配置里写注册名：`my_checker`。checker 配置应该引用注册名。
