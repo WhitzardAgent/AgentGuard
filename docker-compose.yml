@@ -11,6 +11,7 @@ services:
     environment:
       AGENTGUARD_HOST: 0.0.0.0
       AGENTGUARD_PORT: 38080
+      AGENTGUARD_API_KEY: "${AGENTGUARD_API_KEY:-sk-agentguard-backend-X9m42Vq7Tz8nL3pA6cR0yH5uJ1sWfKdE}"
       # Optional: point at a served AgentDoG / LLM endpoint to use the real models.
       AGENTDOG_API_BASE: "${AGENTDOG_API_BASE:-}"
       AGENTDOG_MODEL: "${AGENTDOG_MODEL:-agentdog}"
@@ -19,7 +20,7 @@ services:
       AGENTGUARD_LLM_MODEL: "${AGENTGUARD_LLM_MODEL:-}"
       AGENTGUARD_LLM_API_KEY: "${AGENTGUARD_LLM_API_KEY:-}"
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:38080/health"]
+      test: ["CMD-SHELL", "curl -fsS -H \"X-Api-Key: $$AGENTGUARD_API_KEY\" http://127.0.0.1:38080/v1/backend/health"]
       interval: 5s
       timeout: 3s
       retries: 12
@@ -37,6 +38,7 @@ services:
       FRONTEND_HOST: 0.0.0.0
       FRONTEND_PORT: 38008
       AGENTGUARD_API_BASE: http://server:38080
+      AGENTGUARD_API_KEY: "${AGENTGUARD_API_KEY:-sk-agentguard-backend-X9m42Vq7Tz8nL3pA6cR0yH5uJ1sWfKdE}"
     depends_on:
       server:
         condition: service_healthy

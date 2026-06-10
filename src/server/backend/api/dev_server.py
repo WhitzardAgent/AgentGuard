@@ -7,6 +7,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+from backend.api.auth import check_backend_api_key
 from shared.utils.json import safe_dumps, safe_loads
 from backend.runtime.manager import RuntimeManager
 from backend.runtime.policy.snapshot_builder import snapshot_dict
@@ -34,6 +35,8 @@ class _Handler(BaseHTTPRequestHandler):
         return safe_loads(raw, fallback={}) or {}
 
     def do_GET(self) -> None:  # noqa: N802
+        if not self._authorize_backend_api():
+            return
         if self.path == "/v1/backend/health":
             self._send(200, {"status": "ok", "service": "agentguard-dev"})
         elif self.path == "/v1/server/policy/snapshot":
@@ -53,6 +56,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(404, {"error": "not found"})
 
     def do_POST(self) -> None:  # noqa: N802
+        if not self._authorize_backend_api():
+            return
         body = self._read_body()
         if self.path == "/v1/server/guard/decide":
             body["_transport"] = self._transport_metadata(enforce_session_key=True)
@@ -124,6 +129,13 @@ class _Handler(BaseHTTPRequestHandler):
             "client_key": self.headers.get("X-AgentGuard-Session-Key"),
             "enforce_session_key": enforce_session_key,
         }
+
+    def _authorize_backend_api(self) -> bool:
+        check = check_backend_api_key(self.path, self.headers.get("X-Api-Key"))
+        if check.ok:
+            return True
+        self._send(check.status_code, {"error": check.error})
+        return False
 
     def _validate_client_session(self) -> bool:
         session_id = self.headers.get("X-AgentGuard-Session-Id")

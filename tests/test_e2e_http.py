@@ -324,6 +324,31 @@ def test_backend_rejects_missing_or_invalid_session_key_over_http():
         srv.shutdown()
 
 
+def test_backend_frontend_api_requires_api_key(monkeypatch):
+    monkeypatch.setenv("AGENTGUARD_API_KEY", "sk-test-backend-api-key")
+    manager = RuntimeManager(enable_agentdog=False)
+    base_url, srv, _ = start_dev_server(manager=manager)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as missing:
+            _get_json(f"{base_url}/v1/backend/sessions")
+        assert missing.value.code == 401
+
+        with pytest.raises(urllib.error.HTTPError) as invalid:
+            _get_json(
+                f"{base_url}/v1/backend/sessions",
+                headers={"X-Api-Key": "sk-wrong-backend-api-key"},
+            )
+        assert invalid.value.code == 403
+
+        payload = _get_json(
+            f"{base_url}/v1/backend/sessions",
+            headers={"X-Api-Key": "sk-test-backend-api-key"},
+        )
+        assert payload == {"sessions": []}
+    finally:
+        srv.shutdown()
+
+
 def _post_json(url: str, payload: dict, *, headers: dict[str, str] | None = None) -> dict:
     request_headers = {"Content-Type": "application/json"}
     request_headers.update(headers or {})
@@ -337,6 +362,7 @@ def _post_json(url: str, payload: dict, *, headers: dict[str, str] | None = None
         return json.loads(response.read().decode("utf-8"))
 
 
-def _get_json(url: str) -> dict:
-    with urllib.request.urlopen(url, timeout=3) as response:
+def _get_json(url: str, *, headers: dict[str, str] | None = None) -> dict:
+    request = urllib.request.Request(url, headers=headers or {}, method="GET")
+    with urllib.request.urlopen(request, timeout=3) as response:
         return json.loads(response.read().decode("utf-8"))
