@@ -216,6 +216,9 @@
     const event = item?.event || {};
     const decision = item?.decision || {};
     const rules = Array.isArray(decision?.matched_rules) ? decision.matched_rules.map(String) : [];
+    const securityReview = decision?.security_review && typeof decision.security_review === "object"
+      ? decision.security_review
+      : null;
     return {
       session: String(event?.principal?.session_id || "-"),
       agent: String(event?.principal?.agent_id || "-"),
@@ -223,8 +226,44 @@
       action: String(decision?.action || "unknown").toLowerCase(),
       risk: typeof decision?.risk_score === "number" ? decision.risk_score : Number(decision?.risk_score || 0),
       matchedRules: rules,
+      securityReview,
       raw: item,
     };
+  }
+
+  function formatSecurityReview(review) {
+    if (!review) {
+      return "Security review: none";
+    }
+    const severity = String(review.overall_severity || "none");
+    const summary = String(review.summary || "").trim() || "No summary provided.";
+    const findings = Array.isArray(review.findings) ? review.findings : [];
+    const lines = [
+      `Security review: ${severity}`,
+      `Summary: ${summary}`,
+    ];
+    findings.slice(0, 5).forEach((finding, index) => {
+      const type = String(finding?.threat_type || "unknown");
+      const findingSeverity = String(finding?.severity || "none");
+      const confidence = typeof finding?.confidence === "number"
+        ? finding.confidence.toFixed(2)
+        : String(finding?.confidence || "0");
+      const reason = String(finding?.reason || "").trim();
+      const evidence = Array.isArray(finding?.evidence)
+        ? finding.evidence.map(String).filter(Boolean).slice(0, 3).join(" | ")
+        : "";
+      lines.push(`${index + 1}. ${type} severity=${findingSeverity} confidence=${confidence}`);
+      if (reason) {
+        lines.push(`   reason=${reason}`);
+      }
+      if (evidence) {
+        lines.push(`   evidence=${evidence}`);
+      }
+    });
+    if (findings.length > 5) {
+      lines.push(`... ${findings.length - 5} more findings`);
+    }
+    return lines.join("\n");
   }
 
   function buildOverview() {
@@ -409,7 +448,7 @@
       decision: selected.raw?.decision || {},
       matched_rules: selected.matchedRules,
     };
-    elements.auditDetail.textContent = JSON.stringify(payload, null, 2);
+    elements.auditDetail.textContent = `${formatSecurityReview(selected.securityReview)}\n\n${JSON.stringify(payload, null, 2)}`;
   }
 
   function renderAll() {

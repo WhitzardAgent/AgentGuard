@@ -23,6 +23,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from agentguard.models.security_review import SecurityReviewResult
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Server-side action enum  (used in DSL rules and internal pipeline)
@@ -92,6 +94,7 @@ class Decision(BaseModel):
     ttl_ms: int = 0
     reason: str = ""
     degrade_profile: str | None = None
+    security_review: SecurityReviewResult | None = None
     llm_system_prompt: str | None = Field(default=None, exclude=True)
 
     # ── client-visible fields (populated by Enforcer / API layer) ────────────

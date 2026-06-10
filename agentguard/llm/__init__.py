@@ -17,13 +17,22 @@ Quick usage::
 
 from agentguard.llm.backend import LLMBackend, ChatResponse, ToolCallRequest
 from agentguard.llm.security_review import (
+    COT_LEAK_DETECTOR,
+    DEFAULT_PROMPT_DETECTORS,
+    PROMPT_INJECTION_DETECTOR,
     PromptSecurityReviewer,
+    PromptDetector,
     SecurityReviewRequest,
+    SecurityReviewOrchestrator,
+    SKILL_SAFETY_DETECTOR,
+    TRACE_ANOMALY_DETECTOR,
+    parse_security_review_response,
+)
+from agentguard.models.security_review import (
     SecurityReviewResult,
     ThreatFinding,
     ThreatSeverity,
     ThreatType,
-    parse_security_review_response,
 )
 
 __all__ = [
@@ -31,7 +40,14 @@ __all__ = [
     "ChatResponse",
     "ToolCallRequest",
     "PromptSecurityReviewer",
+    "PromptDetector",
     "SecurityReviewRequest",
+    "SecurityReviewOrchestrator",
+    "PROMPT_INJECTION_DETECTOR",
+    "COT_LEAK_DETECTOR",
+    "SKILL_SAFETY_DETECTOR",
+    "TRACE_ANOMALY_DETECTOR",
+    "DEFAULT_PROMPT_DETECTORS",
     "SecurityReviewResult",
     "ThreatFinding",
     "ThreatSeverity",

@@ -15,6 +15,7 @@ Two deployment modes
 from __future__ import annotations
 
 import logging
+import hashlib
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
@@ -23,7 +24,7 @@ from agentguard.degrade.planner import Enforcer, EnforcerConfig
 from agentguard.graph.builder import GraphWriter
 from agentguard.graph.provenance import ProvenanceTracker
 from agentguard.models.decisions import Decision
-from agentguard.models.events import Principal, RuntimeEvent
+from agentguard.models.events import EventType, Principal, RuntimeEvent
 from agentguard.policy.dsl.compiler import CompiledRule
 from agentguard.policy.evaluator.matcher import FastEvaluator
 from agentguard.policy.rules.dynamic_store import DynamicRuleConfig, SlowDispatcher
@@ -67,6 +68,17 @@ class RemotePipeline:
 
     def handle_result(self, event: RuntimeEvent) -> None:
         self._audit.log(event)
+
+    def record_event(self, event: RuntimeEvent) -> RuntimeEvent:
+        ok = False
+        try:
+            ok = bool(self._client.record_event(event))
+        except Exception as exc:
+            log.warning("RemotePipeline: failed to record event remotely: %s", exc)
+        self._audit.log(event)
+        if not ok:
+            log.debug("RemotePipeline: event recorded only in local audit mirror")
+        return event
 
     def guarded_call(
         self,
@@ -168,6 +180,8 @@ class Guard:
         binding_store: AgentBindingStore | None = None,
         # ── LLM review backend (for LLM_CHECK rules) ─────────────────────
         llm_backend: Any | None = None,
+        # ── optional plugins ──────────────────────────────────────────────
+        plugins: Iterable[Any] | None = None,
         # ── remote mode ──────────────────────────────────────────────────
         remote_url: str | None = None,
         api_key: str = "",
@@ -179,14 +193,9 @@ class Guard:
         self._api_key = api_key
         self._dynamic: Any = None
         self._remote_client: Any | None = None
+        self._plugins: list[Any] = []
         # token stored by start() so end_session() / close() can restore context
         self._session_token: Any = None
-
-        # ── LLM backend resolution ────────────────────────────────────────
-        # Accept: None | LLMBackend instance | "env" (auto-discover from env vars)
-        if llm_backend == "env":
-            from agentguard.llm.backend import LLMBackend as _LLMBackend
-            llm_backend = _LLMBackend.from_env()
 
         # ── remote mode ──────────────────────────────────────────────────
         if remote_url:
@@ -198,6 +207,8 @@ class Guard:
             self.pipeline: Pipeline | RemotePipeline = RemotePipeline(
                 self._remote_client, mode=mode
             )
+            for plugin in list(plugins or []):
+                self.use_plugin(plugin)
             log.info("Guard: remote mode → %s", remote_url)
             return  # skip local subsystem init
 
@@ -270,6 +281,13 @@ class Guard:
             self._dynamic = DynamicRuleUpdater(guard=self, config=dynamic_config)
             self._dynamic.attach()
 
+        plugin_list = list(plugins or [])
+        if llm_backend is not None:
+            from agentguard.plugins.llm_security import LLMSecurityReviewPlugin
+            plugin_list.append(LLMSecurityReviewPlugin(llm_backend=llm_backend))
+        for plugin in plugin_list:
+            self.use_plugin(plugin)
+
     # ------------------------------------------------------------------
     # Tool registration
     # ------------------------------------------------------------------
@@ -282,6 +300,8 @@ class Guard:
         sensitivity: str = "low",
         integrity: str = "trusted",
         tags: list[str] | None = None,
+        tool_definition: dict[str, Any] | None = None,
+        skill_manifest: dict[str, Any] | None = None,
     ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """Decorator that registers a tool with static labels.
 
@@ -296,6 +316,8 @@ class Guard:
                 sink_type=sink_type,
                 boundary=boundary, sensitivity=sensitivity,
                 integrity=integrity, tags=tags,
+                tool_definition=tool_definition,
+                skill_manifest=skill_manifest,
             )
             return self._record_tool_registration(tool_name, wrapped)
         return deco
@@ -310,17 +332,33 @@ class Guard:
         sensitivity: str = "low",
         integrity: str = "trusted",
         tags: list[str] | None = None,
+        tool_definition: dict[str, Any] | None = None,
+        skill_manifest: dict[str, Any] | None = None,
     ) -> Callable[..., Any]:
         wrapped = wrap_tool(
             self, tool_name, fn,
             sink_type=sink_type,
             boundary=boundary, sensitivity=sensitivity,
             integrity=integrity, tags=tags,
+            tool_definition=tool_definition,
+            skill_manifest=skill_manifest,
         )
         return self._record_tool_registration(tool_name, wrapped)
 
     def install_middleware(self, registry: dict[str, Any]) -> None:
         ToolMiddleware(self).install(registry)
+
+    # ------------------------------------------------------------------
+    # Plugins
+    # ------------------------------------------------------------------
+    def use_plugin(self, plugin: Any) -> Any:
+        """Attach an optional plugin to this Guard instance."""
+        setup = getattr(plugin, "setup", None)
+        if not callable(setup):
+            raise TypeError("plugin must expose setup(guard)")
+        setup(self)
+        self._plugins.append(plugin)
+        return plugin
 
     # ------------------------------------------------------------------
     # Session helpers
@@ -390,6 +428,150 @@ class Guard:
         clear_session_signals(session_id)
         if not isinstance(self.pipeline, RemotePipeline):
             self._cache.clear()  # InMemoryStateCache clears all, good enough for now
+
+    # ------------------------------------------------------------------
+    # Model activity audit
+    # ------------------------------------------------------------------
+    def record_model_input(
+        self,
+        *,
+        messages: Any | None = None,
+        context: Any | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        raw: Any | None = None,
+        principal: Principal | None = None,
+        goal: str | None = None,
+        scope: list[str] | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> RuntimeEvent:
+        return self._record_model_activity(
+            "model_input",
+            EventType.AGENT_STEP_STARTED,
+            principal=principal,
+            goal=goal,
+            scope=scope,
+            payload={
+                "messages": messages,
+                "context": context,
+                "provider": provider,
+                "model": model,
+                "raw": raw,
+            },
+            extra=extra,
+        )
+
+    def record_model_output(
+        self,
+        *,
+        output: Any | None = None,
+        tool_calls: Any | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        raw: Any | None = None,
+        principal: Principal | None = None,
+        goal: str | None = None,
+        scope: list[str] | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> RuntimeEvent:
+        return self._record_model_activity(
+            "model_output",
+            EventType.AGENT_STEP_COMPLETED,
+            principal=principal,
+            goal=goal,
+            scope=scope,
+            payload={
+                "output": output,
+                "tool_calls": tool_calls,
+                "provider": provider,
+                "model": model,
+                "raw": raw,
+            },
+            extra=extra,
+        )
+
+    def record_visible_thought(
+        self,
+        *,
+        thought: Any,
+        provider: str | None = None,
+        model: str | None = None,
+        raw: Any | None = None,
+        principal: Principal | None = None,
+        goal: str | None = None,
+        scope: list[str] | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> RuntimeEvent:
+        return self._record_model_activity(
+            "visible_thought",
+            EventType.THOUGHT_PRODUCED,
+            principal=principal,
+            goal=goal,
+            scope=scope,
+            payload={
+                "thought": thought,
+                "provider": provider,
+                "model": model,
+                "raw": raw,
+            },
+            extra=extra,
+        )
+
+    def record_plan(
+        self,
+        *,
+        plan: Any,
+        provider: str | None = None,
+        model: str | None = None,
+        raw: Any | None = None,
+        principal: Principal | None = None,
+        goal: str | None = None,
+        scope: list[str] | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> RuntimeEvent:
+        return self._record_model_activity(
+            "plan",
+            EventType.PLAN_PRODUCED,
+            principal=principal,
+            goal=goal,
+            scope=scope,
+            payload={
+                "plan": plan,
+                "provider": provider,
+                "model": model,
+                "raw": raw,
+            },
+            extra=extra,
+        )
+
+    def record_action_proposed(
+        self,
+        *,
+        action: Any,
+        tool_calls: Any | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        raw: Any | None = None,
+        principal: Principal | None = None,
+        goal: str | None = None,
+        scope: list[str] | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> RuntimeEvent:
+        return self._record_model_activity(
+            "action_proposed",
+            EventType.ACTION_PROPOSED,
+            principal=principal,
+            goal=goal,
+            scope=scope,
+            payload={
+                "action": action,
+                "tool_calls": tool_calls,
+                "provider": provider,
+                "model": model,
+                "raw": raw,
+            },
+            extra=extra,
+        )
 
     # ------------------------------------------------------------------
     # Rule management (in-process mode only)
@@ -651,6 +833,11 @@ class Guard:
         adapter.install(agent)
         return adapter
 
+    def langchain_callback_handler(self) -> Any:
+        """Return a LangChain callback handler that records model activity."""
+        from agentguard.sdk.adapters.langchain import AgentGuardLangChainCallbackHandler
+        return AgentGuardLangChainCallbackHandler(self)
+
     def attach_openai_agents(self, agent: Any) -> Any:
         """Attach AgentGuard to an OpenAI Agents SDK ``Agent`` (or duck-type)."""
         from agentguard.sdk.adapters.openai_agents import OpenAIAgentsAdapter
@@ -679,8 +866,17 @@ class Guard:
         Safe to call even if :meth:`start` was never used.
         """
         self.end_session()
+        for plugin in reversed(self._plugins):
+            teardown = getattr(plugin, "teardown", None)
+            if callable(teardown):
+                try:
+                    teardown()
+                except Exception as exc:
+                    log.warning("Guard: plugin teardown failed: %s", exc)
+        self._plugins.clear()
         if self._dynamic is not None:
             self._dynamic.detach()
+            self._dynamic = None
         self.pipeline.close()
 
     # ------------------------------------------------------------------
@@ -715,6 +911,43 @@ class Guard:
         if entry is not None:
             self._report_tool_registration(entry)
         return wrapped
+
+    def _record_model_activity(
+        self,
+        kind: str,
+        event_type: EventType,
+        *,
+        principal: Principal | None,
+        goal: str | None,
+        scope: list[str] | None,
+        payload: dict[str, Any],
+        extra: dict[str, Any] | None,
+    ) -> RuntimeEvent:
+        session = current_session()
+        resolved_principal = (
+            principal
+            or (session.principal if session is not None else None)
+            or Principal(agent_id="sdk-default", session_id="anon")
+        )
+        resolved_goal = goal if goal is not None else (session.goal if session else None)
+        resolved_scope = list(scope if scope is not None else (session.scope if session else []))
+        activity = {
+            "kind": kind,
+            "capture_policy": "full",
+            **{key: value for key, value in payload.items() if value is not None},
+        }
+        digest_source = repr(activity).encode("utf-8", errors="replace")
+        activity["content_hash"] = hashlib.sha256(digest_source).hexdigest()
+        event_extra = dict(extra or {})
+        event_extra["model_activity"] = activity
+        event = RuntimeEvent(
+            event_type=event_type,
+            principal=resolved_principal,
+            goal=resolved_goal,
+            scope=resolved_scope,
+            extra=event_extra,
+        )
+        return self.pipeline.record_event(event)
 
     def _build_tool_catalog_entry(
         self,

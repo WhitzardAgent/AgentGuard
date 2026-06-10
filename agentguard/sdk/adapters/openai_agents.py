@@ -24,6 +24,7 @@ function.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import uuid
@@ -149,6 +150,9 @@ class OpenAIAgentsAdapter(BaseAdapter):
                     target=_extract_target(tool_name, args),
                     sink_type=_infer_sink(tool_name),  # type: ignore[arg-type]
                 ),
+                extra={
+                    "tool_definition": _function_tool_definition(tool, original, tool_name),
+                },
             )
 
             # ── Policy check (non-blocking) ───────────────────────────
@@ -248,3 +252,23 @@ def _is_function_tool(obj: Any) -> bool:
     FunctionTool, which made the guard silently skip wrapping.
     """
     return hasattr(obj, "on_invoke_tool") and hasattr(obj, "name")
+
+
+def _function_tool_definition(tool: Any, original: Any, tool_name: str) -> dict[str, Any]:
+    try:
+        signature = str(inspect.signature(original))
+    except (TypeError, ValueError):
+        signature = ""
+    raw_schema = (
+        getattr(tool, "params_json_schema", None)
+        or getattr(tool, "parameters", None)
+        or getattr(tool, "schema", None)
+    )
+    return {
+        "name": tool_name,
+        "description": str(getattr(tool, "description", "") or ""),
+        "signature": signature,
+        "schema": raw_schema,
+        "sink_type": _infer_sink(tool_name),
+        "source": "openai_agents",
+    }

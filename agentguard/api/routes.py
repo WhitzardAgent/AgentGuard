@@ -240,9 +240,27 @@ def build_app(guard: "Guard", *, server: "AgentGuardServer | None" = None) -> An
         event = _apply_catalog_tool_labels(event)
         prompt_event = _prepare_llm_prompt_event(event)
         decision = await _finalize_remote_decision(prompt_event, await _evaluate(event))
+        if getattr(decision, "security_review", None) is not None:
+            guard.pipeline.audit.log(prompt_event, decision)
         d = decision.model_dump(mode="json")
         d["client_action"] = decision.to_client_action().value
         return {"ok": True, "decision": d}
+
+    @app.post("/v1/events", summary="Record a non-tool runtime/audit event")
+    async def record_runtime_event(
+        request: Request,
+        x_api_key: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        """Record model-activity or other non-tool events for audit surfaces."""
+        _check_api_key(guard, x_api_key)
+        body = await request.body()
+        try:
+            event = RuntimeEvent.model_validate_json(body)
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        event = _apply_catalog_tool_labels(event)
+        recorded = guard.pipeline.record_event(event)
+        return {"ok": True, "event_id": recorded.event_id}
 
     @app.post("/v1/evaluate/batch", summary="Evaluate multiple events")
     async def evaluate_batch(
@@ -269,6 +287,8 @@ def build_app(guard: "Guard", *, server: "AgentGuardServer | None" = None) -> An
                 event = _apply_catalog_tool_labels(event)
                 prompt_event = _prepare_llm_prompt_event(event)
                 decision = await _finalize_remote_decision(prompt_event, await _evaluate(event))
+                if getattr(decision, "security_review", None) is not None:
+                    guard.pipeline.audit.log(prompt_event, decision)
                 d = decision.model_dump(mode="json")
                 d["client_action"] = decision.to_client_action().value
                 results.append({"ok": True, "decision": d})
@@ -891,6 +911,8 @@ def build_app(guard: "Guard", *, server: "AgentGuardServer | None" = None) -> An
         user_id: str | None = None,
         action: str | None = None,
         rule: str | None = None,
+        threat_type: str | None = None,
+        severity: str | None = None,
         since_ts: float | None = None,
         until_ts: float | None = None,
         n: int = 200,
@@ -904,6 +926,8 @@ def build_app(guard: "Guard", *, server: "AgentGuardServer | None" = None) -> An
           - ``user_id``   user_id substring
           - ``action``    exact action value (deny/allow/llm_check/degrade/human_check)
           - ``rule``      rule_id present in matched_rules list
+          - ``threat_type`` security_review finding type
+          - ``severity``  security_review overall or finding severity
           - ``since_ts``  unix timestamp (float) lower bound
           - ``until_ts``  unix timestamp (float) upper bound
           - ``n``         max records returned (default 200, max 2 000)
@@ -931,6 +955,9 @@ def build_app(guard: "Guard", *, server: "AgentGuardServer | None" = None) -> An
             ev_user_id = principal.get("user_id") or ""
             ev_action = dec.get("action") or ""
             ev_rules = dec.get("matched_rules") or []
+            review = dec.get("security_review") or {}
+            findings = review.get("findings") if isinstance(review, dict) else []
+            findings = findings if isinstance(findings, list) else []
 
             if tool and tool.lower() not in ev_tool.lower():
                 continue
@@ -942,6 +969,24 @@ def build_app(guard: "Guard", *, server: "AgentGuardServer | None" = None) -> An
                 continue
             if rule and rule not in ev_rules:
                 continue
+            if threat_type:
+                wanted = threat_type.lower()
+                if not any(
+                    wanted == str(f.get("threat_type", "")).lower()
+                    for f in findings
+                    if isinstance(f, dict)
+                ):
+                    continue
+            if severity:
+                wanted_sev = severity.lower()
+                severities = [str(review.get("overall_severity", "")).lower()]
+                severities.extend(
+                    str(f.get("severity", "")).lower()
+                    for f in findings
+                    if isinstance(f, dict)
+                )
+                if wanted_sev not in severities:
+                    continue
 
             results.append(rec)
             if len(results) >= n:

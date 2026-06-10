@@ -6,11 +6,8 @@ Server-side action → runtime behavior
 ──────────────────────────────────────
 ALLOW       → apply obligations (REDACT / RATE_LIMIT / …), then execute tool
 DENY        → raise DecisionDenied (tool blocked)
-LLM_CHECK   → invoke LLMBackend reviewer:
-                • "allow"  → execute (after obligations)
-                • "deny"   → raise DecisionDenied
-                • "human"  → escalate to human approval queue
-              Falls back to human approval when no LLMBackend is configured.
+LLM_CHECK   → invoke a registered resolver plugin if present, otherwise
+              escalate to human approval.
 HUMAN_CHECK → enqueue human approval ticket (legacy / explicit DSL action)
 DEGRADE     → rewrite tool parameters, re-validate, then execute
 """
@@ -25,15 +22,10 @@ from dataclasses import dataclass
 from typing import Any, Callable, Literal
 
 from agentguard.degrade.transformers import ActionExecutor
-from agentguard.llm.security_review import (
-    PromptSecurityReviewer,
-    SecurityReviewRequest,
-    SecurityReviewResult,
-    ThreatSeverity,
-)
 from agentguard.models.decisions import Action, ClientAction, Decision
 from agentguard.models.errors import DecisionDenied, HumanApprovalPending
 from agentguard.models.events import RuntimeEvent, ToolCall
+from agentguard.models.security_review import SecurityReviewResult, ThreatSeverity
 from agentguard.review.tickets import ApprovalBridge, InMemoryApprovalBridge
 
 log = logging.getLogger(__name__)
@@ -263,11 +255,24 @@ class Enforcer:
         approval_bridge: ApprovalBridge | None = None,
         action_executor: ActionExecutor | None = None,
         llm_backend: Any | None = None,
+        llm_check_resolver: Callable[[RuntimeEvent, Decision], Decision] | None = None,
     ) -> None:
         self.config = config or EnforcerConfig()
         self._approval = approval_bridge or InMemoryApprovalBridge()
         self._actions = action_executor or ActionExecutor()
-        self._llm = llm_backend   # optional LLMBackend instance
+        self._llm = llm_backend   # backward-compat marker; Guard wraps it as a plugin
+        self._llm_check_resolver = llm_check_resolver
+
+    def set_llm_check_resolver(
+        self,
+        resolver: Callable[[RuntimeEvent, Decision], Decision] | None,
+    ) -> None:
+        """Register the optional resolver used for ``POLICY: LLM_CHECK``.
+
+        The core enforcer intentionally does not import or construct an LLM
+        reviewer. LLM-backed review is supplied by an optional plugin.
+        """
+        self._llm_check_resolver = resolver
 
     def resolve_remote_decision(self, event: RuntimeEvent, decision: Decision) -> Decision:
         """Resolve server-side review actions before returning a remote response.
@@ -378,10 +383,11 @@ class Enforcer:
         event: RuntimeEvent,
         decision: Decision,
     ) -> Decision:
-        if self._llm is None:
+        if self._llm_check_resolver is None:
             log.debug(
-                "LLM_CHECK fired but no llm_backend configured — escalating to HUMAN_CHECK"
+                "LLM_CHECK fired but no resolver plugin configured — escalating to HUMAN_CHECK"
             )
+            unavailable = SecurityReviewResult.unavailable("llm_check_resolver_not_configured")
             return decision.model_copy(update={
                 "action": Action.HUMAN_CHECK,
                 "client_action": ClientAction.HUMAN_CHECK,
@@ -389,28 +395,21 @@ class Enforcer:
                     "security_review_unavailable",
                     _merge_rule_and_llm_reason(
                         decision.reason,
-                        "llm_backend_not_configured",
+                        "llm_check_resolver_not_configured",
                     ),
                 ),
+                "security_review": unavailable,
                 "llm_system_prompt": None,
             })
 
         try:
-            reviewer = (
-                self._llm
-                if hasattr(self._llm, "review")
-                else PromptSecurityReviewer(self._llm)
-            )
-            result = reviewer.review(SecurityReviewRequest(
-                event=event,
-                decision=decision,
-                custom_prompt=decision.llm_system_prompt,
-            ))
+            resolved = self._llm_check_resolver(event, decision)
         except Exception as exc:
             log.warning(
-                "LLM_CHECK: security review failed (%s) — escalating to HUMAN_CHECK",
+                "LLM_CHECK resolver failed (%s) — escalating to HUMAN_CHECK",
                 exc,
             )
+            unavailable = SecurityReviewResult.unavailable(f"review_failed: {type(exc).__name__}")
             return decision.model_copy(update={
                 "action": Action.HUMAN_CHECK,
                 "client_action": ClientAction.HUMAN_CHECK,
@@ -421,45 +420,10 @@ class Enforcer:
                         f"review_failed: {type(exc).__name__}",
                     ),
                 ),
+                "security_review": unavailable,
                 "llm_system_prompt": None,
             })
-
-        severity = result.max_severity()
-        mapped_risk = _SECURITY_REVIEW_RISK[severity]
-        risk_score = max(decision.risk_score, mapped_risk)
-        reason = _format_security_review_reason(result, rule_reason=decision.reason)
-        tool_name = event.tool_call.tool_name if event.tool_call else "?"
-        log.info(
-            "LLM_CHECK security_review severity=%s tool=%s threats=%s rules=%s",
-            severity.value,
-            tool_name,
-            result.threat_types(),
-            decision.matched_rules,
-        )
-
-        if severity is ThreatSeverity.CRITICAL:
-            return decision.model_copy(update={
-                "action": Action.DENY,
-                "client_action": ClientAction.DENY,
-                "risk_score": risk_score,
-                "reason": reason,
-                "llm_system_prompt": None,
-            })
-        if severity is ThreatSeverity.HIGH:
-            return decision.model_copy(update={
-                "action": Action.HUMAN_CHECK,
-                "client_action": ClientAction.HUMAN_CHECK,
-                "risk_score": risk_score,
-                "reason": reason,
-                "llm_system_prompt": None,
-            })
-        return decision.model_copy(update={
-            "action": Action.ALLOW,
-            "client_action": ClientAction.ALLOW,
-            "risk_score": risk_score,
-            "reason": reason,
-            "llm_system_prompt": None,
-        })
+        return resolved.model_copy(update={"llm_system_prompt": None})
 
     def _human_check(
         self,

@@ -86,6 +86,8 @@ class AuditSearchQuery(BaseModel):  # type: ignore[misc]
     agent: str | None = None  # type: ignore[assignment]
     action: str | None = None  # type: ignore[assignment]
     rule: str | None = None    # match if this rule_id is in matched_rules
+    threat_type: str | None = None
+    severity: str | None = None
     since_ts: float | None = None   # unix timestamp lower bound
     until_ts: float | None = None   # unix timestamp upper bound
     n: int = 200

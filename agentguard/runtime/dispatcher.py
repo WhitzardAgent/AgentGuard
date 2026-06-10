@@ -161,6 +161,22 @@ class Pipeline:
         self._graph_writer.submit(event)
         self._audit.log(event)
 
+    def record_event(self, event: RuntimeEvent) -> RuntimeEvent:
+        """Record a non-tool runtime event for audit, graph, and slow hooks.
+
+        Model inputs/outputs, visible thoughts, plans, and proposed actions are
+        observability events rather than executable tool attempts, so they do
+        not go through the blocking enforcer path.
+        """
+        _gc_session_signals()
+        enriched = self._enrich(event)
+        if enriched.extra != event.extra:
+            event.extra = dict(enriched.extra)
+        self._graph_writer.submit(enriched)
+        self._slow.submit(enriched)
+        self._audit.log(enriched)
+        return enriched
+
     def guarded_call(
         self,
         event: RuntimeEvent,

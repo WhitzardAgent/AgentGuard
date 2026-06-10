@@ -133,6 +133,21 @@ class RemoteGuardClient:
             fallback = _FAIL_OPEN_DECISION if self._fail_open else _FAIL_CLOSED_DECISION
             return [fallback] * len(events)
 
+    def record_event(self, event: RuntimeEvent) -> bool:
+        """Submit a non-blocking runtime event to the remote audit pipeline."""
+        payload = json.dumps(event.model_dump(mode="json")).encode()
+        try:
+            resp = self._post("/v1/events", payload)
+        except (urllib.error.HTTPError, urllib.error.URLError, OSError, TimeoutError) as e:
+            log.warning("RemoteGuardClient: event record failed (%s)", e)
+            return False
+        try:
+            body: dict[str, Any] = json.loads(resp)
+        except Exception as e:
+            log.warning("RemoteGuardClient: bad /v1/events response (%s)", e)
+            return False
+        return bool(body.get("ok", False))
+
     def health(self) -> dict[str, Any]:
         """Check runtime health. Raises on error."""
         try:

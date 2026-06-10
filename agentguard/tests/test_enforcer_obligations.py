@@ -13,6 +13,7 @@ from agentguard.llm.security_review import (
 from agentguard.sdk.guard import Guard
 from agentguard.models.decisions import Action, Decision, Obligation
 from agentguard.models.events import EventType
+from agentguard.models.security_review import SecurityReviewResult, ThreatFinding, ThreatSeverity, ThreatType
 from agentguard.tests.conftest import build_event as _mk, make_principal, mini_guard
 
 
@@ -143,6 +144,27 @@ def test_security_review_json_parser_rejects_malformed_output():
         parse_security_review_response("<DECISION>allow</DECISION>")
 
 
+def test_decision_security_review_serializes_and_old_payloads_still_validate():
+    review = SecurityReviewResult(
+        overall_severity=ThreatSeverity.CRITICAL,
+        findings=[
+            ThreatFinding(
+                threat_type=ThreatType.PROMPT_INJECTION,
+                severity=ThreatSeverity.CRITICAL,
+                confidence=0.9,
+                evidence=["ignore previous instructions"],
+            )
+        ],
+        summary="Prompt injection detected.",
+    )
+    decision = Decision(action=Action.DENY, security_review=review)
+
+    payload = decision.model_dump(mode="json")
+    assert payload["security_review"]["overall_severity"] == "critical"
+    assert payload["security_review"]["findings"][0]["threat_type"] == "prompt_injection"
+    assert Decision.model_validate({"action": "allow"}).security_review is None
+
+
 def test_local_llm_check_prompt_includes_trace_summary():
     backend = _CaptureLLMBackend()
     guard = Guard(policy_source=LLM_TRACE_DSL, builtin_rules=False, llm_backend=backend)
@@ -256,7 +278,9 @@ def test_llm_check_falls_back_to_default_system_prompt_when_v3_prompt_empty():
 
     assert backend.messages
     system_prompt = backend.messages[-1][0]["content"]
-    assert system_prompt == SECURITY_REVIEW_SYSTEM
+    assert system_prompt.startswith(SECURITY_REVIEW_SYSTEM)
+    assert "Active prompt packs:" in system_prompt
+    assert "Prompt pack: prompt_injection" in system_prompt
     guard.close()
 
 
@@ -315,6 +339,9 @@ def test_llm_check_high_review_maps_to_human_check():
     assert resolved.client_action is not None
     assert resolved.client_action.value == "human_check"
     assert "security_review:high:" in resolved.reason
+    assert resolved.security_review is not None
+    assert resolved.security_review.overall_severity is ThreatSeverity.HIGH
+    assert resolved.security_review.findings[0].threat_type is ThreatType.TRACE_ANOMALY
     guard.close()
 
 
@@ -334,6 +361,44 @@ def test_llm_check_malformed_review_escalates_to_human_check():
     assert resolved.client_action is not None
     assert resolved.client_action.value == "human_check"
     assert "security_review_unavailable" in resolved.reason
+    assert resolved.security_review is not None
+    assert resolved.security_review.summary == "security review unavailable"
+    guard.close()
+
+
+def test_wrapped_tool_injects_tool_definition_and_respects_explicit_metadata():
+    guard = mini_guard(REDACT_DSL)
+    seen: list[dict] = []
+
+    def post_payload(url: str, body: str = "") -> str:
+        """Post a payload to a URL."""
+        return "ok"
+
+    wrapped = guard.register(
+        "http.post",
+        post_payload,
+        sink_type="http",
+        boundary="external",
+        tags=["network"],
+        tool_definition={"name": "explicit.http.post", "owner": "security-team"},
+        skill_manifest={"name": "explicit-skill"},
+    )
+    original = guard.pipeline.handle_attempt
+
+    def capture(event):
+        seen.append(dict(event.extra))
+        return original(event)
+
+    guard.pipeline.handle_attempt = capture  # type: ignore[method-assign]
+    wrapped("https://example.com", body="email=user@example.com")
+
+    assert seen
+    tool_definition = seen[0]["tool_definition"]
+    assert tool_definition["name"] == "explicit.http.post"
+    assert tool_definition["owner"] == "security-team"
+    assert tool_definition["sink_type"] == "http"
+    assert tool_definition["labels"]["boundary"] == "external"
+    assert seen[0]["skill_manifest"]["name"] == "explicit-skill"
     guard.close()
 
 

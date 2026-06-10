@@ -15,6 +15,12 @@ from agentguard.models.events import (
     ToolCall,
 )
 from agentguard.models.resources import Resource
+from agentguard.models.security_review import (
+    SecurityReviewResult,
+    ThreatFinding,
+    ThreatSeverity,
+    ThreatType,
+)
 from agentguard.models.sessions import GuardSession
 from agentguard.models.tool_catalog import ToolCatalogEntry, ToolCatalogLabels
 from agentguard.models.tools import ToolSpec
@@ -33,6 +39,10 @@ __all__ = [
     "RuntimeEvent",
     "ToolCall",
     "Resource",
+    "SecurityReviewResult",
+    "ThreatFinding",
+    "ThreatSeverity",
+    "ThreatType",
     "GuardSession",
     "ToolCatalogEntry",
     "ToolCatalogLabels",

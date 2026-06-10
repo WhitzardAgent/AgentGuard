@@ -9,6 +9,7 @@ pytest.importorskip("fastapi", reason="requires agentguard[server]")
 from fastapi.testclient import TestClient  # noqa: E402
 
 from agentguard.api.routes import build_app  # noqa: E402
+from agentguard.models.events import EventType, Principal, RuntimeEvent  # noqa: E402
 from agentguard.sdk.guard import Guard  # noqa: E402
 from agentguard.tests.conftest import mini_guard, build_event as _mk  # noqa: E402
 
@@ -210,6 +211,59 @@ def test_evaluate_uses_v3_prompt_for_remote_llm_check_system_message():
     assert "prompt_injection" in system_prompt
     assert r.json()["decision"]["reason"].startswith("security_review:high:")
     assert "rule_reason=Potentially destructive shell command." in r.json()["decision"]["reason"]
+    guard.close()
+
+
+def test_evaluate_returns_security_review_and_audit_search_filters_it():
+    backend = _FakeLLMBackend("deny")
+    guard = Guard(policy_source=LLM_CHECK_V3_PROMPT_DSL, builtin_rules=False, llm_backend=backend)
+
+    with TestClient(build_app(guard), raise_server_exceptions=True) as client:
+        ev = _mk("shell.exec", args={"cmd": "rm -rf /"})
+        r = client.post("/v1/evaluate", content=ev.model_dump_json())
+        assert r.status_code == 200
+        decision = r.json()["decision"]
+        assert decision["security_review"]["overall_severity"] == "critical"
+        assert decision["security_review"]["findings"][0]["threat_type"] == "trace_anomaly"
+
+        by_threat = client.get("/audit/search", params={"threat_type": "trace_anomaly"})
+        assert by_threat.status_code == 200
+        assert any(
+            (item.get("decision") or {}).get("security_review")
+            for item in by_threat.json()
+        )
+
+        by_severity = client.get("/audit/search", params={"severity": "critical"})
+        assert by_severity.status_code == 200
+        assert any(
+            ((item.get("decision") or {}).get("security_review") or {}).get("overall_severity") == "critical"
+            for item in by_severity.json()
+        )
+
+    guard.close()
+
+
+def test_record_runtime_event_records_model_activity():
+    guard = Guard(builtin_rules=False)
+
+    with TestClient(build_app(guard), raise_server_exceptions=True) as client:
+        event = RuntimeEvent(
+            event_type=EventType.AGENT_STEP_STARTED,
+            principal=Principal(agent_id="model-agent", session_id="model-session"),
+            extra={
+                "model_activity": {
+                    "kind": "model_input",
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "capture_policy": "full",
+                }
+            },
+        )
+        r = client.post("/v1/events", content=event.model_dump_json())
+
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+    records = guard.pipeline.audit.recent(5)
+    assert records[-1]["event"]["extra"]["model_activity"]["kind"] == "model_input"
     guard.close()
 
 

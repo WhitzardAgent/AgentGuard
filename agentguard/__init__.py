@@ -14,9 +14,7 @@ from agentguard.policy.rules.dynamic_store import (
     TriggerPolicy,
     DynamicRuleUpdater,
 )
-from agentguard.llm.security_review import (
-    PromptSecurityReviewer,
-    SecurityReviewRequest,
+from agentguard.models.security_review import (
     SecurityReviewResult,
     ThreatFinding,
     ThreatSeverity,
@@ -40,8 +38,6 @@ __all__ = [
     "DynamicRuleConfig",
     "TriggerPolicy",
     "DynamicRuleUpdater",
-    "PromptSecurityReviewer",
-    "SecurityReviewRequest",
     "SecurityReviewResult",
     "ThreatFinding",
     "ThreatSeverity",

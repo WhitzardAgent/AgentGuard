@@ -50,6 +50,8 @@ def wrap_tool(
     sensitivity: str = "low",
     integrity: str = "trusted",
     tags: list[str] | None = None,
+    tool_definition: dict[str, Any] | None = None,
+    skill_manifest: dict[str, Any] | None = None,
 ) -> Callable[..., Any]:
     """Wrap `fn` so every invocation passes through the Guard pipeline.
 
@@ -83,9 +85,26 @@ def wrap_tool(
         "tags": list(tags or []),
         "syntax": list(syntax_fields),
     }
+    inferred_tool_definition = _build_tool_definition(
+        fn,
+        tool_name=tool_name,
+        signature=sig,
+        sink_type=sink_type,
+        boundary=boundary,
+        sensitivity=sensitivity,
+        integrity=integrity,
+        tags=list(tags or []),
+        syntax_fields=syntax_fields,
+        explicit=tool_definition,
+    )
 
     def _build_event(bound: inspect.BoundArguments) -> RuntimeEvent:
         principal, goal, scope = _resolve_principal()
+        extra: dict[str, Any] = {
+            "tool_definition": dict(inferred_tool_definition),
+        }
+        if skill_manifest is not None:
+            extra["skill_manifest"] = skill_manifest
         return RuntimeEvent(
             event_type=EventType.TOOL_CALL_ATTEMPT,
             principal=principal,
@@ -99,6 +118,7 @@ def wrap_tool(
                 label=static_label,
                 syntax=list(syntax_fields),
             ),
+            extra=extra,
         )
 
     if is_async:
@@ -260,6 +280,57 @@ def _resolve_principal() -> tuple[Principal, str | None, list[str]]:
     if session is not None:
         return session.principal, session.goal, session.scope
     return Principal(agent_id="sdk-default", session_id="anon"), None, []
+
+
+def _build_tool_definition(
+    fn: Callable[..., Any],
+    *,
+    tool_name: str,
+    signature: inspect.Signature,
+    sink_type: str,
+    boundary: str,
+    sensitivity: str,
+    integrity: str,
+    tags: list[str],
+    syntax_fields: list[str],
+    explicit: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    parameters: list[dict[str, Any]] = []
+    for name, param in signature.parameters.items():
+        if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+            continue
+        parameters.append({
+            "name": name,
+            "kind": str(param.kind).replace("Parameter.", ""),
+            "default": None if param.default is inspect._empty else repr(param.default),
+            "annotation": None if param.annotation is inspect._empty else _annotation_name(param.annotation),
+        })
+    inferred = {
+        "name": tool_name,
+        "callable": getattr(fn, "__qualname__", getattr(fn, "__name__", "")),
+        "signature": str(signature),
+        "doc": inspect.getdoc(fn) or "",
+        "parameters": parameters,
+        "syntax": list(syntax_fields),
+        "sink_type": sink_type,
+        "labels": {
+            "boundary": boundary,
+            "sensitivity": sensitivity,
+            "integrity": integrity,
+            "tags": list(tags),
+        },
+    }
+    if explicit is None:
+        return inferred
+    merged = dict(inferred)
+    merged.update(dict(explicit))
+    return merged
+
+
+def _annotation_name(annotation: Any) -> str:
+    if isinstance(annotation, type):
+        return annotation.__name__
+    return str(annotation)
 
 
 def _extract_target(tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
