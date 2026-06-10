@@ -14,6 +14,7 @@ class GuardDecideRequest(BaseModel):
     local_signals: list[str] = Field(default_factory=list)
     policy_version: str | None = None
     plugin_extensions: dict[str, Any] = Field(default_factory=dict)
+    client_cached_entries: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class GuardDecideResponse(BaseModel):
@@ -25,7 +26,21 @@ class GuardDecideResponse(BaseModel):
 
 class TraceUploadRequest(BaseModel):
     session_id: str | None = None
+    reason: str | None = None
     entries: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class CheckerConfigUpdateRequest(BaseModel):
+    config: dict[str, Any]
+    client_config: dict[str, Any] | None = None
+    client_config_urls: list[str] = Field(default_factory=list)
+    timeout_s: float = 2.0
+
+
+class CheckerConfigUpdateResponse(BaseModel):
+    status: str
+    loaded_checkers: list[str] = Field(default_factory=list)
+    client_updates: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class SkillRunRequest(BaseModel):

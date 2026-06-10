@@ -7,7 +7,6 @@ CAPABILITIES = {
     "network",
     "external_send",
     "shell",
-    "memory_write",
     "database_write",
     "payment",
     "browser_action",

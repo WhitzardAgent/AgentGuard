@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from agentguard.checkers.base import BaseChecker, CheckResult
-from agentguard.checkers.patterns import find_signals, text_of
+from agentguard.checkers.common.patterns import find_signals, text_of
 from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.events import EventType, RuntimeEvent
 

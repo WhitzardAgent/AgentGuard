@@ -4,9 +4,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from agentguard.schemas.context import RuntimeContext
-from agentguard.schemas.decisions import GuardDecision
-from agentguard.schemas.events import EventType, RuntimeEvent
+from shared.schemas.context import RuntimeContext
+from shared.schemas.decisions import GuardDecision
+from shared.schemas.events import EventType, RuntimeEvent
 
 
 @dataclass
@@ -30,5 +30,10 @@ class BaseChecker:
     def applies(self, event: RuntimeEvent) -> bool:
         return not self.event_types or event.event_type in self.event_types
 
-    def check(self, event: RuntimeEvent, context: RuntimeContext) -> CheckResult:
+    def check(
+        self,
+        event: RuntimeEvent,
+        context: RuntimeContext,
+        trajectory_window: list[RuntimeEvent] | None = None,
+    ) -> CheckResult:
         raise NotImplementedError

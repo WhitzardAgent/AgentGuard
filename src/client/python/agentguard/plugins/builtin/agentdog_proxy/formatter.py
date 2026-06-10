@@ -34,7 +34,7 @@ def format_trajectory(
 
 
 def _summarize(payload: dict[str, Any]) -> str:
-    for key in ("text", "thought", "result", "arguments", "output"):
+    for key in ("text", "result", "arguments", "output", "messages"):
         if key in payload and payload[key] is not None:
             return str(payload[key])[:200]
     return ""

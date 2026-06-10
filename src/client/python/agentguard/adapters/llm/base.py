@@ -18,16 +18,22 @@ class GuardedLLM:
 
     def __call__(self, request: Any, **kwargs: Any) -> Any:
         rt = self._runtime
-        norm_req = self._adapter.normalize_request(request)
-        rt.guard(ev.llm_input(rt.context, norm_req))
-        raw = self._adapter.complete(self._llm, request, **kwargs)
-        norm_resp = self._adapter.normalize_response(raw)
-        decision = rt.guard(ev.llm_output(rt.context, norm_resp), phase="after").decision
-        if decision.decision_type == DecisionType.DENY:
-            return {"agentguard": "blocked", "reason": decision.reason}
-        if decision.decision_type == DecisionType.SANITIZE:
-            return {"agentguard": "sanitized", "reason": decision.reason}
-        return raw
+        try:
+            norm_req = self._adapter.normalize_request(request)
+            rt.guard(ev.llm_input(rt.context, norm_req))
+            raw = self._adapter.complete(self._llm, request, **kwargs)
+            norm_resp = self._adapter.normalize_response(raw)
+            decision = rt.guard(ev.llm_output(rt.context, norm_resp), phase="after").decision
+            if decision.decision_type == DecisionType.DENY:
+                return {"agentguard": "blocked", "reason": decision.reason}
+            if decision.decision_type == DecisionType.SANITIZE:
+                return {"agentguard": "sanitized", "reason": decision.reason}
+            return raw
+        except Exception:
+            rt.sync_local_cache_now(reason="client_error")
+            raise
+        finally:
+            rt.sync_local_cache_async(reason="round_complete")
 
     def complete(self, request: Any, **kwargs: Any) -> Any:
         return self(request, **kwargs)

@@ -20,7 +20,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from agentguard.schemas.policy import PolicyEffect, PolicyRule, RuleCondition
+from shared.schemas.policy import PolicyEffect, PolicyRule, RuleCondition
 
 ACTION_TO_EFFECT = {
     "DENY": PolicyEffect.DENY,

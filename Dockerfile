@@ -1,4 +1,5 @@
-# AgentGuard runtime image (client + server share one image; PYTHONPATH layout).
+# AgentGuard server/runtime image. The server image only carries server + shared
+# source; client code is not required for backend imports.
 FROM python:3.11-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -7,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     AGENTGUARD_HOST=0.0.0.0 \
     AGENTGUARD_PORT=38080 \
-    PYTHONPATH="/opt/agentguard/src/client/python:/opt/agentguard/src:/opt/agentguard/src/server:/opt/agentguard"
+    PYTHONPATH="/opt/agentguard/src:/opt/agentguard/src/server:/opt/agentguard"
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl tini \
@@ -19,12 +20,11 @@ WORKDIR /opt/agentguard
 COPY pyproject.toml README.md ./
 RUN pip install "pydantic>=2.5,<3.0" "fastapi>=0.110" "uvicorn>=0.27"
 
-# Source + data (PYTHONPATH layout, no editable install needed).
-COPY src ./src
-COPY skills ./skills
+# Server source + shared source (PYTHONPATH layout, no editable install needed).
+COPY src/server ./src/server
+COPY src/shared ./src/shared
 COPY rules ./rules
 COPY plugins ./plugins
-COPY examples ./examples
 COPY scripts ./scripts
 
 RUN chmod +x scripts/*.sh 2>/dev/null || true

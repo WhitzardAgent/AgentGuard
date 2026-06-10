@@ -4,11 +4,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
-from agentguard.adapters.agent import default_agent_adapters, select_agent_adapter
 from agentguard.adapters.llm import default_llm_adapters, select_llm_adapter
 from agentguard.audit.logger import AuditLogger
 from agentguard.audit.recorder import AuditRecorder
 from agentguard.checkers.manager import CheckerManager
+from agentguard.config_api import ClientConfigAPIServer
 from agentguard.harness.event_bus import EventBus
 from agentguard.harness.lifecycle import Lifecycle
 from agentguard.harness.runtime import HarnessRuntime
@@ -23,14 +23,13 @@ from agentguard.tools.degrade import ToolDegradeManager
 from agentguard.tools.metadata import ToolMetadata
 from agentguard.tools.registry import ToolRegistry
 from agentguard.tools.wrapper import ToolWrapper
-from agentguard.u_guard.decision_cache import DecisionCache
 from agentguard.u_guard.enforcer import UGuardEnforcer
 from agentguard.u_guard.policy_snapshot import PolicySnapshot
 from agentguard.u_guard.remote_client import RemoteGuardClient
 
 
 class AgentGuard:
-    """Lightweight client-side Harness/U-Guard runtime."""
+    """Lightweight client-side Harness runtime."""
 
     def __init__(
         self,
@@ -69,12 +68,10 @@ class AgentGuard:
             timeout_s=remote_timeout_s,
             retries=remote_retries,
         )
-        self._cache = DecisionCache()
         self._enforcer = UGuardEnforcer(
             snapshot=snapshot,
             remote=self._remote,
             checker_manager=CheckerManager(config=checker_config),
-            cache=self._cache,
         )
         self._sandbox = SandboxExecutor(sandbox, sandbox_profile)
         self._audit = AuditRecorder(session_id, AuditLogger(audit_path))
@@ -83,6 +80,7 @@ class AgentGuard:
         self._lifecycle = Lifecycle()
         self._bus = EventBus()
         self._plugins = PluginManager(self._lifecycle)
+        self._config_api: ClientConfigAPIServer | None = None
 
         self.runtime = HarnessRuntime(
             context=self.context,
@@ -98,7 +96,6 @@ class AgentGuard:
             window_size=window_size,
         )
 
-        self._agent_adapters = default_agent_adapters()
         self._llm_adapters = default_llm_adapters()
         self._skills = SkillRegistryProxy(
             remote=RemoteSkillRunner(server_url, api_key=api_key) if server_url else None
@@ -126,14 +123,26 @@ class AgentGuard:
         self._enforcer.set_snapshot(snap)
         self.context.policy_version = snap.version
 
+    def update_checker_config(self, checker_config: str | dict[str, Any] | None) -> None:
+        """Replace local checker configuration for subsequent guarded events."""
+        self._enforcer.update_checker_config(checker_config)
+
+    def start_config_api(self, *, host: str = "127.0.0.1", port: int = 38181) -> str:
+        """Start a local HTTP API for checker configuration updates."""
+        if self._config_api is None:
+            self._config_api = ClientConfigAPIServer(self, host=host, port=port)
+        return self._config_api.start()
+
+    def stop_config_api(self) -> None:
+        """Stop the local checker configuration HTTP API if it is running."""
+        if self._config_api is not None:
+            self._config_api.stop()
+            self._config_api = None
+
     # ---- wrapping ------------------------------------------------------
     def wrap_tool(self, fn: Callable[..., Any], **meta: Any) -> ToolWrapper:
         metadata = self.register_tool(fn, **meta)
         return ToolWrapper(fn, metadata, self.runtime)
-
-    def wrap_agent(self, agent: Any) -> Any:
-        adapter = select_agent_adapter(agent, self._agent_adapters)
-        return adapter.wrap(agent, self.runtime)
 
     def wrap_llm(self, llm: Any) -> Any:
         adapter = select_llm_adapter(llm, self._llm_adapters)
@@ -219,4 +228,6 @@ class AgentGuard:
         return self.runtime.session.trace
 
     def close(self) -> None:
+        self.stop_config_api()
+        self.runtime.sync_local_cache_now(reason="session_close")
         self._plugins.end_session(self.runtime.session.trace, self.context)

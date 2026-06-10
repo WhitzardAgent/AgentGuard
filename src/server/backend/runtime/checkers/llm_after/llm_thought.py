@@ -1,29 +1,22 @@
-"""Checker for LLM internal thought events."""
+"""Deprecated checker for removed LLM thought events."""
 from __future__ import annotations
 
-from agentguard.schemas.context import RuntimeContext
-from agentguard.schemas.events import EventType, RuntimeEvent
+from shared.schemas.context import RuntimeContext
+from shared.schemas.events import RuntimeEvent
 from backend.runtime.checkers.base import BaseChecker, CheckResult
-from backend.runtime.checkers.patterns import find_signals, text_of
-
-_UNSAFE_INTENT = (
-    "exfiltrate",
-    "bypass the policy",
-    "ignore the guard",
-    "hide this from",
-    "without permission",
-    "secretly",
-)
 
 
 class LLMThoughtChecker(BaseChecker):
     name = "llm_thought"
-    event_types = [EventType.LLM_THOUGHT]
+    event_types = []
 
-    def check(self, event: RuntimeEvent, context: RuntimeContext) -> CheckResult:
-        text = text_of(event.payload.get("thought"))
-        signals = find_signals(text)
-        low = text.lower()
-        if any(p in low for p in _UNSAFE_INTENT):
-            signals.append("unsafe_thought")
-        return CheckResult(risk_signals=signals)
+    def applies(self, event: RuntimeEvent) -> bool:
+        return False
+
+    def check(
+        self,
+        event: RuntimeEvent,
+        context: RuntimeContext,
+        trajectory_window: list[RuntimeEvent] | None = None,
+    ) -> CheckResult:
+        return CheckResult.empty()

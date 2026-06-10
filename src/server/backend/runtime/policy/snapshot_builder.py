@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentguard.u_guard.policy_snapshot import PolicySnapshot
 from backend.runtime.policy.store import PolicyStore
+from shared.rules.snapshot import PolicySnapshot
 
 
 def build_snapshot(store: PolicyStore) -> PolicySnapshot:

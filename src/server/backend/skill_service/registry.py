@@ -10,7 +10,11 @@ class SkillRegistry:
 
     def _load(self):
         if self._registry is None:
-            from skills.registry import get_registry  # noqa: PLC0415
+            try:
+                from skills.registry import get_registry  # noqa: PLC0415
+            except ImportError:
+                self._registry = _EmptySkillRegistry()
+                return self._registry
 
             self._registry = get_registry()
         return self._registry
@@ -20,3 +24,12 @@ class SkillRegistry:
 
     def get(self, name: str) -> Any:
         return self._load().get(name)
+
+
+class _EmptySkillRegistry:
+    def names(self) -> list[str]:
+        return []
+
+    def get(self, name: str) -> Any:
+        _ = name
+        return None

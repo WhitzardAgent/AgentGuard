@@ -13,27 +13,15 @@ from agentguard.utils.time import now_ts
 
 
 class EventType(str, Enum):
-    USER_INPUT = "user_input"
-
     LLM_INPUT = "llm_input"
     LLM_OUTPUT = "llm_output"
-    LLM_THOUGHT = "llm_thought"
-    LLM_TOOL_CALL_CANDIDATE = "llm_tool_call_candidate"
-
     TOOL_INVOKE = "tool_invoke"
     TOOL_RESULT = "tool_result"
 
-    MEMORY_READ = "memory_read"
-    MEMORY_WRITE = "memory_write"
-
-    FILE_READ = "file_read"
-    FILE_WRITE = "file_write"
-
-    NETWORK_REQUEST = "network_request"
-    FINAL_RESPONSE = "final_response"
-
-    SANDBOX_EXECUTION = "sandbox_execution"
-    POLICY_DECISION = "policy_decision"
+    # Deprecated event types intentionally kept out of the active enum:
+    # user_input, llm_thought, llm_tool_call_candidate, memory_read,
+    # memory_write, file_read, file_write, network_request, final_response,
+    # sandbox_execution, policy_decision.
 
 
 # Patterns used for redaction of sensitive payload values.
@@ -165,7 +153,13 @@ def _make(
 
 # ---- helper constructors ----------------------------------------------
 def user_input(context: RuntimeContext, text: str, **meta: Any) -> RuntimeEvent:
-    return _make(EventType.USER_INPUT, context, {"text": text}, metadata=meta)
+    """Compatibility alias: user text is now represented as LLM_INPUT."""
+    return _make(
+        EventType.LLM_INPUT,
+        context,
+        {"text": text, "messages": [{"role": "user", "content": text}]},
+        metadata=meta,
+    )
 
 
 def llm_input(context: RuntimeContext, messages: Any, **meta: Any) -> RuntimeEvent:
@@ -177,7 +171,8 @@ def llm_output(context: RuntimeContext, output: Any, **meta: Any) -> RuntimeEven
 
 
 def llm_thought(context: RuntimeContext, thought: str, **meta: Any) -> RuntimeEvent:
-    return _make(EventType.LLM_THOUGHT, context, {"thought": thought}, metadata=meta)
+    """Compatibility alias: thoughts are no longer a separate event type."""
+    return _make(EventType.LLM_OUTPUT, context, {"output": thought}, metadata=meta)
 
 
 def tool_invoke(
@@ -209,16 +204,5 @@ def tool_result(
 
 
 def final_response(context: RuntimeContext, text: str, **meta: Any) -> RuntimeEvent:
-    return _make(EventType.FINAL_RESPONSE, context, {"text": text}, metadata=meta)
-
-
-def sandbox_execution(
-    context: RuntimeContext, tool_name: str, **meta: Any
-) -> RuntimeEvent:
-    return _make(EventType.SANDBOX_EXECUTION, context, {"tool_name": tool_name}, metadata=meta)
-
-
-def policy_decision(
-    context: RuntimeContext, decision: dict[str, Any], **meta: Any
-) -> RuntimeEvent:
-    return _make(EventType.POLICY_DECISION, context, {"decision": decision}, metadata=meta)
+    """Compatibility alias: final text is now represented as LLM_OUTPUT."""
+    return _make(EventType.LLM_OUTPUT, context, {"output": text}, metadata=meta)

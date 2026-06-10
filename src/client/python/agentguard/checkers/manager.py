@@ -7,70 +7,69 @@ from pathlib import Path
 from typing import Any
 
 from agentguard.checkers.base import BaseChecker, CheckResult
-from agentguard.checkers.memory import MemoryChecker
-from agentguard.checkers.llm_after import FinalResponseChecker, LLMOutputChecker, LLMThoughtChecker
+from agentguard.checkers.llm_after import LLMOutputChecker
 from agentguard.checkers.llm_before import LLMInputChecker
 from agentguard.checkers.tool_after import ToolResultChecker
 from agentguard.checkers.tool_before import ToolInvokeChecker
 from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.events import EventType, RuntimeEvent
 
-PHASE_ORDER = ("llm_before", "llm_after", "tool_before", "tool_after", "memory", "global")
+PHASE_ORDER = ("llm_before", "llm_after", "tool_before", "tool_after", "global")
 
 _EVENT_PHASE = {
-    EventType.USER_INPUT: "llm_before",
     EventType.LLM_INPUT: "llm_before",
     EventType.LLM_OUTPUT: "llm_after",
-    EventType.LLM_THOUGHT: "llm_after",
-    EventType.FINAL_RESPONSE: "llm_after",
     EventType.TOOL_INVOKE: "tool_before",
     EventType.TOOL_RESULT: "tool_after",
-    EventType.MEMORY_READ: "memory",
-    EventType.MEMORY_WRITE: "memory",
 }
 
 _BUILTIN_CHECKERS = {
     "llm_input": LLMInputChecker,
     "llm_output": LLMOutputChecker,
-    "llm_thought": LLMThoughtChecker,
-    "final_response": FinalResponseChecker,
     "tool_invoke": ToolInvokeChecker,
     "tool_result": ToolResultChecker,
-    "memory": MemoryChecker,
 }
 
 
 def default_checkers() -> list[BaseChecker]:
-    by_phase = build_checkers_by_phase(default_checker_config())
-    return [checker for phase in PHASE_ORDER for checker in by_phase.get(phase, [])]
+    return []
 
 
-def default_checker_config() -> dict[str, list[Any]]:
-    return {
-        "llm_before": ["llm_input"],
-        "llm_after": ["llm_output", "llm_thought", "final_response"],
-        "tool_before": ["tool_invoke"],
-        "tool_after": ["tool_result"],
-        "memory": ["memory"],
-    }
+def default_checker_config() -> dict[str, dict[str, list[Any]]]:
+    return {}
 
 
 def load_checker_config(source: str | Path | dict[str, Any] | None) -> dict[str, list[Any]]:
     if source is None:
-        return default_checker_config()
-    if isinstance(source, (str, Path)):
+        return {}
+    elif isinstance(source, (str, Path)):
         path = Path(source)
         with path.open("r", encoding="utf-8") as fh:
             data = json.load(fh)
     else:
         data = dict(source)
 
-    phases = data.get("phases", data)
+    phases = data.get("phases")
+    if not isinstance(phases, dict):
+        raise ValueError("checker config must contain a 'phases' object")
     config: dict[str, list[Any]] = {}
     for phase in PHASE_ORDER:
         if phase in phases:
-            config[phase] = list(phases.get(phase) or [])
+            config[phase] = _checker_specs_for_scope(phases.get(phase), "local")
     return config
+
+
+def _checker_specs_for_scope(value: Any, scope: str) -> list[Any]:
+    if not isinstance(value, dict):
+        raise ValueError("checker phase config must be an object with 'local' and 'remote'")
+    if "local" not in value or "remote" not in value:
+        raise ValueError("checker phase config must include both 'local' and 'remote'")
+    specs = value.get(scope)
+    if specs is None:
+        return []
+    if not isinstance(specs, list):
+        raise ValueError(f"checker phase '{scope}' config must be a list")
+    return list(specs)
 
 
 def build_checkers_by_phase(config: dict[str, list[Any]]) -> dict[str, list[BaseChecker]]:
@@ -125,16 +124,24 @@ class CheckerManager:
             self.checkers_by_phase = {"global": list(checkers)}
         else:
             self.checkers_by_phase = build_checkers_by_phase(load_checker_config(config))
-        self.checkers = [
-            checker
-            for phase in PHASE_ORDER
-            for checker in self.checkers_by_phase.get(phase, [])
-        ]
+        self._refresh_flat_checkers()
+
+    def update_config(self, config: str | Path | dict[str, Any] | None) -> None:
+        """Replace checker configuration for subsequent events."""
+        self.checkers_by_phase = build_checkers_by_phase(load_checker_config(config))
+        self._refresh_flat_checkers()
 
     def add(self, checker: BaseChecker, phase: str | None = None) -> None:
         target = phase or _infer_phase(checker)
         self.checkers_by_phase.setdefault(target, []).append(checker)
         self.checkers.append(checker)
+
+    def _refresh_flat_checkers(self) -> None:
+        self.checkers = [
+            checker
+            for phase in PHASE_ORDER
+            for checker in self.checkers_by_phase.get(phase, [])
+        ]
 
     def run(self, event: RuntimeEvent, context: RuntimeContext) -> CheckResult:
         merged_signals: list[str] = []

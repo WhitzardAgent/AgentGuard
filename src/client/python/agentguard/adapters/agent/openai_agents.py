@@ -123,29 +123,35 @@ def _patch_openai_tool(tool: Any, guard: Any, *, name: str) -> int:
 
     @functools.wraps(original)
     async def guarded_invoke(*args: Any, **kwargs: Any) -> Any:
-        tool_args = _extract_json_args(args, kwargs)
-        decision = guard_tool_before(guard, metadata, tool_args)
-        if decision.decision_type == DecisionType.DENY:
-            return json.dumps({"agentguard": "blocked", "reason": decision.reason})
-        if decision.requires_user or decision.requires_remote:
-            return json.dumps({
-                "agentguard": "pending",
-                "reason": decision.reason,
-                "decision": decision.decision_type.value,
-            })
-
         try:
-            value = await _call_original(*args, **kwargs)
-        except Exception as exc:
-            guard_tool_after(guard, name, error=str(exc))
-            raise
+            tool_args = _extract_json_args(args, kwargs)
+            decision = guard_tool_before(guard, metadata, tool_args)
+            if decision.decision_type == DecisionType.DENY:
+                return json.dumps({"agentguard": "blocked", "reason": decision.reason})
+            if decision.requires_user or decision.requires_remote:
+                return json.dumps({
+                    "agentguard": "pending",
+                    "reason": decision.reason,
+                    "decision": decision.decision_type.value,
+                })
 
-        result_decision = guard_tool_after(guard, name, value)
-        if result_decision.decision_type == DecisionType.DENY:
-            return json.dumps({"agentguard": "blocked", "reason": result_decision.reason})
-        if result_decision.decision_type == DecisionType.SANITIZE:
-            return json.dumps({"agentguard": "sanitized", "reason": result_decision.reason})
-        return value
+            try:
+                value = await _call_original(*args, **kwargs)
+            except Exception as exc:
+                guard_tool_after(guard, name, error=str(exc))
+                raise
+
+            result_decision = guard_tool_after(guard, name, value)
+            if result_decision.decision_type == DecisionType.DENY:
+                return json.dumps({"agentguard": "blocked", "reason": result_decision.reason})
+            if result_decision.decision_type == DecisionType.SANITIZE:
+                return json.dumps({"agentguard": "sanitized", "reason": result_decision.reason})
+            return value
+        except Exception:
+            guard.runtime.sync_local_cache_now(reason="client_error")
+            raise
+        finally:
+            guard.runtime.sync_local_cache_async(reason="round_complete")
 
     set_attr(guarded_invoke, "__agentguard_wrapped__", True)
     if set_attr(tool, "on_invoke_tool", guarded_invoke):

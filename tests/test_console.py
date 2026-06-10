@@ -15,7 +15,15 @@ _DENY_RULE = (
 
 
 def _console() -> ConsoleState:
-    return ConsoleState(RuntimeManager())
+    return ConsoleState(
+        RuntimeManager(
+            checker_config={
+                "phases": {
+                    "tool_before": {"local": [], "remote": ["tool_invoke", "rule_based_check"]}
+                }
+            }
+        )
+    )
 
 
 def test_dsl_parse_and_roundtrip():
@@ -30,7 +38,7 @@ def test_dsl_parse_and_roundtrip():
 
 
 def test_check_reports_missing_lines():
-    result = ConsoleState(RuntimeManager()).check("RULE: x\nPOLICY: DENY")
+    result = _console().check("RULE: x\nPOLICY: DENY")
     assert result["ok"] is False
     assert any("CONDITION" in e["message"] for e in result["errors"])
 
@@ -44,7 +52,7 @@ def test_publish_list_delete_rule():
     rules = con.list_rules("agent-alpha")
     managed = [r for r in rules if r["user_managed"]]
     assert any(r["rule_id"] == "block_shell" for r in managed)
-    # Published rule is enforced by the bound policy engine.
+    # Published rule is available to the optional rule-based checker.
     assert any(r.rule_id == "block_shell" for r in con.manager.policy.store.rules())
 
     dup = con.publish_rule("agent-alpha", _DENY_RULE)

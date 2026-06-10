@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentguard.schemas.decisions import GuardDecision
+from shared.schemas.decisions import GuardDecision
 from backend.plugins.base import ServerPlugin
 from backend.plugins.builtin.agentdog.config import AgentDoGServerConfig
 from backend.plugins.builtin.agentdog.formatter import extract_trajectory

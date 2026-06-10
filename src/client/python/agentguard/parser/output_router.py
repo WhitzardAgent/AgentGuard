@@ -5,14 +5,13 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from agentguard.checkers.patterns import find_signals, text_of
+from agentguard.checkers.common.patterns import find_signals, text_of
 from agentguard.parser.tool_call_parser import parse_tool_calls
 from agentguard.schemas.tool import ToolCall
 
 
 class OutputKind(str, Enum):
-    FINAL_RESPONSE = "final_response"
-    THOUGHT_TRACE = "thought_trace"
+    TEXT_OUTPUT = "text_output"
     TOOL_CALL_CANDIDATE = "tool_call_candidate"
     MALFORMED_TOOL_CALL = "malformed_tool_call"
     UNSAFE_OUTPUT = "unsafe_output"
@@ -22,7 +21,6 @@ class OutputKind(str, Enum):
 class RouterResult:
     kind: OutputKind
     text: str | None = None
-    thought: str | None = None
     tool_calls: list[ToolCall] = field(default_factory=list)
     risk_signals: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
@@ -38,10 +36,7 @@ def route_output(output: Any) -> RouterResult:
     if isinstance(output, dict):
         if output.get("type") == "tool_use" or any(k in output for k in _TOOL_KEYS):
             return _route_tool(output)
-        thought = output.get("thought") or output.get("reasoning")
         text = output.get("text") or output.get("content") or output.get("output")
-        if thought and not text:
-            return RouterResult(OutputKind.THOUGHT_TRACE, thought=str(thought), raw=output)
         return _route_text(text_of(text if text is not None else output), raw=output)
 
     if isinstance(output, list):
@@ -82,5 +77,5 @@ def _route_tool(output: Any) -> RouterResult:
 def _route_text(text: str, raw: Any = None) -> RouterResult:
     signals = find_signals(text)
     unsafe = {"secret_detected", "api_key_detected", "system_prompt_leak"} & set(signals)
-    kind = OutputKind.UNSAFE_OUTPUT if unsafe else OutputKind.FINAL_RESPONSE
+    kind = OutputKind.UNSAFE_OUTPUT if unsafe else OutputKind.TEXT_OUTPUT
     return RouterResult(kind, text=text, risk_signals=signals, raw=raw)

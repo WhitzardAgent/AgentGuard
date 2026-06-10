@@ -3,24 +3,15 @@ from __future__ import annotations
 
 ACTION_LABELS = (
     "read",
-    "write",
-    "send",
     "execute",
-    "query",
     "respond",
-    "think",
 )
 
 _EVENT_ACTION = {
-    "file_read": "read",
-    "memory_read": "read",
-    "file_write": "write",
-    "memory_write": "write",
-    "network_request": "send",
+    "llm_input": "read",
+    "llm_output": "respond",
     "tool_invoke": "execute",
     "tool_result": "read",
-    "final_response": "respond",
-    "llm_thought": "think",
 }
 
 

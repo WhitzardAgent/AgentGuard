@@ -1,15 +1,15 @@
 """Checker for tool invocation events."""
 from __future__ import annotations
 
-from agentguard.schemas.context import RuntimeContext
-from agentguard.schemas.decisions import GuardDecision
-from agentguard.schemas.events import EventType, RuntimeEvent
-from agentguard.tools.capability import (
+from shared.schemas.context import RuntimeContext
+from shared.schemas.decisions import GuardDecision
+from shared.schemas.events import EventType, RuntimeEvent
+from shared.tools.capability import (
     CAP_EXTERNAL_SEND,
     CAP_SHELL,
 )
 from backend.runtime.checkers.base import BaseChecker, CheckResult
-from backend.runtime.checkers.patterns import SHELL_RE, find_signals, text_of
+from backend.runtime.checkers.common.patterns import SHELL_RE, find_signals, text_of
 
 _DANGEROUS_SHELL = ("rm -rf /", "mkfs", ":(){", "dd if=")
 
@@ -18,7 +18,12 @@ class ToolInvokeChecker(BaseChecker):
     name = "tool_invoke"
     event_types = [EventType.TOOL_INVOKE]
 
-    def check(self, event: RuntimeEvent, context: RuntimeContext) -> CheckResult:
+    def check(
+        self,
+        event: RuntimeEvent,
+        context: RuntimeContext,
+        trajectory_window: list[RuntimeEvent] | None = None,
+    ) -> CheckResult:
         payload = event.payload
         caps = set(payload.get("capabilities") or [])
         args_text = text_of(payload.get("arguments"))

@@ -6,7 +6,6 @@ TRANSFORM_HOOKS = (
     "on_event",
     "on_llm_input",
     "on_llm_output",
-    "on_llm_thought",
     "on_tool_invoke",
     "on_tool_result",
     "on_before_remote_decision",

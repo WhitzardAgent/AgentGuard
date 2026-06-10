@@ -5,9 +5,9 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from agentguard.audit.redactor import redact
-from agentguard.utils.json import safe_dumps
-from agentguard.utils.time import iso_now
+from shared.audit.redactor import redact
+from shared.utils.json import safe_dumps
+from shared.utils.time import iso_now
 
 
 class AuditLogger:

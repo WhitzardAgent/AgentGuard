@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentguard.schemas.decisions import GuardDecision
+from shared.schemas.decisions import GuardDecision
 from backend.plugins.base import ServerPlugin
 from backend.plugins.registry import PluginRegistry
 

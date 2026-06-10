@@ -1,19 +1,33 @@
-"""Shared schema re-exports (single source of truth lives in agentguard)."""
+"""Shared runtime schemas used by AgentGuard client and server."""
 from __future__ import annotations
 
-from agentguard.schemas.decisions import DecisionType, GuardDecision
-from agentguard.schemas.events import EventType, RuntimeEvent
-from agentguard.schemas.policy import PolicyEffect, PolicyRule
-
-from shared.protocol.messages import RemoteGuardRequest, RemoteGuardResponse
+from shared.schemas.context import RuntimeContext
+from shared.schemas.decisions import DecisionType, GuardDecision
+from shared.schemas.events import EventType, RuntimeEvent
+from shared.schemas.llm import LLMMessage, LLMRequest, LLMResponse
+from shared.schemas.policy import (
+    PolicyEffect,
+    PolicyRule,
+    RuleCondition,
+    effect_to_decision,
+)
+from shared.schemas.sandbox import SandboxResult
+from shared.schemas.tool import ParseResult, ToolCall
 
 __all__ = [
-    "RuntimeEvent",
+    "RuntimeContext",
     "EventType",
-    "GuardDecision",
+    "RuntimeEvent",
     "DecisionType",
-    "PolicyRule",
+    "GuardDecision",
+    "LLMMessage",
+    "LLMRequest",
+    "LLMResponse",
     "PolicyEffect",
-    "RemoteGuardRequest",
-    "RemoteGuardResponse",
+    "PolicyRule",
+    "RuleCondition",
+    "effect_to_decision",
+    "SandboxResult",
+    "ToolCall",
+    "ParseResult",
 ]

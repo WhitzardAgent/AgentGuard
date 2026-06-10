@@ -1,7 +1,7 @@
 """Server policy rule (reuses the shared PolicyRule schema)."""
 from __future__ import annotations
 
-from agentguard.schemas.policy import (
+from shared.schemas.policy import (
     PolicyEffect,
     PolicyRule,
     RuleCondition,

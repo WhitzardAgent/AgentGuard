@@ -22,9 +22,6 @@ class ClientPlugin:
     def on_llm_output(self, event: RuntimeEvent, context: RuntimeContext) -> RuntimeEvent:
         return event
 
-    def on_llm_thought(self, event: RuntimeEvent, context: RuntimeContext) -> RuntimeEvent:
-        return event
-
     def on_tool_invoke(self, event: RuntimeEvent, context: RuntimeContext) -> RuntimeEvent:
         return event
 

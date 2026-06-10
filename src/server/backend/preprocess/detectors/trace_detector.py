@@ -19,7 +19,7 @@ class TraceDetector(BaseDetector):
             etype = e.get("event_type")
             caps = (e.get("payload") or {}).get("capabilities") or e.get("capabilities") or []
             signals = e.get("risk_signals") or []
-            if etype in ("file_read", "tool_result") or "read_file" in caps:
+            if etype == "tool_result" or "read_file" in caps:
                 seen_read = True
             if {"secret_detected", "api_key_detected"} & set(signals):
                 seen_secret = True

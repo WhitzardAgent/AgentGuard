@@ -15,6 +15,11 @@ def _first_event(guard: AgentGuard, event_type: str):
     return next(entry.event for entry in guard.trace.entries if entry.event.event_type.value == event_type)
 
 
+def test_wrap_agent_is_not_exposed():
+    guard = AgentGuard("wrap-disabled", sandbox="noop")
+    assert not hasattr(guard, "wrap_agent")
+
+
 def test_attach_autogen_patches_tool_and_llm_method():
     calls = []
 

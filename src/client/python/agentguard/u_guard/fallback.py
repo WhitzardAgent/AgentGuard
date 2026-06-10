@@ -11,7 +11,6 @@ _STRONG_SIGNALS = {
     "system_prompt_leak",
     "prompt_injection",
     "tool_result_injection",
-    "unsafe_final_response",
 }
 
 

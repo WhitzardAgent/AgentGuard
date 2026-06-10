@@ -1,20 +1,18 @@
-"""U-Guard enforcer: orchestrates the local/remote decision flow."""
+"""Client enforcer: local checkers first, then remote decision."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable
 
 from agentguard.checkers.base import CheckResult
 from agentguard.checkers.manager import CheckerManager
 from agentguard.schemas.context import RuntimeContext
-from agentguard.schemas.decisions import DecisionType, GuardDecision
+from agentguard.schemas.decisions import GuardDecision
 from agentguard.schemas.events import RuntimeEvent
-from agentguard.u_guard.decision_cache import DecisionCache
-from agentguard.u_guard.fallback import FallbackGuard
-from agentguard.u_guard.local_engine import LocalGuardEngine
 from agentguard.u_guard.policy_snapshot import PolicySnapshot
 from agentguard.u_guard.remote_client import RemoteGuardClient
-from agentguard.u_guard.router import RouteTarget, UGuardRouter
+from agentguard.u_guard.sync_buffer import ClientSyncBuffer
 from agentguard.utils.errors import RemoteGuardError
 
 
@@ -28,7 +26,7 @@ class EnforcementResult:
 
 
 class UGuardEnforcer:
-    """Client-side guard: normalize -> cache -> local -> route -> remote/fallback."""
+    """Client-side enforcement: final checker verdict or server decision."""
 
     def __init__(
         self,
@@ -36,21 +34,22 @@ class UGuardEnforcer:
         snapshot: PolicySnapshot | None = None,
         remote: RemoteGuardClient | None = None,
         checker_manager: CheckerManager | None = None,
-        cache: DecisionCache | None = None,
-        router: UGuardRouter | None = None,
-        fallback: FallbackGuard | None = None,
         trace_window_provider: Callable[[], list[RuntimeEvent]] | None = None,
+        sync_buffer: ClientSyncBuffer | None = None,
+        **_: Any,
     ) -> None:
-        self.local_engine = LocalGuardEngine(snapshot)
+        self.snapshot = snapshot
         self.remote = remote
         self.checkers = checker_manager or CheckerManager()
-        self.cache = cache or DecisionCache()
-        self.router = router or UGuardRouter()
-        self.fallback = fallback or FallbackGuard()
         self.trace_window_provider = trace_window_provider
+        self.sync_buffer = sync_buffer or ClientSyncBuffer()
 
     def set_snapshot(self, snapshot: PolicySnapshot) -> None:
-        self.local_engine.set_snapshot(snapshot)
+        self.snapshot = snapshot
+
+    def update_checker_config(self, config: str | Path | dict[str, Any] | None) -> None:
+        """Replace local checker configuration for subsequent events."""
+        self.checkers.update_config(config)
 
     @property
     def server_available(self) -> bool:
@@ -63,55 +62,62 @@ class UGuardEnforcer:
         *,
         plugin_extensions: dict[str, Any] | None = None,
         force_remote: bool = False,
-        use_cache: bool = True,
     ) -> EnforcementResult:
-        # 1. Run local checkers (annotates event with risk signals).
+        _ = force_remote
+
+        # 1. Run local checkers. They can annotate the event with risk signals
+        # and may return a final local decision.
         check = self.checkers.run(event, context)
 
-        # 2. Decision cache.
-        if use_cache:
-            cached = self.cache.get(event)
-            if cached is not None:
-                cached.metadata.setdefault("route", "cache")
-                return EnforcementResult(cached, event, route="cache", check=check)
-
-        # 3. Local policy snapshot.
         trace_window = self.trace_window_provider() if self.trace_window_provider else None
-        local_eval = self.local_engine.evaluate(event, trace_window)
 
-        # 4. Merge checker final candidate.
+        # 2. A final checker decision wins before remote.
         if check.is_final and check.decision_candidate is not None:
             decision = check.decision_candidate
-            self._finalize(event, decision, "local", use_cache)
-            return EnforcementResult(decision, event, route="local", check=check)
-
-        # 5. Route.
-        plugin_requests_remote = bool((plugin_extensions or {}).get("force_remote"))
-        route = self.router.route(
-            event,
-            local_eval,
-            check,
-            server_available=self.server_available,
-            plugin_requests_remote=plugin_requests_remote,
-            force_remote=force_remote,
-        )
-
-        # 6/7. Remote or fallback.
-        if route.target == RouteTarget.REMOTE:
-            decision, final_route = self._decide_remote(
-                event, context, trace_window, plugin_extensions, local_eval.decision
+            decision.metadata.setdefault("route", "local_checker")
+            self.sync_buffer.add_local_decision(
+                event=event,
+                context=context,
+                check=check,
+                decision=decision,
+                route="local_checker",
+                plugin_extensions=plugin_extensions,
             )
-        elif route.target == RouteTarget.FALLBACK:
-            decision = self.fallback.decide(event)
-            final_route = "fallback"
-        else:
-            decision = local_eval.decision
-            final_route = "local"
+            return EnforcementResult(
+                decision,
+                event,
+                route="local_checker",
+                check=check,
+                plugin_extensions=plugin_extensions or {},
+            )
 
-        # 8. Cache + finalize.
-        self._finalize(event, decision, final_route, use_cache)
+        # 3. No final local decision: send to remote and accept the server's
+        # decision as authoritative.
+        if self.server_available:
+            decision, final_route = self._decide_remote(
+                event, context, trace_window, plugin_extensions
+            )
+            return EnforcementResult(
+                decision,
+                event,
+                route=final_route,
+                check=check,
+                plugin_extensions=plugin_extensions or {},
+            )
+
+        # 4. Local/dev mode without a remote server. This keeps wrappers usable
+        # when no server_url is configured; production deployments should set
+        # server_url so non-final events are judged by the server.
+        decision = GuardDecision.allow(
+            "No final local checker decision and no remote server configured.",
+            risk_signals=list(event.risk_signals),
+            metadata={"route": "local_no_remote"},
+        )
         return EnforcementResult(
-            decision, event, route=final_route, check=check,
+            decision,
+            event,
+            route="local_no_remote",
+            check=check,
             plugin_extensions=plugin_extensions or {},
         )
 
@@ -122,48 +128,24 @@ class UGuardEnforcer:
         context: RuntimeContext,
         trace_window: list[RuntimeEvent] | None,
         plugin_extensions: dict[str, Any] | None,
-        local_decision: GuardDecision,
     ) -> tuple[GuardDecision, str]:
         try:
+            cached_entries = self.sync_buffer.pop_all()
             decision = self.remote.decide(  # type: ignore[union-attr]
                 event,
                 context,
                 trajectory_window=trace_window,
                 local_signals=list(event.risk_signals),
                 plugin_extensions=plugin_extensions or {},
+                client_cached_entries=cached_entries,
             )
             decision.metadata.setdefault("route", "remote")
-            return self._merge_strict(local_decision, decision), "remote"
+            return decision, "remote"
         except RemoteGuardError:
-            return self.fallback.decide(event), "fallback"
-
-    @staticmethod
-    def _merge_strict(local: GuardDecision, remote: GuardDecision) -> GuardDecision:
-        """Deny-overrides: keep the stricter of local and remote."""
-        from agentguard.rules.matcher import _EFFECT_RANK  # noqa: PLC0415
-
-        # Map decision types to a rough strictness rank.
-        rank = {
-            DecisionType.DENY: 9,
-            DecisionType.REQUIRE_APPROVAL: 8,
-            DecisionType.REQUIRE_REMOTE_REVIEW: 7,
-            DecisionType.ASK_USER: 7,
-            DecisionType.DEGRADE: 6,
-            DecisionType.SANITIZE: 5,
-            DecisionType.REWRITE: 4,
-            DecisionType.REPAIR: 3,
-            DecisionType.LOG_ONLY: 2,
-            DecisionType.ALLOW: 1,
-        }
-        _ = _EFFECT_RANK  # keep import meaningful for parity with rule matcher
-        if rank.get(local.decision_type, 0) > rank.get(remote.decision_type, 0):
-            local.metadata.setdefault("remote_decision", remote.decision_type.value)
-            return local
-        return remote
-
-    def _finalize(
-        self, event: RuntimeEvent, decision: GuardDecision, route: str, use_cache: bool
-    ) -> None:
-        decision.metadata.setdefault("route", route)
-        if use_cache:
-            self.cache.put(event, decision)
+            self.sync_buffer.restore_front(cached_entries)
+            decision = GuardDecision.require_remote_review(
+                "Remote decision unavailable; event requires server judgement.",
+                risk_signals=list(event.risk_signals),
+                metadata={"route": "remote_unavailable"},
+            )
+            return decision, "remote_unavailable"

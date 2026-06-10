@@ -2,11 +2,8 @@
 # AgentGuard container entrypoint.
 #
 # Supported CMDs:
-#   serve   (default) — start the server PDP (FastAPI via uvicorn)
-#   frontend          — start the management console web UI (proxies to the server)
-#   client            — run the AgentDoG paired e2e example against $AGENTGUARD_SERVER_URL
-#   example <name>    — run examples/<name>.py
-#   *                 — passed through to the `python -m agentguard.cli` CLI
+#   serve    (default) — start the server PDP (FastAPI via uvicorn)
+#   frontend           — start the management console web UI (proxies to the server)
 set -eu
 
 CMD="${1:-serve}"
@@ -24,17 +21,8 @@ case "$CMD" in
     export FRONTEND_PORT="${FRONTEND_PORT:-38008}"
     exec python src/server/frontend/app.py
     ;;
-  client)
-    exec python examples/remote_client_e2e.py "$@"
-    ;;
-  example)
-    if [ "$#" -lt 1 ]; then
-      echo "usage: example <name>" >&2
-      exit 2
-    fi
-    exec python examples/"$1".py
-    ;;
   *)
-    exec python -m agentguard.cli "$CMD" "$@"
+    echo "unsupported command for server image: $CMD" >&2
+    exit 2
     ;;
 esac

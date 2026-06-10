@@ -151,19 +151,25 @@ def make_guarded_tool(
 
         @functools.wraps(fn)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-            arguments = bind_arguments(fn, args, kwargs)
-            decision = guard_tool_before(guard, metadata, arguments)
-            blocked = _blocked_tool_value(decision, metadata.name)
-            if blocked is not None:
-                return blocked
             try:
-                value = await fn(*args, **kwargs)
-            except Exception as exc:
-                guard_tool_after(guard, metadata.name, error=str(exc))
+                arguments = bind_arguments(fn, args, kwargs)
+                decision = guard_tool_before(guard, metadata, arguments)
+                blocked = _blocked_tool_value(decision, metadata.name)
+                if blocked is not None:
+                    return blocked
+                try:
+                    value = await fn(*args, **kwargs)
+                except Exception as exc:
+                    guard_tool_after(guard, metadata.name, error=str(exc))
+                    raise
+                result_decision = guard_tool_after(guard, metadata.name, value)
+                result_blocked = _blocked_result_value(result_decision, metadata.name)
+                return result_blocked if result_blocked is not None else value
+            except Exception:
+                _sync_local_cache_now(guard, reason="client_error")
                 raise
-            result_decision = guard_tool_after(guard, metadata.name, value)
-            result_blocked = _blocked_result_value(result_decision, metadata.name)
-            return result_blocked if result_blocked is not None else value
+            finally:
+                _sync_local_cache_async(guard, reason="round_complete")
 
         return mark_guarded(async_wrapper)
 
@@ -190,21 +196,33 @@ def make_guarded_llm_callable(
 
         @functools.wraps(fn)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-            guard_llm_before(guard, label=label, args=args, kwargs=kwargs)
-            raw = await fn(*args, **kwargs)
-            decision = guard_llm_after(guard, raw)
-            blocked = _blocked_llm_value(decision)
-            return blocked if blocked is not None else raw
+            try:
+                guard_llm_before(guard, label=label, args=args, kwargs=kwargs)
+                raw = await fn(*args, **kwargs)
+                decision = guard_llm_after(guard, raw)
+                blocked = _blocked_llm_value(decision)
+                return blocked if blocked is not None else raw
+            except Exception:
+                _sync_local_cache_now(guard, reason="client_error")
+                raise
+            finally:
+                _sync_local_cache_async(guard, reason="round_complete")
 
         return mark_guarded(async_wrapper)
 
     @functools.wraps(fn)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
-        guard_llm_before(guard, label=label, args=args, kwargs=kwargs)
-        raw = fn(*args, **kwargs)
-        decision = guard_llm_after(guard, raw)
-        blocked = _blocked_llm_value(decision)
-        return blocked if blocked is not None else raw
+        try:
+            guard_llm_before(guard, label=label, args=args, kwargs=kwargs)
+            raw = fn(*args, **kwargs)
+            decision = guard_llm_after(guard, raw)
+            blocked = _blocked_llm_value(decision)
+            return blocked if blocked is not None else raw
+        except Exception:
+            _sync_local_cache_now(guard, reason="client_error")
+            raise
+        finally:
+            _sync_local_cache_async(guard, reason="round_complete")
 
     return mark_guarded(wrapper)
 
@@ -270,3 +288,17 @@ def _blocked_llm_value(decision: GuardDecision) -> Any | None:
     if decision.decision_type == DecisionType.SANITIZE:
         return {"agentguard": "sanitized", "reason": decision.reason}
     return None
+
+
+def _sync_local_cache_now(guard: Any, *, reason: str) -> None:
+    rt = getattr(guard, "runtime", None)
+    sync = getattr(rt, "sync_local_cache_now", None)
+    if callable(sync):
+        sync(reason=reason)
+
+
+def _sync_local_cache_async(guard: Any, *, reason: str) -> None:
+    rt = getattr(guard, "runtime", None)
+    sync = getattr(rt, "sync_local_cache_async", None)
+    if callable(sync):
+        sync(reason=reason)

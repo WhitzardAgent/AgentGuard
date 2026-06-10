@@ -32,16 +32,10 @@ DO NOT OUTPUT ANYTHING ELSE.
 """
 
 _ROLE_BY_EVENT = {
-    "user_input": "USER",
     "llm_input": "USER",
     "llm_output": "ASSISTANT",
-    "llm_thought": "ASSISTANT [THINKING]",
-    "final_response": "ASSISTANT",
     "tool_invoke": "TOOL_CALL",
     "tool_result": "TOOL_RESULT",
-    "memory_read": "MEMORY_READ",
-    "memory_write": "MEMORY_WRITE",
-    "network_request": "NETWORK",
 }
 
 

@@ -3,10 +3,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agentguard.rules.builtin import builtin_rules
-from agentguard.rules.loader import load_rules_dir, load_rules_file
-from agentguard.schemas.policy import PolicyRule
-from agentguard.utils.hash import short_hash
+from shared.rules.builtin import builtin_rules
+from shared.rules.loader import load_rules_dir, load_rules_file
+from shared.schemas.policy import PolicyRule
+from shared.utils.hash import short_hash
 
 
 class PolicyStore:

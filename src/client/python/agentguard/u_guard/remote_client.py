@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+import threading
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -77,6 +78,7 @@ class RemoteGuardClient:
         trajectory_window: list[RuntimeEvent] | None = None,
         local_signals: list[str] | None = None,
         plugin_extensions: dict[str, Any] | None = None,
+        client_cached_entries: list[dict[str, Any]] | None = None,
     ) -> GuardDecision:
         if not self.enabled:
             raise RemoteGuardError("no server_url configured")
@@ -91,6 +93,7 @@ class RemoteGuardClient:
             "local_signals": list(local_signals or event.risk_signals),
             "policy_version": context.policy_version,
             "plugin_extensions": plugin_extensions or {},
+            "client_cached_entries": list(client_cached_entries or []),
         }
         payload = self._post(self.decide_path, body)
         decision = payload.get("decision") or {}
@@ -114,6 +117,29 @@ class RemoteGuardClient:
         if not self.enabled:
             raise RemoteGuardError("no server_url configured")
         return self._post(self.trace_path, trace)
+
+    def upload_trace_async(
+        self,
+        trace: dict[str, Any],
+        *,
+        on_success: Any | None = None,
+        on_error: Any | None = None,
+    ) -> threading.Thread | None:
+        if not self.enabled:
+            return None
+
+        def _worker() -> None:
+            try:
+                self.upload_trace(trace)
+                if callable(on_success):
+                    on_success()
+            except Exception as exc:  # background sync should not affect agent flow
+                if callable(on_error):
+                    on_error(exc)
+
+        thread = threading.Thread(target=_worker, daemon=True)
+        thread.start()
+        return thread
 
     # ---- transport -----------------------------------------------------
     def _headers(self) -> dict[str, str]:

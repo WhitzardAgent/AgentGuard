@@ -74,7 +74,7 @@ def builtin_rules() -> list[PolicyRule]:
             effect=PolicyEffect.SANITIZE,
             reason="PII detected in model output.",
             priority=40,
-            event_types=["llm_output", "final_response"],
+            event_types=["llm_output"],
             risk_signals=["pii_email", "pii_detected"],
         ),
         PolicyRule(
@@ -82,7 +82,7 @@ def builtin_rules() -> list[PolicyRule]:
             effect=PolicyEffect.DENY,
             reason="AgentDoG detected a trajectory-level exfiltration pattern.",
             priority=120,
-            event_types=["tool_invoke", "network_request"],
+            event_types=["tool_invoke"],
             risk_signals=["exfiltration_detected"],
         ),
         PolicyRule(
@@ -90,7 +90,7 @@ def builtin_rules() -> list[PolicyRule]:
             effect=PolicyEffect.REQUIRE_REMOTE_REVIEW,
             reason="AgentDoG flagged high trajectory risk.",
             priority=65,
-            event_types=["tool_invoke", "llm_output", "final_response"],
+            event_types=["tool_invoke", "llm_output"],
             risk_signals=["agentdog_high_risk", "instruction_hijack"],
         ),
         PolicyRule(
@@ -103,14 +103,6 @@ def builtin_rules() -> list[PolicyRule]:
             conditions=[
                 RuleCondition(field="trace.contains_signal", op="eq", value="prompt_injection")
             ],
-        ),
-        PolicyRule(
-            rule_id="drop_unsafe_thought",
-            effect=PolicyEffect.LOG_ONLY,
-            reason="Unsafe reasoning flagged but logged for review.",
-            priority=20,
-            event_types=["llm_thought"],
-            risk_signals=["unsafe_thought"],
         ),
         PolicyRule(
             rule_id="default_allow_low_risk",

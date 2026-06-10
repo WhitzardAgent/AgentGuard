@@ -12,9 +12,9 @@ import uuid
 from collections import deque
 from typing import Any
 
-from agentguard.schemas.decisions import DecisionType, GuardDecision
-from agentguard.schemas.events import RuntimeEvent
-from agentguard.schemas.policy import PolicyRule
+from shared.schemas.decisions import DecisionType, GuardDecision
+from shared.schemas.events import RuntimeEvent
+from shared.schemas.policy import PolicyRule
 from backend.console.dsl import ParsedRule, parse_source, rule_to_console_dict
 from backend.runtime.manager import RuntimeManager
 
