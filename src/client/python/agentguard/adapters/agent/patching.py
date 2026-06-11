@@ -244,7 +244,16 @@ def patch_llm_methods(
 ) -> int:
     patched = 0
     for name in methods:
-        fn = getattr(obj, name, None)
+        if '.' in name:
+            parts = name.split('.')
+            fn = obj
+            for part in parts[:-1]:
+                fn = getattr(fn, part, None)
+                if fn is None:
+                    break
+            fn = getattr(fn, parts[-1], None)
+        else:
+            fn = getattr(obj, name, None)
         if not callable(fn) or is_guarded(fn):
             continue
         if set_attr(obj, name, make_guarded_llm_callable(guard, fn, label=name)):

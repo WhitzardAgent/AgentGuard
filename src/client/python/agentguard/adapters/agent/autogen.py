@@ -51,17 +51,22 @@ class AutogenAgentAdapter(BaseAgentAdapter):
 
     def _patch_llm(self, agent: Any, guard: Any) -> int:
         patched = 0
-        seen: set[int] = set()
-        for slot in ("model_client", "_model_client", "client", "_client"):
-            client = getattr(agent, slot, None)
-            if client is None or id(client) in seen:
-                continue
-            seen.add(id(client))
-            patched += patch_llm_methods(
-                guard,
-                client,
-                methods=("create", "create_stream", "complete", "generate"),
-            )
+        model_client = getattr(agent, "_model_client", None)
+        if model_client is None:
+            return 0
+        methods = ()
+        client = None
+        if type(model_client).__name__ == "BaseOpenAIChatCompletionClient":
+            methods = ("_client.beta.chat.completions.parse", "_client.chat.completions.create", "_client.beta.chat.completions.stream")
+        elif type(model_client).__name__ == "BaseOllamaChatCompletionClient":
+            methods = ("_client.chat")
+        elif type(model_client).__name__ == "BaseAnthropicChatCompletionClient":
+            methods = ("_client.messages.create")
+        elif type(model_client).__name__ == "AzureAIChatCompletionClient":
+            methods = ("_client.complete")
+        elif type(model_client).__name__ == "LlamaCppChatCompletionClient":
+            methods = ("llm.create_chat_completion")
+        patched += patch_llm_methods(guard, model_client, methods)
         return patched
 
     def _patch_tools(self, agent: Any, guard: Any) -> int:
