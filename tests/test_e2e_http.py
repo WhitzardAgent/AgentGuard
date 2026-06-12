@@ -203,6 +203,38 @@ def test_backend_session_pool_records_client_metadata_over_http():
         srv.shutdown()
 
 
+def test_wrap_tool_reports_tool_to_server_before_invocation():
+    manager = RuntimeManager(enable_agentdog=False)
+    base_url, srv, _ = start_dev_server(manager=manager)
+    guard = AgentGuard(
+        session_id="tool-report-session",
+        agent_id="tool-report-agent",
+        server_url=base_url,
+    )
+    try:
+        def docs_search(query: str) -> str:
+            return f"found:{query}"
+
+        guard.wrap_tool(docs_search, capabilities=["read_file"])
+
+        sessions = _get_json(f"{base_url}/v1/backend/sessions")["sessions"]
+        record = next(item for item in sessions if item["session_id"] == "tool-report-session")
+
+        tools = _get_json(
+            f"{base_url}/v1/backend/tools?ts=1",
+            headers={},
+        )
+        scoped = [item for item in tools if item["owner_agent_id"] == "tool-report-agent"]
+
+        assert record["agent_id"] == "tool-report-agent"
+        assert any(item["name"] == "docs_search" for item in scoped)
+        reported = next(item for item in scoped if item["name"] == "docs_search")
+        assert reported["input_params"] == ["query"]
+    finally:
+        guard.close()
+        srv.shutdown()
+
+
 def test_backend_refreshes_stale_session_when_client_health_is_alive():
     manager = RuntimeManager(enable_agentdog=False)
     guard = AgentGuard("stale-session", agent_id="stale-agent")

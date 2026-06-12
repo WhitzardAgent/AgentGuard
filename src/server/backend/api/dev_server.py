@@ -8,6 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from backend.api.auth import check_backend_api_key
+from backend.console.state import ConsoleState
 from shared.utils.json import safe_dumps, safe_loads
 from backend.runtime.manager import RuntimeManager
 from backend.runtime.policy.snapshot_builder import snapshot_dict
@@ -16,6 +17,7 @@ from backend.skill_service.router import SkillServiceRouter
 
 class _Handler(BaseHTTPRequestHandler):
     manager: RuntimeManager
+    console: ConsoleState
     skills: SkillServiceRouter
 
     def log_message(self, *args: Any) -> None:  # silence default logging
@@ -37,16 +39,22 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         if not self._authorize_backend_api():
             return
-        if self.path == "/v1/backend/health":
+        path = self.path.split("?", 1)[0]
+        if path == "/v1/backend/health":
             self._send(200, {"status": "ok", "service": "agentguard-dev"})
-        elif self.path == "/v1/server/policy/snapshot":
+        elif path == "/v1/server/policy/snapshot":
             if not self._validate_client_session():
                 return
             self._send(200, snapshot_dict(self.manager.policy.store))
-        elif self.path == "/v1/backend/sessions":
+        elif path == "/v1/backend/sessions":
             self._send(200, {"sessions": self.manager.session_pool.list()})
-        elif self.path.startswith("/v1/backend/sessions/"):
-            session_id = self.path.rsplit("/", 1)[-1]
+        elif path == "/v1/backend/tools":
+            self._send(200, self.console.tools())
+        elif path.startswith("/v1/backend/agents/") and path.endswith("/tools"):
+            agent_id = path.split("/")[4]
+            self._send(200, self.console.tools(agent_id))
+        elif path.startswith("/v1/backend/sessions/"):
+            session_id = path.rsplit("/", 1)[-1]
             record = self.manager.session_pool.get(session_id)
             if record is None:
                 self._send(404, {"error": f"session not found: {session_id}"})
@@ -78,6 +86,14 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             else:
                 self._send(200, {"status": "received", "entries": count})
+        elif self.path == "/v1/server/tools/report":
+            if not self._validate_client_session():
+                return
+            tool = self.console.register_tool(body.get("context") or {}, body.get("tool") or {})
+            if tool is None:
+                self._send(400, {"error": "agent_id and tool.name are required"})
+            else:
+                self._send(200, {"status": "ok", "tool": tool})
         elif self.path == "/v1/server/session/unregister":
             session_id = self.headers.get("X-AgentGuard-Session-Id")
             if not session_id:
@@ -163,13 +179,19 @@ def start_dev_server(
     port: int = 0,
     *,
     manager: RuntimeManager | None = None,
+    console: ConsoleState | None = None,
     skills: SkillServiceRouter | None = None,
 ) -> tuple[str, ThreadingHTTPServer, threading.Thread]:
     """Start the dev server in a daemon thread. Returns (base_url, server, thread)."""
+    bound_manager = manager or RuntimeManager()
     handler = type(
         "BoundHandler",
         (_Handler,),
-        {"manager": manager or RuntimeManager(), "skills": skills or SkillServiceRouter()},
+        {
+            "manager": bound_manager,
+            "console": console or ConsoleState(bound_manager),
+            "skills": skills or SkillServiceRouter(),
+        },
     )
     server = ThreadingHTTPServer(("127.0.0.1", port), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)

@@ -34,15 +34,6 @@ _HELD = {
     DecisionType.REQUIRE_REMOTE_REVIEW,
 }
 
-_DEFAULT_TOOLS = [
-    ("agent-alpha", "shell.exec", "privileged", "high", "trusted", ["cmd", "cwd"]),
-    ("agent-alpha", "email.send", "external", "moderate", "trusted", ["to", "subject", "body"]),
-    ("agent-alpha", "file.read", "internal", "moderate", "trusted", ["path"]),
-    ("agent-beta", "http.fetch", "external", "moderate", "untrusted", ["url"]),
-    ("agent-beta", "db.query", "internal", "high", "trusted", ["sql"]),
-    ("agent-beta", "vault.read", "privileged", "high", "trusted", ["key"]),
-]
-
 
 class ConsoleState:
     def __init__(self, manager: RuntimeManager) -> None:
@@ -55,18 +46,6 @@ class ConsoleState:
         self._console_rules: dict[str, dict[str, Any]] = {}
 
         self._tools: dict[tuple[str, str], dict[str, Any]] = {}
-        for owner, name, boundary, sensitivity, integrity, params in _DEFAULT_TOOLS:
-            self._tools[(owner, name)] = {
-                "owner_agent_id": owner,
-                "name": name,
-                "labels": {
-                    "boundary": boundary,
-                    "sensitivity": sensitivity,
-                    "integrity": integrity,
-                    "tags": [],
-                },
-                "input_params": list(params),
-            }
 
         self._traffic: deque[dict[str, Any]] = deque(maxlen=1000)
         self._audit: deque[dict[str, Any]] = deque(maxlen=1000)
@@ -84,6 +63,46 @@ class ConsoleState:
         if agent_id:
             items = [t for t in items if t["owner_agent_id"] == agent_id]
         return [dict(t) for t in items]
+
+    def register_tool(
+        self,
+        context: dict[str, Any] | Any,
+        tool: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        if hasattr(context, "to_dict"):
+            context = context.to_dict()
+        ctx = dict(context or {})
+        agent_id = str(ctx.get("agent_id") or "").strip()
+        name = str(tool.get("name") or "").strip()
+        if not agent_id or not name:
+            return None
+
+        incoming_labels = dict(tool.get("labels") or {})
+        labels = {
+            "boundary": str(incoming_labels.get("boundary") or "internal"),
+            "sensitivity": str(incoming_labels.get("sensitivity") or "low"),
+            "integrity": str(incoming_labels.get("integrity") or "trusted"),
+            "tags": [str(tag) for tag in (incoming_labels.get("tags") or []) if str(tag).strip()],
+        }
+        input_params = [str(param) for param in (tool.get("input_params") or []) if str(param).strip()]
+
+        with self._lock:
+            existing = self._tools.get((agent_id, name)) or {}
+            current_labels = dict(existing.get("labels") or {})
+            merged_labels = {
+                "boundary": current_labels.get("boundary") or labels["boundary"],
+                "sensitivity": current_labels.get("sensitivity") or labels["sensitivity"],
+                "integrity": current_labels.get("integrity") or labels["integrity"],
+                "tags": current_labels.get("tags") or labels["tags"],
+            }
+            record = {
+                "owner_agent_id": agent_id,
+                "name": name,
+                "labels": merged_labels,
+                "input_params": input_params or list(existing.get("input_params") or []),
+            }
+            self._tools[(agent_id, name)] = record
+            return dict(record)
 
     def patch_tool_labels(
         self, agent_id: str, tool_name: str, labels: dict[str, Any]

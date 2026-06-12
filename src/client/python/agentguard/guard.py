@@ -212,7 +212,9 @@ class AgentGuard:
 
     # ---- registration --------------------------------------------------
     def register_tool(self, fn: Callable[..., Any], **meta: Any) -> ToolMetadata:
-        return self._registry.register(fn, **meta)
+        metadata = self._registry.register(fn, **meta)
+        self._report_tool_metadata(metadata)
+        return metadata
 
     def register_plugin(self, plugin: Any) -> Any:
         return self._plugins.register(plugin)
@@ -255,6 +257,30 @@ class AgentGuard:
         except Exception:
             pass
         self.stop_config_api()
+
+    def _report_tool_metadata(self, metadata: ToolMetadata) -> None:
+        if not self._remote.enabled:
+            return
+        tool_payload = {
+            "name": metadata.name,
+            "description": metadata.description,
+            "input_params": list(metadata.required_args),
+            "capabilities": list(metadata.capabilities),
+            "labels": {
+                "boundary": str(metadata.metadata.get("boundary", "internal")),
+                "sensitivity": str(metadata.metadata.get("sensitivity", "low")),
+                "integrity": str(metadata.metadata.get("integrity", "trusted")),
+                "tags": [
+                    str(tag)
+                    for tag in (metadata.metadata.get("tags") or metadata.capabilities or [])
+                    if str(tag).strip()
+                ],
+            },
+        }
+        try:
+            self._remote.report_tool(self.context, tool_payload)
+        except Exception:
+            pass
 
 
 def _generate_session_key() -> str:

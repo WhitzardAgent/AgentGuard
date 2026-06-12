@@ -9,14 +9,16 @@ from backend.api.schemas import (
     GuardDecideRequest,
     GuardDecideResponse,
     SkillRunRequest,
+    ToolReportRequest,
     TraceUploadRequest,
 )
-from backend.app_state import get_manager, get_skills
+from backend.app_state import get_console, get_manager, get_skills
 from backend.runtime.policy.snapshot_builder import snapshot_dict
 
 router = APIRouter()
 
 _manager = get_manager()
+_console = get_console()
 _skills = get_skills()
 
 
@@ -48,6 +50,15 @@ def trace_upload(req: TraceUploadRequest, request: Request) -> dict:
     except PermissionError as exc:
         raise _session_key_error(exc) from exc
     return {"status": "received", "entries": count}
+
+
+@router.post("/v1/server/tools/report")
+def report_tool(req: ToolReportRequest, request: Request) -> dict[str, Any]:
+    _validate_client_session(request)
+    tool = _console.register_tool(req.context, req.tool)
+    if tool is None:
+        raise HTTPException(status_code=400, detail="agent_id and tool.name are required")
+    return {"status": "ok", "tool": tool}
 
 
 @router.post("/v1/server/skills/run")

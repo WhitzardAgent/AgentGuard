@@ -30,6 +30,11 @@ class TraceUploadRequest(BaseModel):
     entries: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class ToolReportRequest(BaseModel):
+    context: dict[str, Any] = Field(default_factory=dict)
+    tool: dict[str, Any] = Field(default_factory=dict)
+
+
 class CheckerConfigUpdateRequest(BaseModel):
     config: dict[str, Any]
     client_config: dict[str, Any] | None = None

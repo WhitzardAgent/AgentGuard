@@ -108,3 +108,27 @@ def test_health_reports_rule_counts():
     assert health["ok"] is True
     assert health["rules"] >= 1
     assert "rule_version" in health
+
+
+def test_register_tool_adds_or_updates_console_catalog():
+    con = _console()
+    tool = con.register_tool(
+        {"agent_id": "live-agent"},
+        {
+            "name": "docs.search",
+            "input_params": ["query"],
+            "labels": {
+                "boundary": "internal",
+                "sensitivity": "moderate",
+                "integrity": "trusted",
+                "tags": ["read_only"],
+            },
+        },
+    )
+    assert tool is not None
+    assert tool["owner_agent_id"] == "live-agent"
+    assert tool["name"] == "docs.search"
+    assert tool["input_params"] == ["query"]
+
+    scoped = con.tools("live-agent")
+    assert any(item["name"] == "docs.search" for item in scoped)

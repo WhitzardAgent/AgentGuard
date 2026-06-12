@@ -11,7 +11,6 @@ from agentguard.adapters.agent.patching import (
     is_guarded,
     mark_guarded,
     make_guarded_tool,
-    patch_llm_methods,
     set_attr,
     tool_name,
 )
@@ -62,6 +61,8 @@ class LangChainAgentAdapter(BaseAgentAdapter):
     def _patch_tool_containers(self, agent: Any, guard: Any) -> int:
         patched = 0
         patched += _patch_container_tools(agent, guard)
+        for _, tool_node in _iter_tool_nodes(agent):
+            patched += _patch_tool_node(tool_node, guard)
 
         nodes = getattr(agent, "nodes", None) or getattr(agent, "_nodes", None)
         if isinstance(nodes, dict):
@@ -80,6 +81,37 @@ class LangChainAgentAdapter(BaseAgentAdapter):
 
     def _patch_llm(self, agent: Any, guard: Any) -> int:
         return _patch_langchain_llm(agent, guard)
+
+
+def _iter_tool_nodes(agent: Any) -> list[tuple[str, Any]]:
+    tool_nodes: list[tuple[str, Any]] = []
+    seen: set[int] = set()
+
+    compiled_nodes = getattr(agent, "nodes", None)
+    if isinstance(compiled_nodes, dict):
+        for name, node in compiled_nodes.items():
+            tool_node = getattr(node, "bound", None)
+            if not isinstance(getattr(tool_node, "tools_by_name", None), dict):
+                continue
+            ident = id(tool_node)
+            if ident in seen:
+                continue
+            seen.add(ident)
+            tool_nodes.append((str(name), tool_node))
+
+    builder_nodes = getattr(getattr(agent, "builder", None), "nodes", None)
+    if isinstance(builder_nodes, dict):
+        for name, node in builder_nodes.items():
+            tool_node = getattr(node, "data", None)
+            if not isinstance(getattr(tool_node, "tools_by_name", None), dict):
+                continue
+            ident = id(tool_node)
+            if ident in seen:
+                continue
+            seen.add(ident)
+            tool_nodes.append((str(name), tool_node))
+
+    return tool_nodes
 
 
 def _patch_container_tools(container: Any, guard: Any) -> int:
@@ -116,6 +148,17 @@ def _patch_container_tools(container: Any, guard: Any) -> int:
     return patched
 
 
+def _patch_tool_node(tool_node: Any, guard: Any) -> int:
+    tools_by_name = getattr(tool_node, "tools_by_name", None)
+    if not isinstance(tools_by_name, dict):
+        return 0
+
+    patched = 0
+    for name, tool in list(tools_by_name.items()):
+        patched += _patch_tool_object(tool, guard, name=str(name))
+    return patched
+
+
 def _patch_langchain_llm(agent: Any, guard: Any) -> int:
     base_model = _get_langchain_base_model(agent)
     if base_model is None:
@@ -124,10 +167,6 @@ def _patch_langchain_llm(agent: Any, guard: Any) -> int:
     target = _unwrap_langchain_llm_target(base_model)
     if target is None:
         return 0
-
-    patched = _patch_langchain_provider_clients(target, guard)
-    if patched:
-        return patched
 
     return _patch_langchain_concrete_llm(target, guard)
 
@@ -181,17 +220,6 @@ def _extract_langchain_closure_model(fn: Any) -> Any | None:
     return None
 
 
-def _capture_langchain_call_target(guard: Any, *, label: str, target: Any) -> None:
-    try:
-        calls = getattr(guard, "_agentguard_langchain_call_targets", None)
-        if not isinstance(calls, dict):
-            calls = {}
-            setattr(guard, "_agentguard_langchain_call_targets", calls)
-        calls[label] = target
-    except Exception:
-        pass
-
-
 def _patch_langchain_concrete_llm(model: Any, guard: Any) -> int:
     target = _unwrap_langchain_llm_target(model)
     if target is None:
@@ -218,142 +246,6 @@ def _unwrap_langchain_llm_target(model: Any) -> Any | None:
             return current
         current = inner
     return current
-
-
-def _patch_langchain_provider_clients(model: Any, guard: Any) -> int:
-    provider = _detect_langchain_provider(model)
-    if provider == "openai":
-        return _patch_langchain_openai_provider(model, guard)
-    if provider == "anthropic":
-        return _patch_langchain_anthropic_provider(model, guard)
-    return 0
-
-
-def _detect_langchain_provider(model: Any) -> str | None:
-    class_name = type(model).__name__.lower()
-    module_name = type(model).__module__.lower()
-
-    if "openai" in module_name or "openai" in class_name:
-        return "openai"
-    if "anthropic" in module_name or "anthropic" in class_name:
-        return "anthropic"
-    return None
-
-
-def _patch_langchain_openai_provider(model: Any, guard: Any) -> int:
-    patched = 0
-    seen: set[int] = set()
-    for attr in ("client", "async_client", "root_client", "root_async_client"):
-        inner = getattr(model, attr, None)
-        if inner is None or id(inner) in seen:
-            continue
-        seen.add(id(inner))
-        patched += _patch_langchain_openai_candidate(
-            guard,
-            inner,
-            label=f"{type(model).__name__}.{attr}",
-        )
-    return patched
-
-
-def _patch_langchain_openai_candidate(guard: Any, candidate: Any, *, label: str) -> int:
-    patched = 0
-
-    if callable(getattr(candidate, "create", None)):
-        _capture_langchain_call_target(guard, label=label, target=candidate)
-        patched += patch_llm_methods(guard, candidate, methods=("create",))
-
-    if callable(getattr(candidate, "parse", None)):
-        _capture_langchain_call_target(guard, label=f"{label}.parse", target=candidate)
-        patched += patch_llm_methods(guard, candidate, methods=("parse",))
-
-    raw_candidate = getattr(candidate, "with_raw_response", None)
-    if raw_candidate is not None:
-        _capture_langchain_call_target(guard, label=f"{label}.with_raw_response", target=raw_candidate)
-        patched += patch_llm_methods(guard, raw_candidate, methods=("create", "parse"))
-
-    chat = getattr(candidate, "chat", None)
-    completions = getattr(chat, "completions", None) if chat is not None else None
-    if completions is not None:
-        _capture_langchain_call_target(
-            guard,
-            label=f"{label}.chat.completions",
-            target=completions,
-        )
-        patched += patch_llm_methods(guard, completions, methods=("create", "parse"))
-
-        raw = getattr(completions, "with_raw_response", None)
-        if raw is not None:
-            _capture_langchain_call_target(
-                guard,
-                label=f"{label}.chat.completions.with_raw_response",
-                target=raw,
-            )
-            patched += patch_llm_methods(guard, raw, methods=("create", "parse"))
-
-    responses = getattr(candidate, "responses", None)
-    if responses is not None:
-        _capture_langchain_call_target(guard, label=f"{label}.responses", target=responses)
-        patched += patch_llm_methods(guard, responses, methods=("create", "parse"))
-
-        raw = getattr(responses, "with_raw_response", None)
-        if raw is not None:
-            _capture_langchain_call_target(
-                guard,
-                label=f"{label}.responses.with_raw_response",
-                target=raw,
-            )
-            patched += patch_llm_methods(guard, raw, methods=("create", "parse"))
-
-    beta = getattr(candidate, "beta", None)
-    beta_chat = getattr(beta, "chat", None) if beta is not None else None
-    beta_completions = getattr(beta_chat, "completions", None) if beta_chat is not None else None
-    if beta_completions is not None:
-        _capture_langchain_call_target(
-            guard,
-            label=f"{label}.beta.chat.completions",
-            target=beta_completions,
-        )
-        patched += patch_llm_methods(guard, beta_completions, methods=("create", "parse", "stream"))
-
-    return patched
-
-
-def _patch_langchain_anthropic_provider(model: Any, guard: Any) -> int:
-    patched = 0
-    seen: set[int] = set()
-    for attr in ("_client", "_async_client"):
-        inner = getattr(model, attr, None)
-        if inner is None or id(inner) in seen:
-            continue
-        seen.add(id(inner))
-        patched += _patch_langchain_anthropic_candidate(
-            guard,
-            inner,
-            label=f"{type(model).__name__}.{attr}",
-        )
-    return patched
-
-
-def _patch_langchain_anthropic_candidate(guard: Any, candidate: Any, *, label: str) -> int:
-    patched = 0
-
-    messages = getattr(candidate, "messages", None)
-    if messages is not None:
-        _capture_langchain_call_target(guard, label=f"{label}.messages", target=messages)
-        patched += patch_llm_methods(guard, messages, methods=("create", "stream"))
-
-    beta = getattr(candidate, "beta", None)
-    beta_messages = getattr(beta, "messages", None) if beta is not None else None
-    if beta_messages is not None:
-        _capture_langchain_call_target(
-            guard,
-            label=f"{label}.beta.messages",
-            target=beta_messages,
-        )
-        patched += patch_llm_methods(guard, beta_messages, methods=("create", "stream"))
-
-    return patched
 
 
 def _make_guarded_langchain_llm_method(
@@ -539,22 +431,15 @@ def _patch_tool_object(tool: Any, guard: Any, *, name: str) -> int:
     if tool is None or is_guarded(tool):
         return 0
 
-    patched = 0
-    for attr in ("func", "coroutine", "_run", "_arun"):
-        fn = getattr(tool, attr, None)
-        if not callable(fn) or is_guarded(fn):
-            continue
-        wrapped = make_guarded_tool(guard, fn, name=name, tool=tool)
-        if set_attr(tool, attr, wrapped):
-            patched += 1
-    if patched:
-        return 1
-
-    for attr in ("invoke", "ainvoke"):
-        fn = getattr(tool, attr, None)
-        if not callable(fn) or is_guarded(fn):
-            continue
-        wrapped = make_guarded_tool(guard, fn, name=name, tool=tool)
-        if set_attr(tool, attr, wrapped):
-            patched += 1
-    return 1 if patched else 0
+    for attrs in (("invoke", "ainvoke"), ("_run", "_arun"), ("func", "coroutine")):
+        patched = False
+        for attr in attrs:
+            fn = getattr(tool, attr, None)
+            if not callable(fn) or is_guarded(fn):
+                continue
+            wrapped = make_guarded_tool(guard, fn, name=name, tool=tool)
+            if set_attr(tool, attr, wrapped):
+                patched = True
+        if patched:
+            return 1
+    return 0
