@@ -81,7 +81,7 @@ if __name__ == "__main__":
     run(agent, "Please retrieve document id=0 and send it to alice@example.com.")
 ```
 
-### Step 2: Import the AgentGuard client
+### Step 2: AgentGuard Client Importing
 
 On top of the agent code from Step 1, you next need to import the AgentGuard client SDK. The client communicates with the control server, forwards the agent's runtime state, and receives access-control decisions.
 
@@ -184,13 +184,207 @@ if __name__ == "__main__":
         guard.close()
 ```
 
-* `Guard()`: configures the control server address. This must match the server's configuration — see [Deploy the AgentGuard Control Server](#2-deploy-the-agentguard-control-server).
+* `Guard()`: configures the control server address. This must match the server's configuration — see the control-server deployment section below.
 * `Principal()`: defines the agent's identity, including agent ID, session ID, role, and trust level. These attributes are used to build constraints in access control policies.
 * `guard.start()`: opens an access-control session, linking the agent's identity and task goal, and starts communicating with the control server. Call this before the agent begins its task.
 * `guard.attach_langchain()`: attaches the client to a LangChain agent instance. Different frameworks use different adapters; see later sections for details.
 * `guard.close()`: closes the session and releases resources. Call this after the agent has finished all tasks.
 
-### Step 3: Write a policy and deploy the control server
+### Step 3: AgentGuard Checkers
+
+AgentGuard supports pluggable checkers on both the client and the server. Both sides use the same normalized runtime schema, but they do not see the same input scope and they are not deployed to the same location. For implementation-level details, see `../../src/client/python/agentguard/checkers/README.md` and `../../src/server/backend/runtime/checkers/README.md`.
+
+#### 1. Client vs. Server Checkers
+
+- **Client checkers** run locally inside the agent process. They receive only the current `event: RuntimeEvent` and `context: RuntimeContext`, so they are best for lightweight low-latency filtering before a remote decision.
+- **Server checkers** run on the control server. They receive the current `event`, the current `context`, and `trajectory_window: list[RuntimeEvent]`, so they are best for cross-step detection, centralized policy evaluation, and auditing.
+- Client checker files must be placed under `../../src/client/python/agentguard/checkers/<phase>/`.
+- Server checker files must be placed under `../../src/server/backend/runtime/checkers/<phase>/`.
+
+#### 2. RuntimeEvent
+
+`RuntimeEvent` is the normalized event object shared by client and server checkers:
+
+```python
+RuntimeEvent(
+    event_id: str,
+    event_type: EventType,
+    timestamp: float,
+    context: RuntimeContext,
+    payload: dict[str, Any],
+    risk_signals: list[str] = [],
+    metadata: dict[str, Any] = {},
+)
+```
+
+- `event_id`: unique identifier for the current runtime event.
+- `event_type`: current runtime stage. Active values are `LLM_INPUT`, `LLM_OUTPUT`, `TOOL_INVOKE`, and `TOOL_RESULT`.
+- `timestamp`: event creation time.
+- `context`: the shared runtime context attached to this event.
+- `payload`: the stage-specific content the checker actually inspects.
+- `risk_signals`: risk labels already attached by earlier checkers or plugins.
+- `metadata`: extra debug or adapter-specific information carried with the event.
+
+Common payload shapes:
+
+```python
+# LLM_INPUT
+{"messages": [...]} 
+{"text": "..."}  # compatibility/simple adapters
+
+# LLM_OUTPUT
+{"output": ...}
+
+# TOOL_INVOKE
+{
+    "tool_name": "send_email",
+    "arguments": {"to": "...", "body": "..."},
+    "capabilities": ["external_send"],
+}
+
+# TOOL_RESULT
+{
+    "tool_name": "read_file",
+    "result": ...,
+    "error": None,
+}
+```
+
+#### 3. RuntimeContext
+
+`RuntimeContext` is the session-level context propagated across events:
+
+```python
+RuntimeContext(
+    session_id: str,
+    user_id: str | None = None,
+    agent_id: str | None = None,
+    task_id: str | None = None,
+    policy: str | None = None,
+    policy_version: str | None = None,
+    environment: str | None = None,
+    metadata: dict[str, Any] = {},
+)
+```
+
+- `session_id`: required session identifier used to associate all events in the same run.
+- `user_id`: optional end-user identity behind the agent request.
+- `agent_id`: optional agent instance or service identity.
+- `task_id`: optional task or workflow identifier for the current unit of work.
+- `policy`: optional logical policy name, source, or mode attached to the session.
+- `policy_version`: optional policy version or snapshot identifier.
+- `environment`: optional runtime environment such as `dev`, `staging`, or `prod`.
+- `metadata`: free-form additional context such as tenant info, framework labels, or adapter-specific fields.
+
+#### 4. `trajectory_window: list[RuntimeEvent]`
+
+`trajectory_window` is only available to server-side checkers.
+
+- It is a recent event window for the same session.
+- Each element in the list is a full `RuntimeEvent`.
+- Use it when detection depends on execution history instead of only the current event.
+- Typical cases include "tool result exposed sensitive data, then a later tool call tries to send it externally" or "untrusted LLM output later flows into a shell command."
+
+Client checkers do not receive `trajectory_window`. If your detection logic requires history, implement it as a server-side checker. In practice, the server window can include both the normal runtime trace and cached local decisions synchronized from the client.
+
+#### 5. Custom Checker
+
+##### Client-side checker
+
+Client checkers must be placed in the phase folder that matches the event type:
+
+```text
+../../src/client/python/agentguard/checkers/llm_before/
+../../src/client/python/agentguard/checkers/llm_after/
+../../src/client/python/agentguard/checkers/tool_before/
+../../src/client/python/agentguard/checkers/tool_after/
+```
+
+Example:
+
+```python
+from agentguard.checkers.base import BaseChecker, CheckResult
+from agentguard.checkers.registry import register
+from agentguard.schemas.context import RuntimeContext
+from agentguard.schemas.events import EventType, RuntimeEvent
+
+
+@register(
+    name="my_client_checker",
+    description="Detect risky tool arguments on the client side.",
+)
+class MyClientChecker(BaseChecker):
+    event_types = [EventType.TOOL_INVOKE]
+
+    def check(self, event: RuntimeEvent, context: RuntimeContext) -> CheckResult:
+        tool_name = event.payload.get("tool_name")
+        arguments = event.payload.get("arguments") or {}
+        if tool_name == "send_email" and arguments.get("to", "").endswith("@external.com"):
+            return CheckResult(risk_signals=["external_send"])
+        return CheckResult.empty()
+```
+
+##### Server-side checker
+
+Server checkers must be placed in the matching server folder:
+
+```text
+../../src/server/backend/runtime/checkers/llm_before/
+../../src/server/backend/runtime/checkers/llm_after/
+../../src/server/backend/runtime/checkers/tool_before/
+../../src/server/backend/runtime/checkers/tool_after/
+```
+
+Example:
+
+```python
+from backend.runtime.checkers.base import BaseChecker, CheckResult
+from backend.runtime.checkers.registry import register
+from shared.schemas.context import RuntimeContext
+from shared.schemas.events import EventType, RuntimeEvent
+
+
+@register(
+    name="my_server_checker",
+    description="Detect multi-step exfiltration on the server side.",
+)
+class MyServerChecker(BaseChecker):
+    event_types = [EventType.TOOL_INVOKE]
+
+    def check(
+        self,
+        event: RuntimeEvent,
+        context: RuntimeContext,
+        trajectory_window: list[RuntimeEvent] | None = None,
+    ) -> CheckResult:
+        trajectory_window = trajectory_window or []
+        if trajectory_window and event.payload.get("tool_name") == "send_email":
+            return CheckResult(risk_signals=["cross_step_review"])
+        return CheckResult.empty()
+```
+
+The server also includes a built-in rule-based checker at `../../src/server/backend/runtime/checkers/tool_before/rule_based_check/checker.py`. Its registered name is `rule_based_check`.
+
+##### Checker configuration
+
+After adding the checker classes, reference their registered names in checker config:
+
+```json
+{
+  "phases": {
+    "tool_before": {
+      "local": ["my_client_checker"],
+      "remote": ["rule_based_check", "my_server_checker"]
+    }
+  }
+}
+```
+
+- `local` is loaded by the client checker manager.
+- `remote` is loaded by the server checker manager.
+- Even if both names appear in the same config file, the implementation files must still be deployed to the correct client or server folder.
+
+### Step 4: Write a policy and deploy the control server
 
 AgentGuard uses a client-server architecture. All management operations — agent monitoring, policy configuration, policy enforcement, and decision dispatch — happen on the control server. This is especially useful when an organization has multiple agent deployments that need centralized governance.
 
@@ -279,7 +473,7 @@ You can also start the UI:
 
 Visit `http://localhost:8008` to access the UI.
 
-### Step 4: Run the agent
+### Step 5: Run the agent
 
 On the agent host, run the agent code:
 

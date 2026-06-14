@@ -18,26 +18,30 @@
 </p>
 
 <p align="center">
-  <strong>AgentGuard: An Attribute-Based Access Control Framework for Tool-Use LLM-Based Agent</strong>
+  <strong>AgentGuard: A Modular Security Foundation for AI Agents</strong>
 </p>
 
 <p align="center">
-  Declarative policy enforcement, provenance-aware decisions, and human-in-the-loop safety for tool invocations.
+  Seamlessly integrates with existing agent frameworks and supports modular deployment of existing rule-based and model-based security strategies.
 </p>
 
 <table align="center" width="100%" cellspacing="0" cellpadding="0">
   <tr>
-    <td align="center" width="30%" style="padding: 20px 18px; border: 1px solid #e5e7eb; border-radius: 18px; background: #ffffff;">
+    <td align="center" width="25%" style="padding: 20px 18px; border: 1px solid #e5e7eb; border-radius: 18px; background: #ffffff;">
       <div style="font-size: 28px; line-height: 1; margin-bottom: 10px;">🧩</div>
       <small><strong>Seamless&nbsp;Integration</strong></small>
     </td>
-    <td align="center" width="30%" style="padding: 20px 18px; border: 1px solid #e5e7eb; border-radius: 18px; background: #ffffff;">
+    <td align="center" width="25%" style="padding: 20px 18px; border: 1px solid #e5e7eb; border-radius: 18px; background: #ffffff;">
+      <div style="font-size: 28px; line-height: 1; margin-bottom: 10px;">🧱</div>
+      <small><strong>Modular&nbsp;Security&nbsp;Strategies</strong></small>
+    </td>
+    <td align="center" width="25%" style="padding: 20px 18px; border: 1px solid #e5e7eb; border-radius: 18px; background: #ffffff;">
       <div style="font-size: 28px; line-height: 1; margin-bottom: 10px;">🛡️</div>
       <small><strong>Multi&#8209;Risk&nbsp;Coverage</strong></small>
     </td>
-    <td align="center" width="40%" style="padding: 20px 18px; border: 1px solid #e5e7eb; border-radius: 18px; background: #ffffff;">
+    <td align="center" width="25%" style="padding: 20px 18px; border: 1px solid #e5e7eb; border-radius: 18px; background: #ffffff;">
       <div style="font-size: 28px; line-height: 1; margin-bottom: 10px;">👁️</div>
-      <small><strong>Visual&nbsp;Rule&nbsp;Setup&nbsp;&amp;&nbsp;Audit</strong></small>
+      <small><strong>Visual&nbsp;Audit</strong></small>
     </td>
   </tr>
 </table>
@@ -46,7 +50,7 @@
 > [!IMPORTANT]
 > This project is still under active development and may contain bugs. Contributions via Issues and PRs are welcome.
 
-AgentGuard is an attribute-based access control framework for agent tool calls that sits between an LLM-based planning engine and the tools it invokes. Before each tool call is executed, and again after it completes, AgentGuard evaluates the agent's behavior against declarative policies to decide whether the action should proceed as-is, be blocked, or be routed for human check.
+AgentGuard is a modular security foundation for AI agents. Compatible with existing security strategies, it identifies and blocks security risks before each LLM call, after each LLM output, before each tool invocation, and after execution according to configurable safeguards.
 
 Today, AgentGuard covers several key technical areas highlighted in Anthropic's [Zero Trust for AI Agents](https://claude.com/blog/zero-trust-for-ai-agents), including access control & privilege management, observability & auditing, and behavioral monitoring & response.
 
@@ -56,29 +60,19 @@ AgentGuard can be integrated into existing agent frameworks without modifying th
 
 ## ✨ Features
 
-### 1. Rich Policy Expressiveness
-
-AgentGuard policies are not hard-coded risk checks buried in business logic. They are written in a standalone DSL that describes when an action should be allowed, denied, or sent for human check. A policy can reference the principal's identity, tool metadata, tool arguments, target addresses, session history, and call-chain context, making it well-suited for the security boundaries commonly found in agent tool calls.
-
-#### Arithmetic & Logical Expressions
-
-Policy conditions support numeric comparisons, set membership checks, regex matching, substring matching, and arbitrary `AND` / `OR` / `NOT` combinations. For instance, `principal.trust_level < 2` distinguishes low-trust agents, `tool.recipient_domain NOT IN allowlist.email` restricts outbound destinations, and `tool.cmd MATCHES ...` identifies dangerous commands. These expressions can also be freely composed with `AND` / `OR` / `NOT`.
-
-#### Cross-Tool Policies
-
-AgentGuard can evaluate both individual tool calls and cross-step attack chains. Using `TRACE` and session-history functions, policies can express behaviors such as "read from a database, then send email," "read a sensitive file, then upload it to an external HTTP endpoint," or "external input eventually flows into a shell command", rather than relying solely on the current tool's arguments.
+### 1. Multi-Dimensional Security Protection
 
 #### Multi-Phase Intervention
 
-Policies can apply at the pre-execution `requested` phase, the post-execution `completed` phase, or the failure `failed` phase. Pre-execution is suitable for blocking or requiring approval; post-execution can be used for logging results or triggering follow-up audits and rule evaluations based on `tool.result`.
+According to configured safeguards, AgentGuard can intervene before each LLM call, after each LLM output, before each tool invocation, and after execution to identify and block security risks across the full agent runtime.
 
-#### Diverse Policy Decisions
+#### Seamless Reuse of Existing Security Strategies
 
-When a rule matches, it can return `ALLOW`, `DENY`, `HUMAN_CHECK`, or `LLM_CHECK`. Policies are therefore not limited to a binary allow/deny outcome: clearly dangerous operations can be rejected outright, while uncertain ones can be routed to a human or an LLM for review.
+AgentGuard provides a unified interface for adapting existing security protections. Through its modular checker architecture, rule-based and model-based strategies can be plugged in behind the same interface and enabled dynamically based on practical needs. Today, AgentGuard includes a built-in access-control strategy set, and users can build additional security policies through DSL definitions.
 
-#### Subject & Object Labels
+#### Single-Tool and Cross-Tool Protection
 
-Policies can enforce differentiated controls based on agent (subject) and tool (object) attributes. Agents declare identity information such as `agent_id`, `session_id`, `role`, `trust_level`, and `scope`. Tools declare static labels such as `boundary`, `sensitivity`, `integrity`, and `tags`. This enables rules such as "low-trust agents cannot invoke privileged-boundary tools" or "results from high-sensitivity tools must not flow to external boundaries." Users can also define custom labels as needed.
+AgentGuard can evaluate both individual tool calls and cross-step attack chains. By efficiently storing runtime context, it can detect behaviors such as "read from a database, then send email," "read a sensitive file, then upload it to an external HTTP endpoint," or "external input eventually flows into a shell command."
 
 ### 2. Seamless Integration with Agent Frameworks
 
@@ -312,7 +306,7 @@ https://github.com/user-attachments/assets/75a17e37-7f51-4c59-96fa-ea449eb79859
 
 Current defenses for agent security mainly fall into two categories: **malicious-intent detection at the model layer** and **tool-call behavior interception**. The former strengthens the underlying LLM through fine-tuning or detects unsafe intent by analyzing the model's reasoning process; the latter enforces predefined security policies at tool invocation time based on call traces, arguments, and runtime context to identify, block, or escalate high-risk actions.
 
-Given that model fine-tuning is often expensive to train and deploy, and that many models do not expose a complete reasoning trace, AgentGuard focuses on the tool-call behavior layer. This approach does not require changing the underlying model. Instead, it places security controls around what the agent actually does, which makes it easier to integrate into existing agent stacks and more practical for production deployment.
+Given that model fine-tuning is often expensive to train and deploy, and that many models do not expose a complete reasoning trace, AgentGuard focuses on practical runtime controls around both LLM interaction and tool execution. This approach does not require changing the underlying model. Instead, it places security controls around what the agent exchanges with the model and actually does in the environment, which makes it easier to integrate into existing agent stacks and more practical for production deployment.
 
 As illustrated below, existing tool-call-based defenses address parts of the problem, but they are often fragmented and optimized for narrow risk scenarios, such as dangerous command filtering, isolated prompt-injection mitigation, or limited auditing. In contrast, AgentGuard provides a unified framework that more systematically covers access control, runtime behavior monitoring, and execution auditing. This design is also more closely aligned with the enterprise agent-security goals emphasized in Anthropic's [Zero Trust for AI Agents](https://claude.com/blog/zero-trust-for-ai-agents), including least-privilege permissions, constrained tool use, observable execution, and auditable policy enforcement.
 
@@ -326,8 +320,9 @@ The high-level architecture of AgentGuard is shown below.
   <img src="./docs/figs/overview.png" alt="AgentGuard architecture" width="50%" />
 </p>
 
-- **Client**: With minimal code modifications, the AgentGuard client integrates into agent frameworks. It monitors every tool call, forwards relevant contextual information to the server, and enforces the server's policy decisions.
-- **Server**: The server receives information from clients, evaluates agent actions against policies, produces policy decisions, and sends them back to clients. It also monitors agent status for administrative auditing.
+- **Client**: With minimal code modifications, the AgentGuard client integrates into agent frameworks and can intercept before and after LLM calls, as well as before and after tool invocations. It can perform lightweight local filtering on the client side and forward events to the server for deeper inspection by configured checkers.
+- **Server**: The server receives information from clients, uses configured checkers to evaluate agent actions against policies, produces policy decisions, and sends them back to clients. It also monitors agent status for administrative auditing.
+- **Checker Extensibility**: Both client and server support pluggable checkers. To add custom checkers, see the [client checker guide](./src/client/python/agentguard/checkers/README.md) and the [server checker guide](./src/server/backend/runtime/checkers/README.md).
 
 ## 👥 Contributors
 
@@ -373,7 +368,7 @@ Listed in no particular order. Thanks to everyone who helped shape AgentGuard.
 - Support more mainstream frameworks
 - Support agent systems in more programming languages
 - Enable protection for multi-agent scenarios
-- Add monitoring for LLM inputs and outputs
+- Expand LLM input/output monitoring and checker coverage
 - Add more varied policy actions
 - Provide automatic security policy recommendations
 

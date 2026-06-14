@@ -1,6 +1,7 @@
 """AgentGuard: the public client facade."""
 from __future__ import annotations
 
+import json
 import secrets
 from pathlib import Path
 from typing import Any, Callable
@@ -54,6 +55,7 @@ class AgentGuard:
         checker_config: str | dict[str, Any] | None = None,
         session_key: str | None = None,
     ) -> None:
+        checker_payload = _checker_config_payload(checker_config)
         snapshot = self._load_snapshot(policy)
         self.session_key = session_key or _generate_session_key()
         self.context = RuntimeContext(
@@ -63,7 +65,11 @@ class AgentGuard:
             policy=policy,
             policy_version=snapshot.version,
             environment=environment,
-            metadata={"client_session_key": self.session_key},
+            metadata={
+                "client_session_key": self.session_key,
+                "client_checker_config": checker_payload,
+                "remote_checker_config": checker_payload,
+            },
         )
 
         self._remote = RemoteGuardClient(
@@ -117,6 +123,7 @@ class AgentGuard:
         if enable_agentdog:
             self.register_plugin(AgentDoGProxyPlugin())
         self._plugins.start_session(self.context)
+        self._register_remote_session()
 
     # ---- policy --------------------------------------------------------
     @staticmethod
@@ -138,6 +145,7 @@ class AgentGuard:
 
     def update_checker_config(self, checker_config: str | dict[str, Any] | None) -> None:
         """Replace local checker configuration for subsequent guarded events."""
+        self.context.metadata["client_checker_config"] = _checker_config_payload(checker_config)
         self._enforcer.update_checker_config(checker_config)
 
     def start_config_api(self, *, host: str = "127.0.0.1", port: int = 38181) -> str:
@@ -148,6 +156,10 @@ class AgentGuard:
         self.context.metadata["client_config_url"] = url
         self.context.metadata["client_checker_list_url"] = self._config_api.checker_list_url
         self.context.metadata["client_health_url"] = self._config_api.health_url
+        try:
+            self._remote.register_session(self.context)
+        except Exception:
+            pass
         return url
 
     def stop_config_api(self) -> None:
@@ -282,6 +294,33 @@ class AgentGuard:
         except Exception:
             pass
 
+    def _register_remote_session(self) -> None:
+        if not self._remote.enabled:
+            return
+        try:
+            self.start_config_api(port=0)
+        except Exception:
+            pass
+        try:
+            self._remote.register_session(self.context)
+        except Exception:
+            pass
+
 
 def _generate_session_key() -> str:
     return f"sk-{secrets.token_urlsafe(32)}"
+
+
+def _checker_config_payload(
+    checker_config: str | Path | dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if checker_config is None:
+        return None
+    if isinstance(checker_config, dict):
+        return json.loads(json.dumps(checker_config))
+    path = Path(checker_config)
+    with path.open("r", encoding="utf-8") as fh:
+        data = json.load(fh)
+    if not isinstance(data, dict):
+        raise ValueError("checker config file must contain a JSON object")
+    return data

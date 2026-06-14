@@ -44,15 +44,27 @@ def update_checker_config(req: CheckerConfigUpdateRequest) -> CheckerConfigUpdat
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     client_config = req.client_config or req.config
-    client_updates = [
-        _push_client_checker_config(
-            url,
-            client_config,
-            req.timeout_s,
-            client_key=_client_key_for_url(url),
+    client_updates = []
+    for principal in req.client_principals:
+        client_updates.extend(
+            _manager.update_client_checker_config(
+                principal,
+                client_config,
+                remote_checker_config=req.config,
+                timeout_s=req.timeout_s,
+            )
         )
-        for url in req.client_config_urls
-    ]
+    client_updates.extend(
+        [
+            _push_client_checker_config(
+                url,
+                client_config,
+                req.timeout_s,
+                client_key=_client_key_for_url(url),
+            )
+            for url in req.client_config_urls
+        ]
+    )
     return CheckerConfigUpdateResponse(
         status="ok",
         loaded_checkers=loaded,

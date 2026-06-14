@@ -8,11 +8,13 @@ from fastapi import APIRouter, HTTPException, Request
 from backend.api.schemas import (
     GuardDecideRequest,
     GuardDecideResponse,
+    SessionRegisterRequest,
     SkillRunRequest,
     ToolReportRequest,
     TraceUploadRequest,
 )
 from backend.app_state import get_console, get_manager, get_skills
+from shared.schemas.context import RuntimeContext
 from backend.runtime.policy.snapshot_builder import snapshot_dict
 
 router = APIRouter()
@@ -59,6 +61,21 @@ def report_tool(req: ToolReportRequest, request: Request) -> dict[str, Any]:
     if tool is None:
         raise HTTPException(status_code=400, detail="agent_id and tool.name are required")
     return {"status": "ok", "tool": tool}
+
+
+@router.post("/v1/server/session/register")
+def register_session(req: SessionRegisterRequest, request: Request) -> dict[str, Any]:
+    context = RuntimeContext.from_dict(req.context)
+    try:
+        record = _manager.session_pool.upsert(
+            context,
+            client_ip=_client_ip(request),
+            client_key=request.headers.get("x-agentguard-session-key"),
+            enforce_key=True,
+        )
+    except PermissionError as exc:
+        raise _session_key_error(exc) from exc
+    return {"status": "ok", "session": record}
 
 
 @router.post("/v1/server/skills/run")

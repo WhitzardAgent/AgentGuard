@@ -35,10 +35,15 @@ class ToolReportRequest(BaseModel):
     tool: dict[str, Any] = Field(default_factory=dict)
 
 
+class SessionRegisterRequest(BaseModel):
+    context: dict[str, Any] = Field(default_factory=dict)
+
+
 class CheckerConfigUpdateRequest(BaseModel):
     config: dict[str, Any]
     client_config: dict[str, Any] | None = None
     client_config_urls: list[str] = Field(default_factory=list)
+    client_principals: list[dict[str, Any]] = Field(default_factory=list)
     timeout_s: float = 2.0
 
 

@@ -107,6 +107,7 @@ class CheckerManager:
         context: RuntimeContext,
         *,
         trajectory_window: list[RuntimeEvent] | None = None,
+        stop_on_first_decision: bool = False,
     ) -> CheckResult:
         merged_signals: list[str] = []
         candidate = None
@@ -131,6 +132,8 @@ class CheckerManager:
             if res.decision_candidate and (candidate is None or res.is_final):
                 candidate = res.decision_candidate
                 is_final = is_final or res.is_final
+                if stop_on_first_decision:
+                    break
 
         for signal in merged_signals:
             event.add_signal(signal)

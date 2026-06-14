@@ -73,6 +73,16 @@ class SessionPool:
                     context_metadata.get("client_health_url")
                     or current.get("client_health_url")
                 ),
+                "client_checker_config": (
+                    context_metadata.get("client_checker_config")
+                    if "client_checker_config" in context_metadata
+                    else current.get("client_checker_config")
+                ),
+                "remote_checker_config": (
+                    context_metadata.get("remote_checker_config")
+                    if "remote_checker_config" in context_metadata
+                    else current.get("remote_checker_config")
+                ),
                 "principal": principal or current.get("principal"),
                 "metadata": metadata,
                 "last_seen": now,
@@ -151,6 +161,73 @@ class SessionPool:
                 key=lambda item: (item.get("last_seen") or 0),
                 reverse=True,
             )
+
+    def find_by_principal(self, principal: dict[str, Any]) -> list[dict[str, Any]]:
+        filters = {str(key): value for key, value in (principal or {}).items() if value is not None}
+        if not filters:
+            return []
+        with self._lock:
+            matches = [
+                dict(record)
+                for record in self._sessions.values()
+                if _record_matches_principal(record, filters)
+            ]
+        return sorted(matches, key=lambda item: (item.get("last_seen") or 0), reverse=True)
+
+    def set_client_checker_config(
+        self,
+        session_id: str | None,
+        checker_config: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if not session_id:
+            return None
+        now = now_ts()
+        with self._lock:
+            current = dict(self._sessions.get(session_id) or {"session_id": session_id})
+            metadata = dict(current.get("metadata") or {})
+            metadata["client_checker_config"] = checker_config
+            current.update(
+                {
+                    "client_checker_config": checker_config,
+                    "metadata": metadata,
+                    "last_seen": now,
+                }
+            )
+            self._sessions[session_id] = current
+            return dict(current)
+
+    def set_remote_checker_config(
+        self,
+        session_id: str | None,
+        checker_config: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if not session_id:
+            return None
+        now = now_ts()
+        with self._lock:
+            current = dict(self._sessions.get(session_id) or {"session_id": session_id})
+            metadata = dict(current.get("metadata") or {})
+            metadata["remote_checker_config"] = checker_config
+            current.update(
+                {
+                    "remote_checker_config": checker_config,
+                    "metadata": metadata,
+                    "last_seen": now,
+                }
+            )
+            self._sessions[session_id] = current
+            return dict(current)
+
+
+def _record_matches_principal(record: dict[str, Any], filters: dict[str, Any]) -> bool:
+    principal = record.get("principal") if isinstance(record.get("principal"), dict) else {}
+    for key, expected in filters.items():
+        actual = record.get(key)
+        if actual is None and isinstance(principal, dict):
+            actual = principal.get(key)
+        if actual != expected:
+            return False
+    return True
 
 
 __all__ = ["TraceStore", "SessionPool"]

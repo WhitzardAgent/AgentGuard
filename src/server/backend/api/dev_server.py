@@ -9,6 +9,7 @@ from typing import Any
 
 from backend.api.auth import check_backend_api_key
 from backend.console.state import ConsoleState
+from shared.schemas.context import RuntimeContext
 from shared.utils.json import safe_dumps, safe_loads
 from backend.runtime.manager import RuntimeManager
 from backend.runtime.policy.snapshot_builder import snapshot_dict
@@ -94,6 +95,19 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(400, {"error": "agent_id and tool.name are required"})
             else:
                 self._send(200, {"status": "ok", "tool": tool})
+        elif self.path == "/v1/server/session/register":
+            context = RuntimeContext.from_dict(body.get("context") or {})
+            try:
+                record = self.manager.session_pool.upsert(
+                    context,
+                    client_ip=self.client_address[0],
+                    client_key=self.headers.get("X-AgentGuard-Session-Key"),
+                    enforce_key=True,
+                )
+            except PermissionError as exc:
+                self._send_session_key_error(exc)
+                return
+            self._send(200, {"status": "ok", "session": record})
         elif self.path == "/v1/server/session/unregister":
             session_id = self.headers.get("X-AgentGuard-Session-Id")
             if not session_id:
@@ -117,15 +131,27 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             client_config = body.get("client_config") or body.get("config")
             timeout_s = float(body.get("timeout_s", 2.0) or 2.0)
-            client_updates = [
-                _push_client_checker_config(
-                    url,
-                    client_config,
-                    timeout_s,
-                    client_key=_client_key_for_url(self.manager, url),
+            client_updates = []
+            for principal in body.get("client_principals") or []:
+                client_updates.extend(
+                    self.manager.update_client_checker_config(
+                        principal,
+                        client_config,
+                        remote_checker_config=body.get("config"),
+                        timeout_s=timeout_s,
+                    )
                 )
-                for url in body.get("client_config_urls") or []
-            ]
+            client_updates.extend(
+                [
+                    _push_client_checker_config(
+                        url,
+                        client_config,
+                        timeout_s,
+                        client_key=_client_key_for_url(self.manager, url),
+                    )
+                    for url in body.get("client_config_urls") or []
+                ]
+            )
             self._send(
                 200,
                 {

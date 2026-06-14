@@ -236,6 +236,120 @@ def test_manager_uses_checker_config_file(tmp_path):
     assert "prompt_injection" not in res["risk_signals"]
 
 
+class StopsChainChecker(BaseChecker):
+    name = "stops_chain"
+    event_types = [EventType.TOOL_INVOKE]
+
+    def check(self, event, context, trajectory_window=None):
+        from shared.schemas.decisions import GuardDecision
+
+        return CheckResult(
+            decision_candidate=GuardDecision.deny("first decision wins", policy_id="server:first"),
+            risk_signals=["chain_stopped"],
+            is_final=True,
+        )
+
+
+class ShouldNotRunChecker(BaseChecker):
+    name = "should_not_run"
+    event_types = [EventType.TOOL_INVOKE]
+
+    def check(self, event, context, trajectory_window=None):
+        raise AssertionError("checker chain should have stopped before this checker")
+
+
+def test_manager_uses_session_scoped_client_checker_config():
+    m = RuntimeManager(
+        enable_agentdog=False,
+        checker_config={
+            "phases": {
+                "llm_before": {"local": [], "remote": ["llm_input"]},
+            }
+        },
+    )
+    m.session_pool.upsert(
+        RuntimeContext(
+            session_id="scoped-session",
+            metadata={
+                "remote_checker_config": {
+                    "phases": {
+                        "tool_before": {"local": [], "remote": [StopsChainChecker]},
+                    }
+                }
+            },
+        )
+    )
+    req = {
+        "request_id": "scoped-config",
+        "context": {"session_id": "scoped-session"},
+        "current_event": {
+            "event_type": "tool_invoke",
+            "payload": {"tool_name": "read_file", "arguments": {}, "capabilities": []},
+            "risk_signals": [],
+        },
+        "trajectory_window": [],
+        "local_signals": [],
+    }
+
+    res = m.decide(req)
+
+    assert res["decision"]["decision_type"] == "deny"
+    assert "chain_stopped" in res["checker_result"]["risk_signals"]
+
+
+def test_update_client_checker_config_updates_both_server_and_client_views():
+    m = RuntimeManager(enable_agentdog=False)
+    m.session_pool.upsert(
+        RuntimeContext(
+            session_id="principal-match",
+            agent_id="agent-1",
+            user_id="user-1",
+        )
+    )
+
+    updates = m.update_client_checker_config(
+        {"session_id": "principal-match", "agent_id": "agent-1", "user_id": "user-1"},
+        {"phases": {"llm_before": {"local": ["llm_input"], "remote": []}}},
+        remote_checker_config={"phases": {"llm_before": {"local": [], "remote": ["llm_input"]}}},
+    )
+
+    assert updates[0]["status"] == "skipped"
+    record = m.session_pool.get("principal-match")
+    assert record is not None
+    assert record["client_checker_config"]["phases"]["llm_before"]["local"] == ["llm_input"]
+    assert record["remote_checker_config"]["phases"]["llm_before"]["remote"] == ["llm_input"]
+
+
+def test_manager_stops_remote_checker_chain_on_first_decision():
+    m = RuntimeManager(
+        enable_agentdog=False,
+        checker_config={
+            "phases": {
+                "tool_before": {
+                    "local": [],
+                    "remote": [StopsChainChecker, ShouldNotRunChecker],
+                }
+            }
+        },
+    )
+    req = {
+        "request_id": "chain-stop",
+        "context": {"session_id": "chain-stop"},
+        "current_event": {
+            "event_type": "tool_invoke",
+            "payload": {"tool_name": "read_file", "arguments": {}, "capabilities": []},
+            "risk_signals": [],
+        },
+        "trajectory_window": [],
+        "local_signals": [],
+    }
+
+    res = m.decide(req)
+
+    assert res["decision"]["decision_type"] == "deny"
+    assert res["decision"]["policy_id"] == "server:first"
+
+
 class TraceAwareChecker(BaseChecker):
     name = "trace_aware"
     event_types = [EventType.TOOL_INVOKE]

@@ -1,6 +1,7 @@
 """Server RuntimeManager: orchestrate a remote guard decision."""
 from __future__ import annotations
 
+import copy
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -18,7 +19,7 @@ from backend.runtime.checkers import server_checker_manager
 from backend.runtime.degrade.planner import DegradePlanner
 from backend.runtime.policy.engine import PolicyEngine
 from backend.runtime.storage import SessionPool, TraceStore
-from shared.utils.json import safe_loads
+from shared.utils.json import safe_dumps, safe_loads
 from shared.utils.time import now_ts
 
 
@@ -73,6 +74,49 @@ class RuntimeManager:
         self.checker_config = checker_config
         self._bind_rule_based_checkers()
         return [checker.name for checker in getattr(self.checkers, "checkers", [])]
+
+    def register_client_session(self, context: RuntimeContext) -> dict[str, Any]:
+        return self.session_pool.upsert(
+            context,
+            client_ip=(context.metadata or {}).get("client_ip"),
+            client_key=(context.metadata or {}).get("client_session_key"),
+        )
+
+    def update_client_checker_config(
+        self,
+        principal: dict[str, Any],
+        checker_config: dict[str, Any],
+        *,
+        remote_checker_config: dict[str, Any] | None = None,
+        timeout_s: float = 2.0,
+    ) -> list[dict[str, Any]]:
+        matches = self.session_pool.find_by_principal(principal)
+        updates: list[dict[str, Any]] = []
+        for session in matches:
+            session_id = session.get("session_id")
+            config_copy = copy.deepcopy(checker_config)
+            remote_copy = copy.deepcopy(remote_checker_config if remote_checker_config is not None else checker_config)
+            self.session_pool.set_client_checker_config(str(session_id) if session_id else None, config_copy)
+            self.session_pool.set_remote_checker_config(str(session_id) if session_id else None, remote_copy)
+            url = session.get("client_config_url")
+            if not url:
+                updates.append(
+                    {
+                        "session_id": session_id,
+                        "status": "skipped",
+                        "reason": "no client config url",
+                    }
+                )
+                continue
+            pushed = _push_client_checker_config(
+                str(url),
+                config_copy,
+                timeout_s,
+                client_key=session.get("client_key"),
+            )
+            pushed["session_id"] = session_id
+            updates.append(pushed)
+        return updates
 
     def start_session_health_monitor(self) -> None:
         """Start the background session health monitor if it is not running."""
@@ -193,8 +237,20 @@ class RuntimeManager:
                 }
             )
 
+        session_cfg = self.session_pool.get(context.session_id or "")
+        effective_checker_config = session_cfg.get("remote_checker_config") if session_cfg else None
+        effective_checkers = self.checkers
+        if effective_checker_config is not None:
+            effective_checkers = server_checker_manager(effective_checker_config)
+            self._bind_rule_based_checkers_for(effective_checkers)
+
         # 1. Server checkers add signals.
-        check = self.checkers.run(event, context, trajectory_window=trace_window)
+        check = effective_checkers.run(
+            event,
+            context,
+            trajectory_window=trace_window,
+            stop_on_first_decision=True,
+        )
 
         # 2. Plugins: request lifecycle + diagnosis.
         plugin_ctx: dict[str, Any] = {"context": ctx_dict}
@@ -213,7 +269,12 @@ class RuntimeManager:
         # 4. Re-run configured checkers after plugin signals are attached. This
         # keeps optional rule-based checkers out of the core path while still
         # letting them see plugin-derived risk signals when they are enabled.
-        post_plugin_check = self.checkers.run(event, context, trajectory_window=trace_window)
+        post_plugin_check = effective_checkers.run(
+            event,
+            context,
+            trajectory_window=trace_window,
+            stop_on_first_decision=True,
+        )
         check = _merge_check_results(check, post_plugin_check)
         decision = _decision_from_checker_result(check)
         decision = self.plugins.on_after_policy_decision(decision, plugin_ctx)
@@ -273,11 +334,14 @@ class RuntimeManager:
         return count
 
     def _bind_rule_based_checkers(self) -> None:
+        self._bind_rule_based_checkers_for(self.checkers)
+
+    def _bind_rule_based_checkers_for(self, checker_manager: Any) -> None:
         try:
             from backend.runtime.checkers.tool_before.rule_based_check import RuleBasedChecker
         except Exception:
             return
-        for checker in getattr(self.checkers, "checkers", []):
+        for checker in getattr(checker_manager, "checkers", []):
             if isinstance(checker, RuleBasedChecker):
                 checker.set_policy_store(self.policy.store)
 
@@ -349,6 +413,39 @@ def _check_client_health(
         return payload.get("status") == "ok", payload
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         return False, str(exc)
+
+
+def _push_client_checker_config(
+    url: str,
+    config: dict[str, Any],
+    timeout_s: float,
+    *,
+    client_key: str | None = None,
+) -> dict[str, Any]:
+    body = safe_dumps({"config": config}).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    if client_key:
+        headers["X-AgentGuard-Session-Key"] = str(client_key)
+    request = urllib.request.Request(url, data=body, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=max(timeout_s, 0.1)) as response:
+            payload = safe_loads(response.read(), fallback={}) or {}
+            return {
+                "url": url,
+                "status": "ok",
+                "status_code": response.status,
+                "response": payload,
+            }
+    except urllib.error.HTTPError as exc:
+        raw = exc.read()
+        return {
+            "url": url,
+            "status": "error",
+            "status_code": exc.code,
+            "error": raw.decode("utf-8", errors="replace"),
+        }
+    except Exception as exc:
+        return {"url": url, "status": "error", "error": str(exc)}
 
 
 def _events_from_cached_entries(entries: list[dict[str, Any]]) -> list[RuntimeEvent]:
