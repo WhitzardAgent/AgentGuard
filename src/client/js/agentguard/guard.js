@@ -1,0 +1,220 @@
+"use strict";
+
+const crypto = require("crypto");
+const path = require("path");
+const { defaultLLMAdapters, selectLLMAdapter } = require("./adapters/llm");
+const { AgentDoGProxyPlugin } = require("./plugins/builtin/agentdog_proxy");
+const { AuditLogger } = require("./audit/logger");
+const { AuditRecorder } = require("./audit/recorder");
+const { CheckerManager } = require("./checkers/manager");
+const { EventBus } = require("./harness/event_bus");
+const { Lifecycle } = require("./harness/lifecycle");
+const { HarnessRuntime } = require("./harness/runtime");
+const { PluginManager } = require("./plugins/manager");
+const { loadPolicy } = require("./rules/loader");
+const { SandboxExecutor } = require("./sandbox/executor");
+const { RuntimeContext } = require("./schemas/context");
+const { SkillRegistryProxy } = require("./skill_client/registry_proxy");
+const { RemoteSkillRunner } = require("./skill_client/remote_runner");
+const { ToolDegradeManager } = require("./tools/degrade");
+const { ToolRegistry } = require("./tools/registry");
+const { ToolWrapper } = require("./tools/wrapper");
+const { UGuardEnforcer } = require("./u_guard/enforcer");
+const { PolicySnapshot } = require("./u_guard/policy_snapshot");
+const { RemoteGuardClient } = require("./u_guard/remote_client");
+const { LangChainAgentAdapter } = require("./adapters/agent/langchain");
+const { AutogenAgentAdapter } = require("./adapters/agent/autogen");
+const { OpenAIAgentsAdapter } = require("./adapters/agent/openai_agents");
+
+class AgentGuard {
+  constructor(session_id, options = {}) {
+    const snapshot = this.loadSnapshot(options.policy || null);
+    this.session_key = options.session_key || options.sessionKey || generateSessionKey();
+    this.context = new RuntimeContext({
+      session_id,
+      user_id: options.user_id || options.userId || null,
+      agent_id: options.agent_id || options.agentId || null,
+      policy: options.policy || null,
+      policy_version: snapshot.version,
+      environment: options.environment || null,
+      metadata: { client_session_key: this.session_key },
+    });
+    this.remote = new RemoteGuardClient(options.server_url || options.serverUrl || null, {
+      api_key: options.api_key || options.apiKey || null,
+      session_id: this.context.session_id,
+      session_key: this.session_key,
+      timeout_s: options.remote_timeout_s ?? options.remoteTimeoutS ?? 5.0,
+      retries: options.remote_retries ?? options.remoteRetries ?? 2,
+    });
+    this.enforcer = new UGuardEnforcer({
+      snapshot,
+      remote: this.remote,
+      checker_manager: new CheckerManager({ config: options.checker_config || null }),
+    });
+    this.sandbox = new SandboxExecutor(options.sandbox || "local", options.sandbox_profile || options.sandboxProfile || null);
+    this.audit = new AuditRecorder(session_id, new AuditLogger(options.audit_path || options.auditPath || null));
+    this.registry = new ToolRegistry();
+    this.degrade = new ToolDegradeManager();
+    this.lifecycle = new Lifecycle();
+    this.bus = new EventBus();
+    this.plugins = new PluginManager(this.lifecycle);
+    this.runtime = new HarnessRuntime({
+      context: this.context,
+      enforcer: this.enforcer,
+      sandbox: this.sandbox,
+      audit: this.audit,
+      registry: this.registry,
+      degrade_manager: this.degrade,
+      lifecycle: this.lifecycle,
+      event_bus: this.bus,
+      max_steps: options.max_steps ?? options.maxSteps ?? 12,
+      max_tool_calls: options.max_tool_calls ?? options.maxToolCalls ?? 24,
+      window_size: options.window_size ?? options.windowSize ?? 8,
+    });
+    this.llm_adapters = defaultLLMAdapters();
+    this.skills = new SkillRegistryProxy({
+      remote: options.server_url || options.serverUrl
+        ? new RemoteSkillRunner(options.server_url || options.serverUrl, {
+            api_key: options.api_key || options.apiKey || null,
+            session_id: this.context.session_id,
+            session_key: this.session_key,
+          })
+        : null,
+    });
+    if (options.enable_agentdog || options.enableAgentdog) {
+      this.register_plugin(new AgentDoGProxyPlugin());
+    }
+    this.plugins.start_session(this.context);
+  }
+
+  loadSnapshot(policy) {
+    let rules = null;
+    if (policy) {
+      for (const candidate of [policy, path.join("rules", "examples", `${policy}.json`), path.join("rules", `${policy}.json`)]) {
+        try {
+          rules = loadPolicy(candidate);
+          break;
+        } catch (_) {
+          continue;
+        }
+      }
+    }
+    if (!rules) {
+      rules = loadPolicy(null);
+    }
+    return new PolicySnapshot({
+      version: policy || "builtin",
+      rules,
+    });
+  }
+
+  load_policy_snapshot(snapshot) {
+    const next = snapshot instanceof PolicySnapshot ? snapshot : PolicySnapshot.fromDict(snapshot);
+    this.enforcer.set_snapshot(next);
+    this.context.policy_version = next.version;
+  }
+
+  update_checker_config(checker_config) {
+    this.enforcer.update_checker_config(checker_config);
+  }
+
+  register_tool(fn, meta = {}) {
+    const metadata = this.registry.register(fn, null, meta);
+    this.reportToolMetadata(metadata);
+    return metadata;
+  }
+
+  wrap_tool(fn, meta = {}) {
+    const metadata = this.register_tool(fn, meta);
+    return new ToolWrapper(fn, metadata, this.runtime);
+  }
+
+  wrap_llm(llm) {
+    const adapter = selectLLMAdapter(llm, this.llm_adapters);
+    return adapter.wrap(llm, this.runtime);
+  }
+
+  attach_autogen(agent, options = {}) {
+    return new AutogenAgentAdapter().attach(agent, this, options);
+  }
+
+  attach_langchain(agent, options = {}) {
+    return new LangChainAgentAdapter().attach(agent, this, options);
+  }
+
+  attach_openai_agents(agent, options = {}) {
+    return new OpenAIAgentsAdapter().attach(agent, this, options);
+  }
+
+  register_plugin(plugin) {
+    return this.plugins.register(plugin);
+  }
+
+  register_skill(skill) {
+    return skill;
+  }
+
+  async run_skill(skill_name, input_data = {}) {
+    return this.skills.run(skill_name, input_data);
+  }
+
+  async invoke_tool(tool_name, arguments_ = {}) {
+    const registered = this.registry.get(tool_name);
+    if (!registered) {
+      throw new Error(`tool not registered: ${tool_name}`);
+    }
+    return this.runtime.invoke_tool({
+      tool_name,
+      arguments: arguments_,
+      fn: registered.fn,
+      metadata: registered.metadata,
+    });
+  }
+
+  flush_audit() {
+    return this.audit.flush();
+  }
+
+  get trace() {
+    return this.runtime.session.trace;
+  }
+
+  async close() {
+    await this.runtime.sync_local_cache_now({ reason: "session_close" });
+    this.plugins.end_session(this.runtime.session.trace, this.context);
+    if (this.remote.enabled) {
+      try {
+        await this.remote.unregister_session();
+      } catch (_) {
+        return;
+      }
+    }
+  }
+
+  reportToolMetadata(metadata) {
+    if (!this.remote.enabled) {
+      return;
+    }
+    const toolPayload = {
+      name: metadata.name,
+      description: metadata.description,
+      input_params: [...(metadata.required_args || [])],
+      capabilities: [...(metadata.capabilities || [])],
+      labels: {
+        boundary: String((metadata.metadata || {}).boundary || "internal"),
+        sensitivity: String((metadata.metadata || {}).sensitivity || "low"),
+        integrity: String((metadata.metadata || {}).integrity || "trusted"),
+        tags: [ ...(((metadata.metadata || {}).tags || metadata.capabilities || []).map((tag) => String(tag)).filter(Boolean)) ],
+      },
+    };
+    this.remote.report_tool(this.context, toolPayload).catch(() => {});
+  }
+}
+
+function generateSessionKey() {
+  return `sk-${crypto.randomBytes(32).toString("base64url")}`;
+}
+
+module.exports = {
+  AgentGuard,
+};

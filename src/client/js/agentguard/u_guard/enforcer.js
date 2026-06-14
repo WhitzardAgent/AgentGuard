@@ -1,0 +1,113 @@
+"use strict";
+
+const { CheckerManager } = require("../checkers/manager");
+const { GuardDecision } = require("../schemas/decisions");
+const { ClientSyncBuffer } = require("./sync_buffer");
+const { RemoteGuardError } = require("../utils/errors");
+
+class EnforcementResult {
+  constructor({ decision, event, route = "local", check = null, plugin_extensions = {} }) {
+    this.decision = decision;
+    this.event = event;
+    this.route = route;
+    this.check = check;
+    this.plugin_extensions = plugin_extensions;
+  }
+}
+
+class UGuardEnforcer {
+  constructor({ snapshot = null, remote = null, checker_manager = null, trace_window_provider = null, sync_buffer = null } = {}) {
+    this.snapshot = snapshot;
+    this.remote = remote;
+    this.checkers = checker_manager || new CheckerManager();
+    this.trace_window_provider = trace_window_provider;
+    this.sync_buffer = sync_buffer || new ClientSyncBuffer();
+  }
+
+  set_snapshot(snapshot) {
+    this.snapshot = snapshot;
+  }
+
+  update_checker_config(config) {
+    this.checkers.update_config(config);
+  }
+
+  get server_available() {
+    return Boolean(this.remote && this.remote.enabled && !this.remote.breaker.is_open);
+  }
+
+  async enforce(event, context, { plugin_extensions = null } = {}) {
+    const check = this.checkers.run(event, context);
+    const traceWindow = this.trace_window_provider ? this.trace_window_provider() : null;
+    if (check.is_final && check.decision_candidate) {
+      const decision = check.decision_candidate;
+      decision.metadata.route = decision.metadata.route || "local_checker";
+      this.sync_buffer.add_local_decision({
+        event,
+        context,
+        check,
+        decision,
+        route: "local_checker",
+        plugin_extensions: plugin_extensions || {},
+      });
+      return new EnforcementResult({
+        decision,
+        event,
+        route: "local_checker",
+        check,
+        plugin_extensions: plugin_extensions || {},
+      });
+    }
+    if (this.server_available) {
+      const { decision, route } = await this.decideRemote(event, context, traceWindow, plugin_extensions || {});
+      return new EnforcementResult({
+        decision,
+        event,
+        route,
+        check,
+        plugin_extensions: plugin_extensions || {},
+      });
+    }
+    return new EnforcementResult({
+      decision: GuardDecision.allow("No final local checker decision and no remote server configured.", {
+        risk_signals: [...(event.risk_signals || [])],
+        metadata: { route: "local_no_remote" },
+      }),
+      event,
+      route: "local_no_remote",
+      check,
+      plugin_extensions: plugin_extensions || {},
+    });
+  }
+
+  async decideRemote(event, context, traceWindow, pluginExtensions) {
+    const cachedEntries = this.sync_buffer.pop_all();
+    try {
+      const decision = await this.remote.decide(event, context, {
+        trajectory_window: traceWindow,
+        local_signals: [...(event.risk_signals || [])],
+        plugin_extensions: pluginExtensions,
+        client_cached_entries: cachedEntries,
+      });
+      decision.metadata.route = decision.metadata.route || "remote";
+      return { decision, route: "remote" };
+    } catch (error) {
+      this.sync_buffer.restore_front(cachedEntries);
+      if (!(error instanceof RemoteGuardError)) {
+        throw error;
+      }
+      return {
+        decision: GuardDecision.require_remote_review("Remote decision unavailable; event requires server judgement.", {
+          risk_signals: [...(event.risk_signals || [])],
+          metadata: { route: "remote_unavailable" },
+        }),
+        route: "remote_unavailable",
+      };
+    }
+  }
+}
+
+module.exports = {
+  EnforcementResult,
+  UGuardEnforcer,
+};
