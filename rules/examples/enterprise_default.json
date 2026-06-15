@@ -1,48 +1,4 @@
 {
   "version": "enterprise_default",
-  "rules": [
-    {
-      "rule_id": "ent_deny_exfiltration",
-      "effect": "deny",
-      "reason": "Block external send of secret/PII content.",
-      "priority": 100,
-      "event_types": ["tool_invoke"],
-      "capabilities": ["external_send"],
-      "risk_signals": ["secret_detected", "api_key_detected", "exfiltration_detected"],
-      "conditions": [],
-      "metadata": {}
-    },
-    {
-      "rule_id": "ent_review_external_send",
-      "effect": "require_remote_review",
-      "reason": "External send escalated to remote review.",
-      "priority": 60,
-      "event_types": ["tool_invoke"],
-      "capabilities": ["external_send"],
-      "risk_signals": [],
-      "conditions": [],
-      "metadata": {}
-    },
-    {
-      "rule_id": "ent_approve_payment",
-      "effect": "require_approval",
-      "reason": "Payments require approval.",
-      "priority": 80,
-      "event_types": ["tool_invoke"],
-      "capabilities": ["payment"],
-      "risk_signals": [],
-      "conditions": [],
-      "metadata": {}
-    },
-    {
-      "rule_id": "ent_sanitize_pii",
-      "effect": "sanitize",
-      "reason": "Sanitize PII in responses.",
-      "priority": 40,
-      "event_types": ["llm_output", "final_response"],
-      "risk_signals": ["pii_email", "pii_detected"],
-      "conditions": [],
-      "metadata": {}
-    }
-  ]
+  "rules": []
 }
