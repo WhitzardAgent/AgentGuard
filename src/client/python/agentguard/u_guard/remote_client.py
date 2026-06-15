@@ -51,6 +51,8 @@ class RemoteGuardClient:
         *,
         api_key: str | None = None,
         session_id: str | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
         session_key: str | None = None,
         timeout_s: float = 5.0,
         retries: int = 2,
@@ -64,6 +66,8 @@ class RemoteGuardClient:
         self.server_url = (server_url or "").rstrip("/")
         self.api_key = api_key
         self.session_id = session_id
+        self.agent_id = agent_id
+        self.user_id = user_id
         self.session_key = session_key
         self.timeout_s = timeout_s
         self.retries = retries
@@ -177,6 +181,10 @@ class RemoteGuardClient:
             headers["Authorization"] = f"Bearer {self.api_key}"
         if self.session_id:
             headers["X-AgentGuard-Session-Id"] = self.session_id
+        if self.agent_id:
+            headers["X-AgentGuard-Agent-Id"] = self.agent_id
+        if self.user_id:
+            headers["X-AgentGuard-User-Id"] = self.user_id
         if self.session_key:
             headers["X-AgentGuard-Session-Key"] = self.session_key
         return headers

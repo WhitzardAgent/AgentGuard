@@ -56,7 +56,11 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, self.console.tools(agent_id))
         elif path.startswith("/v1/backend/sessions/"):
             session_id = path.rsplit("/", 1)[-1]
-            record = self.manager.session_pool.get(session_id)
+            record = self.manager.session_pool.get(
+                session_id,
+                agent_id=self._query_params().get("agent_id"),
+                user_id=self._query_params().get("user_id"),
+            )
             if record is None:
                 self._send(404, {"error": f"session not found: {session_id}"})
             else:
@@ -116,6 +120,8 @@ class _Handler(BaseHTTPRequestHandler):
             try:
                 removed = self.manager.session_pool.remove(
                     session_id,
+                    agent_id=self.headers.get("X-AgentGuard-Agent-Id"),
+                    user_id=self.headers.get("X-AgentGuard-User-Id"),
                     client_key=self.headers.get("X-AgentGuard-Session-Key"),
                     enforce_key=True,
                 )
@@ -169,6 +175,8 @@ class _Handler(BaseHTTPRequestHandler):
         return {
             "client_ip": self.client_address[0],
             "client_key": self.headers.get("X-AgentGuard-Session-Key"),
+            "agent_id": self.headers.get("X-AgentGuard-Agent-Id"),
+            "user_id": self.headers.get("X-AgentGuard-User-Id"),
             "enforce_session_key": enforce_session_key,
         }
 
@@ -185,12 +193,16 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_session_key_error(PermissionError("missing client session id"))
             return False
         try:
-            self.manager.session_pool.touch(
+            record = self.manager.session_pool.touch(
                 session_id,
+                agent_id=self.headers.get("X-AgentGuard-Agent-Id"),
+                user_id=self.headers.get("X-AgentGuard-User-Id"),
                 client_ip=self.client_address[0],
                 client_key=self.headers.get("X-AgentGuard-Session-Key"),
                 enforce_key=True,
             )
+            if record is None:
+                raise PermissionError("unknown client session")
         except PermissionError as exc:
             self._send_session_key_error(exc)
             return False
@@ -199,6 +211,13 @@ class _Handler(BaseHTTPRequestHandler):
     def _send_session_key_error(self, exc: PermissionError) -> None:
         message = str(exc)
         self._send(401 if "missing" in message else 403, {"error": message})
+
+    def _query_params(self) -> dict[str, str]:
+        raw = self.path.split("?", 1)
+        if len(raw) == 1:
+            return {}
+        pairs = [item.split("=", 1) for item in raw[1].split("&") if item]
+        return {key: value for key, value in pairs if key}
 
 
 def start_dev_server(

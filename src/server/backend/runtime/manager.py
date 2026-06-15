@@ -94,10 +94,22 @@ class RuntimeManager:
         updates: list[dict[str, Any]] = []
         for session in matches:
             session_id = session.get("session_id")
+            agent_id = session.get("agent_id")
+            user_id = session.get("user_id")
             config_copy = copy.deepcopy(checker_config)
             remote_copy = copy.deepcopy(remote_checker_config if remote_checker_config is not None else checker_config)
-            self.session_pool.set_client_checker_config(str(session_id) if session_id else None, config_copy)
-            self.session_pool.set_remote_checker_config(str(session_id) if session_id else None, remote_copy)
+            self.session_pool.set_client_checker_config(
+                str(session_id) if session_id else None,
+                str(agent_id) if agent_id is not None else None,
+                str(user_id) if user_id is not None else None,
+                config_copy,
+            )
+            self.session_pool.set_remote_checker_config(
+                str(session_id) if session_id else None,
+                str(agent_id) if agent_id is not None else None,
+                str(user_id) if user_id is not None else None,
+                remote_copy,
+            )
             url = session.get("client_config_url")
             if not url:
                 updates.append(
@@ -179,6 +191,8 @@ class RuntimeManager:
             if alive:
                 refreshed = self.session_pool.touch(
                     session.get("session_id"),
+                    agent_id=session.get("agent_id"),
+                    user_id=session.get("user_id"),
                     metadata={
                         "last_health_check_status": "ok",
                         "last_health_check_url": health_url,
@@ -232,12 +246,18 @@ class RuntimeManager:
             self.record_uploaded_trace(
                 {
                     "session_id": context.session_id,
+                    "agent_id": context.agent_id,
+                    "user_id": context.user_id,
                     "reason": "decision_sync",
                     "entries": cached_entries,
                 }
             )
 
-        session_cfg = self.session_pool.get(context.session_id or "")
+        session_cfg = self.session_pool.get(
+            context.session_id or "",
+            agent_id=context.agent_id,
+            user_id=context.user_id,
+        )
         effective_checker_config = session_cfg.get("remote_checker_config") if session_cfg else None
         effective_checkers = self.checkers
         if effective_checker_config is not None:
@@ -307,8 +327,12 @@ class RuntimeManager:
 
     def record_uploaded_trace(self, trace: dict[str, Any]) -> int:
         session_id = trace.get("session_id") or "unknown"
+        agent_id = trace.get("agent_id") or (trace.get("_transport") or {}).get("agent_id")
+        user_id = trace.get("user_id") or (trace.get("_transport") or {}).get("user_id")
         self.session_pool.touch(
             session_id,
+            agent_id=str(agent_id) if agent_id is not None else None,
+            user_id=str(user_id) if user_id is not None else None,
             client_ip=(trace.get("_transport") or {}).get("client_ip"),
             client_key=(trace.get("_transport") or {}).get("client_key"),
             enforce_key=bool((trace.get("_transport") or {}).get("enforce_session_key")),
@@ -320,13 +344,30 @@ class RuntimeManager:
                 continue
             record = {
                 "session_id": session_id,
+                "agent_id": agent_id,
+                "user_id": user_id,
                 "reason": trace.get("reason"),
                 **entry,
             }
             event_dict = _cached_entry_event_dict(entry)
-            if _trace_store_has_event(self.trace_store.get(session_id), event_dict):
+            entry_context = entry.get("context") if isinstance(entry.get("context"), dict) else {}
+            entry_agent_id = entry_context.get("agent_id", agent_id)
+            entry_user_id = entry_context.get("user_id", user_id)
+            if _trace_store_has_event(
+                self.trace_store.get(
+                    session_id,
+                    agent_id=str(entry_agent_id) if entry_agent_id is not None else None,
+                    user_id=str(entry_user_id) if entry_user_id is not None else None,
+                ),
+                event_dict,
+            ):
                 continue
-            self.trace_store.append(session_id, record)
+            self.trace_store.append(
+                session_id,
+                record,
+                agent_id=str(entry_agent_id) if entry_agent_id is not None else None,
+                user_id=str(entry_user_id) if entry_user_id is not None else None,
+            )
             decision_dict = entry.get("decision") if isinstance(entry.get("decision"), dict) else None
             if event_dict and decision_dict:
                 self.audit.record(event_dict, decision_dict, {"trace_upload": {"reason": trace.get("reason")}})

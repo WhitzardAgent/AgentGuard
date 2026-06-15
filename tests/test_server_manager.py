@@ -103,7 +103,7 @@ def test_manager_records_session_pool_metadata():
         }
     )
 
-    record = m.session_pool.get("pool-session")
+    record = m.session_pool.get("pool-session", agent_id="agent-a", user_id="user-a")
 
     assert record is not None
     assert record["agent_id"] == "agent-a"
@@ -114,6 +114,24 @@ def test_manager_records_session_pool_metadata():
     assert record["principal"] == {"role": "tester"}
     assert record["metadata"]["custom"] == "value"
     assert record["metadata"]["event_metadata"] == {"principal": {"role": "tester"}}
+
+
+def test_session_pool_requires_exact_composite_key_for_lookup():
+    m = RuntimeManager(enable_agentdog=False)
+    m.session_pool.upsert(
+        RuntimeContext(
+            session_id="composite-session",
+            agent_id="composite-agent",
+            user_id="composite-user",
+        )
+    )
+
+    assert m.session_pool.get("composite-session") is None
+    assert m.session_pool.get(
+        "composite-session",
+        agent_id="composite-agent",
+        user_id="composite-user",
+    ) is not None
 
 
 def test_server_checker_config_loads_only_remote_scope():
@@ -270,6 +288,8 @@ def test_manager_uses_session_scoped_client_checker_config():
     m.session_pool.upsert(
         RuntimeContext(
             session_id="scoped-session",
+            agent_id="scoped-agent",
+            user_id="scoped-user",
             metadata={
                 "remote_checker_config": {
                     "phases": {
@@ -281,7 +301,11 @@ def test_manager_uses_session_scoped_client_checker_config():
     )
     req = {
         "request_id": "scoped-config",
-        "context": {"session_id": "scoped-session"},
+        "context": {
+            "session_id": "scoped-session",
+            "agent_id": "scoped-agent",
+            "user_id": "scoped-user",
+        },
         "current_event": {
             "event_type": "tool_invoke",
             "payload": {"tool_name": "read_file", "arguments": {}, "capabilities": []},
@@ -314,7 +338,7 @@ def test_update_client_checker_config_updates_both_server_and_client_views():
     )
 
     assert updates[0]["status"] == "skipped"
-    record = m.session_pool.get("principal-match")
+    record = m.session_pool.get("principal-match", agent_id="agent-1", user_id="user-1")
     assert record is not None
     assert record["client_checker_config"]["phases"]["llm_before"]["local"] == ["llm_input"]
     assert record["remote_checker_config"]["phases"]["llm_before"]["remote"] == ["llm_input"]

@@ -89,9 +89,13 @@ def unregister_session(request: Request) -> dict[str, Any]:
     session_id = request.headers.get("x-agentguard-session-id")
     if not session_id:
         raise _session_key_error(PermissionError("missing client session id"))
+    agent_id = request.headers.get("x-agentguard-agent-id")
+    user_id = request.headers.get("x-agentguard-user-id")
     try:
         removed = _manager.session_pool.remove(
             session_id,
+            agent_id=agent_id,
+            user_id=user_id,
             client_key=request.headers.get("x-agentguard-session-key"),
             enforce_key=True,
         )
@@ -111,6 +115,8 @@ def _transport_metadata(request: Request, *, enforce_session_key: bool) -> dict[
     return {
         "client_ip": _client_ip(request),
         "client_key": request.headers.get("x-agentguard-session-key"),
+        "agent_id": request.headers.get("x-agentguard-agent-id"),
+        "user_id": request.headers.get("x-agentguard-user-id"),
         "enforce_session_key": enforce_session_key,
     }
 
@@ -120,12 +126,16 @@ def _validate_client_session(request: Request) -> None:
     if not session_id:
         raise _session_key_error(PermissionError("missing client session id"))
     try:
-        _manager.session_pool.touch(
+        record = _manager.session_pool.touch(
             session_id,
+            agent_id=request.headers.get("x-agentguard-agent-id"),
+            user_id=request.headers.get("x-agentguard-user-id"),
             client_ip=_client_ip(request),
             client_key=request.headers.get("x-agentguard-session-key"),
             enforce_key=True,
         )
+        if record is None:
+            raise PermissionError("unknown client session")
     except PermissionError as exc:
         raise _session_key_error(exc) from exc
 

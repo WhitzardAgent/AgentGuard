@@ -95,6 +95,8 @@ class ClientSyncBuffer:
     ) -> dict[str, Any]:
         return {
             "session_id": context.session_id,
+            "agent_id": context.agent_id,
+            "user_id": context.user_id,
             "reason": reason,
             "entries": entries,
         }

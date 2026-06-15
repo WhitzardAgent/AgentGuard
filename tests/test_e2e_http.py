@@ -59,6 +59,7 @@ def test_e2e_exfiltration_denied_over_http(server):
 
 
 def test_e2e_policy_snapshot_fetch(server):
+    from agentguard.schemas.context import RuntimeContext
     from agentguard.u_guard.remote_client import RemoteGuardClient
 
     client = RemoteGuardClient(
@@ -66,6 +67,7 @@ def test_e2e_policy_snapshot_fetch(server):
         session_id="snapshot-session",
         session_key="sk-snapshot-session-key",
     )
+    client.register_session(RuntimeContext(session_id="snapshot-session"))
     snap = client.fetch_snapshot()
     assert snap.get("rules")
     assert snap.get("version")
@@ -180,7 +182,7 @@ def test_client_registration_sends_checker_config_to_server():
         checker_config=checker_config,
     )
     try:
-        record = manager.session_pool.get("registered-config-session")
+        record = manager.session_pool.get("registered-config-session", agent_id="registered-agent", user_id="registered-user")
         assert record is not None
         assert record["client_checker_config"] == checker_config
         assert record["remote_checker_config"] == checker_config
@@ -233,14 +235,18 @@ def test_backend_checker_config_update_by_principal_updates_server_and_client():
         assert res["status"] == "ok"
         assert res["client_updates"][0]["status"] == "ok"
 
-        record = manager.session_pool.get("principal-config-session")
+        record = manager.session_pool.get("principal-config-session", agent_id="principal-agent", user_id="principal-user")
         assert record is not None
         assert record["remote_checker_config"] == server_config
         assert record["client_checker_config"] == client_config
 
         server_decision = manager.decide(
             {
-                "context": {"session_id": "principal-config-session"},
+                "context": {
+                    "session_id": "principal-config-session",
+                    "agent_id": "principal-agent",
+                    "user_id": "principal-user",
+                },
                 "current_event": {
                     "event_type": "llm_input",
                     "payload": {
@@ -349,10 +355,10 @@ def test_backend_refreshes_stale_session_when_client_health_is_alive():
             client_key=guard.session_key,
         )
         old_seen = time.time() - 7200
-        manager.session_pool._sessions["stale-session"]["last_seen"] = old_seen
+        manager.session_pool._sessions[manager.session_pool.make_key("stale-session", "stale-agent", None)]["last_seen"] = old_seen
 
         results = manager.refresh_stale_sessions(max_age_s=3600, timeout_s=2)
-        record = manager.session_pool.get("stale-session")
+        record = manager.session_pool.get("stale-session", agent_id="stale-agent")
 
         assert results[0]["status"] == "alive"
         assert record["last_seen"] > old_seen
@@ -376,12 +382,12 @@ def test_backend_session_health_monitor_refreshes_sessions_async():
             client_key=guard.session_key,
         )
         old_seen = time.time() - 10
-        manager.session_pool._sessions["async-health-session"]["last_seen"] = old_seen
+        manager.session_pool._sessions[manager.session_pool.make_key("async-health-session", "async-health-agent", None)]["last_seen"] = old_seen
 
         deadline = time.time() + 2
-        record = manager.session_pool.get("async-health-session")
+        record = manager.session_pool.get("async-health-session", agent_id="async-health-agent")
         while time.time() < deadline:
-            record = manager.session_pool.get("async-health-session")
+            record = manager.session_pool.get("async-health-session", agent_id="async-health-agent")
             if record and record["last_seen"] > old_seen:
                 break
             time.sleep(0.05)
@@ -398,7 +404,7 @@ def test_backend_rejects_missing_or_invalid_session_key_over_http():
     manager = RuntimeManager(enable_agentdog=False)
     base_url, srv, _ = start_dev_server(manager=manager)
     body = {
-        "context": {"session_id": "keyed-session"},
+        "context": {"session_id": "keyed-session", "agent_id": "keyed-agent", "user_id": "keyed-user"},
         "current_event": {"event_type": "llm_input", "payload": {}, "risk_signals": []},
         "trajectory_window": [],
         "local_signals": [],
@@ -422,7 +428,11 @@ def test_backend_rejects_missing_or_invalid_session_key_over_http():
         first = _post_json(
             f"{base_url}/v1/server/guard/decide",
             body,
-            headers={"X-AgentGuard-Session-Key": "sk-first-session-key"},
+            headers={
+                "X-AgentGuard-Session-Key": "sk-first-session-key",
+                "X-AgentGuard-Agent-Id": "keyed-agent",
+                "X-AgentGuard-User-Id": "keyed-user",
+            },
         )
         assert first["decision"]["decision_type"] == "allow"
 
@@ -430,7 +440,11 @@ def test_backend_rejects_missing_or_invalid_session_key_over_http():
             _post_json(
                 f"{base_url}/v1/server/guard/decide",
                 body,
-                headers={"X-AgentGuard-Session-Key": "sk-wrong-session-key"},
+                headers={
+                    "X-AgentGuard-Session-Key": "sk-wrong-session-key",
+                    "X-AgentGuard-Agent-Id": "keyed-agent",
+                    "X-AgentGuard-User-Id": "keyed-user",
+                },
             )
         assert invalid.value.code == 403
 
@@ -441,6 +455,8 @@ def test_backend_rejects_missing_or_invalid_session_key_over_http():
                 headers={
                     "X-AgentGuard-Session-Id": "keyed-session",
                     "X-AgentGuard-Session-Key": "sk-wrong-session-key",
+                    "X-AgentGuard-Agent-Id": "keyed-agent",
+                    "X-AgentGuard-User-Id": "keyed-user",
                 },
             )
         assert invalid_unregister.value.code == 403
@@ -451,10 +467,16 @@ def test_backend_rejects_missing_or_invalid_session_key_over_http():
             headers={
                 "X-AgentGuard-Session-Id": "keyed-session",
                 "X-AgentGuard-Session-Key": "sk-first-session-key",
+                "X-AgentGuard-Agent-Id": "keyed-agent",
+                "X-AgentGuard-User-Id": "keyed-user",
             },
         )
         assert unregistered["removed"] is True
-        assert manager.session_pool.get("keyed-session") is None
+        assert manager.session_pool.get(
+            "keyed-session",
+            agent_id="keyed-agent",
+            user_id="keyed-user",
+        ) is None
     finally:
         srv.shutdown()
 

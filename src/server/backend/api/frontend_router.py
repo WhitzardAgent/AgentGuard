@@ -29,8 +29,12 @@ def refresh_stale_sessions() -> dict[str, Any]:
 
 
 @router.get("/v1/backend/sessions/{session_id}")
-def get_session(session_id: str) -> dict[str, Any]:
-    record = _manager.session_pool.get(session_id)
+def get_session(
+    session_id: str,
+    agent_id: str | None = None,
+    user_id: str | None = None,
+) -> dict[str, Any]:
+    record = _manager.session_pool.get(session_id, agent_id=agent_id, user_id=user_id)
     if record is None:
         raise HTTPException(status_code=404, detail=f"session not found: {session_id}")
     return record

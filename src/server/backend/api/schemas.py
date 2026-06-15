@@ -26,6 +26,8 @@ class GuardDecideResponse(BaseModel):
 
 class TraceUploadRequest(BaseModel):
     session_id: str | None = None
+    agent_id: str | None = None
+    user_id: str | None = None
     reason: str | None = None
     entries: list[dict[str, Any]] = Field(default_factory=list)
 

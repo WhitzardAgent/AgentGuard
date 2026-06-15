@@ -76,6 +76,8 @@ class AgentGuard:
             server_url,
             api_key=api_key,
             session_id=self.context.session_id,
+            agent_id=self.context.agent_id,
+            user_id=self.context.user_id,
             session_key=self.session_key,
             timeout_s=remote_timeout_s,
             retries=remote_retries,
@@ -114,6 +116,8 @@ class AgentGuard:
                 server_url,
                 api_key=api_key,
                 session_id=self.context.session_id,
+                agent_id=self.context.agent_id,
+                user_id=self.context.user_id,
                 session_key=self.session_key,
             )
             if server_url
