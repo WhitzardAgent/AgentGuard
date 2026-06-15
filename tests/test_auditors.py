@@ -5,6 +5,7 @@ import pytest
 from fastapi import HTTPException
 
 from backend.api import frontend_router
+from backend.audit import AuditTraceEntry, auditor_manager
 from backend.api.schemas import TraceAuditRequest
 from backend.runtime.manager import RuntimeManager
 
@@ -49,14 +50,15 @@ def test_runtime_manager_persists_trace_window_and_current_event():
     )
 
     event_ids = {
-        (record.get("event") or {}).get("event_id")
+        record.event.event_id
         for record in trace
-        if isinstance(record.get("event"), dict)
+        if record.event is not None
     }
 
     assert event_ids == {"evt-previous", "evt-current"}
-    current = next(record for record in trace if (record.get("event") or {}).get("event_id") == "evt-current")
-    assert current["decision"]["decision_type"] == "allow"
+    current = next(record for record in trace if record.event is not None and record.event.event_id == "evt-current")
+    assert current.decision is not None
+    assert current.decision.decision_type.value == "allow"
 
 
 def test_frontend_router_runs_custom_trace_audit(monkeypatch):
@@ -146,3 +148,32 @@ def test_frontend_router_lists_registered_auditors():
     assert any(item["name"] == "trace_risk_summary" for item in payload["auditors"])
     summary = next(item for item in payload["auditors"] if item["name"] == "trace_risk_summary")
     assert "Summarize a full trace" in summary["description"]
+
+
+def test_auditor_manager_uses_trace_only():
+    result = auditor_manager().audit(
+        "trace_risk_summary",
+        [
+            AuditTraceEntry.from_dict(
+                {
+                    "event": {
+                        "event_id": "evt-1",
+                        "event_type": "tool_result",
+                        "context": {
+                            "session_id": "audit-session",
+                            "agent_id": "audit-agent",
+                            "user_id": "audit-user",
+                        },
+                        "payload": {"tool_name": "read_file", "result": "ok"},
+                        "risk_signals": [],
+                    },
+                    "decision": {"decision_type": "deny", "reason": "blocked"},
+                }
+            )
+        ],
+    )
+
+    assert result.level == "critical"
+    assert result.metadata["session_ids"] == ["audit-session"]
+    assert result.metadata["agent_ids"] == ["audit-agent"]
+    assert result.metadata["user_ids"] == ["audit-user"]

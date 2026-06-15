@@ -1,7 +1,9 @@
 # AgentGuard Documentation
 
-- [中文](zh/)：包含快速部署、`AgentGuard Client Importing`、`AgentGuard Checkers`、`Custom Checker`，以及 `RuntimeEvent`、`RuntimeContext`、`trajectory_window` 的说明。
-- [English](en/)： includes quick deployment, `AgentGuard Client Importing`, `AgentGuard Checkers`, `Custom Checker`, and detailed explanations of `RuntimeEvent`, `RuntimeContext`, and `trajectory_window`.
+AgentGuard is a zero-trust security foundation for AI agents. The documentation covers deployment, checker extension, custom-auditor extension, and runtime observability.
+
+- [中文](zh/)：包含快速部署、`AgentGuard Client Importing`、`AgentGuard Checkers`、`Custom Checker`、`Custom Auditor`，以及 `RuntimeEvent`、`RuntimeContext`、`trajectory_window` 的说明。
+- [English](en/)： includes quick deployment, `AgentGuard Client Importing`, `AgentGuard Checkers`, `Custom Checker`, `Custom Auditor`, and detailed explanations of `RuntimeEvent`, `RuntimeContext`, and `trajectory_window`.
 
 ## Checker References
 

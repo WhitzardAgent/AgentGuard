@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <strong>AgentGuard：基于模块化架构的智能体安全防护基座</strong>
+  <strong>AgentGuard：面向 AI Agents 的零信任安全防护基座</strong>
 </p>
 
 <p align="center">
@@ -50,7 +50,7 @@
 > [!IMPORTANT]
 > 本项目仍处于活跃开发阶段，可能包含尚未发现的缺陷。欢迎通过 Issue 和 PR 提交反馈与贡献。
 
-AgentGuard 是一套基于模块化架构的智能体安全防护基座，兼容已有安全防护策略。它会在每次调用大模型前、大模型输出后、工具调用前、执行完成后，根据安全配置识别与拦截安全风险。
+AgentGuard 是一套面向 AI Agents 的零信任安全防护基座，兼容已有安全防护策略。它会在每次调用大模型前、大模型输出后、工具调用前、执行完成后，根据安全配置识别与拦截安全风险，同时也支持通过可插拔 custom auditor 对已存储的运行轨迹进行事后审计。
 
 目前，AgentGuard 已覆盖 Anthropic 的 [Zero Trust for AI Agents](https://claude.com/blog/zero-trust-for-ai-agents) 中强调的多个关键技术点，包括访问控制与权限管理、可观测性与审计，以及行为监控与响应。
 
@@ -64,7 +64,7 @@ AgentGuard 可以集成到现有的智能体框架中，无需修改底层的执
 
 #### Multi-Phase Intervention
 
-在每次调用大模型前、大模型输出后、工具调用前、执行完成后，AgentGuard 都可以根据配置的安全策略进行识别与拦截，在智能体运行全流程中持续介入安全防护。
+在每次调用大模型前、大模型输出后、工具调用前、执行完成后，AgentGuard 都可以根据配置的安全策略进行识别与拦截，在智能体运行全流程中持续介入安全防护。此外，它还支持通过可插拔 custom auditor 对已存储的运行轨迹进行事后审计。
 
 #### 无缝衔接已有安全防护策略
 
@@ -357,6 +357,7 @@ https://github.com/user-attachments/assets/75a17e37-7f51-4c59-96fa-ea449eb79859
 - **客户端**：通过极少量代码修改，客户端可集成进智能体框架中，并能够在 LLM 调用前后、工具调用前后进行拦截。客户端可以先在本地执行轻量级过滤，再将事件发送到服务端，由服务端根据配置的 checker 进一步检测。
 - **服务器**：服务器接收来自客户端的信息，并根据配置的 checker 对智能体动作进行策略评估，生成策略决策并返回给客户端；同时服务器持续监控智能体状态，供管理员进行审计。
 - **Checker 扩展**：客户端与服务器都支持灵活扩展各种 checker。若需了解如何支持自定义 checker，可参考客户端说明 `src/client/python/agentguard/checkers/README_CN.md` 与服务端说明 `src/server/backend/runtime/checkers/README_CN.md`。
+- **Custom Auditor 扩展**：后端也支持面向事后轨迹审计的可插拔 custom auditor。公共抽象位于 `src/server/backend/audit/`，具体 auditor 实现位于 `src/server/backend/audit/auditors/`。可参考 `./docs/zh/README.md` 中新增的 custom auditor 章节。
 
 ## 👥 贡献者
 

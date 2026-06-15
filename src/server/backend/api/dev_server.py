@@ -208,9 +208,6 @@ class _Handler(BaseHTTPRequestHandler):
                 result = auditor_manager().audit(
                     auditor_name,
                     trace,
-                    session_id=session_id,
-                    agent_id=str(agent_id) if agent_id is not None else None,
-                    user_id=str(user_id) if user_id is not None else None,
                 )
             except ValueError as exc:
                 self._send(400, {"error": str(exc)})

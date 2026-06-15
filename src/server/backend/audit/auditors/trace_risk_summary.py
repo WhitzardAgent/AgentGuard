@@ -2,11 +2,9 @@
 from __future__ import annotations
 
 from collections import Counter
-from typing import Any
 
-from backend.audit.base import AuditResult, BaseAuditor
+from backend.audit.base import AuditResult, AuditTraceEntry, BaseAuditor
 from backend.audit.registry import register
-from backend.runtime.storage import trace_entry_event_dict
 
 _CRITICAL_SIGNALS = {
     "credential_theft",
@@ -34,31 +32,22 @@ _WARNING_DECISIONS = {"degrade", "sanitize", "log_only"}
 class TraceRiskSummaryAuditor(BaseAuditor):
     def audit(
         self,
-        trace: list[dict[str, Any]],
-        *,
-        session_id: str,
-        agent_id: str | None = None,
-        user_id: str | None = None,
+        trace: list[AuditTraceEntry],
     ) -> AuditResult:
         signal_counter: Counter[str] = Counter()
         decision_counter: Counter[str] = Counter()
         event_ids: list[str] = []
         reasons: list[str] = []
 
-        for record in trace:
-            event = trace_entry_event_dict(record) or {}
-            decision = record.get("decision") if isinstance(record.get("decision"), dict) else {}
-            event_id = event.get("event_id") or record.get("event_id")
-            if event_id:
-                event_ids.append(str(event_id))
-            signals = _signals_from_record(record, event, decision)
-            signal_counter.update(signals)
-            decision_type = decision.get("decision_type")
-            if isinstance(decision_type, str) and decision_type:
+        for entry in trace:
+            if entry.event_id:
+                event_ids.append(entry.event_id)
+            signal_counter.update(_signals_from_entry(entry))
+            decision_type = entry.decision.decision_type.value if entry.decision is not None else None
+            if decision_type:
                 decision_counter.update([decision_type])
-            decision_reason = decision.get("reason")
-            if isinstance(decision_reason, str) and decision_reason:
-                reasons.append(decision_reason)
+            if entry.decision is not None and entry.decision.reason:
+                reasons.append(entry.decision.reason)
 
         critical_signals = sorted(signal for signal in signal_counter if signal in _CRITICAL_SIGNALS)
         high_signals = sorted(signal for signal in signal_counter if signal in _HIGH_SIGNALS)
@@ -98,34 +87,40 @@ class TraceRiskSummaryAuditor(BaseAuditor):
             level=level,
             reason=reason,
             metadata={
-                "session_id": session_id,
-                "agent_id": agent_id,
-                "user_id": user_id,
                 "trace_entries": len(trace),
                 "event_ids": event_ids,
                 "signal_counts": dict(signal_counter),
                 "decision_counts": dict(decision_counter),
+                "session_ids": _identity_values(trace, "session_id"),
+                "agent_ids": _identity_values(trace, "agent_id"),
+                "user_ids": _identity_values(trace, "user_id"),
             },
         )
 
 
-def _signals_from_record(
-    record: dict[str, Any],
-    event: dict[str, Any],
-    decision: dict[str, Any],
-) -> list[str]:
+def _signals_from_entry(entry: AuditTraceEntry) -> list[str]:
     signals: list[str] = []
-    for candidate in (
-        record.get("risk_signals"),
-        event.get("risk_signals"),
-        decision.get("risk_signals"),
-    ):
+    candidates = [
+        entry.event.risk_signals if entry.event is not None else [],
+        entry.decision.risk_signals if entry.decision is not None else [],
+        entry.checker_result.get("risk_signals") if isinstance(entry.checker_result, dict) else [],
+    ]
+    for candidate in candidates:
         if not isinstance(candidate, list):
             continue
         for signal in candidate:
             if isinstance(signal, str) and signal and signal not in signals:
                 signals.append(signal)
     return signals
+
+
+def _identity_values(trace: list[AuditTraceEntry], field_name: str) -> list[str]:
+    values: list[str] = []
+    for entry in trace:
+        value = getattr(entry, field_name)
+        if isinstance(value, str) and value and value not in values:
+            values.append(value)
+    return values
 
 
 def _build_reason(prefix: str, extra_reason: str | None = None, **groups: list[str]) -> str:

@@ -11,6 +11,7 @@ from typing import Any, Callable
 from shared.schemas.context import RuntimeContext
 from shared.schemas.decisions import DecisionType, GuardDecision
 from shared.schemas.events import RuntimeEvent
+from backend.audit import AuditTraceEntry
 from backend.audit.audit_logger import AuditLogger
 from backend.plugins.loader import load_builtin_plugins
 from backend.plugins.manager import PluginManager
@@ -89,7 +90,7 @@ class RuntimeManager:
         *,
         remote_checker_config: dict[str, Any] | None = None,
         timeout_s: float = 2.0,
-    ) -> list[dict[str, Any]]:
+    ) -> list[AuditTraceEntry]:
         matches = self.session_pool.find_by_principal(principal)
         updates: list[dict[str, Any]] = []
         for session in matches:
@@ -311,16 +312,16 @@ class RuntimeManager:
         self.audit.record(event.to_dict(), decision.to_dict(), plugin_results)
         self._store_trace_record(
             context.session_id or event.context.session_id or "unknown",
-            {
-                "session_id": context.session_id or event.context.session_id or "unknown",
-                "agent_id": context.agent_id or event.context.agent_id,
-                "user_id": context.user_id or event.context.user_id,
-                "reason": "guard_decide",
-                "event": event.to_dict(),
-                "decision": decision.to_dict(),
-                "checker_result": _checker_result_dict(check),
-                "plugin_results": plugin_results,
-            },
+            AuditTraceEntry(
+                session_id=context.session_id or event.context.session_id or "unknown",
+                agent_id=context.agent_id or event.context.agent_id,
+                user_id=context.user_id or event.context.user_id,
+                reason="guard_decide",
+                event=event,
+                decision=decision,
+                checker_result=_checker_result_dict(check),
+                plugin_results=plugin_results,
+            ),
             agent_id=context.agent_id or event.context.agent_id,
             user_id=context.user_id or event.context.user_id,
         )
@@ -367,28 +368,29 @@ class RuntimeManager:
         for entry in trace.get("entries") or []:
             if not isinstance(entry, dict):
                 continue
-            record = {
-                "session_id": session_id,
-                "agent_id": agent_id,
-                "user_id": user_id,
-                "reason": trace.get("reason"),
-                **entry,
-            }
-            event_dict = _cached_entry_event_dict(entry)
-            entry_context = entry.get("context") if isinstance(entry.get("context"), dict) else {}
-            entry_agent_id = entry_context.get("agent_id", agent_id)
-            entry_user_id = entry_context.get("user_id", user_id)
+            record = AuditTraceEntry.from_dict(
+                {
+                    "session_id": session_id,
+                    "agent_id": agent_id,
+                    "user_id": user_id,
+                    "reason": trace.get("reason"),
+                    **entry,
+                }
+            )
             stored = self._store_trace_record(
                 session_id,
                 record,
-                agent_id=str(entry_agent_id) if entry_agent_id is not None else None,
-                user_id=str(entry_user_id) if entry_user_id is not None else None,
+                agent_id=str(record.agent_id) if record.agent_id is not None else None,
+                user_id=str(record.user_id) if record.user_id is not None else None,
             )
             if not stored:
                 continue
-            decision_dict = entry.get("decision") if isinstance(entry.get("decision"), dict) else None
-            if event_dict and decision_dict:
-                self.audit.record(event_dict, decision_dict, {"trace_upload": {"reason": trace.get("reason")}})
+            if record.event is not None and record.decision is not None:
+                self.audit.record(
+                    record.event.to_dict(),
+                    record.decision.to_dict(),
+                    {"trace_upload": {"reason": trace.get("reason")}},
+                )
             count += 1
         return count
 
@@ -403,13 +405,13 @@ class RuntimeManager:
             observed_user_id = observed.context.user_id or context.user_id
             self._store_trace_record(
                 observed_session_id,
-                {
-                    "session_id": observed_session_id,
-                    "agent_id": observed_agent_id,
-                    "user_id": observed_user_id,
-                    "reason": "trajectory_window",
-                    "event": observed.to_dict(),
-                },
+                AuditTraceEntry(
+                    session_id=observed_session_id,
+                    agent_id=observed_agent_id,
+                    user_id=observed_user_id,
+                    reason="trajectory_window",
+                    event=observed,
+                ),
                 agent_id=observed_agent_id,
                 user_id=observed_user_id,
             )
@@ -417,7 +419,7 @@ class RuntimeManager:
     def _store_trace_record(
         self,
         session_id: str,
-        record: dict[str, Any],
+        record: AuditTraceEntry | dict[str, Any],
         *,
         agent_id: str | None = None,
         user_id: str | None = None,
@@ -573,7 +575,7 @@ def _merge_event_window(events: list[RuntimeEvent]) -> list[RuntimeEvent]:
     return merged
 
 
-def _trace_store_has_event(records: list[dict[str, Any]], event: dict[str, Any] | None) -> bool:
+def _trace_store_has_event(records: list[AuditTraceEntry | dict[str, Any]], event: dict[str, Any] | None) -> bool:
     if not event:
         return False
     event_id = event.get("event_id")

@@ -471,7 +471,7 @@ def test_server_records_uploaded_trace():
         }
     )
     assert count == 1
-    assert m.trace_store.get("s7")[0]["reason"] == "round_complete"
+    assert m.trace_store.get("s7")[0].reason == "round_complete"
 
 
 def test_rule_based_check_is_a_checker():

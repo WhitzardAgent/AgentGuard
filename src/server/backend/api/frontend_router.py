@@ -112,9 +112,6 @@ def run_custom_trace_audit(req: TraceAuditRequest) -> TraceAuditResponse:
         result = _auditors.audit(
             req.auditor_name,
             trace,
-            session_id=req.session_id,
-            agent_id=req.agent_id,
-            user_id=req.user_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

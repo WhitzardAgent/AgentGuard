@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <strong>AgentGuard: A Modular Security Foundation for AI Agents</strong>
+  <strong>AgentGuard: Zero-Trust Security Foundation for AI Agents</strong>
 </p>
 
 <p align="center">
@@ -50,7 +50,7 @@
 > [!IMPORTANT]
 > This project is still under active development and may contain bugs. Contributions via Issues and PRs are welcome.
 
-AgentGuard is a modular security foundation for AI agents. Compatible with existing security strategies, it identifies and blocks security risks before each LLM call, after each LLM output, before each tool invocation, and after execution according to configurable safeguards.
+AgentGuard is a zero-trust security foundation for AI agents. Compatible with existing security strategies, it identifies and blocks security risks before each LLM call, after each LLM output, before each tool invocation, and after execution according to configurable safeguards, and it also supports post-hoc auditing of stored traces through pluggable custom auditors.
 
 Today, AgentGuard covers several key technical areas highlighted in Anthropic's [Zero Trust for AI Agents](https://claude.com/blog/zero-trust-for-ai-agents), including access control & privilege management, observability & auditing, and behavioral monitoring & response.
 
@@ -64,7 +64,7 @@ AgentGuard can be integrated into existing agent frameworks without modifying th
 
 #### Multi-Phase Intervention
 
-According to configured safeguards, AgentGuard can intervene before each LLM call, after each LLM output, before each tool invocation, and after execution to identify and block security risks across the full agent runtime.
+According to configured safeguards, AgentGuard can intervene before each LLM call, after each LLM output, before each tool invocation, and after execution to identify and block security risks across the full agent runtime. In addition to inline intervention, it also supports post-hoc auditing over stored runtime traces through pluggable custom auditors.
 
 #### Seamless Reuse of Existing Security Strategies
 
@@ -360,6 +360,7 @@ The high-level architecture of AgentGuard is shown below.
 - **Client**: With minimal code modifications, the AgentGuard client integrates into agent frameworks and can intercept before and after LLM calls, as well as before and after tool invocations. It can perform lightweight local filtering on the client side and forward events to the server for deeper inspection by configured checkers.
 - **Server**: The server receives information from clients, uses configured checkers to evaluate agent actions against policies, produces policy decisions, and sends them back to clients. It also monitors agent status for administrative auditing.
 - **Checker Extensibility**: Both client and server support pluggable checkers. To add custom checkers, see the [client checker guide](./src/client/python/agentguard/checkers/README.md) and the [server checker guide](./src/server/backend/runtime/checkers/README.md).
+- **Custom Auditor Extensibility**: The backend also supports pluggable custom auditors for post-hoc trace review. Shared auditor abstractions live under `src/server/backend/audit/`, while concrete auditors live under `src/server/backend/audit/auditors/`. See the documentation chapter on custom auditors in `./docs/en/README.md`.
 
 ## 👥 Contributors
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 import threading
 from typing import Any
 
+from backend.audit.base import AuditTraceEntry
 from shared.schemas.context import RuntimeContext
 from shared.utils.time import now_ts
 
@@ -16,7 +17,9 @@ def _session_storage_key(
     return f"{session_id or 'unknown'}::{agent_id or 'unknown'}::{user_id or 'unknown'}"
 
 
-def trace_entry_event_dict(entry: dict[str, Any]) -> dict[str, Any] | None:
+def trace_entry_event_dict(entry: AuditTraceEntry | dict[str, Any]) -> dict[str, Any] | None:
+    if isinstance(entry, AuditTraceEntry):
+        return entry.event.to_dict() if entry.event is not None else None
     event = entry.get("event")
     if isinstance(event, dict):
         return event
@@ -28,62 +31,59 @@ def trace_entry_event_dict(entry: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
-def _merge_trace_records(existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
-    merged = dict(existing)
-    for key, value in incoming.items():
-        if value is None:
-            continue
-        current = merged.get(key)
-        if isinstance(current, dict) and isinstance(value, dict):
-            nested = dict(current)
-            nested.update(value)
-            merged[key] = nested
-            continue
-        merged[key] = value
-    return merged
+def _coerce_trace_entry(record: AuditTraceEntry | dict[str, Any]) -> AuditTraceEntry:
+    return record if isinstance(record, AuditTraceEntry) else AuditTraceEntry.from_dict(record)
+
+
+def _merge_trace_records(existing: AuditTraceEntry, incoming: AuditTraceEntry) -> AuditTraceEntry:
+    return existing.merged_with(incoming)
+
+
+def _clone_trace_entry(record: AuditTraceEntry) -> AuditTraceEntry:
+    return AuditTraceEntry.from_dict(record.to_dict())
 
 
 class TraceStore:
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._traces: dict[str, list[dict[str, Any]]] = {}
+        self._traces: dict[str, list[AuditTraceEntry]] = {}
 
     def append(
         self,
         session_id: str,
-        record: dict[str, Any],
+        record: AuditTraceEntry | dict[str, Any],
         *,
         agent_id: str | None = None,
         user_id: str | None = None,
     ) -> None:
         session_key = _session_storage_key(session_id, agent_id, user_id)
+        entry = _coerce_trace_entry(record)
         with self._lock:
-            self._traces.setdefault(session_key, []).append(dict(record))
+            self._traces.setdefault(session_key, []).append(entry)
 
     def upsert(
         self,
         session_id: str,
-        record: dict[str, Any],
+        record: AuditTraceEntry | dict[str, Any],
         *,
         agent_id: str | None = None,
         user_id: str | None = None,
     ) -> str:
         session_key = _session_storage_key(session_id, agent_id, user_id)
-        event = trace_entry_event_dict(record)
-        event_id = event.get("event_id") if isinstance(event, dict) else None
+        entry = _coerce_trace_entry(record)
+        event_id = entry.event_id
         with self._lock:
             records = self._traces.setdefault(session_key, [])
             if event_id:
                 for index, existing in enumerate(records):
-                    existing_event = trace_entry_event_dict(existing)
-                    if not existing_event or existing_event.get("event_id") != event_id:
+                    if existing.event_id != event_id:
                         continue
-                    merged = _merge_trace_records(existing, record)
+                    merged = _merge_trace_records(existing, entry)
                     if merged == existing:
                         return "unchanged"
                     records[index] = merged
                     return "updated"
-            records.append(dict(record))
+            records.append(entry)
             return "appended"
 
     def get(
@@ -92,12 +92,12 @@ class TraceStore:
         *,
         agent_id: str | None = None,
         user_id: str | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[AuditTraceEntry]:
         session_key = self._resolve_key(session_id, agent_id=agent_id, user_id=user_id)
         if session_key is None:
             return []
         with self._lock:
-            return [dict(record) for record in self._traces.get(session_key, [])]
+            return [_clone_trace_entry(record) for record in self._traces.get(session_key, [])]
 
     def sessions(self) -> list[str]:
         with self._lock:

@@ -384,6 +384,57 @@ After adding the checker classes, reference their registered names in checker co
 - `remote` is loaded by the server checker manager.
 - Even if both names appear in the same config file, the implementation files must still be deployed to the correct client or server folder.
 
+
+#### 6. Custom Auditor
+
+AgentGuard also supports post-hoc auditing on the backend. Unlike checkers, which run inline during the live runtime, custom auditors run on the full stored trace for a `session_id` / `agent_id` / `user_id` tuple after events have already been recorded. This is useful for compliance review, incident triage, retrospective analysis, and generating summarized severity labels for the frontend.
+
+The shared auditor abstractions live under:
+
+```text
+../../src/server/backend/audit/base.py
+../../src/server/backend/audit/manager.py
+../../src/server/backend/audit/registry.py
+```
+
+Concrete auditor implementations must be placed under:
+
+```text
+../../src/server/backend/audit/auditors/
+```
+
+The backend-discovered auditor interface is:
+
+```python
+from backend.audit.base import AuditResult, AuditTraceEntry, BaseAuditor
+from backend.audit.registry import register
+
+
+@register(
+    name="my_trace_auditor",
+    description="Summarize a stored trace into a severity label.",
+)
+class MyTraceAuditor(BaseAuditor):
+    def audit(
+        self,
+        trace: list[AuditTraceEntry],
+    ) -> AuditResult:
+        if any((record.get("decision") or {}).get("decision_type") == "deny" for record in trace):
+            return AuditResult(level="high", reason="The trace contains denied actions.")
+        return AuditResult.ok()
+```
+
+Each `AuditTraceEntry` contains the canonical trace fields `session_id`, `agent_id`, `user_id`, `reason`, `event`, `decision`, `checker_result`, and `plugin_results`. Auditors should treat `event` as the primary runtime payload and the other fields as optional enrichments from the backend trace pipeline.
+
+`AuditResult` currently uses four normalized severity levels: `critical`, `high`, `warning`, and `ok`. Each result also includes a human-readable `reason` and optional `metadata`.
+
+After you add the auditor implementation, the backend discovers it by registered name. The frontend can then:
+
+- call `GET /v1/backend/auditors` to list available auditors and descriptions
+- call `POST /v1/backend/audit/custom/run` with `session_id`, `agent_id`, `user_id`, and `auditor_name` to run one auditor on the corresponding stored trace
+
+For a concrete built-in example, see `../../src/server/backend/audit/auditors/trace_risk_summary.py`.
+
 ### Step 4: Write a policy and deploy the control server
 
 AgentGuard uses a client-server architecture. All management operations — agent monitoring, policy configuration, policy enforcement, and decision dispatch — happen on the control server. This is especially useful when an organization has multiple agent deployments that need centralized governance.

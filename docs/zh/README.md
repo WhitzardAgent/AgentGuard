@@ -376,6 +376,57 @@ Server 还内置了一个基于规则的 checker，位置在 `../../../src/serve
 - `remote` 由 server 侧 checker manager 加载。
 - 即使两个注册名出现在同一份配置文件里，对应实现文件仍然必须分别部署到正确的 client 或 server 目录下。
 
+
+#### 6. Custom Auditor
+
+AgentGuard 还支持在后端执行事后审计。与在运行时链路中同步执行的 checker 不同，custom auditor 面向已经存储完成的完整 trace 工作：它会在 `session_id` / `agent_id` / `user_id` 对应的轨迹上做回溯分析。这类能力适合用于合规复核、事故排查、事后分析，以及为前端生成总结性的风险等级。
+
+公共 auditor 抽象位于：
+
+```text
+../../src/server/backend/audit/base.py
+../../src/server/backend/audit/manager.py
+../../src/server/backend/audit/registry.py
+```
+
+具体 auditor 实现需要放在：
+
+```text
+../../src/server/backend/audit/auditors/
+```
+
+后端发现并加载的 auditor 接口形态如下：
+
+```python
+from backend.audit.base import AuditResult, AuditTraceEntry, BaseAuditor
+from backend.audit.registry import register
+
+
+@register(
+    name="my_trace_auditor",
+    description="对已存储 trace 做风险等级总结。",
+)
+class MyTraceAuditor(BaseAuditor):
+    def audit(
+        self,
+        trace: list[AuditTraceEntry],
+    ) -> AuditResult:
+        if any((record.get("decision") or {}).get("decision_type") == "deny" for record in trace):
+            return AuditResult(level="high", reason="该轨迹中包含被拒绝的动作。")
+        return AuditResult.ok()
+```
+
+每个 `AuditTraceEntry` 都对应一条规范化 trace 记录，包含 `session_id`、`agent_id`、`user_id`、`reason`、`event`、`decision`、`checker_result` 和 `plugin_results` 这些字段。对 auditor 来说，`event` 是主要运行时负载，其余字段则是后端 trace 管线补充的上下文信息。
+
+`AuditResult` 当前统一使用四个等级：`critical`、`high`、`warning` 和 `ok`。每个结果还包含面向人的 `reason`，以及可选的 `metadata`。
+
+加入 auditor 实现后，后端会根据注册名自动发现它。此时前端可以：
+
+- 调用 `GET /v1/backend/auditors` 列出当前可用 auditor 及其描述
+- 调用 `POST /v1/backend/audit/custom/run`，传入 `session_id`、`agent_id`、`user_id` 和 `auditor_name`，对对应已存储 trace 执行一次审计
+
+如果想看一个内置的具体例子，可参考 `../../src/server/backend/audit/auditors/trace_risk_summary.py`。
+
 ### 第 4 步：在中控服务器上编写策略并启动中控服务
 该项目采用 C/S 架构，访问控制的所有管理操作，包括智能体的状态监控、策略配置、策略执行、访问控制指令下发等，都需要在中控服务器上进行。该架构尤其有利于一个组织内部有多套智能体资产时，能够统一管理。
 

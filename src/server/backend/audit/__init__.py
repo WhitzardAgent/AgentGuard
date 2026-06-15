@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from backend.audit.audit_logger import AuditLogger
-from backend.audit.base import AuditLevel, AuditResult, BaseAuditor
+from backend.audit.base import AuditLevel, AuditResult, AuditTraceEntry, BaseAuditor
 from backend.audit.manager import (
     AuditorManager,
     CustomAuditorManager,
@@ -22,6 +22,7 @@ __all__ = [
     "AuditLogger",
     "replay_records",
     "BaseAuditor",
+    "AuditTraceEntry",
     "AuditResult",
     "AuditLevel",
     "AuditorManager",

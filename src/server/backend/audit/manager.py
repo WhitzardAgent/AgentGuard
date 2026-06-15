@@ -1,7 +1,7 @@
 """Manager for registered auditors."""
 from __future__ import annotations
 
-from backend.audit.base import AuditResult, BaseAuditor
+from backend.audit.base import AuditResult, AuditTraceEntry, BaseAuditor
 from backend.audit.registry import get_auditor_class
 
 
@@ -25,25 +25,15 @@ class AuditorManager:
     def audit(
         self,
         auditor_name: str,
-        trace: list[dict[str, object]],
-        *,
-        session_id: str,
-        agent_id: str | None = None,
-        user_id: str | None = None,
+        trace: list[AuditTraceEntry],
     ) -> AuditResult:
         auditor = self.get(auditor_name)
-        return auditor.audit(
-            trace,
-            session_id=session_id,
-            agent_id=agent_id,
-            user_id=user_id,
-        )
+        return auditor.audit(trace)
 
 
 def auditor_manager() -> AuditorManager:
     return AuditorManager()
 
 
-# Backward-compatible aliases for older imports.
 CustomAuditorManager = AuditorManager
 custom_auditor_manager = auditor_manager
