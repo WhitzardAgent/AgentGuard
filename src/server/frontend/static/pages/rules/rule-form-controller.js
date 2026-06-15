@@ -31,6 +31,7 @@
       ruleSeverityInput,
       ruleCategoryInput,
       ruleReasonInput,
+      traceOnFieldHint,
       pathField,
       onField,
       promptField,
@@ -131,6 +132,10 @@
       return String(ruleOnInput?.value || "").trim();
     }
 
+    function currentCallSubtype() {
+      return String(ruleOnSubtypeInput?.value || "").trim();
+    }
+
     function modeNeedsTrace() {
       const mode = matchingMode();
       return mode === "trace";
@@ -139,6 +144,11 @@
     function modeNeedsOn() {
       const mode = matchingMode();
       return mode === "on";
+    }
+
+    function modeShowsOnOptions() {
+      const mode = matchingMode();
+      return mode === "on" || mode === "trace";
     }
 
     function allowedConditionSourceTypes(pathState = pathBuilder.getValue()) {
@@ -173,6 +183,7 @@
       defaultMode: "step",
       pathSymbols: currentPathSymbols(),
       currentCallToolKey: currentCallToolKey(),
+      currentCallSubtype: currentCallSubtype(),
       locked: allowedConditionSourceTypes(pathBuilder.getValue()).length === 0,
       allowedSourceTypes: allowedConditionSourceTypes(pathBuilder.getValue()),
       onChange() {
@@ -205,7 +216,10 @@
 
     function syncBuilderUI() {
       setFieldVisibility(pathField, modeNeedsTrace());
-      setFieldVisibility(onField, modeNeedsOn());
+      setFieldVisibility(onField, modeShowsOnOptions());
+      if (traceOnFieldHint) {
+        traceOnFieldHint.hidden = !modeNeedsTrace();
+      }
 
       const currentValue = String(ruleOnInput.value || "").trim();
       const optionCount = Array.isArray(ruleOnInput.options) || typeof ruleOnInput.options?.length === "number"
@@ -222,6 +236,7 @@
     function syncConditionLock(pathState = pathBuilder.getValue()) {
       const allowedSources = allowedConditionSourceTypes(pathState);
       conditionBuilder.setCurrentCallToolKey(currentCallToolKey());
+      conditionBuilder.setCurrentCallSubtype(currentCallSubtype());
       conditionBuilder.setAllowedSourceTypes(allowedSources);
       conditionBuilder.setLocked(allowedSources.length === 0);
     }
@@ -332,9 +347,10 @@
 
     function ruleFromFormState(formState) {
       const effectivePath = normalizedPathForMode(formState);
-      const effectiveOnClause = formState.entryMode === "trace"
-        ? ""
-        : onClause.buildOnClause(formState.onSubtype, toolNameForKey(formState.onToolKey));
+      const effectiveOnClause = onClause.buildOnClause(
+        formState.onSubtype,
+        toolNameForKey(formState.onToolKey),
+      );
       return {
         name: formState.name,
         entryMode: formState.entryMode,
@@ -342,6 +358,7 @@
         pathSlots: effectivePath.pathSlots,
         condition: formState.condition.expression,
         conditionItems: formState.condition.items,
+        conditionTree: formState.condition.tree || null,
         symbolToolMap: formState.condition.symbolToolMap,
         conditionSavedConditions: formState.condition.savedConditions || [],
         conditionCurrentId: formState.condition.currentConditionId || "",
@@ -378,6 +395,7 @@
         },
         condition: {
           items: normalized.conditionItems,
+          tree: normalized.conditionTree || null,
           symbolToolMap: normalized.symbolToolMap || {},
           savedConditions: normalized.conditionSavedConditions || [],
           currentConditionId: normalized.conditionCurrentId || "",
@@ -405,6 +423,7 @@
       conditionBuilder.setPathSymbols(currentPathSymbols());
       conditionBuilder.setValue({
         items: formState.condition?.items || [],
+        tree: formState.condition?.tree || null,
         savedConditions: formState.condition?.savedConditions || [],
         currentConditionId: formState.condition?.currentConditionId || "",
       });
@@ -547,11 +566,14 @@
       } else {
         rulePreviewBlock.textContent = preview.buildPreview(rule);
       }
-      const onParts = onClause.parseOnClauseParts(onClause.deriveOnClause(model.normalizeRule(rule)));
-      if (ruleOnSubtypeInput) {
-        ruleOnSubtypeInput.value = onParts.subtype;
+      const shouldSyncOnInputs = rule.entryMode === "on" || Boolean(String(rule.onClause || "").trim());
+      if (shouldSyncOnInputs) {
+        const onParts = onClause.parseOnClauseParts(onClause.deriveOnClause(model.normalizeRule(rule)));
+        if (ruleOnSubtypeInput) {
+          ruleOnSubtypeInput.value = onParts.subtype;
+        }
+        ruleOnInput.value = toolKeyForName(onParts.toolPattern);
       }
-      ruleOnInput.value = toolKeyForName(onParts.toolPattern);
       const pathState = pathBuilder.getValue();
       const finished = pathState.finished;
       pathFinishButton.classList.toggle("primary", finished);

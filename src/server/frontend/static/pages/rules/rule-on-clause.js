@@ -1,6 +1,6 @@
 (function () {
   const ruleDsl = window.AgentGuardRuleDSL || {};
-  const supportedOnSubtypes = ["requested", "attempted", "attempt", "completed", "result", "failed"];
+  const supportedOnSubtypes = ["requested", "completed", "failed"];
   const supportedOnSubtypeSet = new Set(supportedOnSubtypes);
 
   function deriveOnClause(rule) {

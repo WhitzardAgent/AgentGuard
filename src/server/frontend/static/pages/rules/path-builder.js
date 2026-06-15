@@ -26,6 +26,11 @@
     return PATH_WILDCARDS.includes(value);
   }
 
+  function toolLabel(value) {
+    const normalized = String(value || "").trim() || "A";
+    return isWildcard(normalized) ? normalized : `Tool ${normalized}`;
+  }
+
   function nextLabel(label) {
     const code = String(label || "A").toUpperCase().charCodeAt(0);
     if (Number.isNaN(code) || code < 65 || code >= 90) {
@@ -95,7 +100,7 @@
       return { ok: false, message: "PATH must contain at least one concrete segment." };
     }
     if (isWildcard(currentSegments[0].value)) {
-      return { ok: false, message: "PATH must start with A." };
+      return { ok: false, message: "PATH must start with Tool A." };
     }
     if (isWildcard(currentSegments[currentSegments.length - 1].value)) {
       return { ok: false, message: "PATH cannot end with a wildcard segment." };
@@ -116,7 +121,7 @@
 
     function syncHint() {
       if (!segments.length) {
-        hint.textContent = "Build PATH by adding one or more concrete or wildcard segments.";
+        hint.textContent = "Build Tool TRACE by adding one or more concrete or wildcard segments. Any tool or trigger stage filter refers to the final tool on the trace.";
         hint.classList.remove("path-builder-error");
         return;
       }
@@ -138,7 +143,7 @@
     }
 
     function optionLabel(value) {
-      return PATH_WILDCARD_LABELS[value] || value;
+      return PATH_WILDCARD_LABELS[value] || toolLabel(value);
     }
 
     function removeSegment(index) {
@@ -163,7 +168,7 @@
 
       const text = document.createElement("div");
       text.className = "path-summary-value";
-      text.textContent = segments.map((segment) => segment.value).join(" -> ");
+      text.textContent = segments.map((segment) => toolLabel(segment.value)).join(" -> ");
       summary.appendChild(text);
 
       root.appendChild(summary);
@@ -173,7 +178,7 @@
       if (!segments.length) {
         const empty = document.createElement("div");
         empty.className = "empty-state";
-        empty.textContent = "PATH is empty. Click + to add the first segment.";
+        empty.textContent = "TRACE is empty. Click + to add the first segment.";
         root.appendChild(empty);
         return;
       }

@@ -263,6 +263,25 @@ test("parsePublishedRuleSource restores TRACE plus ON and context conditions", (
   assert.equal(restored.conditionItems[1].contextPath, "tool.boundary");
 });
 
+test("parsePublishedRuleSource restores IN, NOT IN and MATCHES operators", () => {
+  const restored = parsePublishedRuleSource([
+    "RULE: review_operator_variants",
+    "TRACE: A -> B",
+    "ON: tool_call(http.post)",
+    "CONDITION: tool.domain IN allowlist.http",
+    '  AND tool.url MATCHES ".*127\\\\.0\\\\.0\\\\.1.*"',
+    "  AND principal.role NOT IN denylist.roles",
+    "POLICY: HUMAN_CHECK",
+  ].join("\n"));
+
+  assert.ok(restored);
+  assert.equal(restored.conditionItems[0].operator, "IN");
+  assert.equal(restored.conditionItems[0].value, "allowlist.http");
+  assert.equal(restored.conditionItems[1].operator, "MATCHES");
+  assert.equal(restored.conditionItems[2].operator, "NOT IN");
+  assert.equal(restored.conditionItems[2].value, "denylist.roles");
+});
+
 test("parsePublishedRuleSource restores llm_check prompt metadata", () => {
   const restored = parsePublishedRuleSource([
     "RULE: review_external_http",

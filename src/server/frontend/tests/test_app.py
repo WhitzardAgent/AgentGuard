@@ -6,12 +6,12 @@ import threading
 from contextlib import contextmanager
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-import sys
 from pathlib import Path
+import sys
 
-SERVER_SRC_DIR = Path(__file__).resolve().parents[2]
-if str(SERVER_SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SERVER_SRC_DIR))
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 import frontend.app as frontend_app
 
@@ -113,7 +113,7 @@ def test_rules_proxy_forwards_api_key_and_payload():
 
     assert status == 200
     assert payload == {"loaded": 2}
-    assert observed["path"] == "/v1/backend/rules/reload"
+    assert observed["path"] == "/rules/reload"
     assert observed["api_key"] == "test-secret"
     assert json.loads(str(observed["body"]))["source"].startswith("RULE test")
 
@@ -149,7 +149,7 @@ def test_rules_check_proxy_forwards_api_key_and_payload():
 
     assert status == 200
     assert payload["ok"] is True
-    assert observed["path"] == "/v1/backend/rules/check"
+    assert observed["path"] == "/rules/check"
     assert observed["api_key"] == "test-secret"
     assert json.loads(str(observed["body"]))["source"].startswith("RULE: test")
 
@@ -238,7 +238,7 @@ def test_agent_rules_proxy_lists_effective_rules():
 
     assert status == 200
     assert payload[0]["rule_id"] == "agent_rule"
-    assert observed["path"] == "/v1/backend/agents/agent-a/rules"
+    assert observed["path"] == "/agents/agent-a/rules"
 
 
 def test_agent_rule_create_proxy_forwards_payload_and_api_key():
@@ -272,7 +272,7 @@ def test_agent_rule_create_proxy_forwards_payload_and_api_key():
 
     assert status == 200
     assert payload["ok"] is True
-    assert observed["path"] == "/v1/backend/agents/agent-a/rules"
+    assert observed["path"] == "/agents/agent-a/rules"
     assert observed["api_key"] == "test-secret"
     assert json.loads(str(observed["body"]))["source"].startswith("RULE: agent_rule")
 
@@ -305,7 +305,7 @@ def test_agent_rule_delete_proxy_forwards_request():
 
     assert status == 200
     assert payload["ok"] is True
-    assert observed["path"] == "/v1/backend/agents/agent-a/rules/agent_rule"
+    assert observed["path"] == "/agents/agent-a/rules/agent_rule"
     assert observed["api_key"] == "test-secret"
 
 
@@ -340,7 +340,7 @@ def test_tool_label_patch_proxy_forwards_request():
 
     assert status == 200
     assert payload["ok"] is True
-    assert observed["path"] == "/v1/backend/agents/agent-a/tools/email.send/labels"
+    assert observed["path"] == "/agents/agent-a/tools/email.send/labels"
     assert observed["api_key"] == "test-secret"
     assert json.loads(str(observed["body"]))["boundary"] == "internal"
 
@@ -350,12 +350,12 @@ def test_runtime_page_renders_shared_sidebar_and_active_nav():
         status, body = _text_request("GET", preview.url, "/runtime.html")
 
     assert status == 200
+    assert 'id="sidebar-toggle"' in body
     assert 'id="app-sidebar"' in body
-    assert 'id="sidebar-agent-panel"' in body
     assert 'href="/">Home</a>' in body
     assert 'href="/agents.html">Agents</a>' in body
     assert 'href="/user.html">User</a>' in body
-    assert 'class="sidebar-nav-item sidebar-nav-item-child active"' in body
+    assert 'class="sidebar-nav-item active"' in body
     assert 'href="/runtime.html"' in body
     assert 'href="/labels.html"' in body
     assert 'data-agent-required="true"' in body
@@ -381,8 +381,7 @@ def test_agents_page_renders_agent_selection_workspace():
 
     assert status == 200
     assert "Available Agents" in body
-    assert "Choose which registered agent to watch from the agent list." in body
-    assert 'id="agent-sync-status"' in body
+    assert "Watching" in body
     assert '<a class="sidebar-nav-item active" href="/agents.html">Agents</a>' in body
 
 

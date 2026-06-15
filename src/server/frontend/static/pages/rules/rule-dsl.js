@@ -1,7 +1,7 @@
 (function () {
   const SUPPORTED_ACTIONS = new Set(["DENY", "HUMAN_CHECK", "LLM_CHECK", "ALLOW", "DEGRADE"]);
-  const CONTEXT_PREFIXES = new Set(["tool", "target", "principal", "caller", "event"]);
-  const ON_SUBTYPES = ["requested", "attempted", "attempt", "completed", "result", "failed"];
+  const CONTEXT_PREFIXES = new Set(["tool", "principal"]);
+  const ON_SUBTYPES = ["requested", "completed", "failed"];
 
   function escapeString(value) {
     return String(value)
@@ -115,6 +115,10 @@
   function serializeValue(item) {
     const rawValue = String(item.value || "");
     const sourceType = String(item?.sourceType || "trace").trim() || "trace";
+    const operator = serializeOperator(item?.operator);
+    if (operator === "IN" || operator === "NOT IN") {
+      return rawValue.trim();
+    }
     if (
       (item.feature === "syntax" || sourceType === "context")
       && /^-?\d+(?:\.\d+)?$/.test(rawValue)

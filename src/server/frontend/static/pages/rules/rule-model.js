@@ -35,11 +35,18 @@
   function normalizeRuleCondition(rule, symbols, options = {}) {
     const normalizedCondition = typeof normalizeConditionItems === "function"
       ? normalizeConditionItems(
-        { items: rule?.conditionItems || (rule?.conditionState ? [rule.conditionState] : []) },
+        {
+          items: rule?.conditionItems || (rule?.conditionState ? [rule.conditionState] : []),
+          tree: rule?.conditionTree || null,
+        },
         symbols.length ? symbols : ["A"],
         options,
       )
-      : { items: Array.isArray(rule?.conditionItems) ? rule.conditionItems : [], symbolToolMap: rule?.symbolToolMap || {} };
+      : {
+        items: Array.isArray(rule?.conditionItems) ? rule.conditionItems : [],
+        symbolToolMap: rule?.symbolToolMap || {},
+        tree: rule?.conditionTree || null,
+      };
 
     return {
       condition: normalizedCondition.items
@@ -66,6 +73,7 @@
         contextPath: item.contextPath || "",
       })),
       symbolToolMap: normalizedCondition.symbolToolMap || {},
+      conditionTree: normalizedCondition.tree || rule?.conditionTree || null,
       conditionSavedConditions: Array.isArray(rule?.conditionSavedConditions)
         ? rule.conditionSavedConditions.map((entry) => ({
           conditionId: String(entry?.conditionId || "").trim(),
@@ -92,6 +100,7 @@
               contextPath: item?.contextPath || "",
             }))
             : [],
+          tree: entry?.tree || null,
         }))
         : [],
       conditionCurrentId: String(rule?.conditionCurrentId || "").trim(),

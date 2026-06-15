@@ -86,6 +86,7 @@ const elements = {
   ruleSeverityInput: document.getElementById("rule-severity-input"),
   ruleCategoryInput: document.getElementById("rule-category-input"),
   ruleReasonInput: document.getElementById("rule-reason-input"),
+  traceOnFieldHint: document.getElementById("trace-on-field-hint"),
   pathField: document.getElementById("path-field"),
   onField: document.getElementById("on-field"),
   promptField: document.getElementById("prompt-field"),

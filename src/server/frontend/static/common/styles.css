@@ -814,6 +814,40 @@ textarea {
   font-family: Consolas, "Courier New", monospace;
 }
 
+.condition-target-list-input {
+  min-height: 50px;
+  padding: 9px 11px;
+  line-height: 1.4;
+  border-radius: 10px;
+  background: #fdfefc;
+}
+
+.condition-membership-checklist {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fbfcfa;
+}
+
+.condition-membership-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.condition-membership-option input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  flex: 0 0 auto;
+}
+
 .table {
   width: 100%;
   border-collapse: collapse;
@@ -1357,6 +1391,186 @@ textarea {
   gap: 12px;
 }
 
+.condition-tree-section {
+  display: grid;
+  gap: 10px;
+}
+
+.condition-tree-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.condition-tree-library {
+  display: grid;
+  gap: 10px;
+}
+
+.condition-tree-library-card {
+  border: 1px solid #d7dfd0;
+  border-radius: 14px;
+  background: #ffffff;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.condition-tree-library-head,
+.condition-tree-group-head,
+.condition-tree-leaf-actions,
+.condition-tree-library-actions,
+.condition-tree-editor-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.condition-tree-group-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.condition-tree-group-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 4px;
+}
+
+.condition-tree-group-add-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.condition-tree-group-add-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 4;
+  display: grid;
+  gap: 2px;
+  min-width: 132px;
+  padding: 6px;
+  border: 1px solid #dfe7d7;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 12px 28px rgba(36, 48, 36, 0.12);
+  backdrop-filter: blur(8px);
+}
+
+.condition-tree-group-add-item {
+  border: 0;
+  background: transparent;
+  color: #304030;
+  border-radius: 8px;
+  padding: 7px 10px;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.condition-tree-group-add-item:hover {
+  background: rgba(47, 107, 59, 0.08);
+  color: var(--text);
+}
+
+.condition-tree-group-add-item:focus-visible {
+  outline: 2px solid rgba(47, 107, 59, 0.2);
+  outline-offset: 0;
+}
+
+.condition-tree-library-head {
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.condition-tree-library-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.condition-tree-group {
+  border: 1px solid #d7dfd0;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #fcfdfb 0%, #f6f8f3 100%);
+  padding: 12px;
+  display: grid;
+  gap: 12px;
+}
+
+.condition-tree-group-title {
+  font-weight: 600;
+}
+
+.condition-tree-group-body {
+  display: grid;
+  gap: 10px;
+  padding-left: 12px;
+  border-left: 2px solid rgba(47, 107, 59, 0.14);
+}
+
+.condition-tree-leaf {
+  border: 1px solid #dde5d6;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.condition-tree-leaf-rule {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.condition-tree-leaf-actions {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+}
+
+.condition-tree-preview,
+.condition-tree-inline-preview {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.condition-tree-editor {
+  display: grid;
+  gap: 12px;
+}
+
+.condition-tree-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.condition-tree-field {
+  margin: 0;
+}
+
+.condition-field-wide {
+  grid-column: 1 / -1;
+}
+
 .condition-field {
   margin-bottom: 0;
   display: grid;
@@ -1394,6 +1608,7 @@ textarea {
   display: grid;
   gap: 4px;
   padding-right: 84px;
+  padding-left: 36px;
 }
 
 .condition-step-kicker {
@@ -1619,6 +1834,11 @@ textarea {
   gap: 6px;
 }
 
+.condition-card-actions-start {
+  left: 10px;
+  right: auto;
+}
+
 .condition-icon-button {
   width: 28px;
   height: 28px;
@@ -1645,6 +1865,24 @@ textarea {
   height: 14px;
   object-fit: contain;
   display: block;
+}
+
+.condition-tree-action-button {
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  flex: 0 0 auto;
+}
+
+.condition-tree-library-actions {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+}
+
+.condition-tree-library-rule {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .condition-summary-line {
@@ -1715,8 +1953,9 @@ textarea {
 .condition-builder-actions {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 12px;
+  margin-bottom: 8px;
 }
 
 .condition-add-button {
@@ -2049,6 +2288,10 @@ textarea {
   }
 
   .condition-builder-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .condition-tree-editor-grid {
     grid-template-columns: 1fr;
   }
 

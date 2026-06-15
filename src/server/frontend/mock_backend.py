@@ -350,12 +350,21 @@ class FrontendMockBackend:
             normalized = FrontendMockBackend._normalize_rule_header(block)
             lines = [line.strip() for line in normalized.splitlines() if line.strip()]
             missing: list[str] = []
-            for prefix in ("RULE:", "TRACE:", "CONDITION:", "POLICY:"):
+            missing_path: list[str] = []
+            for prefix in ("RULE:", "CONDITION:", "POLICY:"):
                 if not any(line.startswith(prefix) for line in lines):
                     missing.append(prefix.rstrip(":"))
+            for prefix in ("TRACE:", "ON"):
+                if not any(line.startswith(prefix) for line in lines):
+                    missing_path.append(prefix.rstrip(":"))
             if missing:
                 errors.append({
                     "message": f"Rule block {index} is missing required line(s): {', '.join(missing)}.",
+                })
+                continue
+            if len(missing_path) == 2:
+                errors.append({
+                    "message": f"Rule block {index} is missing required line(s): ON or TRACE.",
                 })
                 continue
 
@@ -481,36 +490,42 @@ class FrontendMockBackend:
                 "name": "shell.exec",
                 "owner_agent_id": "agent-alpha",
                 "description": "Execute bounded shell commands for local automation.",
+                "input_params": ["cmd", "cwd"],
                 "labels": {"boundary": "privileged", "sensitivity": "high", "integrity": "trusted"},
             },
             {
                 "name": "email.send",
                 "owner_agent_id": "agent-alpha",
                 "description": "Send outbound email to customers.",
+                "input_params": ["to", "subject", "body"],
                 "labels": {"boundary": "external", "sensitivity": "moderate", "integrity": "trusted"},
             },
             {
                 "name": "docs.search",
                 "owner_agent_id": "agent-alpha",
                 "description": "Search internal knowledge base documents.",
+                "input_params": ["query", "limit"],
                 "labels": {"boundary": "internal", "sensitivity": "low", "integrity": "trusted"},
             },
             {
                 "name": "http.get",
                 "owner_agent_id": "agent-beta",
                 "description": "Fetch data from external HTTP endpoints.",
+                "input_params": ["url", "timeout"],
                 "labels": {"boundary": "external", "sensitivity": "low", "integrity": "unfiltered"},
             },
             {
                 "name": "db.query",
                 "owner_agent_id": "agent-beta",
                 "description": "Run read-only analytics queries.",
+                "input_params": ["sql", "limit"],
                 "labels": {"boundary": "internal", "sensitivity": "high", "integrity": "trusted"},
             },
             {
                 "name": "ticket.create",
                 "owner_agent_id": "agent-beta",
                 "description": "Open follow-up tickets in the tracker.",
+                "input_params": ["title", "description", "priority"],
                 "labels": {"boundary": "internal", "sensitivity": "moderate", "integrity": "trusted"},
             },
         ]

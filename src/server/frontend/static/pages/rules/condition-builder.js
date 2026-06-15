@@ -8,38 +8,28 @@
     "label.integrity": ["trusted", "unfiltered"],
   };
 
+  const principalRoleValues = ["basic", "default", "privileged", "system"];
+
   const traceFeatureOperators = {
-    name: ["=="],
-    "label.boundary": ["==", "!="],
-    "label.sensitivity": ["==", "!="],
-    "label.integrity": ["==", "!="],
-    syntax: ["==", "!=", ">", ">=", "<", "<=", "contains"],
+    name: ["==", "!=", "IN", "NOT IN"],
+    "label.boundary": ["==", "!=", "IN", "NOT IN"],
+    "label.sensitivity": ["==", "!=", "IN", "NOT IN"],
+    "label.integrity": ["==", "!=", "IN", "NOT IN"],
+    syntax: ["==", "!=", ">", ">=", "<", "<=", "IN", "NOT IN", "MATCHES", "contains"],
   };
 
   const contextDefinitions = {
     tool: [
-      { value: "tool.name", label: "tool.name", kind: "tool-name", operators: ["=="] },
-      { value: "tool.boundary", label: "tool.boundary", kind: "enum", enumKey: "label.boundary", operators: ["==", "!="] },
-      { value: "tool.sensitivity", label: "tool.sensitivity", kind: "enum", enumKey: "label.sensitivity", operators: ["==", "!="] },
-      { value: "tool.integrity", label: "tool.integrity", kind: "enum", enumKey: "label.integrity", operators: ["==", "!="] },
-      { value: "tool.syntax", label: "tool.<syntax field>", kind: "tool-syntax", operators: ["==", "!=", ">", ">=", "<", "<=", "contains"] },
-    ],
-    target: [
-      { value: "target.domain", label: "target.domain", kind: "text", operators: ["==", "!=", "contains"] },
-      { value: "target.raw", label: "target.<field>", kind: "free-field", fieldPrefix: "target", operators: ["==", "!=", ">", ">=", "<", "<=", "contains"] },
+      { value: "tool.name", label: "tool.name", kind: "tool-name", operators: ["==", "!=", "IN", "NOT IN"] },
+      { value: "tool.boundary", label: "tool.boundary", kind: "enum", enumKey: "label.boundary", operators: ["==", "!=", "IN", "NOT IN"] },
+      { value: "tool.sensitivity", label: "tool.sensitivity", kind: "enum", enumKey: "label.sensitivity", operators: ["==", "!=", "IN", "NOT IN"] },
+      { value: "tool.integrity", label: "tool.integrity", kind: "enum", enumKey: "label.integrity", operators: ["==", "!=", "IN", "NOT IN"] },
+      { value: "tool.syntax", label: "tool.<syntax field>", kind: "tool-syntax", operators: ["==", "!=", ">", ">=", "<", "<=", "IN", "NOT IN", "MATCHES", "contains"] },
+      { value: "tool.result", label: "tool.result", kind: "text", operators: ["==", "!=", "IN", "NOT IN", "MATCHES", "contains"] },
     ],
     principal: [
-      { value: "principal.role", label: "principal.role", kind: "text", operators: ["==", "!="] },
-      { value: "principal.trust_level", label: "principal.trust_level", kind: "number", operators: ["==", "!=", ">", ">=", "<", "<="] },
-      { value: "principal.user_id", label: "principal.user_id", kind: "text", operators: ["==", "!=", "contains"] },
-    ],
-    caller: [
-      { value: "caller.role", label: "caller.role", kind: "text", operators: ["==", "!="] },
-      { value: "caller.trust_level", label: "caller.trust_level", kind: "number", operators: ["==", "!=", ">", ">=", "<", "<="] },
-    ],
-    event: [
-      { value: "event.type", label: "event.type", kind: "text", operators: ["==", "!="] },
-      { value: "event.session_id", label: "event.session_id", kind: "text", operators: ["==", "!=", "contains"] },
+      { value: "principal.role", label: "user.role", kind: "enum", enumValues: principalRoleValues, operators: ["==", "!=", "IN", "NOT IN"] },
+      { value: "principal.trust_level", label: "user.trust_level", kind: "number", operators: ["==", "!=", ">", ">=", "<", "<="] },
     ],
   };
 
@@ -51,10 +41,12 @@
 
   const contextPropertyGroups = [
     { value: "tool", label: "tool" },
-    { value: "target", label: "target" },
-    { value: "principal", label: "principal" },
-    { value: "caller", label: "caller" },
-    { value: "event", label: "event" },
+    { value: "principal", label: "user" }
+  ];
+
+  const principalContextSubpropertyGroups = [
+    { value: "principal.role", label: "role" },
+    { value: "principal.trust_level", label: "trust_level" },
   ];
 
   const wizardStages = ["source", "symbol", "property", "comparison", "complete"];
@@ -74,10 +66,6 @@
     }));
   }
 
-  function firstToolOption() {
-    return toolOptions()[0] || null;
-  }
-
   function toolNameForKey(toolKey) {
     if (typeof toolCatalogHelpers.toolNameForKey === "function") {
       return toolCatalogHelpers.toolNameForKey(toolKey, toolCatalog(), window.AgentGuardData?.findToolByKey);
@@ -86,24 +74,190 @@
     return match ? match.name : "";
   }
 
+  function displaySymbol(symbol) {
+    const normalized = String(symbol || "").trim() || "A";
+    return `Tool ${normalized}`;
+  }
+
   function inputParamsForTool(toolKey) {
     const match = window.AgentGuardData?.findToolByKey?.(toolCatalog(), toolKey);
     return match ? match.input_params : [];
   }
 
-  function contextPrefixes() {
-    return Object.keys(contextDefinitions);
+  function toolContextSubpropertyLabel(value) {
+    const normalized = String(value || "").trim();
+    if (!normalized) {
+      return "";
+    }
+    if (normalized === "tool.name") {
+      return "name";
+    }
+    if (normalized === "tool.boundary") {
+      return "label-boundary";
+    }
+    if (normalized === "tool.sensitivity") {
+      return "label-sensitivity";
+    }
+    if (normalized === "tool.integrity") {
+      return "label-integrity";
+    }
+    if (normalized === "tool.result") {
+      return "result";
+    }
+    if (normalized.startsWith("tool.")) {
+      return `param-${normalized.slice("tool.".length)}`;
+    }
+    return normalized;
   }
 
-  function contextFieldsForPrefix(prefix) {
-    return (contextDefinitions[prefix] || []).map((item) => ({
-      value: item.value,
-      label: item.label,
-    }));
+  function normalizeToolNameToken(value) {
+    return String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[.\s-]+/g, "_");
+  }
+
+  function serializeOperator(operator) {
+    if (operator === "contains") {
+      return "CONTAINS";
+    }
+    return String(operator || "").trim();
+  }
+
+  function serializeComparisonValue(item) {
+    const rawValue = String(item?.value || "").trim();
+    const operator = serializeOperator(item?.operator);
+    const sourceType = String(item?.sourceType || "trace").trim() || "trace";
+    if (operator === "IN" || operator === "NOT IN") {
+      return rawValue;
+    }
+    if (
+      (item?.feature === "syntax" || sourceType === "context")
+      && /^-?\d+(?:\.\d+)?$/.test(rawValue)
+    ) {
+      return rawValue;
+    }
+    return `"${rawValue.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+  }
+
+  function comparisonOptionLabel(value) {
+    const normalized = String(value || "").trim();
+    return normalized === "contains" ? "CONTAINS" : normalized;
+  }
+
+  function isMembershipOperator(operator) {
+    const normalized = String(operator || "").trim().toUpperCase();
+    return normalized === "IN" || normalized === "NOT IN";
+  }
+
+  function formatSetLiteral(values) {
+    const items = (Array.isArray(values) ? values : [])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+      .map((value) => `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`);
+    return items.length ? `{${items.join(", ")}}` : "";
+  }
+
+  function parseSetLiteralEntries(rawValue) {
+    const trimmed = String(rawValue || "").trim();
+    if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+      return [];
+    }
+
+    const inner = trimmed.slice(1, -1).trim();
+    if (!inner) {
+      return [];
+    }
+
+    const matches = inner.match(/"((?:\\.|[^"])*)"|([^,{}]+)/g) || [];
+    return matches
+      .map((entry) => {
+        const candidate = String(entry || "").trim();
+        if (!candidate) {
+          return "";
+        }
+        const quoted = candidate.match(/^"((?:\\.|[^"])*)"$/);
+        if (quoted) {
+          return quoted[1]
+            .replace(/\\"/g, "\"")
+            .replace(/\\\\/g, "\\");
+        }
+        return candidate.replace(/^,\s*/, "").trim();
+      })
+      .filter(Boolean);
+  }
+
+  function membershipEditorValue(rawValue) {
+    const entries = parseSetLiteralEntries(rawValue);
+    if (entries.length) {
+      return entries.join("\n");
+    }
+    return String(rawValue || "").trim();
+  }
+
+  function normalizeMembershipValueInput(rawValue) {
+    const trimmed = String(rawValue || "").trim();
+    if (!trimmed) {
+      return "";
+    }
+    if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+      return trimmed;
+    }
+    if (!/[\r\n,]/.test(trimmed)) {
+      return trimmed;
+    }
+
+    const entries = trimmed
+      .split(/\r?\n|,/)
+      .map((entry) => String(entry || "").trim())
+      .filter(Boolean);
+    return formatSetLiteral(entries) || trimmed;
+  }
+
+  function membershipPlaceholder(definition) {
+    if (definition?.kind === "enum") {
+      return "One item per line, or a collection ref like denylist.roles";
+    }
+    if (definition?.kind === "tool-name") {
+      return "One tool name per line, or a collection ref like allowlist.tools";
+    }
+    return "One item per line, or a collection ref like allowlist.http";
+  }
+
+  function uniqueToolNameOptions() {
+    const seen = new Set();
+    return toolOptions().reduce((acc, option) => {
+      const name = String(option?.name || option?.label || "").trim();
+      if (!name || seen.has(name)) {
+        return acc;
+      }
+      seen.add(name);
+      acc.push({ value: name, label: name });
+      return acc;
+    }, []);
+  }
+
+  function membershipOptionEntries(source) {
+    if (!source) {
+      return [];
+    }
+    if (source.feature === "name" || source.kind === "tool-name") {
+      return uniqueToolNameOptions();
+    }
+    if (String(source.feature || "").startsWith("label.")) {
+      return (labelValues[source.feature] || []).map((value) => ({ value, label: value }));
+    }
+    if (source.kind === "enum") {
+      const values = Array.isArray(source.enumValues)
+        ? source.enumValues
+        : (labelValues[source.enumKey] || []);
+      return values.map((value) => ({ value, label: value }));
+    }
+    return [];
   }
 
   function contextDefinitionForPath(path, prefixHint = "") {
-    if (path && path !== `${prefixHint}.raw`) {
+    if (path) {
       const prefix = String(path).split(".")[0];
       const exact = (contextDefinitions[prefix] || []).find((item) => item.value === path);
       if (exact) {
@@ -112,21 +266,14 @@
       if (prefix === "tool") {
         return contextDefinitions.tool.find((item) => item.value === "tool.syntax");
       }
-      const raw = (contextDefinitions[prefix] || []).find((item) => item.kind === "free-field");
-      if (raw) {
-        return raw;
-      }
     }
     const hinted = (contextDefinitions[prefixHint] || [])[0];
     return hinted || contextDefinitions.tool[0];
   }
 
-  function buildContextPath(prefix, fieldValue, fieldName, syntaxField) {
+  function buildContextPath(fieldValue, syntaxField) {
     if (fieldValue === "tool.syntax") {
       return syntaxField ? `tool.${syntaxField}` : "";
-    }
-    if (fieldValue === `${prefix}.raw`) {
-      return fieldName ? `${prefix}.${fieldName}` : "";
     }
     return fieldValue || "";
   }
@@ -142,27 +289,125 @@
     return "complete";
   }
 
-  function defaultItem(symbols) {
-    return {
-      conditionId: "",
-      confirmed: false,
-      stepStage: "source",
-      connector: "",
-      openParen: "",
-      closeParen: "",
-      sourceType: "trace",
-      symbol: symbols[0] || "A",
-      feature: "",
-      propertyGroup: "",
-      syntaxField: "",
-      operator: "",
-      value: "",
-      selectedToolKey: "",
-      contextPrefix: "",
-      contextField: "",
-      contextFieldName: "",
-      contextPath: "",
+  function createField(labelText, control, className = "") {
+    const wrap = document.createElement("label");
+    wrap.className = `field condition-tree-field${className ? ` ${className}` : ""}`;
+    const label = document.createElement("span");
+    label.textContent = labelText;
+    wrap.appendChild(label);
+    wrap.appendChild(control);
+    return wrap;
+  }
+
+  function createButton(text, className, onClick, ariaLabel = "") {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = className;
+    button.textContent = text;
+    if (ariaLabel) {
+      button.setAttribute("aria-label", ariaLabel);
+      button.setAttribute("title", ariaLabel);
+    }
+    button.addEventListener("click", onClick);
+    return button;
+  }
+
+  function createAssetIconButton(iconName, ariaLabel, onClick) {
+    const createIconButton = uiHelpers.createIconButton || function fallbackCreateIconButton(nextIconName, nextAriaLabel, nextOnClick) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "condition-icon-button";
+      button.setAttribute("aria-label", nextAriaLabel);
+      button.setAttribute("title", nextAriaLabel);
+      const icon = document.createElement("img");
+      icon.className = "condition-action-icon";
+      icon.src = `/assets/${nextIconName}`;
+      icon.alt = "";
+      button.appendChild(icon);
+      button.addEventListener("click", nextOnClick);
+      return button;
     };
+
+    return createIconButton(iconName, ariaLabel, onClick, {
+      className: "condition-icon-button condition-tree-action-button",
+      iconClassName: "condition-action-icon",
+      title: ariaLabel,
+    });
+  }
+
+  function createSelect(options, value, onChange) {
+    const select = document.createElement("select");
+    (options || []).forEach((optionValue) => {
+      const option = document.createElement("option");
+      if (typeof optionValue === "object") {
+        option.value = optionValue.value;
+        option.textContent = optionValue.label;
+        option.disabled = Boolean(optionValue.disabled);
+      } else {
+        option.value = optionValue;
+        option.textContent = optionValue;
+      }
+      option.selected = option.value === value;
+      select.appendChild(option);
+    });
+    select.value = value;
+    select.addEventListener("change", onChange);
+    return select;
+  }
+
+  function createInput(value, onInput, placeholder = "Value") {
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = value || "";
+    input.placeholder = placeholder;
+    input.addEventListener("input", onInput);
+    return input;
+  }
+
+  function createTextarea(value, onInput, placeholder = "Value", className = "") {
+    const textarea = document.createElement("textarea");
+    textarea.className = className;
+    textarea.value = value || "";
+    textarea.placeholder = placeholder;
+    textarea.rows = 3;
+    textarea.addEventListener("input", onInput);
+    return textarea;
+  }
+
+  function createMembershipCheckboxGroup(options, selectedValues, onChange) {
+    const wrap = document.createElement("div");
+    wrap.className = "condition-membership-checklist";
+    const selected = new Set((Array.isArray(selectedValues) ? selectedValues : []).map((value) => String(value || "").trim()));
+
+    (options || []).forEach((entry) => {
+      const optionValue = String(entry?.value || "").trim();
+      if (!optionValue) {
+        return;
+      }
+      const label = document.createElement("label");
+      label.className = "condition-membership-option";
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.value = optionValue;
+      checkbox.checked = selected.has(optionValue);
+      checkbox.addEventListener("change", () => {
+        const checkedValues = Array.from(wrap.children || [])
+          .map((child) => child?.children?.[0] || null)
+          .filter((input) => input && input.tagName === "INPUT" && input.type === "checkbox" && input.checked)
+          .map((input) => String(input.value || "").trim())
+          .filter(Boolean);
+        onChange(checkedValues);
+      });
+
+      const text = document.createElement("span");
+      text.textContent = String(entry?.label || optionValue);
+      label.appendChild(checkbox);
+      label.appendChild(text);
+      wrap.appendChild(label);
+    });
+
+    return wrap;
   }
 
   function inferSymbolToolMap(value) {
@@ -187,13 +432,14 @@
   function buildItemExpression(item) {
     const openParen = item.openParen || "";
     const closeParen = item.closeParen || "";
-    const operator = item.operator === "contains" ? "CONTAINS" : item.operator;
+    const operator = serializeOperator(item.operator);
+    const serializedValue = serializeComparisonValue(item);
 
     if (item.sourceType === "context") {
       if (!item.contextPath || !operator || !item.value) {
         return "";
       }
-      return `${openParen}${item.contextPath} ${operator} "${item.value}"${closeParen}`;
+      return `${openParen}${item.contextPath} ${operator} ${serializedValue}${closeParen}`;
     }
 
     if (!item.symbol || !item.feature || !item.operator || !item.value) {
@@ -203,24 +449,47 @@
       if (!item.syntaxField) {
         return "";
       }
-      return `${openParen}${item.symbol}.${item.syntaxField} ${operator} "${item.value}"${closeParen}`;
+      return `${openParen}${item.symbol}.${item.syntaxField} ${operator} ${serializedValue}${closeParen}`;
     }
     if (item.feature === "name") {
-      return `${openParen}${item.symbol}.name ${operator} "${item.value}"${closeParen}`;
+      return `${openParen}${item.symbol}.name ${operator} ${serializedValue}${closeParen}`;
     }
     const field = item.feature.replace(/^label\./, "");
-    return `${openParen}${item.symbol}.${field} ${operator} "${item.value}"${closeParen}`;
+    return `${openParen}${item.symbol}.${field} ${operator} ${serializedValue}${closeParen}`;
+  }
+
+  function defaultItem(symbols, allowedSourceTypes) {
+    const sourceType = Array.isArray(allowedSourceTypes) && allowedSourceTypes.length === 1
+      ? allowedSourceTypes[0]
+      : "trace";
+    return {
+      conditionId: "",
+      confirmed: true,
+      stepStage: "complete",
+      connector: "",
+      openParen: "",
+      closeParen: "",
+      sourceType,
+      symbol: symbols[0] || "A",
+      feature: sourceType === "trace" ? "name" : "",
+      propertyGroup: sourceType === "trace" ? "name" : "",
+      syntaxField: "",
+      operator: sourceType === "trace" ? "==" : "",
+      value: "",
+      selectedToolKey: "",
+      contextPrefix: sourceType === "context" ? "tool" : "",
+      contextField: "",
+      contextFieldName: "",
+      contextPath: "",
+    };
   }
 
   function normalizeTraceItem(raw, index, symbols, symbolToolMap) {
-    const fallback = defaultItem(symbols);
-    const stepStage = normalizeStepStage(raw);
-    const hasExplicitStepStage = String(raw?.stepStage || "").trim() !== "";
-    const isDraft = !raw?.confirmed && hasExplicitStepStage && stepStage !== "complete";
+    const fallback = defaultItem(symbols, ["trace"]);
     const item = {
       conditionId: String(raw?.conditionId || ""),
-      confirmed: Boolean(raw?.confirmed),
-      stepStage,
+      confirmed: true,
+      stepStage: "complete",
       connector: index === 0 ? "" : String(raw?.connector || "AND"),
       openParen: String(raw?.openParen || ""),
       closeParen: String(raw?.closeParen || ""),
@@ -242,12 +511,9 @@
       item.symbol = symbols[0] || "A";
     }
 
-    const featureOptions = ["name", "label.boundary", "label.sensitivity", "label.integrity"];
-    if (symbolToolMap[item.symbol]) {
-      featureOptions.splice(1, 0, "syntax");
-    }
+    const featureOptions = ["name", "label.boundary", "label.sensitivity", "label.integrity", "syntax"];
     if (!featureOptions.includes(item.feature)) {
-      item.feature = isDraft ? "" : "name";
+      item.feature = "name";
     }
 
     if (!item.propertyGroup) {
@@ -255,136 +521,75 @@
         item.propertyGroup = "syntax";
       } else if (item.feature.startsWith("label.")) {
         item.propertyGroup = "label";
-      } else if (item.feature === "name") {
+      } else {
         item.propertyGroup = "name";
       }
     }
 
-    const operators = item.feature ? traceFeatureOperators[item.feature] : [];
-    if (item.operator && !operators.includes(item.operator)) {
-      item.operator = isDraft ? "" : (operators[0] || "");
-    }
-    if (!item.operator && !isDraft && operators.length) {
-      item.operator = operators[0];
+    if (item.feature === "name" && !isMembershipOperator(item.operator)) {
+      if (item.selectedToolKey) {
+        item.value = toolNameForKey(item.selectedToolKey) || item.value;
+      } else {
+        const option = toolOptions().find((entry) => entry.name === item.value);
+        item.selectedToolKey = option?.value || symbolToolMap[item.symbol] || "";
+      }
+    } else if (item.feature === "name") {
+      item.selectedToolKey = "";
     }
 
-    if (item.feature === "name") {
-      const tools = toolOptions();
-      const selectedTool = tools.find((option) => option.value === item.selectedToolKey);
-      if (selectedTool) {
-        item.value = selectedTool.name;
-      } else if (tools.some((option) => option.name === item.value)) {
-        const firstMatchingTool = tools.find((option) => option.name === item.value);
-        item.selectedToolKey = firstMatchingTool?.value || "";
-        item.value = firstMatchingTool?.name || item.value;
-      } else if (!isDraft) {
-        item.selectedToolKey = tools[0]?.value || "";
-        item.value = tools[0]?.name || "";
-      } else {
-        item.selectedToolKey = "";
-        item.value = "";
-      }
-      item.syntaxField = "";
-    } else if (item.feature.startsWith("label.")) {
-      const values = labelValues[item.feature] || [];
-      if (item.value && !values.includes(item.value)) {
-        item.value = isDraft ? "" : (values[0] || "");
-      }
-      if (!item.value && !isDraft) {
-        item.value = values[0] || "";
-      }
-      item.syntaxField = "";
-      item.selectedToolKey = "";
-    } else if (item.feature === "syntax") {
-      const params = inputParamsForTool(symbolToolMap[item.symbol] || "");
-      if (item.syntaxField && !params.includes(item.syntaxField)) {
-        item.syntaxField = isDraft ? "" : (params[0] || "");
-      }
-      if (!item.syntaxField && !isDraft) {
+    if (item.feature === "syntax") {
+      const resolvedToolKey = item.selectedToolKey || symbolToolMap[item.symbol] || "";
+      item.selectedToolKey = resolvedToolKey;
+      const params = inputParamsForTool(resolvedToolKey);
+      if (!item.syntaxField) {
+        item.syntaxField = params[0] || "";
+      } else if (params.length && !params.includes(item.syntaxField)) {
         item.syntaxField = params[0] || "";
       }
-      item.selectedToolKey = "";
     } else {
-      item.syntaxField = "";
-      item.selectedToolKey = "";
-      item.value = "";
+      item.syntaxField = item.feature === "syntax" ? item.syntaxField : "";
+    }
+
+    const operators = traceFeatureOperators[item.feature] || ["=="];
+    if (!operators.includes(item.operator)) {
+      item.operator = operators[0] || "";
     }
 
     return {
       ...item,
-      resolvedToolName: toolNameForKey(symbolToolMap[item.symbol] || ""),
       expression: buildItemExpression(item),
     };
   }
 
   function normalizeContextItem(raw, index, options = {}) {
-    const currentCallToolKey = String(options.currentCallToolKey || "");
-    const stepStage = normalizeStepStage(raw);
-    const hasExplicitStepStage = String(raw?.stepStage || "").trim() !== "";
-    const isDraft = !raw?.confirmed && hasExplicitStepStage && stepStage !== "complete";
-    const derivedPrefix = String(raw?.contextPath || "").split(".")[0] || "";
-    const prefix = String(raw?.contextPrefix || (!isDraft ? (derivedPrefix || "tool") : ""));
-    const definition = prefix ? contextDefinitionForPath(String(raw?.contextPath || ""), prefix) : null;
-    const contextField = String(raw?.contextField || (!isDraft ? (definition?.value || "tool.name") : ""));
-    const fieldName = String(raw?.contextFieldName || "");
+    const prefix = String(raw?.contextPrefix || String(raw?.contextPath || "").split(".")[0] || "tool");
+    const definition = contextDefinitionForPath(raw?.contextPath || raw?.contextField, prefix);
+    const fieldValue = String(raw?.contextField || definition.value || "");
+    const toolKey = String(options.currentCallToolKey || "");
+    const params = inputParamsForTool(toolKey);
+    const pathSegment = prefix === "tool" && String(raw?.contextPath || "").startsWith("tool.")
+      ? String(raw.contextPath).slice("tool.".length)
+      : "";
     let syntaxField = String(raw?.syntaxField || "");
-    if (contextField === "tool.syntax") {
-      const params = inputParamsForTool(currentCallToolKey);
-      if (syntaxField && !params.includes(syntaxField)) {
-        syntaxField = isDraft ? "" : (params[0] || "");
+
+    if (fieldValue === "tool.syntax") {
+      if (!syntaxField && pathSegment && !contextDefinitions.tool.some((item) => item.value === `tool.${pathSegment}`)) {
+        syntaxField = pathSegment;
       }
-      if (!syntaxField && !isDraft) {
+      if (!syntaxField || (params.length && !params.includes(syntaxField))) {
         syntaxField = params[0] || "";
       }
-    }
-    const contextPath = contextField ? buildContextPath(prefix, contextField, fieldName, syntaxField) : "";
-    const nextDefinition = contextField
-      ? contextDefinitionForPath(
-        contextPath || (contextField === "tool.syntax" ? contextField : `${prefix}.raw`),
-        prefix,
-      )
-      : null;
-    const operators = nextDefinition?.operators || [];
-    let value = String(raw?.value || "");
-    let selectedToolKey = String(raw?.selectedToolKey || "");
-
-    if (nextDefinition?.kind === "enum") {
-      const options = labelValues[nextDefinition.enumKey] || [];
-      if (value && !options.includes(value)) {
-        value = isDraft ? "" : (options[0] || "");
-      }
-      if (!value && !isDraft) {
-        value = options[0] || "";
-      }
-    }
-    if (nextDefinition?.kind === "tool-name") {
-      const tools = toolOptions();
-      const selectedTool = tools.find((option) => option.value === selectedToolKey);
-      if (selectedTool) {
-        value = selectedTool.name;
-      } else if (tools.some((option) => option.name === value)) {
-        selectedToolKey = tools.find((option) => option.name === value)?.value || "";
-      } else if (!isDraft) {
-        selectedToolKey = tools[0]?.value || "";
-        value = tools[0]?.name || value;
-      } else {
-        selectedToolKey = "";
-        value = "";
-      }
+    } else {
+      syntaxField = "";
     }
 
-    let operator = String(raw?.operator || "");
-    if (operator && !operators.includes(operator)) {
-      operator = isDraft ? "" : (operators[0] || "");
-    }
-    if (!operator && !isDraft && operators.length) {
-      operator = operators[0];
-    }
-
-    return {
+    const fieldName = fieldValue === "tool.syntax" ? "" : String(raw?.contextFieldName || "");
+    const contextPath = buildContextPath(fieldValue, syntaxField);
+    const operators = definition.operators || ["=="];
+    const item = {
       conditionId: String(raw?.conditionId || ""),
-      confirmed: Boolean(raw?.confirmed),
-      stepStage,
+      confirmed: true,
+      stepStage: "complete",
       connector: index === 0 ? "" : String(raw?.connector || "AND"),
       openParen: String(raw?.openParen || ""),
       closeParen: String(raw?.closeParen || ""),
@@ -393,60 +598,79 @@
       feature: "",
       propertyGroup: "",
       syntaxField,
-      operator,
-      value,
-      selectedToolKey,
+      operator: operators.includes(raw?.operator) ? raw.operator : (operators[0] || ""),
+      value: String(raw?.value || ""),
+      selectedToolKey: String(raw?.selectedToolKey || ""),
       contextPrefix: prefix,
-      contextField,
+      contextField: fieldValue,
       contextFieldName: fieldName,
       contextPath,
-      resolvedToolName: "",
       expression: "",
+    };
+    return {
+      ...item,
+      expression: buildItemExpression(item),
     };
   }
 
+  function coerceItemSourceType(item, allowedSourceTypes, symbols, options = {}) {
+    if (!Array.isArray(allowedSourceTypes) || !allowedSourceTypes.length) {
+      return item;
+    }
+    if (allowedSourceTypes.includes(item.sourceType)) {
+      return item;
+    }
+    if (allowedSourceTypes.includes("context")) {
+      return normalizeContextItem({
+        sourceType: "context",
+        contextPrefix: "tool",
+        contextField: "tool.name",
+        contextPath: "tool.name",
+        operator: "==",
+        value: item.value || "",
+        selectedToolKey: item.selectedToolKey || "",
+        connector: item.connector,
+      }, item.connector ? 1 : 0, options);
+    }
+    return normalizeTraceItem({
+      sourceType: "trace",
+      symbol: symbols[0] || "A",
+      feature: "name",
+      operator: "==",
+      value: item.value || "",
+      connector: item.connector,
+    }, item.connector ? 1 : 0, symbols, {});
+  }
+
   function normalizeItem(raw, index, symbols, symbolToolMap, options = {}) {
-    const sourceType = String(raw?.sourceType || "").trim() || "trace";
-    if (sourceType === "context") {
-      const normalized = normalizeContextItem(raw, index, options);
-      return {
-        ...normalized,
-        expression: buildItemExpression(normalized),
-      };
+    if (raw?.sourceType === "context" || raw?.contextPath) {
+      return normalizeContextItem(raw, index, options);
     }
     return normalizeTraceItem(raw, index, symbols, symbolToolMap);
   }
 
-  function normalizeItems(value, symbols, options = {}) {
-    if (Array.isArray(value?.items) && value.items.length === 0) {
-      return {
-        items: [],
-        symbolToolMap: {},
-      };
-    }
-
-    const sourceItems = Array.isArray(value?.items)
-      ? value.items
-      : value?.feature || value?.contextPath
-        ? [value]
-        : [defaultItem(symbols)];
-
-    const baseMap = inferSymbolToolMap({ items: sourceItems });
-    const normalized = sourceItems.map((item, index) => normalizeItem(item, index, symbols, baseMap, options));
-    const symbolToolMap = inferSymbolToolMap({ items: normalized });
-
+  function createGroupNode(type, children = [], id = "") {
     return {
-      items: normalized.map((item, index) => normalizeItem(item, index, symbols, symbolToolMap, options)),
-      symbolToolMap,
+      id: id || "",
+      type: type === "OR" ? "OR" : "AND",
+      children,
     };
   }
 
-  function exportItem(item, index = 0) {
+  function createConditionNode(item, id = "") {
+    return {
+      id: id || "",
+      type: "condition",
+      item,
+    };
+  }
+
+  function cloneItem(item) {
     return {
       conditionId: item.conditionId || "",
-      confirmed: Boolean(item.confirmed),
-      stepStage: item.stepStage || "complete",
-      connector: index === 0 ? "" : String(item.connector || "AND"),
+      confirmed: true,
+      stepStage: "complete",
+      connector: item.connector || "",
       openParen: item.openParen || "",
       closeParen: item.closeParen || "",
       sourceType: item.sourceType || "trace",
@@ -464,202 +688,363 @@
     };
   }
 
-  function exportItems(items) {
-    return (Array.isArray(items) ? items : []).map((item, index) => exportItem(item, index));
+  function stripStructuralTokens(item) {
+    return {
+      ...cloneItem(item),
+      connector: "",
+      openParen: "",
+      closeParen: "",
+    };
   }
 
-  function createField(labelText, child) {
-    const wrap = document.createElement("div");
-    wrap.className = "field condition-field";
-    const label = document.createElement("label");
-    label.textContent = labelText;
-    wrap.appendChild(label);
-    wrap.appendChild(child);
-    return wrap;
+  function conditionDisplayExpression(item, symbols, options = {}) {
+    const normalized = normalizeItems({ items: [stripStructuralTokens(item)] }, symbols, options);
+    return normalized.items[0]?.expression || "";
   }
 
-  function createSelect(options, selectedValue, onChange) {
-    const select = document.createElement("select");
-    options.forEach((optionValue) => {
-      const option = document.createElement("option");
-      if (typeof optionValue === "object" && optionValue !== null) {
-        option.value = optionValue.value;
-        option.textContent = optionValue.label;
-        option.selected = optionValue.value === selectedValue;
-      } else {
-        option.value = optionValue;
-        option.textContent = optionValue;
-        option.selected = optionValue === selectedValue;
+  function cloneNode(node) {
+    if (!node) {
+      return null;
+    }
+    if (node.type === "condition") {
+      return createConditionNode(cloneItem(node.item), node.id);
+    }
+    return createGroupNode(node.type, (node.children || []).map(cloneNode).filter(Boolean), node.id);
+  }
+
+  function flattenGroup(group, wrap) {
+    const children = Array.isArray(group?.children) ? group.children : [];
+    const items = [];
+    children.forEach((child, index) => {
+      let childItems = [];
+      if (child?.type === "condition") {
+        childItems = [stripStructuralTokens(child.item)];
+      } else if (child?.type === "AND" || child?.type === "OR") {
+        childItems = flattenGroup(child, true);
       }
-      select.appendChild(option);
+      if (!childItems.length) {
+        return;
+      }
+      childItems[0].connector = index === 0 ? "" : group.type;
+      items.push(...childItems);
     });
-    select.addEventListener("change", onChange);
-    return select;
+    if (wrap && items.length) {
+      items[0].openParen = `${items[0].openParen || ""}(`;
+      items[items.length - 1].closeParen = `${items[items.length - 1].closeParen || ""})`;
+    }
+    return items;
   }
 
-  const createIconButton = uiHelpers.createIconButton || function fallbackCreateIconButton(iconName, ariaLabel, onClick) {
-    const button = document.createElement("button");
-    button.className = "condition-icon-button";
-    button.type = "button";
-    button.setAttribute("aria-label", ariaLabel);
+  function expressionForItems(items) {
+    return (items || [])
+      .filter((item) => item?.expression)
+      .map((item, index) => index === 0 ? item.expression : `${item.connector || "AND"} ${item.expression}`)
+      .join(" ");
+  }
 
-    const icon = document.createElement("img");
-    icon.className = "condition-action-icon";
-    icon.src = `/assets/${iconName}`;
-    icon.alt = "";
-    button.appendChild(icon);
+  function groupFromOperator(operator, left, right) {
+    const children = [];
+    if (left?.type === operator) {
+      children.push(...(left.children || []).map(cloneNode));
+    } else if (left) {
+      children.push(cloneNode(left));
+    }
+    if (right?.type === operator) {
+      children.push(...(right.children || []).map(cloneNode));
+    } else if (right) {
+      children.push(cloneNode(right));
+    }
+    return createGroupNode(operator, children);
+  }
 
-    button.addEventListener("click", onClick);
-    return button;
-  };
+  function tokenizeItems(items) {
+    const tokens = [];
+    (items || []).forEach((item, index) => {
+      if (index > 0) {
+        tokens.push({ type: "operator", value: item.connector || "AND" });
+      }
+      const opens = String(item.openParen || "");
+      const closes = String(item.closeParen || "");
+      for (let count = 0; count < opens.length; count += 1) {
+        tokens.push({ type: "paren", value: "(" });
+      }
+      tokens.push({ type: "condition", value: createConditionNode(cloneItem(item)) });
+      for (let count = 0; count < closes.length; count += 1) {
+        tokens.push({ type: "paren", value: ")" });
+      }
+    });
+    return tokens;
+  }
+
+  function itemsToTree(items) {
+    if (!Array.isArray(items) || !items.length) {
+      return createGroupNode("AND", []);
+    }
+
+    const values = [];
+    const operators = [];
+    const tokens = tokenizeItems(items);
+
+    function applyOperator() {
+      const operator = operators.pop();
+      const right = values.pop();
+      const left = values.pop();
+      if (!operator || !left || !right) {
+        throw new Error("Malformed condition expression.");
+      }
+      values.push(groupFromOperator(operator, left, right));
+    }
+
+    tokens.forEach((token) => {
+      if (token.type === "condition") {
+        values.push(token.value);
+        return;
+      }
+      if (token.type === "paren" && token.value === "(") {
+        operators.push("(");
+        return;
+      }
+      if (token.type === "paren" && token.value === ")") {
+        while (operators.length && operators[operators.length - 1] !== "(") {
+          applyOperator();
+        }
+        if (!operators.length || operators[operators.length - 1] !== "(") {
+          throw new Error("Unbalanced parentheses.");
+        }
+        operators.pop();
+        return;
+      }
+      while (operators.length && operators[operators.length - 1] !== "(") {
+        applyOperator();
+      }
+      operators.push(token.value);
+    });
+
+    while (operators.length) {
+      if (operators[operators.length - 1] === "(") {
+        throw new Error("Unbalanced parentheses.");
+      }
+      applyOperator();
+    }
+
+    if (values.length !== 1) {
+      throw new Error("Malformed condition expression.");
+    }
+
+    const root = values[0];
+    if (root.type === "condition") {
+      return createGroupNode("AND", [root]);
+    }
+    return root;
+  }
+
+  function collectRawItemsFromTree(tree, acc = []) {
+    if (!tree) {
+      return acc;
+    }
+    if (tree.type === "condition") {
+      acc.push(tree.item || {});
+      return acc;
+    }
+    (tree.children || []).forEach((child) => collectRawItemsFromTree(child, acc));
+    return acc;
+  }
+
+  function assignNormalizedItemsToTree(tree, normalizedItems) {
+    let index = 0;
+
+    function visit(node) {
+      if (!node) {
+        return null;
+      }
+      if (node.type === "condition") {
+        const nextItem = normalizedItems[index] ? cloneItem(normalizedItems[index]) : cloneItem(node.item || {});
+        index += 1;
+        return createConditionNode(nextItem, node.id);
+      }
+      return createGroupNode(node.type, (node.children || []).map(visit).filter(Boolean), node.id);
+    }
+
+    return visit(tree);
+  }
+
+  function normalizeSavedConditionEntry(entry, symbols, options) {
+    const preferredItems = Array.isArray(entry?.items) && entry.items.length
+      ? entry.items
+      : entry?.tree
+        ? collectRawItemsFromTree(entry.tree)
+        : [];
+    const normalized = normalizeItems({ items: preferredItems }, symbols, options);
+    let tree;
+    if (entry?.tree) {
+      tree = assignNormalizedItemsToTree(entry.tree, normalized.items);
+    } else if (normalized.items.length) {
+      tree = normalized.tree;
+    } else {
+      tree = createGroupNode("AND", []);
+    }
+    return {
+      conditionId: String(entry?.conditionId || ""),
+      expression: normalized.expression,
+      items: normalized.items.map(cloneItem),
+      tree,
+    };
+  }
+
+  function normalizeItems(value, symbols, options = {}) {
+    const nextSymbols = Array.isArray(symbols) && symbols.length ? symbols : ["A"];
+    const preferredItems = Array.isArray(value?.items)
+      ? value.items
+      : value?.tree
+        ? flattenGroup(value.tree, false)
+      : value?.feature || value?.contextPath
+        ? [value]
+        : [];
+
+    const rawSymbolToolMap = inferSymbolToolMap({ items: preferredItems });
+    const normalizedItems = preferredItems.map((raw, index) => normalizeItem(raw, index, nextSymbols, rawSymbolToolMap, options));
+    const coercedItems = normalizedItems.map((item) => coerceItemSourceType(item, options.allowedSourceTypes || [], nextSymbols, options));
+    const symbolToolMap = inferSymbolToolMap({ items: coercedItems });
+    const finalItems = coercedItems.map((item, index) => normalizeItem(item, index, nextSymbols, symbolToolMap, options));
+
+    let tree;
+    try {
+      tree = value?.tree
+        ? assignNormalizedItemsToTree(value.tree, finalItems)
+        : itemsToTree(finalItems);
+    } catch {
+      tree = createGroupNode(
+        "AND",
+        finalItems.map((item) => createConditionNode(cloneItem(item))),
+      );
+    }
+
+    return {
+      items: finalItems,
+      symbolToolMap,
+      tree,
+      expression: expressionForItems(finalItems),
+    };
+  }
 
   function createConditionBuilder(options) {
     const root = options.root;
     const hint = options.hint;
     const addButton = options.addButton;
-    const stepModeButton = options.stepModeButton;
-    const directModeButton = options.directModeButton;
-    const modeCopy = options.modeCopy;
-    const onChange = options.onChange || (() => {});
-    const shell = root.closest(".condition-builder");
-    const flow = options.flow || shell?.querySelector?.("#condition-builder-flow") || null;
-    const actionsBar = (hint && hint.closest(".condition-builder-actions"))
-      || (addButton && addButton.closest(".condition-builder-actions"))
-      || null;
-    let symbols = options.pathSymbols && options.pathSymbols.length ? options.pathSymbols : ["A"];
+    let symbols = Array.isArray(options.pathSymbols) && options.pathSymbols.length ? options.pathSymbols : ["A"];
     let currentCallToolKey = String(options.currentCallToolKey || "");
-    let builderMode = String(options.defaultMode || "step").trim() === "direct" ? "direct" : "step";
-    let state = normalizeItems(options.value, symbols, { currentCallToolKey });
+    let currentCallSubtype = String(options.currentCallSubtype || "");
+    let allowedSourceTypes = Array.isArray(options.allowedSourceTypes) ? options.allowedSourceTypes.slice() : [];
     let locked = Boolean(options.locked);
-    let allowedSourceTypes = new Set(
-      Array.isArray(options.allowedSourceTypes) && options.allowedSourceTypes.length
-        ? options.allowedSourceTypes
-        : ["trace", "context"],
-    );
-    let stepSavedConditions = [];
-    let stepCurrentConditionId = "";
+    let onChange = typeof options.onChange === "function" ? options.onChange : function noop() {};
+    let nodeCounter = 0;
+    let openAddMenuGroupId = "";
 
-    function buildSavedConditionEntry(conditionId, items) {
-      const exportedItems = exportItems(items).map((item, index) => ({
-        ...item,
-        confirmed: true,
-        stepStage: "complete",
-        conditionId: index === 0 ? (conditionId || item.conditionId || "") : (item.conditionId || ""),
-        connector: index === 0 ? "" : String(item.connector || "AND"),
-      }));
-      const normalizedEntry = normalizeItems({ items: exportedItems }, symbols, { currentCallToolKey });
-      const normalizedItems = normalizedEntry.items.map((item, index) => ({
-        ...item,
-        confirmed: true,
-        stepStage: "complete",
-        conditionId: index === 0 ? (conditionId || item.conditionId || "") : (item.conditionId || ""),
-        connector: index === 0 ? "" : String(item.connector || "AND"),
-      }));
-      const expression = expressionForItems(normalizedItems);
+    function nextNodeId(prefix = "node") {
+      nodeCounter += 1;
+      return `${prefix}_${nodeCounter}`;
+    }
+
+    function stampNodeIds(node) {
+      if (!node) {
+        return null;
+      }
+      if (node.type === "condition") {
+        return createConditionNode(cloneItem(node.item), node.id || nextNodeId("cond"));
+      }
+      return createGroupNode(
+        node.type,
+        (node.children || []).map(stampNodeIds).filter(Boolean),
+        node.id || nextNodeId("group"),
+      );
+    }
+
+    function normalizeState(value) {
+      const normalized = normalizeItems(value || {}, symbols, {
+        currentCallToolKey,
+        allowedSourceTypes,
+      });
+      const preferredTree = value?.tree
+        ? assignNormalizedItemsToTree(value.tree, normalized.items)
+        : normalized.tree;
+      const saved = Array.isArray(value?.savedConditions)
+        ? value.savedConditions.map((entry) => normalizeSavedConditionEntry(entry, symbols, { currentCallToolKey, allowedSourceTypes }))
+        : [];
       return {
-        conditionId: conditionId || normalizedItems[0]?.conditionId || "",
-        items: exportItems(normalizedItems),
-        expression,
+        items: normalized.items,
+        symbolToolMap: normalized.symbolToolMap,
+        tree: stampNodeIds(preferredTree || createGroupNode("AND", [])),
+        savedConditions: saved,
+        draftItem: null,
+        expression: normalized.expression,
       };
     }
 
-    function deriveStepSavedConditions(value, normalizedItems) {
-      const rawSaved = Array.isArray(value?.savedConditions) ? value.savedConditions : [];
-      if (rawSaved.length) {
-        return rawSaved
-          .map((entry) => {
-            const normalizedEntry = normalizeItems({ items: entry?.items || [] }, symbols, { currentCallToolKey });
-            const completeItems = normalizedEntry.items
-              .filter((item) => item.expression)
-              .map((item) => ({ ...item, confirmed: true, stepStage: "complete" }));
-            if (!completeItems.length) {
-              return null;
-            }
-            return buildSavedConditionEntry(
-              String(entry?.conditionId || completeItems[0]?.conditionId || ""),
-              completeItems,
-            );
-          })
-          .filter(Boolean);
-      }
+    let state = normalizeState(options.value || {});
 
-      return normalizedItems
-        .filter((item) => item.stepStage === "complete" && item.expression)
-        .map((item) => buildSavedConditionEntry(item.conditionId || "", [{ ...item, connector: "" }]));
+    function syncFromTree() {
+      const rawItems = flattenGroup(state.tree, false);
+      const normalized = normalizeItems({ items: rawItems }, symbols, {
+        currentCallToolKey,
+        allowedSourceTypes,
+      });
+      state.items = normalized.items;
+      state.symbolToolMap = normalized.symbolToolMap;
+      state.expression = normalized.expression;
+      state.tree = stampNodeIds(assignNormalizedItemsToTree(state.tree, normalized.items));
     }
 
-    function initializeStepState(value, normalizedItems = state.items) {
-      stepSavedConditions = deriveStepSavedConditions(value, normalizedItems);
-      const requestedCurrentId = String(value?.currentConditionId || "").trim();
-      if (requestedCurrentId && stepSavedConditions.some((entry) => entry.conditionId === requestedCurrentId)) {
-        stepCurrentConditionId = requestedCurrentId;
+    function emit() {
+      onChange(api.getValue());
+    }
+
+    function updateHint(message = "") {
+      if (!hint) {
         return;
       }
-      stepCurrentConditionId = stepSavedConditions[stepSavedConditions.length - 1]?.conditionId || "";
+      if (locked) {
+        hint.textContent = "CONDITION is locked until TRACE or ON is configured.";
+        return;
+      }
+      if (message) {
+        hint.textContent = message;
+        return;
+      }
+      if (state.draftItem) {
+        hint.textContent = "Finish the guided single-condition builder, then save it into the library.";
+        return;
+      }
+      if (!state.savedConditions.length) {
+        hint.textContent = "Create a saved single condition first, then insert it into the logic tree.";
+        return;
+      }
+      hint.textContent = "Use each group's + menu to insert a saved condition or add a nested group.";
     }
 
-    initializeStepState(options.value, state.items);
-    if (!state.items.length && stepCurrentConditionId) {
-      const initialActiveCondition = savedConditionById(stepCurrentConditionId);
-      if (initialActiveCondition) {
-        applyActiveStepCondition(initialActiveCondition);
+    function ensureRootGroup() {
+      if (!state.tree || (state.tree.type !== "AND" && state.tree.type !== "OR")) {
+        state.tree = stampNodeIds(createGroupNode("AND", []));
       }
     }
 
     function defaultSourceType() {
-      if (allowedSourceTypes.has("trace")) {
+      if (allowedSourceTypes.includes("trace")) {
         return "trace";
       }
-      if (allowedSourceTypes.has("context")) {
+      if (allowedSourceTypes.includes("context")) {
         return "context";
       }
       return "trace";
     }
 
     function hasSourceChoice() {
-      return allowedSourceTypes.has("trace") && allowedSourceTypes.has("context");
+      return allowedSourceTypes.includes("trace") && allowedSourceTypes.includes("context");
     }
 
     function baseStageOrderForSourceType(sourceType) {
       return sourceType === "trace"
         ? ["source", "symbol", "property", "comparison", "complete"]
         : ["source", "property", "comparison", "complete"];
-    }
-
-    function buildDefaultDraft(connector = "") {
-      if (defaultSourceType() === "context") {
-        const item = {
-          ...defaultItem(symbols),
-          connector,
-          sourceType: "context",
-          symbol: "",
-          feature: "",
-          propertyGroup: "",
-          syntaxField: "",
-          selectedToolKey: "",
-          contextPrefix: "",
-          contextField: "",
-          contextFieldName: "",
-          contextPath: "",
-          operator: "",
-          value: "",
-        };
-        item.stepStage = stageOrderForItem(item)[0];
-        return item;
-      }
-      const item = {
-        ...defaultItem(symbols),
-        connector,
-      };
-      item.stepStage = stageOrderForItem(item)[0];
-      return item;
-    }
-
-    function normalizeSourceType(sourceType) {
-      if (allowedSourceTypes.has(sourceType)) {
-        return sourceType;
-      }
-      return defaultSourceType();
     }
 
     function traceGroupFromFeature(feature) {
@@ -675,50 +1060,178 @@
       return "name";
     }
 
-    function contextDefinitionForItem(item) {
-      if (!item.contextField && !item.contextPath) {
-        return { operators: [] };
-      }
-      return contextDefinitionForPath(item.contextPath, item.contextPrefix || "tool");
+  function contextDefinitionForItem(item) {
+    if (!item.contextField && !item.contextPath) {
+      return { operators: [] };
     }
+    return contextDefinitionForPath(item.contextPath, item.contextPrefix || "tool");
+  }
+
+  function toolKeyForName(name) {
+    if (!name) {
+      return "";
+    }
+    const normalizedName = normalizeToolNameToken(name);
+    const matches = toolOptions().filter((option) => (
+      option.name === name || normalizeToolNameToken(option.name) === normalizedName
+    ));
+    return matches.length === 1 ? String(matches[0].value || "") : "";
+  }
+
+  function savedConditionItems(savedConditions = []) {
+    return (Array.isArray(savedConditions) ? savedConditions : []).flatMap((entry) => (
+      Array.isArray(entry?.items) ? entry.items : []
+    ));
+  }
+
+  function inferredTraceToolKey(symbol, items = [], savedConditions = [], currentItem = null) {
+    const allItems = [...(Array.isArray(items) ? items : []), ...savedConditionItems(savedConditions)];
+    const matched = allItems.find((entry) => (
+      entry
+      && entry !== currentItem
+      && entry.sourceType === "trace"
+      && entry.symbol === symbol
+      && entry.feature === "name"
+      && entry.operator === "=="
+      && (entry.selectedToolKey || entry.value)
+    ));
+    if (!matched) {
+      return "";
+    }
+    return String(matched.selectedToolKey || toolKeyForName(String(matched.value || "")) || "");
+  }
+
+  function toolKeyFromConditionEntry(entry, currentItem) {
+    if (!entry || entry === currentItem) {
+      return "";
+    }
+    if (entry.selectedToolKey) {
+      return String(entry.selectedToolKey || "");
+    }
+    if (entry.sourceType === "context" && entry.contextPath === "tool.name" && entry.operator === "==") {
+      return toolKeyForName(String(entry.value || ""));
+    }
+    if (entry.sourceType === "trace" && entry.feature === "name" && entry.operator === "==") {
+      return toolKeyForName(String(entry.value || ""));
+    }
+    return "";
+  }
+
+  function inferredContextToolKey(item, items = [], savedConditions = []) {
+    if (item?.selectedToolKey) {
+      return String(item.selectedToolKey || "");
+    }
+    if (item?.contextField === "tool.name") {
+      const fromDraft = toolKeyForName(String(item.value || ""));
+      if (fromDraft) {
+        return fromDraft;
+      }
+    }
+    const toolCondition = [...(Array.isArray(items) ? items : []), ...savedConditionItems(savedConditions)].find((entry) => (
+      Boolean(toolKeyFromConditionEntry(entry, item))
+    ));
+    const inferred = toolKeyFromConditionEntry(toolCondition, item);
+    if (inferred) {
+      return inferred;
+    }
+    return String(currentCallToolKey || "");
+  }
+
+  function toolContextSubpropertyOptions(item, items = [], savedConditions = []) {
+    const inferredToolKey = inferredContextToolKey(item, items, savedConditions);
+    const params = inputParamsForTool(inferredToolKey);
+    const options = [
+      { value: "tool.name", label: toolContextSubpropertyLabel("tool.name") },
+      { value: "tool.boundary", label: toolContextSubpropertyLabel("tool.boundary") },
+      { value: "tool.sensitivity", label: toolContextSubpropertyLabel("tool.sensitivity") },
+      { value: "tool.integrity", label: toolContextSubpropertyLabel("tool.integrity") },
+      ...params.map((param) => ({ value: `tool.${param}`, label: toolContextSubpropertyLabel(`tool.${param}`) })),
+    ];
+    if (currentCallSubtype === "completed") {
+      options.push({ value: "tool.result", label: toolContextSubpropertyLabel("tool.result") });
+    }
+    return options;
+  }
+
+  function toolContextSubpropertyValue(item) {
+    if (item.contextField === "tool.syntax") {
+      return item.contextPath || "";
+    }
+    return item.contextField || "";
+  }
 
     function tracePropertyOptionsForItem(item) {
       return tracePropertyGroups.filter((option) => {
         if (option.value !== "syntax") {
           return true;
         }
-        return Boolean(state.symbolToolMap[item.symbol]);
+        return Boolean(
+          state.symbolToolMap[item.symbol]
+          || inferredTraceToolKey(item.symbol, state.items, state.savedConditions, item),
+        );
       });
     }
 
-    function stageOrderForItem(item) {
-      const sourceType = normalizeSourceType(item?.sourceType || defaultSourceType());
+    function buildDefaultDraft() {
+      const sourceType = defaultSourceType();
+      return {
+        conditionId: "",
+        confirmed: false,
+        stepStage: hasSourceChoice() ? "source" : (sourceType === "trace" ? "symbol" : "property"),
+        connector: "",
+        openParen: "",
+        closeParen: "",
+        sourceType,
+        symbol: sourceType === "trace" ? (symbols[0] || "A") : "",
+        feature: "",
+        propertyGroup: "",
+        syntaxField: "",
+        operator: "",
+        value: "",
+        selectedToolKey: "",
+        contextPrefix: sourceType === "context" ? "" : "",
+        contextField: "",
+        contextFieldName: "",
+        contextPath: "",
+      };
+    }
+
+    function stageOrderForDraft(item) {
+      const sourceType = String(item?.sourceType || defaultSourceType()).trim() || defaultSourceType();
       const order = baseStageOrderForSourceType(sourceType);
       return hasSourceChoice() ? order : order.filter((stage) => stage !== "source");
     }
 
-    function currentStageForItem(item) {
-      const order = stageOrderForItem(item);
+    function currentDraftStage(item) {
+      const order = stageOrderForDraft(item);
       const requested = normalizeStepStage(item);
       return order.includes(requested) ? requested : order[0];
     }
 
-    function previousStage(item) {
-      const order = stageOrderForItem(item);
-      const index = order.indexOf(currentStageForItem(item));
+    function previousDraftStage(item) {
+      const order = stageOrderForDraft(item);
+      const index = order.indexOf(currentDraftStage(item));
       return index > 0 ? order[index - 1] : order[0];
     }
 
-    function nextStage(item) {
-      const order = stageOrderForItem(item);
-      const index = order.indexOf(currentStageForItem(item));
+    function nextDraftStage(item) {
+      const order = stageOrderForDraft(item);
+      const index = order.indexOf(currentDraftStage(item));
       return index >= 0 && index < order.length - 1 ? order[index + 1] : "complete";
     }
 
-    function canAdvanceStage(item) {
-      const stage = currentStageForItem(item);
+    function draftExpression(item) {
+      const normalized = normalizeItems({ items: [{ ...item, confirmed: true, stepStage: "complete" }] }, symbols, {
+        currentCallToolKey,
+        allowedSourceTypes,
+      });
+      return normalized.items[0]?.expression || "";
+    }
+
+    function canAdvanceDraft(item) {
+      const stage = currentDraftStage(item);
       if (stage === "source") {
-        return allowedSourceTypes.has(item.sourceType);
+        return allowedSourceTypes.includes(item.sourceType);
       }
       if (stage === "symbol") {
         return Boolean(item.symbol);
@@ -741,688 +1254,99 @@
           return false;
         }
         const definition = contextDefinitionForItem(item);
-        if (definition.kind === "free-field") {
-          return Boolean(item.contextFieldName);
-        }
         if (definition.kind === "tool-syntax") {
           return Boolean(item.syntaxField);
         }
         return true;
       }
       if (stage === "comparison") {
-        return Boolean(item.expression);
+        return Boolean(draftExpression(item));
       }
       return true;
     }
 
-    function coerceItemSourceType(item, index) {
-      const nextSourceType = normalizeSourceType(String(item?.sourceType || "").trim() || defaultSourceType());
-      if (nextSourceType === "context") {
-        const normalized = normalizeContextItem({
-          ...item,
-          connector: index === 0 ? "" : String(item?.connector || "AND"),
-          sourceType: "context",
-          contextPrefix: item?.contextPrefix || "",
-          contextField: item?.contextField || "",
-          contextFieldName: item?.contextFieldName || "",
-          contextPath: item?.contextPath || "",
-          operator: item?.operator || "",
-          value: item?.value || "",
-        }, index, { currentCallToolKey });
-        return {
-          ...normalized,
-          conditionId: String(item?.conditionId || normalized.conditionId || ""),
-          stepStage: item?.confirmed ? "complete" : normalizeStepStage(item),
-          expression: buildItemExpression(normalized),
-        };
-      }
-      const normalized = normalizeTraceItem({
-        ...item,
-        connector: index === 0 ? "" : String(item?.connector || "AND"),
-        sourceType: "trace",
-      }, index, symbols, state.symbolToolMap || {});
-      return {
-        ...normalized,
-        conditionId: String(item?.conditionId || normalized.conditionId || ""),
-        stepStage: item?.confirmed ? "complete" : normalizeStepStage(item),
-      };
-    }
-
-    function hasIncompleteStep() {
-      return builderMode === "step" && state.items.some((item) => item.stepStage !== "complete");
-    }
-
-    function expressionForItems(items, { completeOnly = false } = {}) {
-      return items.reduce((acc, item, index) => {
-        if (!item?.expression) {
-          return acc;
-        }
-        if (completeOnly && item.stepStage !== "complete") {
-          return acc;
-        }
-        acc.push(index === 0 ? item.expression : `${item.connector} ${item.expression}`);
-        return acc;
-      }, []).join(" ");
-    }
-
-    function stepItems() {
-      return state.items.filter((item) => item.stepStage === "complete");
-    }
-
-    function savedConditionById(conditionId) {
-      return stepSavedConditions.find((entry) => entry.conditionId === conditionId) || null;
-    }
-
-    function activeStepCondition() {
-      return savedConditionById(stepCurrentConditionId);
-    }
-
-    function currentDraftIndex() {
-      return state.items.findIndex((item) => item.stepStage !== "complete");
-    }
-
-    function nextConditionId(items = state.items) {
-      const maxValue = items.reduce((acc, item) => {
-        const matched = String(item?.conditionId || "").match(/^COND(\d+)$/);
-        const numeric = matched ? Number(matched[1]) : 0;
-        return Math.max(acc, Number.isFinite(numeric) ? numeric : 0);
-      }, 0);
-      return `COND${maxValue + 1}`;
-    }
-
-    function assignMissingConditionIds(items) {
-      let nextId = items.reduce((acc, item) => {
-        const matched = String(item?.conditionId || "").match(/^COND(\d+)$/);
-        const numeric = matched ? Number(matched[1]) : 0;
-        return Math.max(acc, Number.isFinite(numeric) ? numeric : 0);
-      }, 0) + 1;
-
-      return items.map((item) => {
-        if (item.stepStage !== "complete" || item.conditionId) {
-          return item;
-        }
-        const withId = {
-          ...item,
-          conditionId: `COND${nextId}`,
-        };
-        nextId += 1;
-        return withId;
-      });
-    }
-
-    function applyActiveStepCondition(entry) {
-      const activeItems = exportItems(entry?.items || []).map((item, index) => ({
-        ...item,
-        confirmed: true,
-        stepStage: "complete",
-        connector: index === 0 ? "" : String(item.connector || "AND"),
-      }));
-      syncItems(activeItems);
-    }
-
-    function seedStepSavedConditionsFromState() {
-      if (stepSavedConditions.length || !state.items.length || hasIncompleteStep()) {
-        return;
-      }
-      const entry = buildSavedConditionEntry(
-        state.items[0]?.conditionId || nextConditionId(state.items),
-        stepItems(),
-      );
-      if (!entry.expression) {
-        return;
-      }
-      stepSavedConditions = [entry];
-      stepCurrentConditionId = entry.conditionId;
-    }
-
-    function updateModeUI() {
-      if (stepModeButton) {
-        stepModeButton.classList.toggle("active", builderMode === "step");
-        stepModeButton.setAttribute("aria-pressed", builderMode === "step" ? "true" : "false");
-      }
-      if (directModeButton) {
-        directModeButton.classList.toggle("active", builderMode === "direct");
-        directModeButton.setAttribute("aria-pressed", builderMode === "direct" ? "true" : "false");
-      }
-      if (modeCopy) {
-        modeCopy.textContent = builderMode === "step"
-          ? "Build single conditions with guidance and combine them into complex rules."
-          : "Direct mode exposes raw per-item editing, including connectors and parentheses on each row.";
-      }
-    }
-
-    function emit() {
-      updateHint();
-      onChange(api.getValue());
-    }
-
-    function updateHint() {
-      if (locked) {
-        hint.textContent = "Confirm PATH or ON first to unlock CONDITION editing.";
-        hint.classList.add("condition-builder-warning");
-        return;
-      }
-      if (!allowedSourceTypes.size) {
-        hint.textContent = "Add PATH or ON first to unlock CONDITION editing.";
-        hint.classList.add("condition-builder-warning");
-        return;
-      }
-      if (builderMode === "step") {
-        hint.textContent = hasIncompleteStep()
-          ? "Finish the guided builder card, then save the single condition before combining rules."
-          : "Generate reusable single rules first.";
-      } else {
-        hint.textContent = "Build one or more conditions from TRACE symbols or the current-call context.";
-      }
-      hint.classList.remove("condition-builder-warning");
-    }
-
-    function mountDefaultActions() {
-      if (!actionsBar || !shell || typeof shell.appendChild !== "function") {
-        return;
-      }
-      actionsBar.classList?.remove?.("condition-builder-actions-inline");
-      shell.appendChild(actionsBar);
-    }
-
-    function mountStepActions(container) {
-      if (!actionsBar || !container || typeof container.appendChild !== "function") {
-        return;
-      }
-      actionsBar.classList?.add?.("condition-builder-actions-inline");
-      container.appendChild(actionsBar);
-    }
-
-    function syncLockState() {
-      if (addButton) {
-        addButton.disabled = locked || hasIncompleteStep();
-      }
-      if (shell) {
-        shell.classList.toggle("is-locked", locked);
-      }
-      root.querySelectorAll("button, select, input, textarea").forEach((element) => {
-        if (element === addButton) {
-          element.disabled = locked || hasIncompleteStep();
-          return;
-        }
-        if (element.attributes?.["data-allow-while-locked"] === "true") {
-          return;
-        }
-        element.disabled = locked;
-      });
-    }
-
-    function syncItems(nextItems) {
-      const normalized = normalizeItems({ items: nextItems }, symbols, { currentCallToolKey });
-      const coercedItems = normalized.items.map((item, index) => coerceItemSourceType(item, index));
-      state = {
-        ...normalized,
-        items: assignMissingConditionIds(coercedItems),
-      };
-    }
-
-    function removeItem(index) {
-      const nextItems = state.items.filter((_, itemIndex) => itemIndex !== index);
-      syncItems(nextItems);
+    function openDraft(item) {
+      state.draftItem = item ? { ...cloneItem(item), confirmed: false, stepStage: "comparison" } : buildDefaultDraft();
       render();
-      emit();
+      updateHint("Complete the single condition builder, then save it to the library.");
     }
 
-    function updateItem(index, patch, options = {}) {
-      const shouldRender = options.render !== false;
-      const nextItems = state.items.slice();
-      nextItems[index] = { ...nextItems[index], ...patch };
-      syncItems(nextItems);
-      if (shouldRender) {
-        render();
-      }
-      emit();
+    function closeDraft() {
+      state.draftItem = null;
+      render();
+      updateHint();
     }
 
-    function setCurrentStepCondition(conditionId) {
-      const entry = savedConditionById(conditionId);
-      if (!entry) {
+    function toggleAddMenu(groupId) {
+      openAddMenuGroupId = openAddMenuGroupId === groupId ? "" : groupId;
+      render();
+    }
+
+    function closeAddMenu() {
+      if (!openAddMenuGroupId) {
         return;
       }
-      stepCurrentConditionId = entry.conditionId;
-      applyActiveStepCondition(entry);
+      openAddMenuGroupId = "";
+    }
+
+    function saveDraftCondition() {
+      const normalized = normalizeItems({ items: [{ ...state.draftItem, confirmed: true, stepStage: "complete" }] }, symbols, {
+        currentCallToolKey,
+        allowedSourceTypes,
+      });
+      const item = normalized.items[0];
+      if (!item?.expression) {
+        updateHint("Finish the condition fields before saving.");
+        return;
+      }
+      const editingExisting = state.draftItem?.conditionId
+        && state.savedConditions.some((entry) => entry.conditionId === state.draftItem.conditionId);
+      const existingIndex = editingExisting
+        ? state.savedConditions.findIndex((entry) => entry.conditionId === state.draftItem.conditionId)
+        : -1;
+      const conditionId = editingExisting ? state.draftItem.conditionId : nextConditionId();
+      const entry = {
+        conditionId,
+        expression: item.expression,
+        items: [cloneItem(item)],
+        tree: stampNodeIds(createGroupNode("AND", [createConditionNode(cloneItem(item))])),
+      };
+      if (existingIndex >= 0) {
+        state.savedConditions[existingIndex] = entry;
+      } else {
+        state.savedConditions.push(entry);
+      }
+      state.draftItem = null;
       render();
       emit();
     }
 
     function removeSavedCondition(conditionId) {
-      const nextSavedConditions = stepSavedConditions.filter((entry) => entry.conditionId !== conditionId);
-      stepSavedConditions = nextSavedConditions;
-      if (!nextSavedConditions.length) {
-        stepCurrentConditionId = "";
-        syncItems([]);
+      state.savedConditions = state.savedConditions.filter((entry) => entry.conditionId !== conditionId);
+      render();
+      emit();
+    }
+
+    function updateDraft(patch, renderAfter = true) {
+      state.draftItem = { ...(state.draftItem || buildDefaultDraft()), ...patch };
+      if (state.draftItem.sourceType === "trace") {
+        state.draftItem.contextPrefix = "";
+        state.draftItem.contextField = "";
+        state.draftItem.contextFieldName = "";
+        state.draftItem.contextPath = "";
+      } else {
+        state.draftItem.symbol = "";
+        state.draftItem.feature = "";
+        state.draftItem.propertyGroup = "";
+      }
+      if (renderAfter) {
         render();
-        emit();
-        return;
-      }
-
-      if (stepCurrentConditionId === conditionId) {
-        const replacement = nextSavedConditions[nextSavedConditions.length - 1];
-        stepCurrentConditionId = replacement.conditionId;
-        applyActiveStepCondition(replacement);
-      }
-      render();
-      emit();
-    }
-
-    function selectedSavedConditionIds() {
-      return stepSavedConditions
-        .filter((entry) => Boolean(entry.selected))
-        .map((entry) => entry.conditionId);
-    }
-
-    function toggleSavedConditionSelection(conditionId, selected) {
-      stepSavedConditions = stepSavedConditions.map((entry) => (
-        entry.conditionId === conditionId
-          ? { ...entry, selected: Boolean(selected) }
-          : entry
-      ));
-      render();
-      emit();
-    }
-
-    function showStepToast(message, tone = "success") {
-      if (window.AgentGuardUI?.showToast) {
-        window.AgentGuardUI.showToast(message, tone);
       }
     }
 
-    function combineSavedConditions(operation, selectedIds) {
-      const selectedEntries = selectedIds
-        .map((conditionId) => savedConditionById(conditionId))
-        .filter(Boolean);
-      if (!selectedEntries.length) {
-        return;
-      }
-
-      if (operation === "reuse" && selectedEntries.length === 1) {
-        stepSavedConditions = stepSavedConditions.map((entry) => ({ ...entry, selected: false }));
-        stepCurrentConditionId = selectedEntries[0].conditionId;
-        applyActiveStepCondition(selectedEntries[0]);
-        render();
-        emit();
-        showStepToast(`Current result switched to ${selectedEntries[0].conditionId}.`);
-        return;
-      }
-
-      let combinedItems = [];
-      if (selectedEntries.length === 1) {
-        combinedItems = exportItems(selectedEntries[0].items).map((item, index, items) => {
-          const nextItem = {
-            ...item,
-            connector: index === 0 ? "" : String(item.connector || "AND"),
-          };
-          if (operation === "wrap") {
-            if (index === 0) {
-              nextItem.openParen = `${nextItem.openParen || ""}(`;
-            }
-            if (index === items.length - 1) {
-              nextItem.closeParen = `)${nextItem.closeParen || ""}`;
-            }
-          }
-          return nextItem;
-        });
-      } else {
-        combinedItems = exportItems(selectedEntries[0].items).map((item, index) => ({
-          ...item,
-          connector: index === 0 ? "" : String(item.connector || "AND"),
-        }));
-        const appendedItems = exportItems(selectedEntries[1].items).map((item, index) => ({
-          ...item,
-          connector: index === 0 ? operation : String(item.connector || "AND"),
-        }));
-        combinedItems = combinedItems.concat(appendedItems);
-      }
-
-      const nextId = nextConditionId([
-        ...state.items,
-        ...stepSavedConditions.map((entry) => ({ conditionId: entry.conditionId })),
-      ]);
-      const nextEntry = buildSavedConditionEntry(nextId, combinedItems);
-      stepSavedConditions = stepSavedConditions
-        .map((entry) => ({ ...entry, selected: false }))
-        .concat([{ ...nextEntry, selected: false }]);
-      stepCurrentConditionId = nextEntry.conditionId;
-      applyActiveStepCondition(nextEntry);
-      render();
-      emit();
-    }
-
-    function renderConfirmedItem(item, index, { showId = false, allowConnectorEdit = false } = {}) {
-      const summary = document.createElement("div");
-      summary.className = "condition-summary-line";
-
-      const leading = document.createElement("div");
-      leading.className = "condition-summary-main";
-
-      if (showId) {
-        const idTag = document.createElement("span");
-        idTag.className = "condition-summary-id";
-        idTag.textContent = item.conditionId || `COND${index + 1}`;
-        leading.appendChild(idTag);
-      } else {
-        const label = document.createElement("span");
-        label.className = "condition-summary-label";
-        label.textContent = "COND: ";
-        leading.appendChild(label);
-      }
-
-      const text = document.createElement("div");
-      text.className = "condition-summary-rule";
-      text.textContent = item.expression;
-      leading.appendChild(text);
-      summary.appendChild(leading);
-
-      const trailing = document.createElement("div");
-      trailing.className = "condition-summary-controls";
-      if (allowConnectorEdit && index > 0) {
-        const connectorSelect = createSelect(["AND", "OR"], item.connector || "AND", (event) => {
-          updateItem(index, { connector: event.target.value });
-        });
-        trailing.appendChild(connectorSelect);
-      }
-
-      const actions = document.createElement("div");
-      actions.className = "condition-summary-actions";
-      actions.appendChild(createIconButton("modify.png", "Modify condition", () => modifyItem(index)));
-      actions.appendChild(createIconButton("close.png", "Remove condition", () => removeItem(index)));
-      trailing.appendChild(actions);
-      summary.appendChild(trailing);
-
-      return summary;
-    }
-
-    function modifyItem(index) {
-      const nextItems = state.items.slice();
-      if (builderMode === "step") {
-        nextItems[index] = {
-          ...nextItems[index],
-          confirmed: false,
-          stepStage: "comparison",
-        };
-      } else {
-        nextItems[index] = {
-          ...nextItems[index],
-          confirmed: false,
-          stepStage: "complete",
-        };
-      }
-      syncItems(nextItems);
-      render();
-      emit();
-    }
-
-    function renderTraceFields(detailSection, item, index) {
-      const symbolSelect = createSelect(symbols, item.symbol, (event) => {
-        updateItem(index, { symbol: event.target.value });
-      });
-      detailSection.appendChild(createField("Tool Symbol", symbolSelect));
-
-      const featureOptions = ["name", "label.boundary", "label.sensitivity", "label.integrity"];
-      if (state.symbolToolMap[item.symbol]) {
-        featureOptions.splice(1, 0, "syntax");
-      }
-      const featureSelect = createSelect(featureOptions, item.feature, (event) => {
-        updateItem(index, { feature: event.target.value });
-      });
-      detailSection.appendChild(createField("Feature", featureSelect));
-
-      if (item.feature === "syntax") {
-        const params = inputParamsForTool(state.symbolToolMap[item.symbol] || "");
-        const syntaxFieldSelect = createSelect(params.length ? params : [""], item.syntaxField, (event) => {
-          updateItem(index, { syntaxField: event.target.value });
-        });
-        syntaxFieldSelect.disabled = !state.symbolToolMap[item.symbol];
-        detailSection.appendChild(createField("Syntax Field", syntaxFieldSelect));
-      }
-
-      const operatorSelect = createSelect(traceFeatureOperators[item.feature], item.operator, (event) => {
-        updateItem(index, { operator: event.target.value });
-      });
-      detailSection.appendChild(createField("Operator", operatorSelect));
-
-      if (item.feature === "name") {
-        const valueSelect = createSelect(toolOptions(), item.selectedToolKey, (event) => {
-          const nextSelectedToolKey = event.target.value;
-          updateItem(index, {
-            selectedToolKey: nextSelectedToolKey,
-            value: toolNameForKey(nextSelectedToolKey),
-          });
-        });
-        detailSection.appendChild(createField("Value", valueSelect));
-      } else if (item.feature.startsWith("label.")) {
-        const valueSelect = createSelect(labelValues[item.feature], item.value, (event) => {
-          updateItem(index, { value: event.target.value });
-        });
-        detailSection.appendChild(createField("Value", valueSelect));
-      } else {
-        const input = document.createElement("input");
-        input.type = "text";
-        input.value = item.value;
-        input.placeholder = item.syntaxField ? `Value for ${item.syntaxField}` : "Value";
-        input.addEventListener("input", (event) => {
-          updateItem(index, { value: event.target.value }, { render: false });
-        });
-        detailSection.appendChild(createField("Value", input));
-      }
-    }
-
-    function renderContextFields(detailSection, item, index) {
-      const prefix = item.contextPrefix || "tool";
-      const definition = contextDefinitionForPath(item.contextPath, prefix);
-
-      const prefixSelect = createSelect(contextPrefixes(), prefix, (event) => {
-        const nextPrefix = event.target.value;
-        const firstField = contextFieldsForPrefix(nextPrefix)[0]?.value || `${nextPrefix}.raw`;
-        updateItem(index, {
-          contextPrefix: nextPrefix,
-          contextField: firstField,
-          contextFieldName: "",
-          contextPath: buildContextPath(nextPrefix, firstField, "", ""),
-          syntaxField: "",
-          operator: contextDefinitionForPath(firstField, nextPrefix).operators?.[0] || "==",
-          selectedToolKey: "",
-          value: "",
-        });
-      });
-      detailSection.appendChild(createField("Context", prefixSelect));
-
-      const fieldSelect = createSelect(contextFieldsForPrefix(prefix), item.contextField, (event) => {
-        const nextField = event.target.value;
-        updateItem(index, {
-          contextField: nextField,
-          contextFieldName: "",
-          contextPath: buildContextPath(prefix, nextField, "", ""),
-          syntaxField: "",
-          operator: contextDefinitionForPath(nextField, prefix).operators?.[0] || "==",
-          selectedToolKey: "",
-          value: "",
-        });
-      });
-      detailSection.appendChild(createField("Field", fieldSelect));
-
-      if (definition.kind === "free-field") {
-        const fieldNameInput = document.createElement("input");
-        fieldNameInput.type = "text";
-        fieldNameInput.value = item.contextFieldName || "";
-        fieldNameInput.placeholder = `${prefix} field`;
-        fieldNameInput.addEventListener("input", (event) => {
-          const nextFieldName = event.target.value;
-          updateItem(index, {
-            contextFieldName: nextFieldName,
-            contextPath: buildContextPath(prefix, item.contextField, nextFieldName, ""),
-          }, { render: false });
-        });
-        detailSection.appendChild(createField("Field Name", fieldNameInput));
-      }
-
-      if (definition.kind === "tool-syntax") {
-        const params = inputParamsForTool(currentCallToolKey);
-        const syntaxFieldSelect = createSelect(params.length ? params : [""], item.syntaxField, (event) => {
-          const nextSyntaxField = event.target.value;
-          updateItem(index, {
-            syntaxField: nextSyntaxField,
-            contextPath: buildContextPath(prefix, item.contextField, "", nextSyntaxField),
-          });
-        });
-        detailSection.appendChild(createField("Syntax Field", syntaxFieldSelect));
-      }
-
-      const operatorSelect = createSelect(definition.operators || ["=="], item.operator, (event) => {
-        updateItem(index, { operator: event.target.value });
-      });
-      detailSection.appendChild(createField("Operator", operatorSelect));
-
-      if (definition.kind === "enum") {
-        const valueSelect = createSelect(labelValues[definition.enumKey] || [""], item.value, (event) => {
-          updateItem(index, { value: event.target.value });
-        });
-        detailSection.appendChild(createField("Value", valueSelect));
-        return;
-      }
-
-      if (definition.kind === "tool-name") {
-        const valueSelect = createSelect(toolOptions(), item.selectedToolKey, (event) => {
-          const nextSelectedToolKey = event.target.value;
-          updateItem(index, {
-            selectedToolKey: nextSelectedToolKey,
-            value: toolNameForKey(nextSelectedToolKey),
-          });
-        });
-        detailSection.appendChild(createField("Value", valueSelect));
-        return;
-      }
-
-      const input = document.createElement("input");
-      input.type = "text";
-      input.value = item.value;
-      input.placeholder = definition.kind === "number" ? "Numeric value" : "Value";
-      input.addEventListener("input", (event) => {
-        updateItem(index, { value: event.target.value }, { render: false });
-      });
-      detailSection.appendChild(createField("Value", input));
-    }
-
-    function renderEditableItem(item, index, options = {}) {
-      const showStructureFields = options.showStructureFields !== false;
-      const card = document.createElement("div");
-      card.className = "condition-card";
-
-      const actions = document.createElement("div");
-      actions.className = "condition-card-actions";
-      actions.appendChild(createIconButton("confirm.png", "Confirm condition", () => confirmItem(index)));
-      if (state.items.length > 1) {
-        actions.appendChild(createIconButton("close.png", "Remove condition", () => removeItem(index)));
-      }
-      card.appendChild(actions);
-
-      const detailSection = document.createElement("div");
-      detailSection.className = "condition-detail-section";
-
-      if (showStructureFields) {
-        const openParenSelect = createSelect(["", "(", "(("], item.openParen || "", (event) => {
-          updateItem(index, { openParen: event.target.value });
-        });
-        detailSection.appendChild(createField("Open Paren", openParenSelect));
-      }
-
-      const sourceTypeSelect = createSelect([
-        { value: "trace", label: "Trace symbol" },
-        { value: "context", label: "Current call context" },
-      ], item.sourceType || "trace", (event) => {
-        const nextSourceType = event.target.value;
-        if (nextSourceType === "context") {
-          updateItem(index, {
-            sourceType: "context",
-            symbol: "",
-            feature: "",
-            syntaxField: "",
-            selectedToolKey: "",
-            contextPrefix: "tool",
-            contextField: "tool.name",
-            contextFieldName: "",
-            contextPath: "tool.name",
-            operator: "==",
-            value: toolOptions()[0]?.name || "",
-          });
-          return;
-        }
-        const firstTool = firstToolOption();
-        updateItem(index, {
-          sourceType: "trace",
-          symbol: symbols[0] || "A",
-          feature: "name",
-          syntaxField: "",
-          selectedToolKey: firstTool?.value || "",
-          operator: "==",
-          value: firstTool?.name || "",
-          contextPrefix: "",
-          contextField: "",
-          contextFieldName: "",
-          contextPath: "",
-        });
-      });
-      Array.from(sourceTypeSelect.options || []).forEach((option) => {
-        option.disabled = !allowedSourceTypes.has(option.value);
-      });
-      sourceTypeSelect.value = normalizeSourceType(item.sourceType || "trace");
-      detailSection.appendChild(createField("Source", sourceTypeSelect));
-
-      if (item.sourceType === "context") {
-        renderContextFields(detailSection, item, index);
-      } else {
-        renderTraceFields(detailSection, item, index);
-      }
-
-      if (showStructureFields) {
-        const closeParenSelect = createSelect(["", ")", "))"], item.closeParen || "", (event) => {
-          updateItem(index, { closeParen: event.target.value });
-        });
-        detailSection.appendChild(createField("Close Paren", closeParenSelect));
-      }
-
-      card.appendChild(detailSection);
-      return card;
-    }
-
-    function renderStepStageHeader(item, stage) {
-      const order = stageOrderForItem(item).filter((entry) => entry !== "complete");
-      const stepNumber = Math.max(order.indexOf(stage) + 1, 1);
-      const stageMeta = {
-        source: { title: "Choose rule scope", copy: "Select the tool format" },
-        symbol: { title: "Choose tool node", copy: "Choose the tool node you want to inspect." },
-        property: { title: "Choose property", copy: "Select the property and subproperty to constrain." },
-        comparison: { title: "Choose relation and target value", copy: "Set the comparison operator and the target value." },
-      }[stage];
-
-      const header = document.createElement("div");
-      header.className = "condition-step-header";
-
-      const kicker = document.createElement("p");
-      kicker.className = "condition-step-kicker";
-      kicker.textContent = `Step ${stepNumber}`;
-      header.appendChild(kicker);
-
-      const title = document.createElement("h5");
-      title.className = "condition-step-title";
-      title.textContent = stageMeta.title;
-      header.appendChild(title);
-
-      const copy = document.createElement("p");
-      copy.className = "condition-step-copy";
-      copy.textContent = stageMeta.copy;
-      header.appendChild(copy);
-      return header;
-    }
-
-    function renderStepProgress(item) {
-      const order = stageOrderForItem(item).filter((stage) => stage !== "complete");
-      const currentStage = currentStageForItem(item);
+    function draftProgress(item) {
+      const order = stageOrderForDraft(item).filter((stage) => stage !== "complete");
+      const currentStage = currentDraftStage(item);
       const activeIndex = order.indexOf(currentStage);
       const progress = document.createElement("div");
       progress.className = "condition-step-progress";
@@ -1436,7 +1360,6 @@
           dot.classList.add("is-active");
         }
         progress.appendChild(dot);
-
         if (index < order.length - 1) {
           const segment = document.createElement("span");
           segment.className = "condition-step-progress-segment";
@@ -1446,21 +1369,297 @@
           progress.appendChild(segment);
         }
       });
-
       return progress;
     }
 
-    function renderStepSource(detailSection, item, index) {
-      const options = [
-        { value: "trace", label: "Path rule" },
-        { value: "context", label: "Single tool rule" },
-      ];
-      const select = createSelect(options, item.sourceType, (event) => {
-        const nextSourceType = event.target.value;
-        if (nextSourceType === "context") {
-          updateItem(index, {
-            sourceType: "context",
-            symbol: "",
+    function renderDraftStageHeader(item, stage) {
+      const order = stageOrderForDraft(item).filter((entry) => entry !== "complete");
+      const stepNumber = Math.max(order.indexOf(stage) + 1, 1);
+      const stageMeta = {
+        source: { title: "Choose rule scope", copy: "Select the tool format." },
+        symbol: { title: "Choose tool node", copy: "Choose the tool node you want to inspect." },
+        property: { title: "Choose property", copy: "Select the property and subproperty to constrain." },
+        comparison: { title: "Choose relation and target value", copy: "Set the comparison operator and the target value." },
+      }[stage];
+
+      const header = document.createElement("div");
+      header.className = "condition-step-header";
+      const kicker = document.createElement("p");
+      kicker.className = "condition-step-kicker";
+      kicker.textContent = `Step ${stepNumber}`;
+      header.appendChild(kicker);
+      const title = document.createElement("h5");
+      title.className = "condition-step-title";
+      title.textContent = stageMeta.title;
+      header.appendChild(title);
+      const copy = document.createElement("p");
+      copy.className = "condition-step-copy";
+      copy.textContent = stageMeta.copy;
+      header.appendChild(copy);
+      return header;
+    }
+
+    function renderDraftSubproperty(detailSection, item) {
+      if (item.sourceType === "trace") {
+        const group = item.propertyGroup || traceGroupFromFeature(item.feature);
+        if (!group || group === "name") {
+          return;
+        }
+        if (group === "label") {
+          detailSection.appendChild(createField("Sub-property", createSelect([
+            { value: "", label: "Select sub-property" },
+            { value: "label.boundary", label: "label-boundary" },
+            { value: "label.sensitivity", label: "label-sensitivity" },
+            { value: "label.integrity", label: "label-integrity" },
+          ], item.feature, (event) => {
+            updateDraft({ feature: event.target.value, operator: "", value: "" });
+          })));
+          return;
+        }
+        const inferredToolKey = state.symbolToolMap[item.symbol]
+          || inferredTraceToolKey(item.symbol, state.items, state.savedConditions, item);
+        const params = inputParamsForTool(inferredToolKey);
+        detailSection.appendChild(createField("Sub-property", createSelect(
+          [{ value: "", label: "Select sub-property" }, ...(params.length ? params.map((value) => ({ value, label: `param-${value}` })) : [])],
+          item.syntaxField,
+          (event) => updateDraft({ syntaxField: event.target.value }),
+        )));
+        return;
+      }
+
+      const prefix = item.contextPrefix || "tool";
+      if (prefix === "tool") {
+        const subpropertyOptions = toolContextSubpropertyOptions(item, state.items, state.savedConditions);
+        detailSection.appendChild(createField("Sub-property", createSelect(
+          [
+            { value: "", label: "Select sub-property" },
+            ...subpropertyOptions,
+          ],
+          toolContextSubpropertyValue(item),
+          (event) => {
+            const nextField = event.target.value;
+            if (String(nextField || "").startsWith("tool.") && !contextDefinitions.tool.some((option) => option.value === nextField)) {
+              const nextSyntaxField = String(nextField).slice("tool.".length);
+              updateDraft({
+                contextField: "tool.syntax",
+                contextFieldName: "",
+                contextPath: buildContextPath("tool.syntax", nextSyntaxField),
+                syntaxField: nextSyntaxField,
+                operator: "",
+                value: "",
+              });
+              return;
+            }
+            updateDraft({
+              contextField: nextField,
+              contextFieldName: "",
+              contextPath: buildContextPath(nextField, ""),
+              syntaxField: "",
+              operator: "",
+              value: "",
+            });
+          },
+        )));
+        return;
+      }
+
+      if (prefix === "principal") {
+        detailSection.appendChild(createField("Sub-property", createSelect(
+          [{ value: "", label: "Select sub-property" }, ...principalContextSubpropertyGroups],
+          item.contextField,
+          (event) => {
+            const nextField = event.target.value;
+            updateDraft({
+              contextField: nextField,
+              contextFieldName: "",
+              contextPath: buildContextPath(nextField, ""),
+              syntaxField: "",
+              operator: "",
+              value: "",
+            });
+          },
+        )));
+        return;
+      }
+    }
+
+    function renderDraftProperty(detailSection, item) {
+      if (item.sourceType === "trace") {
+        const propertyOptions = tracePropertyOptionsForItem(item);
+        const selectedGroup = item.propertyGroup || traceGroupFromFeature(item.feature);
+        detailSection.appendChild(createField("Property", createSelect(
+          [{ value: "", label: "Select property" }, ...propertyOptions],
+          selectedGroup,
+          (event) => {
+            const nextGroup = event.target.value;
+            if (!nextGroup) {
+              updateDraft({ propertyGroup: "", feature: "", syntaxField: "", operator: "", selectedToolKey: "", value: "" });
+            } else if (nextGroup === "name") {
+              updateDraft({ propertyGroup: "name", feature: "name", syntaxField: "", operator: "", selectedToolKey: "", value: "" });
+            } else if (nextGroup === "label") {
+              updateDraft({ propertyGroup: "label", feature: "", syntaxField: "", operator: "", selectedToolKey: "", value: "" });
+            } else {
+              updateDraft({ propertyGroup: "syntax", feature: "syntax", syntaxField: "", operator: "", selectedToolKey: "", value: "" });
+            }
+          },
+        )));
+        renderDraftSubproperty(detailSection, item);
+        return;
+      }
+
+      detailSection.appendChild(createField("Property", createSelect(
+        [{ value: "", label: "Select property" }, ...contextPropertyGroups],
+        item.contextPrefix || "",
+        (event) => {
+          const nextPrefix = event.target.value;
+          updateDraft({
+            contextPrefix: nextPrefix,
+            contextField: "",
+            contextFieldName: "",
+            contextPath: "",
+            syntaxField: "",
+            operator: "",
+            value: "",
+          });
+        },
+      )));
+      renderDraftSubproperty(detailSection, item);
+    }
+
+    function renderDraftComparison(detailSection, item) {
+      if (item.sourceType === "trace") {
+        detailSection.appendChild(createField("Comparison", createSelect(
+          [{ value: "", label: "Select comparison" }, ...((traceFeatureOperators[item.feature] || []).map((value) => ({ value, label: comparisonOptionLabel(value) })))],
+          item.operator,
+          (event) => updateDraft({ operator: event.target.value }),
+        )));
+        if (isMembershipOperator(item.operator)) {
+          const options = membershipOptionEntries(item);
+          if (options.length) {
+            detailSection.appendChild(createField("Target values", createMembershipCheckboxGroup(
+              options,
+              parseSetLiteralEntries(item.value),
+              (nextValues) => updateDraft({ value: formatSetLiteral(nextValues) }),
+            ), "condition-field-wide"));
+            return;
+          }
+          detailSection.appendChild(createField("Target list", createTextarea(
+            membershipEditorValue(item.value),
+            (event) => updateDraft({ value: normalizeMembershipValueInput(event.target.value) }, false),
+            item.feature === "name"
+              ? "One tool name per line, or a collection ref like allowlist.tools"
+              : "One item per line, or a collection ref like allowlist.http",
+            "condition-target-list-input",
+          ), "condition-field-wide"));
+          return;
+        }
+        if (item.feature === "name") {
+          detailSection.appendChild(createField("Target value", createSelect(
+            [{ value: "", label: "Select target value" }, ...toolOptions()],
+            item.selectedToolKey,
+            (event) => updateDraft({
+              selectedToolKey: event.target.value,
+              value: toolNameForKey(event.target.value),
+            }),
+          )));
+          return;
+        }
+        if (String(item.feature || "").startsWith("label.")) {
+          detailSection.appendChild(createField("Target value", createSelect(
+            [{ value: "", label: "Select target value" }, ...((labelValues[item.feature] || []).map((value) => ({ value, label: value })))],
+            item.value,
+            (event) => updateDraft({ value: event.target.value }),
+          )));
+          return;
+        }
+        detailSection.appendChild(createField("Target value", createInput(
+          item.value,
+          (event) => updateDraft({ value: event.target.value }, false),
+          item.syntaxField ? `Value for ${item.syntaxField}` : "Value",
+        )));
+        return;
+      }
+
+      const definition = contextDefinitionForItem(item);
+      detailSection.appendChild(createField("Comparison", createSelect(
+        [{ value: "", label: "Select comparison" }, ...((definition.operators || []).map((value) => ({ value, label: comparisonOptionLabel(value) })))],
+        item.operator,
+        (event) => updateDraft({ operator: event.target.value }),
+      )));
+      if (isMembershipOperator(item.operator)) {
+        const options = membershipOptionEntries(definition);
+        if (options.length) {
+          detailSection.appendChild(createField("Target values", createMembershipCheckboxGroup(
+            options,
+            parseSetLiteralEntries(item.value),
+            (nextValues) => updateDraft({ value: formatSetLiteral(nextValues) }),
+          ), "condition-field-wide"));
+          return;
+        }
+        detailSection.appendChild(createField("Target list", createTextarea(
+          membershipEditorValue(item.value),
+          (event) => updateDraft({ value: normalizeMembershipValueInput(event.target.value) }, false),
+          membershipPlaceholder(definition),
+          "condition-target-list-input",
+        ), "condition-field-wide"));
+        return;
+      }
+      if (definition.kind === "enum") {
+        const enumOptions = Array.isArray(definition.enumValues)
+          ? definition.enumValues
+          : (labelValues[definition.enumKey] || []);
+        detailSection.appendChild(createField("Target value", createSelect(
+          [{ value: "", label: "Select target value" }, ...(enumOptions.map((value) => ({ value, label: value })))],
+          item.value,
+          (event) => updateDraft({ value: event.target.value }),
+        )));
+        return;
+      }
+      if (definition.kind === "tool-name") {
+        detailSection.appendChild(createField("Target value", createSelect(
+          [{ value: "", label: "Select target value" }, ...toolOptions()],
+          item.selectedToolKey,
+          (event) => updateDraft({
+            selectedToolKey: event.target.value,
+            value: toolNameForKey(event.target.value),
+          }),
+        )));
+        return;
+      }
+      detailSection.appendChild(createField("Target value", createInput(
+        item.value,
+        (event) => updateDraft({ value: event.target.value }, false),
+        definition.kind === "number" ? "Numeric value" : "Value",
+      )));
+    }
+
+    function renderDraftBuilder() {
+      if (!state.draftItem) {
+        return null;
+      }
+      const item = state.draftItem;
+      const stage = currentDraftStage(item);
+      const card = document.createElement("div");
+      card.className = "condition-card condition-step-card";
+      const cardActions = document.createElement("div");
+      cardActions.className = "condition-card-actions condition-card-actions-start";
+      cardActions.appendChild(createAssetIconButton("close.png", "Close condition builder", closeDraft));
+      card.appendChild(cardActions);
+      card.appendChild(renderDraftStageHeader(item, stage));
+
+      const detailSection = document.createElement("div");
+      detailSection.className = "condition-detail-section";
+      if (stage === "source") {
+        const options = [
+          { value: "trace", label: "Path rule" },
+          { value: "context", label: "Single tool rule" },
+        ];
+        const select = createSelect(options, item.sourceType, (event) => {
+          const nextSourceType = event.target.value;
+          updateDraft({
+            sourceType: nextSourceType,
+            stepStage: nextSourceType === "trace" ? "symbol" : "property",
+            symbol: nextSourceType === "trace" ? (symbols[0] || "A") : "",
             feature: "",
             propertyGroup: "",
             syntaxField: "",
@@ -1472,747 +1671,520 @@
             operator: "",
             value: "",
           });
-          return;
-        }
-        updateItem(index, {
-          sourceType: "trace",
-          symbol: symbols[0] || "A",
-          feature: "",
-          propertyGroup: "",
-          syntaxField: "",
-          selectedToolKey: "",
-          operator: "",
-          value: "",
-          contextPrefix: "",
-          contextField: "",
-          contextFieldName: "",
-          contextPath: "",
         });
-      });
-      Array.from(select.options || []).forEach((option) => {
-        option.disabled = !allowedSourceTypes.has(option.value);
-      });
-      detailSection.appendChild(createField("Rule Scope", select));
-    }
-
-    function renderStepProperty(detailSection, item, index) {
-      if (item.sourceType === "trace") {
-        const propertyOptions = tracePropertyOptionsForItem(item);
-        const selectedGroup = item.propertyGroup || traceGroupFromFeature(item.feature);
-        const select = createSelect([
-          { value: "", label: "Select property" },
-          ...propertyOptions,
-        ], selectedGroup, (event) => {
-          const nextGroup = event.target.value;
-          if (!nextGroup) {
-            updateItem(index, {
-              propertyGroup: "",
-              feature: "",
-              syntaxField: "",
-              operator: "",
-              selectedToolKey: "",
-              value: "",
-            });
-            return;
-          }
-          if (nextGroup === "name") {
-            updateItem(index, {
-              propertyGroup: "name",
-              feature: "name",
-              syntaxField: "",
-              operator: "",
-              selectedToolKey: "",
-              value: "",
-            });
-            return;
-          }
-          if (nextGroup === "label") {
-            updateItem(index, {
-              propertyGroup: "label",
-              feature: "",
-              syntaxField: "",
-              operator: "",
-              selectedToolKey: "",
-              value: "",
-            });
-            return;
-          }
-          updateItem(index, {
-            propertyGroup: "syntax",
-            feature: "syntax",
-            syntaxField: "",
-            operator: "",
-            selectedToolKey: "",
-            value: "",
-          });
+        Array.from(select.options || []).forEach((option) => {
+          option.disabled = !allowedSourceTypes.includes(option.value);
         });
-        detailSection.appendChild(createField("Property", select));
-        renderStepSubproperty(detailSection, item, index);
-        return;
-      }
-
-      const select = createSelect([
-        { value: "", label: "Select property" },
-        ...contextPropertyGroups,
-      ], item.contextPrefix || "", (event) => {
-        const nextPrefix = event.target.value;
-        if (!nextPrefix) {
-          updateItem(index, {
-            contextPrefix: "",
-            contextField: "",
-            contextFieldName: "",
-            contextPath: "",
-            syntaxField: "",
-            operator: "",
-            selectedToolKey: "",
-            value: "",
-          });
-          return;
-        }
-        updateItem(index, {
-          contextPrefix: nextPrefix,
-          contextField: "",
-          contextFieldName: "",
-          contextPath: "",
-          syntaxField: "",
-          operator: "",
-          selectedToolKey: "",
-          value: "",
-        });
-      });
-      detailSection.appendChild(createField("Property", select));
-      renderStepSubproperty(detailSection, item, index);
-    }
-
-    function renderStepSubproperty(detailSection, item, index) {
-      if (item.sourceType === "trace") {
-        const group = item.propertyGroup || traceGroupFromFeature(item.feature);
-        if (!group || group === "name") {
-          return;
-        }
-        if (group === "label") {
-          const labelOptions = [
-            { value: "", label: "Select sub-property" },
-            { value: "label.boundary", label: "boundary" },
-            { value: "label.sensitivity", label: "sensitivity" },
-            { value: "label.integrity", label: "integrity" },
-          ];
-          const select = createSelect(labelOptions, item.feature, (event) => {
-            const nextFeature = event.target.value;
-            updateItem(index, {
-              feature: nextFeature,
-              operator: "",
-              value: "",
-            });
-          });
-          detailSection.appendChild(createField("Sub-property", select));
-          return;
-        }
-
-        const params = inputParamsForTool(state.symbolToolMap[item.symbol] || "");
-        const syntaxFieldSelect = createSelect([{ value: "", label: "Select sub-property" }, ...(params.length ? params : [""])], item.syntaxField, (event) => {
-          updateItem(index, { syntaxField: event.target.value });
-        });
-        detailSection.appendChild(createField("Sub-property", syntaxFieldSelect));
-        return;
-      }
-
-      const prefix = item.contextPrefix || "tool";
-      if (!item.contextField && !item.contextPath) {
-        return;
-      }
-      const fieldSelect = createSelect([{ value: "", label: "Select sub-property" }, ...contextFieldsForPrefix(prefix)], item.contextField, (event) => {
-        const nextField = event.target.value;
-        if (!nextField) {
-          updateItem(index, {
-            contextField: "",
-            contextFieldName: "",
-            contextPath: "",
-            syntaxField: "",
-            operator: "",
-            selectedToolKey: "",
-            value: "",
-          });
-          return;
-        }
-        updateItem(index, {
-          contextField: nextField,
-          contextFieldName: "",
-          contextPath: buildContextPath(prefix, nextField, "", ""),
-          syntaxField: "",
-          operator: "",
-          selectedToolKey: "",
-          value: "",
-        });
-      });
-      detailSection.appendChild(createField("Sub-property", fieldSelect));
-
-      const definition = contextDefinitionForItem(item);
-      if (definition.kind === "free-field") {
-        const fieldNameInput = document.createElement("input");
-        fieldNameInput.type = "text";
-        fieldNameInput.value = item.contextFieldName || "";
-        fieldNameInput.placeholder = `${prefix} field`;
-        fieldNameInput.addEventListener("input", (event) => {
-          const nextFieldName = event.target.value;
-          updateItem(index, {
-            contextFieldName: nextFieldName,
-            contextPath: buildContextPath(prefix, item.contextField, nextFieldName, ""),
-          }, { render: false });
-        });
-        detailSection.appendChild(createField("Custom field name", fieldNameInput));
-      }
-
-      if (definition.kind === "tool-syntax") {
-        const params = inputParamsForTool(currentCallToolKey);
-        const syntaxFieldSelect = createSelect(params.length ? params : [""], item.syntaxField, (event) => {
-          const nextSyntaxField = event.target.value;
-          updateItem(index, {
-            syntaxField: nextSyntaxField,
-            contextPath: buildContextPath(prefix, item.contextField, "", nextSyntaxField),
-          });
-        });
-        detailSection.appendChild(createField("Syntax field", syntaxFieldSelect));
-      }
-    }
-
-    function renderStepComparison(detailSection, item, index) {
-      if (item.sourceType === "trace") {
-        const operatorSelect = createSelect([{ value: "", label: "Select comparison" }, ...(traceFeatureOperators[item.feature] || [])], item.operator, (event) => {
-          updateItem(index, { operator: event.target.value });
-        });
-        detailSection.appendChild(createField("Comparison", operatorSelect));
-
-        if (item.feature === "name") {
-          const valueSelect = createSelect([{ value: "", label: "Select target value" }, ...toolOptions()], item.selectedToolKey, (event) => {
-            const nextSelectedToolKey = event.target.value;
-            updateItem(index, {
-              selectedToolKey: nextSelectedToolKey,
-              value: toolNameForKey(nextSelectedToolKey),
-            });
-          });
-          detailSection.appendChild(createField("Target value", valueSelect));
-          return;
-        }
-
-        if (item.feature.startsWith("label.")) {
-          const valueSelect = createSelect([{ value: "", label: "Select target value" }, ...labelValues[item.feature]], item.value, (event) => {
-            updateItem(index, { value: event.target.value });
-          });
-          detailSection.appendChild(createField("Target value", valueSelect));
-          return;
-        }
-
-        const input = document.createElement("input");
-        input.type = "text";
-        input.value = item.value;
-        input.placeholder = item.syntaxField ? `Value for ${item.syntaxField}` : "Value";
-        input.addEventListener("input", (event) => {
-          updateItem(index, { value: event.target.value }, { render: false });
-        });
-        detailSection.appendChild(createField("Target value", input));
-        return;
-      }
-
-      const definition = contextDefinitionForItem(item);
-      const operatorSelect = createSelect([{ value: "", label: "Select comparison" }, ...(definition.operators || [])], item.operator, (event) => {
-        updateItem(index, { operator: event.target.value });
-      });
-      detailSection.appendChild(createField("Comparison", operatorSelect));
-
-      if (definition.kind === "enum") {
-        const valueSelect = createSelect([{ value: "", label: "Select target value" }, ...(labelValues[definition.enumKey] || [""])], item.value, (event) => {
-          updateItem(index, { value: event.target.value });
-        });
-        detailSection.appendChild(createField("Target value", valueSelect));
-        return;
-      }
-
-      if (definition.kind === "tool-name") {
-        const valueSelect = createSelect([{ value: "", label: "Select target value" }, ...toolOptions()], item.selectedToolKey, (event) => {
-          const nextSelectedToolKey = event.target.value;
-          updateItem(index, {
-            selectedToolKey: nextSelectedToolKey,
-            value: toolNameForKey(nextSelectedToolKey),
-          });
-        });
-        detailSection.appendChild(createField("Target value", valueSelect));
-        return;
-      }
-
-      const input = document.createElement("input");
-      input.type = "text";
-      input.value = item.value;
-      input.placeholder = definition.kind === "number" ? "Numeric value" : "Value";
-      input.addEventListener("input", (event) => {
-        updateItem(index, { value: event.target.value }, { render: false });
-      });
-      detailSection.appendChild(createField("Target value", input));
-    }
-
-    function renderGuidedItem(item, index) {
-      const stage = currentStageForItem(item);
-      const card = document.createElement("div");
-      card.className = "condition-card condition-step-card";
-
-      const actions = document.createElement("div");
-      actions.className = "condition-card-actions";
-      if (state.items.length > 1 || stepItems().length > 0) {
-        actions.appendChild(createIconButton("close.png", "Remove condition", () => removeItem(index)));
-      }
-      card.appendChild(actions);
-      card.appendChild(renderStepStageHeader(item, stage));
-
-      const detailSection = document.createElement("div");
-      detailSection.className = "condition-detail-section";
-
-      if (stage === "source") {
-        renderStepSource(detailSection, item, index);
+        detailSection.appendChild(createField("Rule Scope", select));
       } else if (stage === "symbol") {
-        const symbolSelect = createSelect(symbols, item.symbol, (event) => {
-          updateItem(index, { symbol: event.target.value });
-        });
-        detailSection.appendChild(createField("Path tool", symbolSelect));
+        detailSection.appendChild(createField("Path tool", createSelect(
+          symbols.map((symbol) => ({ value: symbol, label: displaySymbol(symbol) })),
+          item.symbol,
+          (event) => updateDraft({ symbol: event.target.value }),
+        )));
       } else if (stage === "property") {
-        renderStepProperty(detailSection, item, index);
+        renderDraftProperty(detailSection, item);
       } else if (stage === "comparison") {
-        renderStepComparison(detailSection, item, index);
+        renderDraftComparison(detailSection, item);
       }
-
       card.appendChild(detailSection);
 
       if (stage === "comparison") {
         const preview = document.createElement("pre");
         preview.className = "condition-step-preview";
-        preview.textContent = buildItemExpression(item) || "<incomplete>";
+        preview.textContent = draftExpression(item) || "<incomplete>";
         card.appendChild(preview);
       }
 
       const actionRow = document.createElement("div");
       actionRow.className = "condition-step-nav";
-      if (stage !== "source") {
+      if (stage !== stageOrderForDraft(item)[0]) {
         const backButton = document.createElement("button");
         backButton.type = "button";
         backButton.className = "btn condition-step-nav-button";
         backButton.textContent = "<";
-        backButton.addEventListener("click", () => {
-          updateItem(index, { stepStage: previousStage(item) });
-        });
+        backButton.addEventListener("click", () => updateDraft({ stepStage: previousDraftStage(item) }));
         actionRow.appendChild(backButton);
       } else {
         const spacer = document.createElement("span");
         spacer.className = "condition-step-nav-spacer";
         actionRow.appendChild(spacer);
       }
-
-      actionRow.appendChild(renderStepProgress(item));
-
+      actionRow.appendChild(draftProgress(item));
       const nextButton = document.createElement("button");
       nextButton.type = "button";
       nextButton.className = "btn primary condition-step-nav-button";
       if (stage === "comparison") {
         nextButton.setAttribute("aria-label", "Generate single rule");
         nextButton.textContent = "Create >";
-        nextButton.disabled = !canAdvanceStage(item);
-        nextButton.addEventListener("click", () => confirmItem(index));
+        nextButton.disabled = !canAdvanceDraft(item);
+        nextButton.addEventListener("click", saveDraftCondition);
       } else {
         nextButton.setAttribute("aria-label", "Next builder step");
         nextButton.textContent = ">";
-        nextButton.disabled = !canAdvanceStage(item);
-        nextButton.addEventListener("click", () => {
-          updateItem(index, { stepStage: nextStage(item) });
-        });
+        nextButton.disabled = !canAdvanceDraft(item);
+        nextButton.addEventListener("click", () => updateDraft({ stepStage: nextDraftStage(item) }));
       }
       actionRow.appendChild(nextButton);
       card.appendChild(actionRow);
       return card;
     }
 
-    function confirmItem(index) {
-      const currentItem = state.items[index];
-      if (!currentItem?.expression) {
+    function nextConditionId(items = state.savedConditions) {
+      const maxValue = items.reduce((acc, item) => {
+        const matched = String(item?.conditionId || "").match(/^COND(\d+)$/);
+        const numeric = matched ? Number(matched[1]) : 0;
+        return Math.max(acc, Number.isFinite(numeric) ? numeric : 0);
+      }, 0);
+      return `COND${maxValue + 1}`;
+    }
+
+    function keepDraftInSync() {
+      if (!state.draftItem) {
         return;
       }
+      const nextDraft = { ...state.draftItem };
+      if (!allowedSourceTypes.includes(nextDraft.sourceType)) {
+        const fallback = buildDefaultDraft();
+        state.draftItem = fallback;
+        return;
+      }
+      if (nextDraft.sourceType === "trace" && !symbols.includes(nextDraft.symbol)) {
+        nextDraft.symbol = symbols[0] || "A";
+      }
+      if (nextDraft.sourceType === "context" && nextDraft.contextField === "tool.syntax") {
+        const inferredToolKey = inferredContextToolKey(nextDraft, state.items, state.savedConditions);
+        const params = inputParamsForTool(inferredToolKey);
+        if (!inferredToolKey || !params.length) {
+          nextDraft.contextField = "";
+          nextDraft.contextPath = "";
+          nextDraft.syntaxField = "";
+          nextDraft.operator = "";
+          nextDraft.value = "";
+        } else if (nextDraft.syntaxField && !params.includes(nextDraft.syntaxField)) {
+          nextDraft.syntaxField = params[0] || "";
+          nextDraft.contextPath = buildContextPath(nextDraft.contextField, nextDraft.syntaxField);
+        }
+      }
+      if (nextDraft.sourceType === "context" && nextDraft.contextField === "tool.result" && currentCallSubtype !== "completed") {
+        nextDraft.contextField = "";
+        nextDraft.contextPath = "";
+        nextDraft.operator = "";
+        nextDraft.value = "";
+      }
+      state.draftItem = nextDraft;
+    }
 
-      const nextId = currentItem.conditionId || nextConditionId([
-        ...state.items,
-        ...stepSavedConditions.map((entry) => ({ conditionId: entry.conditionId })),
-      ]);
-      const confirmedItem = {
-        ...exportItem(currentItem),
-        conditionId: nextId,
-        connector: "",
-        confirmed: true,
-        stepStage: "complete",
-      };
-      const nextEntry = buildSavedConditionEntry(nextId, [confirmedItem]);
-      stepSavedConditions = stepSavedConditions
-        .map((entry) => ({ ...entry, selected: false }))
-        .concat([{ ...nextEntry, selected: false }]);
-      stepCurrentConditionId = nextEntry.conditionId;
-      applyActiveStepCondition(nextEntry);
+    keepDraftInSync();
+
+    function findGroupById(node, id) {
+      if (!node) {
+        return null;
+      }
+      if (node.id === id && (node.type === "AND" || node.type === "OR")) {
+        return node;
+      }
+      if (node.type === "condition") {
+        return null;
+      }
+      for (const child of node.children || []) {
+        const match = findGroupById(child, id);
+        if (match) {
+          return match;
+        }
+      }
+      return null;
+    }
+
+    function removeNodeById(node, id) {
+      if (!node || node.type === "condition") {
+        return node;
+      }
+      return createGroupNode(
+        node.type,
+        (node.children || [])
+          .filter((child) => child.id !== id)
+          .map((child) => child.type === "condition" ? child : removeNodeById(child, id)),
+        node.id,
+      );
+    }
+
+    function insertSavedConditionIntoGroup(groupId, conditionId) {
+      if (locked) {
+        return;
+      }
+      const selected = state.savedConditions.find((entry) => entry.conditionId === conditionId) || null;
+      if (!selected) {
+        updateHint("Choose a saved condition from the group's + menu first.");
+        return;
+      }
+      const group = findGroupById(state.tree, groupId);
+      if (!group) {
+        return;
+      }
+      const subtree = selected.tree
+        ? stampNodeIds(cloneNode(selected.tree))
+        : stampNodeIds(itemsToTree(selected.items));
+      const children = subtree.type === "condition" ? [subtree] : (subtree.children || []).map(stampNodeIds);
+      group.children.push(...children);
+      closeAddMenu();
+      syncFromTree();
       render();
       emit();
     }
 
-    function renderStepList() {
-      const wrap = document.createElement("div");
-      wrap.className = "condition-step-list";
-
-      const header = document.createElement("div");
-      header.className = "condition-step-list-header";
-      const title = document.createElement("strong");
-      title.textContent = "Saved Conditions";
-      header.appendChild(title);
-      mountStepActions(header);
-      wrap.appendChild(header);
-
-      if (!stepSavedConditions.length) {
-        const empty = document.createElement("div");
-        empty.className = "empty-state";
-        empty.textContent = "No saved conditions yet. Finish the guided builder to create COND1.";
-        wrap.appendChild(empty);
-        return wrap;
+    function addGroup(groupId) {
+      if (locked) {
+        return;
       }
+      const group = findGroupById(state.tree, groupId);
+      if (!group) {
+        return;
+      }
+      group.children.push(stampNodeIds(createGroupNode("AND", [])));
+      closeAddMenu();
+      syncFromTree();
+      render();
+      emit();
+    }
 
-      stepSavedConditions.forEach((entry) => {
-        const row = document.createElement("div");
-        row.className = "condition-summary-line";
-
-        const leading = document.createElement("div");
-        leading.className = "condition-summary-main";
-
-        const checkbox = document.createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.className = "condition-summary-checkbox";
-        checkbox.checked = Boolean(entry.selected);
-        checkbox.addEventListener("change", (event) => {
-          toggleSavedConditionSelection(entry.conditionId, event.target.checked);
-        });
-        leading.appendChild(checkbox);
-
-        const idTag = document.createElement("span");
-        idTag.className = "condition-summary-id";
-        idTag.textContent = entry.conditionId;
-        leading.appendChild(idTag);
-
-        const text = document.createElement("div");
-        text.className = "condition-summary-rule";
-        text.textContent = entry.expression;
-        leading.appendChild(text);
-        row.appendChild(leading);
-
-        const trailing = document.createElement("div");
-        trailing.className = "condition-summary-controls";
-
-        const actions = document.createElement("div");
-        actions.className = "condition-summary-actions";
-        actions.appendChild(createIconButton("confirm.png", "Use saved condition", () => {
-          setCurrentStepCondition(entry.conditionId);
-        }));
-        actions.appendChild(createIconButton("close.png", "Remove saved condition", () => {
-          removeSavedCondition(entry.conditionId);
-        }));
-        trailing.appendChild(actions);
-        row.appendChild(trailing);
-
-        wrap.appendChild(row);
-      });
-
-      const combineRow = document.createElement("div");
-      combineRow.className = "condition-step-combine";
-
-      const selectedIds = selectedSavedConditionIds();
-      const combineInfo = document.createElement("div");
-      combineInfo.className = "condition-step-combine-copy";
-
-      const combineHeader = document.createElement("div");
-      combineHeader.className = "condition-step-combine-header";
-
-      const combineLabel = document.createElement("strong");
-      combineLabel.textContent = "Combine Mode";
-      combineHeader.appendChild(combineLabel);
-
-      const combineMeta = document.createElement("div");
-      combineMeta.className = "condition-step-combine-meta";
-
-      const combineDescription = document.createElement("p");
-      combineDescription.className = "subtle";
-      if (selectedIds.length === 1) {
-        combineDescription.textContent = "Wrap with () or select as result";
-      } else if (selectedIds.length === 2) {
-        combineDescription.textContent = "Combine expressions with AND or OR.";
+    function deleteTreeNode(nodeId) {
+      if (state.tree.id === nodeId) {
+        state.tree = stampNodeIds(createGroupNode("AND", []));
       } else {
-        combineDescription.textContent = "";
+        state.tree = removeNodeById(state.tree, nodeId);
       }
-      combineMeta.appendChild(combineDescription);
+      syncFromTree();
+      render();
+      emit();
+    }
 
-      const infoWrap = document.createElement("div");
-      infoWrap.className = "hint-wrap";
-
-      const infoDot = document.createElement("span");
-      infoDot.className = "hint-dot";
-      infoDot.textContent = "i";
-      infoWrap.appendChild(infoDot);
-
-      const infoBubble = document.createElement("div");
-      infoBubble.className = "hint-bubble";
-      infoBubble.textContent = "Select one or two saved expressions, then choose how to combine them.";
-      infoWrap.appendChild(infoBubble);
-
-      combineHeader.appendChild(infoWrap);
-      combineInfo.appendChild(combineHeader);
-      combineInfo.appendChild(combineMeta);
-      combineRow.appendChild(combineInfo);
-
-      const combineOptions = [{ value: "", label: "Combine selected" }];
-      if (selectedIds.length === 1) {
-        combineOptions.push({ value: "wrap", label: "Wrap with ()" });
-        combineOptions.push({ value: "reuse", label: "Use as current result" });
-      } else if (selectedIds.length === 2) {
-        combineOptions.push({ value: "AND", label: "Combine with AND" });
-        combineOptions.push({ value: "OR", label: "Combine with OR" });
+    function setGroupType(nodeId, type) {
+      const group = findGroupById(state.tree, nodeId);
+      if (!group) {
+        return;
       }
-      const combineSelect = createSelect(combineOptions, "", (event) => {
-        const operation = event.target.value;
-        if (!operation) {
-          return;
-        }
-        combineSavedConditions(operation, selectedIds);
-      });
-      combineSelect.disabled = selectedIds.length === 0 || selectedIds.length > 2;
-      combineRow.appendChild(combineSelect);
-      wrap.appendChild(combineRow);
+      group.type = type === "OR" ? "OR" : "AND";
+      syncFromTree();
+      render();
+      emit();
+    }
+
+    function createSectionTitleWithHint(text, hintText) {
+      const wrap = document.createElement("div");
+      wrap.className = "on-filter-help-row";
+
+      const title = document.createElement("strong");
+      title.textContent = text;
+      wrap.appendChild(title);
+
+      if (hintText) {
+        const hintWrap = document.createElement("div");
+        hintWrap.className = "hint-wrap";
+
+        const hintDot = document.createElement("span");
+        hintDot.className = "hint-dot";
+        hintDot.textContent = "i";
+        hintWrap.appendChild(hintDot);
+
+        const hintBubble = document.createElement("div");
+        hintBubble.className = "hint-bubble";
+        hintBubble.textContent = hintText;
+        hintWrap.appendChild(hintBubble);
+
+        wrap.appendChild(hintWrap);
+      }
+
       return wrap;
     }
 
-    function renderCurrentResult() {
-      const currentEntry = activeStepCondition();
-      if (!currentEntry) {
-        return null;
+    function renderLibrary() {
+      const section = document.createElement("section");
+      section.className = "condition-tree-section";
+
+      const header = document.createElement("div");
+      header.className = "condition-tree-section-head";
+      header.appendChild(createSectionTitleWithHint(
+        "Saved Conditions",
+        "You can build single conditions here with the guided flow."
+      ));
+      if (addButton) {
+        header.appendChild(addButton);
       }
+      section.appendChild(header);
 
-      const currentResult = document.createElement("div");
-      currentResult.className = "condition-current-result";
+      const list = document.createElement("div");
+      list.className = "condition-tree-library";
 
-      const currentLabel = document.createElement("div");
-      currentLabel.className = "condition-current-result-label";
-      currentLabel.textContent = "Current Result";
-      currentResult.appendChild(currentLabel);
-
-      const currentBody = document.createElement("div");
-      currentBody.className = "condition-current-result-body";
-
-      const currentId = document.createElement("span");
-      currentId.className = "condition-summary-id";
-      currentId.textContent = currentEntry.conditionId;
-      currentBody.appendChild(currentId);
-
-      const currentRule = document.createElement("div");
-      currentRule.className = "condition-summary-rule";
-      currentRule.textContent = currentEntry.expression;
-      currentBody.appendChild(currentRule);
-
-      currentResult.appendChild(currentBody);
-      return currentResult;
-    }
-
-    function renderItem(item, index) {
-      return item.confirmed ? renderConfirmedItem(item, index) : renderEditableItem(item, index);
-    }
-
-    function renderDirectMode() {
-      if (flow) {
-        flow.hidden = true;
-      }
-      root.innerHTML = "";
-      mountDefaultActions();
-      if (!state.items.length) {
+      if (!state.savedConditions.length) {
         const empty = document.createElement("div");
         empty.className = "empty-state";
-        empty.textContent = locked
-          ? "CONDITION is locked until PATH is confirmed."
-          : "CONDITION is empty. Click + to add the first condition.";
-        root.appendChild(empty);
-        syncLockState();
-        return;
+        empty.textContent = "No saved conditions yet.";
+        list.appendChild(empty);
+      } else {
+        state.savedConditions.forEach((entry) => {
+          const card = document.createElement("article");
+          card.className = "condition-tree-library-card";
+
+          const row = document.createElement("div");
+          row.className = "condition-tree-library-head";
+          const summary = document.createElement("div");
+          summary.className = "condition-tree-library-summary";
+          const id = document.createElement("span");
+          id.className = "condition-summary-id";
+          id.textContent = entry.conditionId;
+          summary.appendChild(id);
+          const body = document.createElement("div");
+          body.className = "condition-summary-rule condition-tree-library-rule";
+          body.textContent = entry.expression || "<condition pending>";
+          summary.appendChild(body);
+          row.appendChild(summary);
+          const controls = document.createElement("div");
+          controls.className = "condition-tree-library-actions";
+          controls.appendChild(createAssetIconButton("modify.png", "Edit saved condition", () => {
+            openDraft({ ...entry.items[0], conditionId: entry.conditionId });
+          }));
+          controls.appendChild(createAssetIconButton("close.png", "Delete saved condition", () => {
+            removeSavedCondition(entry.conditionId);
+          }));
+          row.appendChild(controls);
+          card.appendChild(row);
+
+          list.appendChild(card);
+        });
       }
 
-      state.items.forEach((item, index) => {
-        if (index > 0) {
-          const connectorSection = document.createElement("div");
-          connectorSection.className = item.confirmed
-            ? "condition-connector-line"
-            : "condition-connector-section";
-
-          if (item.confirmed) {
-            const connectorLabel = document.createElement("span");
-            connectorLabel.className = "condition-connector-text";
-            connectorLabel.textContent = item.connector || "AND";
-            connectorSection.appendChild(connectorLabel);
-          } else {
-            const connectorSelect = createSelect(["AND", "OR"], item.connector || "AND", (event) => {
-              updateItem(index, { connector: event.target.value });
-            });
-            connectorSection.appendChild(createField("Connector", connectorSelect));
-          }
-
-          root.appendChild(connectorSection);
-        }
-
-        root.appendChild(renderItem(item, index));
-      });
-      syncLockState();
+      section.appendChild(list);
+      return section;
     }
 
-    function renderStepMode() {
-      root.innerHTML = "";
-      mountDefaultActions();
-      seedStepSavedConditionsFromState();
-      const draftIndex = currentDraftIndex();
-      if (flow) {
-        flow.hidden = true;
+    function renderGroupAddMenu(node) {
+      const wrap = document.createElement("div");
+      wrap.className = "condition-tree-group-add-wrap";
+
+      const trigger = createAssetIconButton("add.png", "Add node", () => toggleAddMenu(node.id));
+      trigger.className = "condition-icon-button condition-tree-action-button condition-tree-group-add-trigger";
+      wrap.appendChild(trigger);
+
+      if (openAddMenuGroupId === node.id) {
+        const menu = document.createElement("div");
+        menu.className = "condition-tree-group-add-menu";
+
+        const groupButton = document.createElement("button");
+        groupButton.type = "button";
+        groupButton.className = "condition-tree-group-add-item";
+        groupButton.textContent = "Group";
+        groupButton.addEventListener("click", () => addGroup(node.id));
+        menu.appendChild(groupButton);
+
+        state.savedConditions.forEach((entry) => {
+          const conditionButton = document.createElement("button");
+          conditionButton.type = "button";
+          conditionButton.className = "condition-tree-group-add-item";
+          conditionButton.textContent = entry.conditionId;
+          conditionButton.setAttribute("title", entry.expression || entry.conditionId);
+          conditionButton.addEventListener("click", () => insertSavedConditionIntoGroup(node.id, entry.conditionId));
+          menu.appendChild(conditionButton);
+        });
+
+        wrap.appendChild(menu);
       }
-      const hasVisibleStepState = Boolean(stepSavedConditions.length || draftIndex >= 0);
-      if (!hasVisibleStepState) {
+
+      return wrap;
+    }
+
+    function renderTreeNode(node, isRoot) {
+      if (node.type === "condition") {
+        const card = document.createElement("div");
+        card.className = "condition-tree-leaf";
+
+        const expression = document.createElement("div");
+        expression.className = "condition-summary-rule condition-tree-leaf-rule";
+        expression.textContent = conditionDisplayExpression(node.item, symbols, {
+          currentCallToolKey,
+          allowedSourceTypes,
+        }) || "<condition pending>";
+        card.appendChild(expression);
+
+        const controls = document.createElement("div");
+        controls.className = "condition-tree-leaf-actions";
+        controls.appendChild(createAssetIconButton("delete.png", "Delete condition", () => deleteTreeNode(node.id)));
+        card.appendChild(controls);
+        return card;
+      }
+
+      const group = document.createElement("div");
+      group.className = "condition-tree-group";
+
+      const header = document.createElement("div");
+      header.className = "condition-tree-group-head";
+
+      const title = document.createElement("div");
+      title.className = "condition-tree-group-title";
+      if (isRoot) {
+        title.textContent = "Logic Root";
+      } else {
+        title.textContent = "Group";
+      }
+      header.appendChild(title);
+
+      const actions = document.createElement("div");
+      actions.className = "condition-tree-group-actions";
+      const operatorToggle = document.createElement("div");
+      operatorToggle.className = "condition-tree-group-toggle";
+      const andButton = createButton("AND", `filter-chip${node.type === "AND" ? " active" : ""}`, () => setGroupType(node.id, "AND"));
+      andButton.setAttribute("aria-label", isRoot ? "Set root logic to AND" : "Set group logic to AND");
+      const orButton = createButton("OR", `filter-chip${node.type === "OR" ? " active" : ""}`, () => setGroupType(node.id, "OR"));
+      orButton.setAttribute("aria-label", isRoot ? "Set root logic to OR" : "Set group logic to OR");
+      operatorToggle.appendChild(andButton);
+      operatorToggle.appendChild(orButton);
+      actions.appendChild(operatorToggle);
+      actions.appendChild(renderGroupAddMenu(node));
+      if (!isRoot) {
+        actions.appendChild(createAssetIconButton("delete.png", "Delete group", () => deleteTreeNode(node.id)));
+      }
+      header.appendChild(actions);
+      group.appendChild(header);
+
+      const body = document.createElement("div");
+      body.className = "condition-tree-group-body";
+      if (!node.children.length) {
         const empty = document.createElement("div");
         empty.className = "empty-state";
-        empty.textContent = locked
-          ? "CONDITION is locked until PATH or ON is ready."
-          : "Step condition builder is empty. Click + to start the guided condition wizard.";
-        root.appendChild(empty);
-        syncLockState();
-        return;
+        empty.textContent = "Empty group. Insert a saved condition or a nested group.";
+        body.appendChild(empty);
+      } else {
+        node.children.forEach((child) => body.appendChild(renderTreeNode(child, false)));
       }
+      group.appendChild(body);
+      return group;
+    }
 
-      if (draftIndex >= 0) {
-        const marker = document.createElement("div");
-        marker.className = "condition-step-marker";
-        marker.textContent = "Guided Builder";
-        root.appendChild(marker);
-        if (flow) {
-          flow.hidden = false;
-          root.appendChild(flow);
-        }
-        root.appendChild(renderGuidedItem(state.items[draftIndex], draftIndex));
+    function renderCanvas() {
+      const section = document.createElement("section");
+      section.className = "condition-tree-section";
+
+      const header = document.createElement("div");
+      header.className = "condition-tree-section-head";
+      header.appendChild(createSectionTitleWithHint(
+        "Logic Canvas",
+        "You can combine saved single conditions here to package them into a complex rule."
+      ));
+      section.appendChild(header);
+      section.appendChild(renderTreeNode(state.tree, true));
+      return section;
+    }
+
+    function renderPreview() {
+      const section = document.createElement("section");
+      section.className = "condition-tree-section";
+      const header = document.createElement("div");
+      header.className = "condition-tree-section-head";
+      const title = document.createElement("strong");
+      title.textContent = "CONDITION Preview";
+      header.appendChild(title);
+      section.appendChild(header);
+      const preview = document.createElement("pre");
+      preview.className = "condition-tree-preview code-block";
+      preview.textContent = state.expression || "<condition pending>";
+      section.appendChild(preview);
+      return section;
+    }
+
+    function syncLockState() {
+      if (addButton) {
+        addButton.disabled = locked;
       }
-
-      root.appendChild(renderStepList());
-
-      const currentResult = renderCurrentResult();
-      if (currentResult) {
-        root.appendChild(currentResult);
-      }
-
-      syncLockState();
     }
 
     function render() {
-      updateModeUI();
-      if (builderMode === "step") {
-        renderStepMode();
+      if (!root) {
         return;
       }
-      renderDirectMode();
-    }
-
-    function addCondition() {
-      if (locked || hasIncompleteStep()) {
-        return;
+      ensureRootGroup();
+      syncLockState();
+      root.innerHTML = "";
+      if (state.draftItem) {
+        root.appendChild(renderDraftBuilder());
       }
-      const connector = state.items.length ? "AND" : "";
-      syncItems(state.items.concat([buildDefaultDraft(connector)]));
-      render();
-      emit();
+      root.appendChild(renderLibrary());
+      root.appendChild(renderCanvas());
+      root.appendChild(renderPreview());
+      updateHint();
     }
 
     if (addButton) {
-      addButton.addEventListener("click", addCondition);
+      addButton.addEventListener("click", () => {
+        if (locked) {
+          return;
+        }
+        openDraft();
+      });
     }
-    stepModeButton?.addEventListener("click", () => {
-      builderMode = "step";
-      render();
-      emit();
-    });
-    directModeButton?.addEventListener("click", () => {
-      builderMode = "direct";
-      render();
-      emit();
-    });
 
     const api = {
       getValue() {
         return {
-          items: exportItems(state.items),
+          items: state.items.map(cloneItem),
           symbolToolMap: { ...state.symbolToolMap },
-          savedConditions: stepSavedConditions.map((entry) => ({
+          savedConditions: state.savedConditions.map((entry) => ({
             conditionId: entry.conditionId,
             expression: entry.expression,
-            items: exportItems(entry.items),
+            items: entry.items.map(cloneItem),
+            tree: cloneNode(entry.tree),
           })),
-          currentConditionId: stepCurrentConditionId,
-          expression: expressionForItems(state.items, { completeOnly: builderMode === "step" }),
+          tree: cloneNode(state.tree),
+          expression: state.expression,
         };
       },
       getMode() {
-        return builderMode;
+        return "tree";
       },
-      setMode(nextMode) {
-        builderMode = String(nextMode || "").trim() === "direct" ? "direct" : "step";
-        if (builderMode === "step") {
-          seedStepSavedConditionsFromState();
-        }
+      setMode() {},
+      setValue(value) {
+        state = normalizeState(value || {});
+        syncFromTree();
         render();
         emit();
-      },
-      setValue(value) {
-        syncItems(Array.isArray(value?.items) ? value.items : value);
-        initializeStepState(value, state.items);
-        if (builderMode === "step" && !hasIncompleteStep() && stepCurrentConditionId) {
-          const activeEntry = savedConditionById(stepCurrentConditionId);
-          if (activeEntry) {
-            applyActiveStepCondition(activeEntry);
-          }
-        }
-        render();
-        updateHint();
       },
       setLocked(nextLocked) {
         locked = Boolean(nextLocked);
         render();
-        updateHint();
       },
       setAllowedSourceTypes(nextAllowedSourceTypes) {
-        allowedSourceTypes = new Set(
-          Array.isArray(nextAllowedSourceTypes) && nextAllowedSourceTypes.length
-            ? nextAllowedSourceTypes
-            : [],
-        );
-        syncItems(state.items);
+        allowedSourceTypes = Array.isArray(nextAllowedSourceTypes) ? nextAllowedSourceTypes.slice() : [];
+        state = normalizeState(api.getValue());
+        syncFromTree();
         render();
         emit();
       },
       setPathSymbols(nextSymbols) {
-        symbols = nextSymbols && nextSymbols.length ? nextSymbols : ["A"];
-        state = state.items.length
-          ? normalizeItems({ items: state.items }, symbols, { currentCallToolKey })
-          : { items: [], symbolToolMap: {} };
-        syncItems(state.items);
+        symbols = Array.isArray(nextSymbols) && nextSymbols.length ? nextSymbols : ["A"];
+        state = normalizeState(api.getValue());
+        syncFromTree();
         render();
         emit();
       },
       setCurrentCallToolKey(nextToolKey) {
         currentCallToolKey = String(nextToolKey || "");
-        if (state.items.some((item) => item.sourceType === "context" && item.contextField === "tool.syntax")) {
-          syncItems(state.items);
-          render();
-          emit();
-        }
+        state = normalizeState(api.getValue());
+        syncFromTree();
+        render();
+        emit();
+      },
+      setCurrentCallSubtype(nextSubtype) {
+        currentCallSubtype = String(nextSubtype || "");
+        state = normalizeState(api.getValue());
+        syncFromTree();
+        render();
+        emit();
       },
       clear() {
-        state = { items: [], symbolToolMap: {} };
-        stepSavedConditions = [];
-        stepCurrentConditionId = "";
+        state = normalizeState({
+          items: [],
+          tree: createGroupNode("AND", []),
+          savedConditions: [],
+        });
         render();
         emit();
       },
@@ -2220,38 +2192,29 @@
         if (!state.items.length) {
           return { ok: false, message: "At least one condition is required." };
         }
-        let balance = 0;
         for (const item of state.items) {
-          if (builderMode === "step" && item.stepStage !== "complete") {
-            return { ok: false, message: "Finish the guided condition builder before continuing." };
-          }
           if (!item.expression) {
             return { ok: false, message: "One condition is incomplete." };
           }
-          if (item.sourceType === "trace" && item.feature === "syntax" && !state.symbolToolMap[item.symbol]) {
-            return { ok: false, message: "Trace syntax conditions need an inferred tool mapping first." };
+          if (item.sourceType === "trace" && item.feature === "syntax" && !item.selectedToolKey) {
+            return { ok: false, message: "Trace syntax conditions need a tool selection first." };
           }
-          balance += (item.openParen || "").length;
-          balance -= (item.closeParen || "").length;
-          if (balance < 0) {
-            return { ok: false, message: "Parentheses are not balanced." };
+          if (item.sourceType === "context" && !item.contextPath) {
+            return { ok: false, message: "Context conditions need a valid field path." };
           }
-        }
-        if (balance !== 0) {
-          return { ok: false, message: "Parentheses are not balanced." };
         }
         return { ok: true, message: "CONDITION is valid." };
       },
     };
 
     render();
-    updateHint();
     return api;
   }
 
   window.AgentGuardConditionBuilder = {
     createConditionBuilder,
     inferSymbolToolMap,
+    itemsToTree,
     normalizeItems,
   };
 })();

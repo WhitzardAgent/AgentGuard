@@ -34,8 +34,11 @@
     const closeParen = trailingParens ? trailingParens[0] : "";
     const core = trimmed.slice(openParen.length, trimmed.length - closeParen.length).trim();
 
+    const operatorPattern = "(NOT IN|MATCHES|CONTAINS|==|!=|>=|<=|>|<|IN)";
     const parsed = core.match(
-      /^([A-Z])\.(name|boundary|sensitivity|integrity|label\.boundary|label\.sensitivity|label\.integrity|syntax\.([A-Za-z0-9_]+)|([A-Za-z0-9_]+))\s+(==|!=|>=|<=|>|<|CONTAINS)\s+(.+)$/,
+      new RegExp(
+        `^([A-Z])\\.(name|boundary|sensitivity|integrity|label\\.boundary|label\\.sensitivity|label\\.integrity|syntax\\.([A-Za-z0-9_]+)|([A-Za-z0-9_]+))\\s+${operatorPattern}\\s+(.+)$`,
+      ),
     );
     if (parsed) {
       const [, symbol, featurePath, legacySyntaxField = "", inferredSyntaxField = "", operator, rawValue] = parsed;
@@ -71,7 +74,9 @@
     }
 
     const contextParsed = core.match(
-      /^((?:tool|target|principal|caller|event)\.[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*)\s+(==|!=|>=|<=|>|<|CONTAINS)\s+(.+)$/,
+      new RegExp(
+        `^((?:tool|target|principal|caller|event)\\.[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)*)\\s+${operatorPattern}\\s+(.+)$`,
+      ),
     );
     if (!contextParsed) {
       return null;

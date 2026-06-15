@@ -167,6 +167,45 @@ test("serializeRule appends severity category and reason when provided", () => {
   assert.match(dsl, /Reason: "External email needs approval"/);
 });
 
+test("serializeRule preserves IN and MATCHES operators with expected right-hand formatting", () => {
+  const dsl = serializeRule({
+    name: "review_allowlist_and_regex",
+    path: "A->B",
+    action: "HUMAN_CHECK",
+    conditionItems: [
+      {
+        connector: "",
+        openParen: "",
+        closeParen: "",
+        sourceType: "context",
+        contextPrefix: "tool",
+        contextField: "tool.syntax",
+        contextFieldName: "",
+        contextPath: "tool.domain",
+        syntaxField: "domain",
+        operator: "IN",
+        value: "allowlist.http",
+      },
+      {
+        connector: "AND",
+        openParen: "",
+        closeParen: "",
+        sourceType: "context",
+        contextPrefix: "tool",
+        contextField: "tool.syntax",
+        contextFieldName: "",
+        contextPath: "tool.url",
+        syntaxField: "url",
+        operator: "MATCHES",
+        value: ".*127\\\\.0\\\\.0\\\\.1.*",
+      },
+    ],
+  });
+
+  assert.match(dsl, /CONDITION: tool\.domain IN allowlist\.http/);
+  assert.match(dsl, /AND tool\.url MATCHES ".*127\\\\\\\\\.0\\\\\\\\\.0\\\\\\\\\.1\.\*"/);
+});
+
 test("serializeRule appends prompt only for llm_check rules", () => {
   const dsl = serializeRule({
     name: "review_external_http",

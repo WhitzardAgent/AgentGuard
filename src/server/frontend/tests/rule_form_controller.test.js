@@ -114,6 +114,7 @@ function setupController() {
           },
           setPathSymbols() {},
           setCurrentCallToolKey() {},
+          setCurrentCallSubtype() {},
           setAllowedSourceTypes() {},
           setLocked() {},
           setValue(nextValue) {
@@ -186,7 +187,10 @@ function setupController() {
     elements,
     toolData: {
       loadToolCatalog() {
-        return [];
+        return [{ tool_key: "tool://mailer", name: "email.send" }];
+      },
+      findToolByKey(catalog, toolKey) {
+        return (Array.isArray(catalog) ? catalog : []).find((tool) => tool?.tool_key === toolKey) || null;
       },
     },
     toolCatalogHelpers: {},
@@ -220,11 +224,30 @@ function setupController() {
       },
     },
     onClause: {
-      buildOnClause() {
+      buildOnClause(subtype, toolName) {
+        const normalizedSubtype = String(subtype || "").trim();
+        const normalizedToolName = String(toolName || "").trim();
+        if (normalizedSubtype && normalizedToolName) {
+          return `tool_call.${normalizedSubtype}(${normalizedToolName})`;
+        }
+        if (normalizedSubtype) {
+          return `tool_call.${normalizedSubtype}`;
+        }
+        if (normalizedToolName) {
+          return `tool_call(${normalizedToolName})`;
+        }
         return "";
       },
-      parseOnClauseParts() {
-        return { subtype: "", toolPattern: "" };
+      parseOnClauseParts(value) {
+        const source = String(value || "").trim();
+        const matched = source.match(/^tool_call(?:\.([A-Za-z_][A-Za-z0-9_]*))?(?:\(([A-Za-z_][A-Za-z0-9_.]*|[A-Za-z_][A-Za-z0-9_]*\.\*)\))?$/);
+        if (!matched) {
+          return { subtype: "", toolPattern: "" };
+        }
+        return {
+          subtype: String(matched[1] || "").trim(),
+          toolPattern: String(matched[2] || "").trim(),
+        };
       },
       deriveOnClause(rule) {
         return String(rule?.onClause || "").trim();
@@ -302,4 +325,38 @@ test("rule form controller clears prompt on reset", () => {
 
   assert.equal(elements.rulePromptInput.value, "");
   assert.equal(elements.promptField.hidden, true);
+});
+
+test("rule form controller keeps ON inputs visible in trace mode", () => {
+  const { controller, elements } = setupController();
+
+  controller.resetRuleForm();
+
+  assert.equal(elements.onField.hidden, false);
+  assert.equal(elements.pathField.hidden, false);
+});
+
+test("rule form controller does not clear trace-mode ON selections during preview refresh", () => {
+  const { controller, elements } = setupController();
+
+  elements.ruleOnSubtypeInput.value = "requested";
+  elements.ruleOnInput.value = "tool://mailer";
+
+  controller.renderPreview();
+
+  assert.equal(elements.ruleOnSubtypeInput.value, "requested");
+  assert.equal(elements.ruleOnInput.value, "tool://mailer");
+});
+
+test("rule form controller includes ON clause in trace mode rules", () => {
+  const { controller, elements } = setupController();
+
+  elements.ruleNameInput.value = "trace_with_on";
+  elements.ruleOnSubtypeInput.value = "requested";
+  elements.ruleOnInput.value = "tool://mailer";
+
+  const rule = controller.currentRule();
+
+  assert.equal(rule.entryMode, "trace");
+  assert.equal(rule.onClause, "tool_call.requested(email.send)");
 });
