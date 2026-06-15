@@ -16,8 +16,36 @@ def _session_storage_key(
     return f"{session_id or 'unknown'}::{agent_id or 'unknown'}::{user_id or 'unknown'}"
 
 
+def trace_entry_event_dict(entry: dict[str, Any]) -> dict[str, Any] | None:
+    event = entry.get("event")
+    if isinstance(event, dict):
+        return event
+    checker_input = entry.get("checker_input")
+    if isinstance(checker_input, dict) and isinstance(checker_input.get("event"), dict):
+        return checker_input["event"]
+    if isinstance(entry.get("event_type"), str):
+        return entry
+    return None
+
+
+def _merge_trace_records(existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(existing)
+    for key, value in incoming.items():
+        if value is None:
+            continue
+        current = merged.get(key)
+        if isinstance(current, dict) and isinstance(value, dict):
+            nested = dict(current)
+            nested.update(value)
+            merged[key] = nested
+            continue
+        merged[key] = value
+    return merged
+
+
 class TraceStore:
     def __init__(self) -> None:
+        self._lock = threading.Lock()
         self._traces: dict[str, list[dict[str, Any]]] = {}
 
     def append(
@@ -29,7 +57,34 @@ class TraceStore:
         user_id: str | None = None,
     ) -> None:
         session_key = _session_storage_key(session_id, agent_id, user_id)
-        self._traces.setdefault(session_key, []).append(record)
+        with self._lock:
+            self._traces.setdefault(session_key, []).append(dict(record))
+
+    def upsert(
+        self,
+        session_id: str,
+        record: dict[str, Any],
+        *,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+    ) -> str:
+        session_key = _session_storage_key(session_id, agent_id, user_id)
+        event = trace_entry_event_dict(record)
+        event_id = event.get("event_id") if isinstance(event, dict) else None
+        with self._lock:
+            records = self._traces.setdefault(session_key, [])
+            if event_id:
+                for index, existing in enumerate(records):
+                    existing_event = trace_entry_event_dict(existing)
+                    if not existing_event or existing_event.get("event_id") != event_id:
+                        continue
+                    merged = _merge_trace_records(existing, record)
+                    if merged == existing:
+                        return "unchanged"
+                    records[index] = merged
+                    return "updated"
+            records.append(dict(record))
+            return "appended"
 
     def get(
         self,
@@ -41,10 +96,12 @@ class TraceStore:
         session_key = self._resolve_key(session_id, agent_id=agent_id, user_id=user_id)
         if session_key is None:
             return []
-        return list(self._traces.get(session_key, []))
+        with self._lock:
+            return [dict(record) for record in self._traces.get(session_key, [])]
 
     def sessions(self) -> list[str]:
-        return list(self._traces.keys())
+        with self._lock:
+            return list(self._traces.keys())
 
     def _resolve_key(
         self,
@@ -332,4 +389,4 @@ def _record_matches_principal(record: dict[str, Any], filters: dict[str, Any]) -
     return True
 
 
-__all__ = ["TraceStore", "SessionPool"]
+__all__ = ["TraceStore", "SessionPool", "trace_entry_event_dict"]

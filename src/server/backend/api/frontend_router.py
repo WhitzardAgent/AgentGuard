@@ -7,8 +7,14 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from backend.api.schemas import CheckerConfigUpdateRequest, CheckerConfigUpdateResponse
+from backend.api.schemas import (
+    CheckerConfigUpdateRequest,
+    CheckerConfigUpdateResponse,
+    TraceAuditRequest,
+    TraceAuditResponse,
+)
 from backend.app_state import get_console, get_manager
+from backend.audit import auditor_descriptions, auditor_manager
 from shared.utils.json import safe_dumps, safe_loads
 
 router = APIRouter()
@@ -16,6 +22,7 @@ router = APIRouter()
 # Bind console observers to the shared manager during API startup.
 _manager = get_manager()
 get_console()
+_auditors = auditor_manager()
 
 
 @router.get("/v1/backend/sessions")
@@ -73,6 +80,53 @@ def update_checker_config(req: CheckerConfigUpdateRequest) -> CheckerConfigUpdat
         status="ok",
         loaded_checkers=loaded,
         client_updates=client_updates,
+    )
+
+
+@router.get("/v1/backend/auditors")
+def list_auditors() -> dict[str, list[dict[str, str]]]:
+    return {
+        "auditors": [
+            {"name": name, "description": description}
+            for name, description in sorted(auditor_descriptions().items())
+        ]
+    }
+
+
+@router.post("/v1/backend/audit/custom/run", response_model=TraceAuditResponse)
+def run_custom_trace_audit(req: TraceAuditRequest) -> TraceAuditResponse:
+    trace = _manager.get_trace_records(
+        req.session_id,
+        agent_id=req.agent_id,
+        user_id=req.user_id,
+    )
+    if not trace:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "trace not found for "
+                f"session_id={req.session_id}, agent_id={req.agent_id}, user_id={req.user_id}"
+            ),
+        )
+    try:
+        result = _auditors.audit(
+            req.auditor_name,
+            trace,
+            session_id=req.session_id,
+            agent_id=req.agent_id,
+            user_id=req.user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return TraceAuditResponse(
+        session_id=req.session_id,
+        agent_id=req.agent_id,
+        user_id=req.user_id,
+        auditor_name=req.auditor_name,
+        level=result.level,
+        reason=result.reason,
+        trace_entries=len(trace),
+        metadata=result.metadata,
     )
 
 

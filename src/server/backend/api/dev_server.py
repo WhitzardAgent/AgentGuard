@@ -49,6 +49,15 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, snapshot_dict(self.manager.policy.store))
         elif path == "/v1/backend/sessions":
             self._send(200, {"sessions": self.manager.session_pool.list()})
+        elif path == "/v1/backend/auditors":
+            from backend.audit import auditor_descriptions
+
+            self._send(200, {
+                "auditors": [
+                    {"name": name, "description": description}
+                    for name, description in sorted(auditor_descriptions().items())
+                ]
+            })
         elif path == "/v1/backend/tools":
             self._send(200, self.console.tools())
         elif path.startswith("/v1/backend/agents/") and path.endswith("/tools"):
@@ -164,6 +173,59 @@ class _Handler(BaseHTTPRequestHandler):
                     "status": "ok",
                     "loaded_checkers": loaded,
                     "client_updates": client_updates,
+                },
+            )
+        elif self.path == "/v1/backend/audit/custom/run":
+            session_id = body.get("session_id")
+            auditor_name = body.get("auditor_name")
+            if not isinstance(session_id, str) or not session_id:
+                self._send(400, {"error": "session_id is required"})
+                return
+            if not isinstance(auditor_name, str) or not auditor_name:
+                self._send(400, {"error": "auditor_name is required"})
+                return
+            agent_id = body.get("agent_id")
+            user_id = body.get("user_id")
+            trace = self.manager.get_trace_records(
+                session_id,
+                agent_id=str(agent_id) if agent_id is not None else None,
+                user_id=str(user_id) if user_id is not None else None,
+            )
+            if not trace:
+                self._send(
+                    404,
+                    {
+                        "error": (
+                            "trace not found for "
+                            f"session_id={session_id}, agent_id={agent_id}, user_id={user_id}"
+                        )
+                    },
+                )
+                return
+            try:
+                from backend.audit import auditor_manager
+
+                result = auditor_manager().audit(
+                    auditor_name,
+                    trace,
+                    session_id=session_id,
+                    agent_id=str(agent_id) if agent_id is not None else None,
+                    user_id=str(user_id) if user_id is not None else None,
+                )
+            except ValueError as exc:
+                self._send(400, {"error": str(exc)})
+                return
+            self._send(
+                200,
+                {
+                    "session_id": session_id,
+                    "agent_id": agent_id,
+                    "user_id": user_id,
+                    "auditor_name": auditor_name,
+                    "level": result.level,
+                    "reason": result.reason,
+                    "trace_entries": len(trace),
+                    "metadata": result.metadata,
                 },
             )
         elif self.path == "/v1/backend/sessions/refresh-stale":

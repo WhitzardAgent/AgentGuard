@@ -18,7 +18,7 @@ from backend.runtime.checkers.base import CheckResult
 from backend.runtime.checkers import server_checker_manager
 from backend.runtime.degrade.planner import DegradePlanner
 from backend.runtime.policy.engine import PolicyEngine
-from backend.runtime.storage import SessionPool, TraceStore
+from backend.runtime.storage import SessionPool, TraceStore, trace_entry_event_dict
 from shared.utils.json import safe_dumps, safe_loads
 from shared.utils.time import now_ts
 
@@ -252,6 +252,7 @@ class RuntimeManager:
                     "entries": cached_entries,
                 }
             )
+        self._remember_trace_window(trace_window, context)
 
         session_cfg = self.session_pool.get(
             context.session_id or "",
@@ -308,6 +309,21 @@ class RuntimeManager:
 
         # 6. Audit.
         self.audit.record(event.to_dict(), decision.to_dict(), plugin_results)
+        self._store_trace_record(
+            context.session_id or event.context.session_id or "unknown",
+            {
+                "session_id": context.session_id or event.context.session_id or "unknown",
+                "agent_id": context.agent_id or event.context.agent_id,
+                "user_id": context.user_id or event.context.user_id,
+                "reason": "guard_decide",
+                "event": event.to_dict(),
+                "decision": decision.to_dict(),
+                "checker_result": _checker_result_dict(check),
+                "plugin_results": plugin_results,
+            },
+            agent_id=context.agent_id or event.context.agent_id,
+            user_id=context.user_id or event.context.user_id,
+        )
 
         # 6b. Observers (traffic/telemetry/approvals for the console).
         for observer in self.observers:
@@ -324,6 +340,15 @@ class RuntimeManager:
             "checker_result": _checker_result_dict(check),
             "plugin_results": plugin_results,
         }
+
+    def get_trace_records(
+        self,
+        session_id: str,
+        *,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        return self.trace_store.get(session_id, agent_id=agent_id, user_id=user_id)
 
     def record_uploaded_trace(self, trace: dict[str, Any]) -> int:
         session_id = trace.get("session_id") or "unknown"
@@ -353,26 +378,57 @@ class RuntimeManager:
             entry_context = entry.get("context") if isinstance(entry.get("context"), dict) else {}
             entry_agent_id = entry_context.get("agent_id", agent_id)
             entry_user_id = entry_context.get("user_id", user_id)
-            if _trace_store_has_event(
-                self.trace_store.get(
-                    session_id,
-                    agent_id=str(entry_agent_id) if entry_agent_id is not None else None,
-                    user_id=str(entry_user_id) if entry_user_id is not None else None,
-                ),
-                event_dict,
-            ):
-                continue
-            self.trace_store.append(
+            stored = self._store_trace_record(
                 session_id,
                 record,
                 agent_id=str(entry_agent_id) if entry_agent_id is not None else None,
                 user_id=str(entry_user_id) if entry_user_id is not None else None,
             )
+            if not stored:
+                continue
             decision_dict = entry.get("decision") if isinstance(entry.get("decision"), dict) else None
             if event_dict and decision_dict:
                 self.audit.record(event_dict, decision_dict, {"trace_upload": {"reason": trace.get("reason")}})
             count += 1
         return count
+
+    def _remember_trace_window(
+        self,
+        trace_window: list[RuntimeEvent],
+        context: RuntimeContext,
+    ) -> None:
+        for observed in trace_window:
+            observed_session_id = observed.context.session_id or context.session_id or "unknown"
+            observed_agent_id = observed.context.agent_id or context.agent_id
+            observed_user_id = observed.context.user_id or context.user_id
+            self._store_trace_record(
+                observed_session_id,
+                {
+                    "session_id": observed_session_id,
+                    "agent_id": observed_agent_id,
+                    "user_id": observed_user_id,
+                    "reason": "trajectory_window",
+                    "event": observed.to_dict(),
+                },
+                agent_id=observed_agent_id,
+                user_id=observed_user_id,
+            )
+
+    def _store_trace_record(
+        self,
+        session_id: str,
+        record: dict[str, Any],
+        *,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+    ) -> bool:
+        status = self.trace_store.upsert(
+            session_id,
+            record,
+            agent_id=str(agent_id) if agent_id is not None else None,
+            user_id=str(user_id) if user_id is not None else None,
+        )
+        return status != "unchanged"
 
     def _bind_rule_based_checkers(self) -> None:
         self._bind_rule_based_checkers_for(self.checkers)
@@ -503,15 +559,7 @@ def _events_from_cached_entries(entries: list[dict[str, Any]]) -> list[RuntimeEv
 
 
 def _cached_entry_event_dict(entry: dict[str, Any]) -> dict[str, Any] | None:
-    event = entry.get("event")
-    if isinstance(event, dict):
-        return event
-    checker_input = entry.get("checker_input")
-    if isinstance(checker_input, dict) and isinstance(checker_input.get("event"), dict):
-        return checker_input["event"]
-    if isinstance(entry.get("event_type"), str):
-        return entry
-    return None
+    return trace_entry_event_dict(entry)
 
 
 def _merge_event_window(events: list[RuntimeEvent]) -> list[RuntimeEvent]:

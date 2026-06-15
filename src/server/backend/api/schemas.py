@@ -1,7 +1,7 @@
 """Pydantic request/response models for the server API."""
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -58,3 +58,21 @@ class CheckerConfigUpdateResponse(BaseModel):
 class SkillRunRequest(BaseModel):
     skill_name: str
     input: dict[str, Any] = Field(default_factory=dict)
+
+
+class TraceAuditRequest(BaseModel):
+    session_id: str
+    agent_id: str | None = None
+    user_id: str | None = None
+    auditor_name: str
+
+
+class TraceAuditResponse(BaseModel):
+    session_id: str
+    agent_id: str | None = None
+    user_id: str | None = None
+    auditor_name: str
+    level: Literal["critical", "high", "warning", "ok"]
+    reason: str
+    trace_entries: int = 0
+    metadata: dict[str, Any] = Field(default_factory=dict)
