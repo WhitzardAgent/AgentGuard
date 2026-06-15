@@ -3,6 +3,8 @@
 * [Quick Deployment](README.md)
 * [Overview](overview.md)
 * [Core Concepts](concepts.md)
+* Runtime Internals
+  * [Runtime Session Lifecycle](runtime/session_lifecycle.md)
 * AgentGuard Client Importing
   * [LangChain](how-to-plugin/langchain.md)
   * [AutoGen](how-to-plugin/autogen.md)

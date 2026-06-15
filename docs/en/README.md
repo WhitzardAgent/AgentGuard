@@ -397,7 +397,40 @@ git clone https://github.com/WhitzardAgent/AgentGuard.git
 cd AgentGuard
 ```
 
-#### 1. Write an access control policy
+#### 1. Write a checker config file
+
+Before writing any access-control policy, first define which server-side checker is active in this quick start:
+
+```bash
+mkdir -p config
+
+cat <<EOF > config/checkers.json
+{
+  "phases": {
+    "llm_before": {
+      "local": [],
+      "remote": []
+    },
+    "llm_after": {
+      "local": [],
+      "remote": []
+    },
+    "tool_before": {
+      "local": [],
+      "remote": ["rule_based_check"]
+    },
+    "tool_after": {
+      "local": [],
+      "remote": []
+    }
+  }
+}
+EOF
+```
+
+This config means: only the `tool_before` phase runs a remote checker, and that checker is the built-in `rule_based_check`. All other phases are empty. In other words, the server will evaluate your policy rules only right before a tool call runs. That keeps the quick start focused on access-control decisions around tool execution, without introducing additional LLM-phase or tool-result checkers yet.
+
+#### 2. Create an access control policy
 
 Our agent has two tools: `retrieve_doc` and `send_email_to` — one retrieves a document by ID, the other sends it to an email address. Suppose we want agents with trust level below 2 to only send the confidential document (id 0) to `admin@example.com`, and block all other recipients. We can create a policy file:
 
@@ -421,7 +454,7 @@ EOF
 
 AgentGuard provides a dedicated DSL for writing policies, which we'll cover in detail in [DSL Basic Structure](./policies/dsl_basic_structure.md).
 
-#### 2. Deploy the AgentGuard control server
+#### 3. Deploy the AgentGuard control server
 
 We offer two deployment methods: Docker and source code.
 
@@ -429,7 +462,15 @@ We offer two deployment methods: Docker and source code.
 
 > You need Docker installed first.
 
-Docker deployment is straightforward — just run this command from the project root:
+Docker deployment is straightforward. First set the checker config path in `.env`:
+
+```bash
+cp .env.example .env
+# then set:
+# AGENTGUARD_SERVER_CHECKER_CONFIG=./config/checkers.json
+```
+
+Then run this command from the project root:
 
 ```bash
 ./scripts/start.sh -d
@@ -456,6 +497,7 @@ pip install -e ".[server]"
 Then start the control server:
 
 ```bash
+AGENTGUARD_SERVER_CHECKER_CONFIG=./config/checkers.json \
 python -m agentguard serve \
     --host 0.0.0.0 \
     --port 38080 \

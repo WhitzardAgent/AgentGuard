@@ -3,6 +3,8 @@
 * [快速部署](README.md)
 * [概览](overview.md)
 * [核心概念](concepts.md)
+* 运行时链路
+  * [会话生命周期与存储](runtime/session_lifecycle.md)
 * 如何在智能体中导入访问控制客户端
   * [LangChain](how-to-plugin/langchain.md)
   * [AutoGen](how-to-plugin/autogen.md)

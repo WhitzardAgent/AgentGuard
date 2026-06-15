@@ -152,18 +152,32 @@ class AgentGuard:
         self.context.metadata["client_checker_config"] = _checker_config_payload(checker_config)
         self._enforcer.update_checker_config(checker_config)
 
-    def start_config_api(self, *, host: str = "127.0.0.1", port: int = 38181) -> str:
+    def start_config_api(
+        self,
+        *,
+        host: str = "127.0.0.1",
+        port: int = 38181,
+        sync_remote: bool = True,
+    ) -> str:
         """Start a local HTTP API for checker configuration updates."""
+        prev_config_url = self.context.metadata.get("client_config_url")
+        prev_checker_list_url = self.context.metadata.get("client_checker_list_url")
+        prev_health_url = self.context.metadata.get("client_health_url")
         if self._config_api is None:
             self._config_api = ClientConfigAPIServer(self, host=host, port=port)
         url = self._config_api.start()
+        checker_list_url = self._config_api.checker_list_url
+        health_url = self._config_api.health_url
         self.context.metadata["client_config_url"] = url
-        self.context.metadata["client_checker_list_url"] = self._config_api.checker_list_url
-        self.context.metadata["client_health_url"] = self._config_api.health_url
-        try:
-            self._remote.register_session(self.context)
-        except Exception:
-            pass
+        self.context.metadata["client_checker_list_url"] = checker_list_url
+        self.context.metadata["client_health_url"] = health_url
+        urls_changed = (
+            prev_config_url != url
+            or prev_checker_list_url != checker_list_url
+            or prev_health_url != health_url
+        )
+        if sync_remote and urls_changed:
+            self._sync_remote_session()
         return url
 
     def stop_config_api(self) -> None:
@@ -302,9 +316,14 @@ class AgentGuard:
         if not self._remote.enabled:
             return
         try:
-            self.start_config_api(port=0)
+            self.start_config_api(port=0, sync_remote=False)
         except Exception:
             pass
+        self._sync_remote_session()
+
+    def _sync_remote_session(self) -> None:
+        if not self._remote.enabled:
+            return
         try:
             self._remote.register_session(self.context)
         except Exception:

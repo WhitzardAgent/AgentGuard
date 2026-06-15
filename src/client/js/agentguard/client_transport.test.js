@@ -106,9 +106,11 @@ test("agentguard auto-registers remote session with checker config metadata", as
   });
 
   await new Promise((resolve) => setImmediate(resolve));
+  await guard.ensureRemoteSessionRegistered();
 
-  assert.equal(calls.length >= 1, true);
-  const registerCall = calls.find((call) => call.url.endsWith("/v1/server/session/register"));
+  const registerCalls = calls.filter((call) => call.url.endsWith("/v1/server/session/register"));
+  assert.equal(registerCalls.length, 1);
+  const registerCall = registerCalls[0];
   assert.ok(registerCall);
   const body = JSON.parse(registerCall.options.body);
   assert.equal(body.context.session_id, "sess-4");

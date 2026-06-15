@@ -5,7 +5,7 @@
     <img src="https://img.shields.io/badge/Document-Docs-0ea5e9?style=for-the-badge&logo=gitbook&logoColor=white" alt="Document" />
   </a>
   <a href="https://github.com/WhitzardAgent/AgentGuard/releases">
-    <img src="https://img.shields.io/badge/Release-v1.0-111827?style=for-the-badge&logo=github&logoColor=white" alt="Release v1.0" />
+    <img src="https://img.shields.io/badge/Release-v2.0-111827?style=for-the-badge&logo=github&logoColor=white" alt="Release v2.0" />
   </a>
   <a href="./LICENSE">
     <img src="https://img.shields.io/badge/License-GPL%20v3-16a34a?style=for-the-badge&logo=open-source-initiative&logoColor=white" alt="License" />
@@ -95,7 +95,7 @@ AgentGuard uses a centralized control-plane architecture to govern distributed a
 
 ## 🚀 Quick Start
 
-### 1. Write Access Control Policies and Start the Control Server
+### 1. Write Checker Config, Then Write Access Control Policies and Start the Control Server
 
 > Docker must be installed first.
 
@@ -106,7 +106,38 @@ git clone https://github.com/WhitzardAgent/AgentGuard.git
 cd AgentGuard
 ```
 
-Create an access control policy:
+First, create a checker config file for the control server:
+
+```bash
+mkdir -p config
+
+cat <<EOF > config/checkers.json
+{
+  "phases": {
+    "llm_before": {
+      "local": [],
+      "remote": []
+    },
+    "llm_after": {
+      "local": [],
+      "remote": []
+    },
+    "tool_before": {
+      "local": [],
+      "remote": ["rule_based_check"]
+    },
+    "tool_after": {
+      "local": [],
+      "remote": []
+    }
+  }
+}
+EOF
+```
+
+This config tells AgentGuard which checkers run in each runtime phase. In this quick start, only `tool_before` enables one remote checker: `rule_based_check`. That means the server evaluates access-control rules right before a tool call is executed, while all other phases stay empty. This keeps the first demo simple: the client forwards tool-invocation decisions to the server, and the server uses the built-in rule-based checker to match your policy rules and return an allow/deny decision.
+
+Then create an access control policy:
 
 ```bash
 mkdir -p rules
@@ -137,6 +168,12 @@ Next, configure the environment variables for the control server:
 ```bash
 cp .env.example .env
 vi .env
+```
+
+Set the server checker config path in `.env`:
+
+```bash
+AGENTGUARD_SERVER_CHECKER_CONFIG=./config/checkers.json
 ```
 
 Start the control server:

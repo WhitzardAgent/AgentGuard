@@ -96,6 +96,7 @@ class AgentGuard {
     }
     this.plugins.start_session(this.context);
     this.remote_session_registration = null;
+    this.remote_session_registered = false;
     this.ensureRemoteSessionRegistered();
   }
 
@@ -200,8 +201,12 @@ class AgentGuard {
     this.plugins.end_session(this.runtime.session.trace, this.context);
     if (this.remote.enabled) {
       try {
-        await this.ensureRemoteSessionRegistered();
-        await this.remote.unregister_session();
+        const registered = await this.ensureRemoteSessionRegistered();
+        if (registered) {
+          await this.remote.unregister_session();
+          this.remote_session_registered = false;
+          this.remote_session_registration = null;
+        }
       } catch (_) {
         return;
       }
@@ -212,12 +217,21 @@ class AgentGuard {
     if (!this.remote.enabled) {
       return Promise.resolve(false);
     }
+    if (this.remote_session_registered) {
+      return Promise.resolve(true);
+    }
     if (this.remote_session_registration) {
       return this.remote_session_registration;
     }
     this.remote_session_registration = this.remote.register_session(this.context)
-      .then(() => true)
-      .catch(() => false);
+      .then(() => {
+        this.remote_session_registered = true;
+        return true;
+      })
+      .catch(() => {
+        this.remote_session_registration = null;
+        return false;
+      });
     return this.remote_session_registration;
   }
 

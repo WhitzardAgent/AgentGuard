@@ -5,7 +5,7 @@
     <img src="https://img.shields.io/badge/%E6%96%87%E6%A1%A3-Docs-0ea5e9?style=for-the-badge&logo=gitbook&logoColor=white" alt="文档" />
   </a>
   <a href="https://github.com/WhitzardAgent/AgentGuard/releases">
-    <img src="https://img.shields.io/badge/%E5%8F%91%E5%B8%83-v1.0-111827?style=for-the-badge&logo=github&logoColor=white" alt="发布 v1.0" />
+    <img src="https://img.shields.io/badge/%E5%8F%91%E5%B8%83-v2.0-111827?style=for-the-badge&logo=github&logoColor=white" alt="发布 v2.0" />
   </a>
   <a href="./LICENSE">
     <img src="https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF%E8%AF%81-GPL%20v3-16a34a?style=for-the-badge&logo=open-source-initiative&logoColor=white" alt="许可证" />
@@ -95,7 +95,7 @@ AgentGuard 采用集中式中控架构，实现对分布式智能体进程的统
 
 ## 🚀 快速开始
 
-### 1. 编写访问控制策略并安装中控服务
+### 1. 先编写 Checker 配置，再编写访问控制策略并安装中控服务
 
 > 你需要先安装 Docker
 
@@ -106,7 +106,38 @@ git clone https://github.com/WhitzardAgent/AgentGuard.git
 cd AgentGuard
 ```
 
-编写一套访问控制策略：
+首先，先为中控服务编写一份 checker 配置：
+
+```bash
+mkdir -p config
+
+cat <<EOF > config/checkers.json
+{
+  "phases": {
+    "llm_before": {
+      "local": [],
+      "remote": []
+    },
+    "llm_after": {
+      "local": [],
+      "remote": []
+    },
+    "tool_before": {
+      "local": [],
+      "remote": ["rule_based_check"]
+    },
+    "tool_after": {
+      "local": [],
+      "remote": []
+    }
+  }
+}
+EOF
+```
+
+这份配置用于告诉 AgentGuard：在不同运行阶段分别启用哪些 checker。这个 quick start 里，只有 `tool_before` 阶段启用了一个远端 checker：`rule_based_check`。这意味着 server 只会在工具真正执行之前，基于内置的规则型 checker 去匹配访问控制策略；其他阶段都先保持为空。这样可以让第一个示例尽量简单：client 将工具调用前的判定请求发给 server，server 再用 `rule_based_check` 根据你写的策略返回 allow / deny 决策。
+
+然后，再编写一套访问控制策略：
 ```bash
 mkdir -p rules
 
@@ -136,6 +167,12 @@ EOF
 ```bash
 cp .env.example .env
 vi .env
+```
+
+在 `.env` 中补充 server checker 配置文件路径：
+
+```bash
+AGENTGUARD_SERVER_CHECKER_CONFIG=./config/checkers.json
 ```
 
 启动中控服务：
