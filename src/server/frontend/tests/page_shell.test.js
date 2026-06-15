@@ -47,6 +47,11 @@ function bootShell(selectedAgentId = "") {
   const elements = {};
   const agentRequired = [
     { hidden: false },
+  ];
+  const checkerRequired = [
+    { hidden: false },
+  ];
+  const ruleBasedRequired = [
     { hidden: false },
     { hidden: false },
   ];
@@ -81,6 +86,12 @@ function bootShell(selectedAgentId = "") {
       if (selector === "[data-agent-required='true']") {
         return agentRequired;
       }
+      if (selector === "[data-checker-required='true']") {
+        return checkerRequired;
+      }
+      if (selector === "[data-rule-based-required='true']") {
+        return ruleBasedRequired;
+      }
       return [];
     },
     addEventListener() {},
@@ -94,14 +105,28 @@ function bootShell(selectedAgentId = "") {
   delete require.cache[require.resolve("../static/common/page-shell.js")];
   require("../static/common/page-shell.js");
 
-  return { elements, agentRequired, shell: global.window.AgentGuardShell };
+  return {
+    elements,
+    agentRequired,
+    checkerRequired,
+    ruleBasedRequired,
+    shell: global.window.AgentGuardShell,
+  };
 }
 
 test("sidebar hides agent-required links until an agent is selected", () => {
-  const { agentRequired, elements, shell } = bootShell("");
+  const {
+    agentRequired,
+    checkerRequired,
+    ruleBasedRequired,
+    elements,
+    shell,
+  } = bootShell("");
 
-  assert.equal(elements["sidebar-current-user"].textContent, "Default User");
+  assert.equal(elements["sidebar-current-user"].textContent, "Current User");
   assert.equal(agentRequired.every((item) => item.hidden), true);
+  assert.equal(checkerRequired.every((item) => item.hidden), true);
+  assert.equal(ruleBasedRequired.every((item) => item.hidden), true);
   assert.equal(elements["sidebar-agent-panel"].hidden, true);
   assert.equal(elements["sidebar-selected-agent-wrap"].hidden, true);
   assert.equal(elements["sidebar-selected-agent"].textContent, "");
@@ -109,7 +134,15 @@ test("sidebar hides agent-required links until an agent is selected", () => {
   shell.setSelectedAgent("agent-a");
 
   assert.equal(agentRequired.every((item) => item.hidden === false), true);
+  assert.equal(checkerRequired.every((item) => item.hidden), true);
+  assert.equal(ruleBasedRequired.every((item) => item.hidden), true);
   assert.equal(elements["sidebar-agent-panel"].hidden, false);
   assert.equal(elements["sidebar-selected-agent-wrap"].hidden, false);
   assert.equal(elements["sidebar-selected-agent"].textContent, "agent-a");
+
+  shell.setSelectedChecker("rule_based_check");
+
+  assert.equal(checkerRequired.every((item) => item.hidden === false), true);
+  assert.equal(ruleBasedRequired.every((item) => item.hidden === false), true);
+  assert.equal(elements["sidebar-selected-checker"].textContent, "rule_based_check");
 });

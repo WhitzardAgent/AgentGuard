@@ -7,8 +7,14 @@
   <script>
     (function () {
       try {
-        if (!String(window.localStorage.getItem("agentguard.selectedAgentId") || "").trim()) {
+        const agentId = String(window.localStorage.getItem("agentguard.selectedAgentId") || "").trim();
+        const checkerName = String(window.localStorage.getItem("agentguard.selectedCheckerName") || "").trim();
+        if (!agentId) {
           window.location.replace("/agents.html");
+          return;
+        }
+        if (checkerName !== "rule_based_check") {
+          window.location.replace("/checkers.html");
         }
       } catch {
         window.location.replace("/agents.html");

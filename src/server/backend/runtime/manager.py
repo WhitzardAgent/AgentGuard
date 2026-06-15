@@ -83,6 +83,9 @@ class RuntimeManager:
             client_key=(context.metadata or {}).get("client_session_key"),
         )
 
+    def sessions_for_principal(self, principal: dict[str, Any]) -> list[dict[str, Any]]:
+        return self.session_pool.find_by_principal(principal)
+
     def update_client_checker_config(
         self,
         principal: dict[str, Any],
@@ -130,6 +133,24 @@ class RuntimeManager:
             pushed["session_id"] = session_id
             updates.append(pushed)
         return updates
+
+    def update_agent_checker_config(
+        self,
+        agent_id: str,
+        checker_config: dict[str, Any],
+        *,
+        client_config: dict[str, Any] | None = None,
+        timeout_s: float = 2.0,
+    ) -> list[dict[str, Any]]:
+        normalized_agent_id = str(agent_id or "").strip()
+        if not normalized_agent_id:
+            return []
+        return self.update_client_checker_config(
+            {"agent_id": normalized_agent_id},
+            client_config or checker_config,
+            remote_checker_config=checker_config,
+            timeout_s=timeout_s,
+        )
 
     def start_session_health_monitor(self) -> None:
         """Start the background session health monitor if it is not running."""

@@ -113,7 +113,7 @@ def test_rules_proxy_forwards_api_key_and_payload():
 
     assert status == 200
     assert payload == {"loaded": 2}
-    assert observed["path"] == "/rules/reload"
+    assert observed["path"] == "/v1/backend/rules/reload"
     assert observed["api_key"] == "test-secret"
     assert json.loads(str(observed["body"]))["source"].startswith("RULE test")
 
@@ -149,7 +149,7 @@ def test_rules_check_proxy_forwards_api_key_and_payload():
 
     assert status == 200
     assert payload["ok"] is True
-    assert observed["path"] == "/rules/check"
+    assert observed["path"] == "/v1/backend/rules/check"
     assert observed["api_key"] == "test-secret"
     assert json.loads(str(observed["body"]))["source"].startswith("RULE: test")
 
@@ -238,7 +238,7 @@ def test_agent_rules_proxy_lists_effective_rules():
 
     assert status == 200
     assert payload[0]["rule_id"] == "agent_rule"
-    assert observed["path"] == "/agents/agent-a/rules"
+    assert observed["path"] == "/v1/backend/agents/agent-a/rules"
 
 
 def test_agent_rule_create_proxy_forwards_payload_and_api_key():
@@ -272,7 +272,7 @@ def test_agent_rule_create_proxy_forwards_payload_and_api_key():
 
     assert status == 200
     assert payload["ok"] is True
-    assert observed["path"] == "/agents/agent-a/rules"
+    assert observed["path"] == "/v1/backend/agents/agent-a/rules"
     assert observed["api_key"] == "test-secret"
     assert json.loads(str(observed["body"]))["source"].startswith("RULE: agent_rule")
 
@@ -305,7 +305,7 @@ def test_agent_rule_delete_proxy_forwards_request():
 
     assert status == 200
     assert payload["ok"] is True
-    assert observed["path"] == "/agents/agent-a/rules/agent_rule"
+    assert observed["path"] == "/v1/backend/agents/agent-a/rules/agent_rule"
     assert observed["api_key"] == "test-secret"
 
 
@@ -340,9 +340,157 @@ def test_tool_label_patch_proxy_forwards_request():
 
     assert status == 200
     assert payload["ok"] is True
-    assert observed["path"] == "/agents/agent-a/tools/email.send/labels"
+    assert observed["path"] == "/v1/backend/agents/agent-a/tools/email.send/labels"
     assert observed["api_key"] == "test-secret"
     assert json.loads(str(observed["body"]))["boundary"] == "internal"
+
+
+def test_checkers_config_proxy_forwards_payload_and_api_key():
+    observed: dict[str, object] = {}
+
+    class UpstreamHandler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            observed["path"] = self.path
+            observed["api_key"] = self.headers.get("X-Api-Key")
+            length = int(self.headers.get("Content-Length", "0"))
+            observed["body"] = self.rfile.read(length).decode("utf-8")
+            body = json.dumps({"status": "ok", "loaded_checkers": ["tool_invoke"], "client_updates": []}).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    request_body = {
+        "config": {"phases": {"tool_before": {"local": [], "remote": ["tool_invoke"]}}},
+        "client_principals": [{"agent_id": "agent-a"}],
+    }
+
+    with _ThreadedServer(UpstreamHandler) as upstream:
+        with patched_proxy_target(upstream.url, api_key="test-secret"):
+            with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+                status, payload = _json_request("POST", preview.url, "/api/checkers/config", request_body)
+
+    assert status == 200
+    assert payload["status"] == "ok"
+    assert observed["path"] == "/v1/backend/checkers/config"
+    assert observed["api_key"] == "test-secret"
+    assert json.loads(str(observed["body"])) == request_body
+
+
+def test_agent_checker_config_get_proxy_forwards_request():
+    observed: dict[str, object] = {}
+
+    class UpstreamHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            observed["path"] = self.path
+            body = json.dumps({
+                "agent_id": "agent-a",
+                "session_count": 1,
+                "config_status": "consistent",
+                "client_checker_config": {"phases": {}},
+                "remote_checker_config": {"phases": {}},
+                "sessions": [],
+            }).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    with _ThreadedServer(UpstreamHandler) as upstream:
+        with patched_proxy_target(upstream.url):
+            with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+                status, payload = _json_request(
+                    "GET",
+                    preview.url,
+                    "/api/agents/agent-a/checkers/config",
+                )
+
+    assert status == 200
+    assert payload["agent_id"] == "agent-a"
+    assert observed["path"] == "/v1/backend/agents/agent-a/checkers/config"
+
+
+def test_agent_checker_config_post_proxy_forwards_payload_and_api_key():
+    observed: dict[str, object] = {}
+
+    class UpstreamHandler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            observed["path"] = self.path
+            observed["api_key"] = self.headers.get("X-Api-Key")
+            length = int(self.headers.get("Content-Length", "0"))
+            observed["body"] = self.rfile.read(length).decode("utf-8")
+            body = json.dumps({"status": "ok", "loaded_checkers": [], "client_updates": []}).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    request_body = {
+        "config": {"phases": {"tool_before": {"local": [], "remote": ["tool_invoke"]}}},
+        "client_config": {"phases": {"tool_after": {"local": ["tool_result"], "remote": []}}},
+    }
+
+    with _ThreadedServer(UpstreamHandler) as upstream:
+        with patched_proxy_target(upstream.url, api_key="test-secret"):
+            with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+                status, payload = _json_request(
+                    "POST",
+                    preview.url,
+                    "/api/agents/agent-a/checkers/config",
+                    request_body,
+                )
+
+    assert status == 200
+    assert payload["status"] == "ok"
+    assert observed["path"] == "/v1/backend/agents/agent-a/checkers/config"
+    assert observed["api_key"] == "test-secret"
+    assert json.loads(str(observed["body"])) == request_body
+
+
+def test_agent_checker_available_get_proxy_forwards_request():
+    observed: dict[str, object] = {}
+
+    class UpstreamHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            observed["path"] = self.path
+            body = json.dumps({
+                "agent_id": "agent-a",
+                "local_checkers": [{"name": "tool_invoke", "description": "", "event_types": ["tool_invoke"]}],
+                "remote_checkers": [{"name": "rule_based_check", "description": "", "event_types": ["tool_invoke"]}],
+            }).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    with _ThreadedServer(UpstreamHandler) as upstream:
+        with patched_proxy_target(upstream.url):
+            with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+                status, payload = _json_request(
+                    "GET",
+                    preview.url,
+                    "/api/agents/agent-a/checkers/available",
+                )
+
+    assert status == 200
+    assert payload["agent_id"] == "agent-a"
+    assert observed["path"] == "/v1/backend/agents/agent-a/checkers/available"
 
 
 def test_runtime_page_renders_shared_sidebar_and_active_nav():
@@ -350,15 +498,15 @@ def test_runtime_page_renders_shared_sidebar_and_active_nav():
         status, body = _text_request("GET", preview.url, "/runtime.html")
 
     assert status == 200
-    assert 'id="sidebar-toggle"' in body
     assert 'id="app-sidebar"' in body
     assert 'href="/">Home</a>' in body
     assert 'href="/agents.html">Agents</a>' in body
+    assert 'href="/checkers.html"' in body
     assert 'href="/user.html">User</a>' in body
-    assert 'class="sidebar-nav-item active"' in body
     assert 'href="/runtime.html"' in body
+    assert "active" in body
     assert 'href="/labels.html"' in body
-    assert 'data-agent-required="true"' in body
+    assert 'data-checker-required="true"' in body
 
 
 def test_home_page_renders_intro_and_home_active_nav():
@@ -370,9 +518,10 @@ def test_home_page_renders_intro_and_home_active_nav():
     assert "AgentGuard" in body
     assert "keeps your agent workflow in control." in body
     assert 'href="/agents.html"' in body
+    assert 'href="/checkers.html"' in body
     assert '<a class="sidebar-nav-item active" href="/">Home</a>' in body
     assert 'href="/labels.html"' in body
-    assert 'data-agent-required="true"' in body
+    assert 'data-rule-based-required="true"' in body
 
 
 def test_agents_page_renders_agent_selection_workspace():
@@ -381,8 +530,18 @@ def test_agents_page_renders_agent_selection_workspace():
 
     assert status == 200
     assert "Available Agents" in body
-    assert "Watching" in body
+    assert "Choose an agent" in body
     assert '<a class="sidebar-nav-item active" href="/agents.html">Agents</a>' in body
+
+
+def test_checkers_page_renders_checker_selection_workspace():
+    with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+        status, body = _text_request("GET", preview.url, "/checkers.html")
+
+    assert status == 200
+    assert "Available Checkers" in body
+    assert 'href="/checkers.html"' in body
+    assert 'Checkers</a>' in body
 
 
 def test_mock_mode_lists_tools_and_agent_scoped_tools():

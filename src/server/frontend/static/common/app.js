@@ -13,6 +13,14 @@
   const LEGACY_TOOL_SCOPE_KEY = "agentguard.toolCatalogApiBase";
   const text = window.AgentGuardText || {};
   const shell = window.AgentGuardShell || null;
+  const EVENT_TYPE_PHASE_MAP = {
+    tool_invoke: "tool_before",
+    tool_result: "tool_after",
+    llm_input: "llm_before",
+    llm_output: "llm_after",
+    llm_thought: "llm_after",
+    final_response: "llm_after",
+  };
 
   function buildQuery(params) {
     const search = new URLSearchParams();
@@ -28,6 +36,80 @@
 
   function getSelectedAgentId() {
     return String(shell?.getState?.().selectedAgentId || "").trim();
+  }
+
+  function normalizeCheckerOption(item) {
+    return {
+      name: String(item?.name || "").trim(),
+      description: String(item?.description || "").trim(),
+      event_types: Array.isArray(item?.event_types) ? item.event_types.map(String).filter(Boolean) : [],
+    };
+  }
+
+  function normalizeAgentCheckerConfig(item) {
+    return {
+      agent_id: String(item?.agent_id || "").trim(),
+      session_count: Number.isFinite(Number(item?.session_count)) ? Number(item.session_count) : 0,
+      config_status: String(item?.config_status || "none").trim() || "none",
+      client_checker_config: item?.client_checker_config && typeof item.client_checker_config === "object"
+        ? item.client_checker_config
+        : null,
+      remote_checker_config: item?.remote_checker_config && typeof item.remote_checker_config === "object"
+        ? item.remote_checker_config
+        : null,
+      sessions: Array.isArray(item?.sessions) ? item.sessions.slice() : [],
+    };
+  }
+
+  function buildCheckerConfig(checker) {
+    const option = normalizeCheckerOption(checker);
+    if (!option.name) {
+      throw new Error("checker name is required.");
+    }
+    const phases = {};
+    option.event_types.forEach((eventType) => {
+      const phase = EVENT_TYPE_PHASE_MAP[String(eventType || "").trim()];
+      if (!phase) {
+        return;
+      }
+      if (!phases[phase]) {
+        phases[phase] = { local: [], remote: [] };
+      }
+      if (!phases[phase].remote.includes(option.name)) {
+        phases[phase].remote.push(option.name);
+      }
+    });
+    if (option.name === "rule_based_check") {
+      phases.tool_before = phases.tool_before || { local: [], remote: [] };
+      if (!phases.tool_before.remote.includes("tool_invoke")) {
+        phases.tool_before.remote.unshift("tool_invoke");
+      }
+      if (!phases.tool_before.remote.includes("rule_based_check")) {
+        phases.tool_before.remote.push("rule_based_check");
+      }
+    }
+    if (!Object.keys(phases).length) {
+      throw new Error(`checker '${option.name}' does not expose a supported event type.`);
+    }
+    return { phases };
+  }
+
+  function selectedCheckerFromConfig(configResponse) {
+    const remoteConfig = normalizeAgentCheckerConfig(configResponse).remote_checker_config || {};
+    const phases = remoteConfig?.phases;
+    if (!phases || typeof phases !== "object") {
+      return "";
+    }
+    const found = Object.values(phases).flatMap((phase) => {
+      if (!phase || typeof phase !== "object" || !Array.isArray(phase.remote)) {
+        return [];
+      }
+      return phase.remote.map(String).filter(Boolean);
+    });
+    if (found.includes("rule_based_check")) {
+      return "rule_based_check";
+    }
+    return found.find((name) => name !== "tool_invoke") || found[0] || "";
   }
 
   function clearLegacyToolCache() {
@@ -402,6 +484,48 @@
     return rules;
   }
 
+  async function listAgentAvailableCheckers(agentId = getSelectedAgentId()) {
+    const normalizedAgentId = String(agentId || "").trim();
+    if (!normalizedAgentId) {
+      return { agent_id: "", local_checkers: [], remote_checkers: [] };
+    }
+    const payload = await fetchJson(`/api/agents/${encodeURIComponent(normalizedAgentId)}/checkers/available`);
+    return {
+      agent_id: String(payload?.agent_id || normalizedAgentId).trim(),
+      local_checkers: Array.isArray(payload?.local_checkers) ? payload.local_checkers.map(normalizeCheckerOption) : [],
+      remote_checkers: Array.isArray(payload?.remote_checkers) ? payload.remote_checkers.map(normalizeCheckerOption) : [],
+    };
+  }
+
+  async function getAgentCheckerConfig(agentId = getSelectedAgentId()) {
+    const normalizedAgentId = String(agentId || "").trim();
+    if (!normalizedAgentId) {
+      return normalizeAgentCheckerConfig({});
+    }
+    const payload = await fetchJson(`/api/agents/${encodeURIComponent(normalizedAgentId)}/checkers/config`);
+    return normalizeAgentCheckerConfig(payload);
+  }
+
+  async function updateAgentCheckerConfig(agentId, config, clientConfig = null) {
+    const normalizedAgentId = String(agentId || "").trim();
+    if (!normalizedAgentId) {
+      throw new Error("agent_id is required.");
+    }
+    if (!config || typeof config !== "object") {
+      throw new Error("config is required.");
+    }
+    return fetchJson(`/api/agents/${encodeURIComponent(normalizedAgentId)}/checkers/config`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        config,
+        client_config: clientConfig,
+      }),
+    });
+  }
+
   function groupToolsByAgent(catalog) {
     return (Array.isArray(catalog) ? catalog : []).reduce((acc, tool) => {
       const agentId = String(tool?.owner_agent_id || "").trim();
@@ -458,8 +582,11 @@
     groupToolsByAgent,
     listAgentIds,
     normalizeAgentSummary,
+    normalizeCheckerOption,
     normalizeRule,
     normalizeTool,
+    buildCheckerConfig,
+    selectedCheckerFromConfig,
     loadAgentCatalog,
     persistAgentCatalog,
     refreshAgentCatalog,
@@ -479,6 +606,15 @@
     },
     refreshRuleList(agentId = getSelectedAgentId()) {
       return refreshScopedRuleList(agentId);
+    },
+    listAgentAvailableCheckers(agentId = getSelectedAgentId()) {
+      return listAgentAvailableCheckers(agentId);
+    },
+    getAgentCheckerConfig(agentId = getSelectedAgentId()) {
+      return getAgentCheckerConfig(agentId);
+    },
+    updateAgentCheckerConfig(agentId, config, clientConfig = null) {
+      return updateAgentCheckerConfig(agentId, config, clientConfig);
     },
     clearToolCache: clearScopedAgentCache,
     clearScopedAgentCache,

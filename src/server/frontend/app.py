@@ -42,6 +42,8 @@ PAGE_ROUTES = {
     "/index.html": "home.html",
     "/agents": "agents.html",
     "/agents.html": "agents.html",
+    "/checkers": "checkers.html",
+    "/checkers.html": "checkers.html",
     "/user": "user.html",
     "/user.html": "user.html",
     "/labels": "labels.html",
@@ -55,13 +57,14 @@ PAGE_ROUTES = {
 PAGE_TAB_KEYS = {
     "home.html": "home",
     "agents.html": "agents",
+    "checkers.html": "checkers",
     "user.html": "user",
     "labels.html": "labels",
     "rules.html": "rules",
     "runtime.html": "runtime",
 }
 
-SIDEBAR_TABS = ("home", "agents", "user", "labels", "rules", "runtime")
+SIDEBAR_TABS = ("home", "agents", "checkers", "user", "labels", "rules", "runtime")
 
 
 class FrontendPreviewHandler(BaseHTTPRequestHandler):
@@ -106,6 +109,16 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
             self._proxy(upstream_path, method="GET", query=query)
             return
 
+        if path.startswith("/api/agents/") and path.endswith("/checkers/config"):
+            upstream_path = path.removeprefix("/api/")
+            self._proxy(upstream_path, method="GET", query=query)
+            return
+
+        if path.startswith("/api/agents/") and path.endswith("/checkers/available"):
+            upstream_path = path.removeprefix("/api/")
+            self._proxy(upstream_path, method="GET", query=query)
+            return
+
         if path.startswith("/api/agents/") and path.endswith("/rules"):
             upstream_path = path.removeprefix("/api/")
             self._proxy(upstream_path, method="GET", query=query)
@@ -145,6 +158,15 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
 
         if path == "/api/rules/reload":
             self._proxy("rules/reload", method="POST", query=query)
+            return
+
+        if path == "/api/checkers/config":
+            self._proxy("checkers/config", method="POST", query=query)
+            return
+
+        if path.startswith("/api/agents/") and path.endswith("/checkers/config"):
+            upstream_path = path.removeprefix("/api/")
+            self._proxy(upstream_path, method="POST", query=query)
             return
 
         if path.startswith("/api/agents/") and path.endswith("/rules"):
@@ -396,12 +418,15 @@ def serve(host: str | None = None, port: int | None = None) -> None:
         print(f"Proxying /api/rules to {API_BASE_URL}/v1/backend/rules")
         print(f"Proxying /api/rules/reload to {API_BASE_URL}/v1/backend/rules/reload")
         print("Proxying /api/agents/{agent_id}/rules to agent-scoped rule endpoints")
+        print("Proxying /api/agents/{agent_id}/checkers/config to agent-scoped checker endpoints")
+        print("Proxying /api/agents/{agent_id}/checkers/available to agent-scoped checker catalog endpoints")
         print("Proxying /api/agents/{agent_id}/tools/{tool_name}/labels to tool-label patch endpoint")
         print(f"Proxying /api/health to {API_BASE_URL}/v1/backend/health")
         print(f"Proxying /api/stats to {API_BASE_URL}/v1/backend/stats")
         print(f"Proxying /api/traffic to {API_BASE_URL}/v1/backend/traffic")
         print(f"Proxying /api/audit/recent to {API_BASE_URL}/v1/backend/audit/recent")
         print(f"Proxying /api/approvals to {API_BASE_URL}/v1/backend/approvals")
+        print(f"Proxying /api/checkers/config to {API_BASE_URL}/v1/backend/checkers/config")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

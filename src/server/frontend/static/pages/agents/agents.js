@@ -57,6 +57,9 @@
         shell?.setSelectedAgent?.(agentId);
         renderAgentList();
         showToast(`Now watching ${agentId}.`, "success");
+        if (typeof window !== "undefined" && window.location) {
+          window.location.assign("/checkers.html");
+        }
       });
 
       agentList.appendChild(card);

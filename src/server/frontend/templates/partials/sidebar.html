@@ -17,10 +17,17 @@
                 </div>
               </section>
 
+              <section class="sidebar-agent-context" aria-label="Current checker context" id="sidebar-selected-checker-wrap" hidden>
+                <div class="sidebar-agent-chip">
+                  <div class="sidebar-agent-name" id="sidebar-selected-checker"></div>
+                </div>
+              </section>
+
               <nav class="sidebar-agent-group" aria-label="Agent scoped sections">
-                <a class="sidebar-nav-item sidebar-nav-item-child{{ labels_active }}" href="/labels.html" data-agent-required="true" hidden>Labels</a>
-                <a class="sidebar-nav-item sidebar-nav-item-child{{ rules_active }}" href="/rules.html" data-agent-required="true" hidden>Rules</a>
-                <a class="sidebar-nav-item sidebar-nav-item-child{{ runtime_active }}" href="/runtime.html" data-agent-required="true" hidden>DashBoard</a>
+                <a class="sidebar-nav-item sidebar-nav-item-child{{ checkers_active }}" href="/checkers.html" data-agent-required="true" hidden>Checkers</a>
+                <a class="sidebar-nav-item sidebar-nav-item-child{{ labels_active }}" href="/labels.html" data-rule-based-required="true" hidden>Labels</a>
+                <a class="sidebar-nav-item sidebar-nav-item-child{{ rules_active }}" href="/rules.html" data-rule-based-required="true" hidden>Rules</a>
+                <a class="sidebar-nav-item sidebar-nav-item-child{{ runtime_active }}" href="/runtime.html" data-checker-required="true" hidden>DashBoard</a>
               </nav>
             </div>
           </div>

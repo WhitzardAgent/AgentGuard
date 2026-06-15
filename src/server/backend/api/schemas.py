@@ -55,6 +55,43 @@ class CheckerConfigUpdateResponse(BaseModel):
     client_updates: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class AgentCheckerConfigUpdateRequest(BaseModel):
+    config: dict[str, Any]
+    client_config: dict[str, Any] | None = None
+    timeout_s: float = 2.0
+
+
+class AgentCheckerSessionConfig(BaseModel):
+    session_id: str
+    agent_id: str | None = None
+    user_id: str | None = None
+    last_seen: float | None = None
+    client_config_url: str | None = None
+    client_checker_config: dict[str, Any] | None = None
+    remote_checker_config: dict[str, Any] | None = None
+
+
+class AgentCheckerConfigResponse(BaseModel):
+    agent_id: str
+    session_count: int = 0
+    config_status: Literal["none", "consistent", "mixed"] = "none"
+    client_checker_config: dict[str, Any] | None = None
+    remote_checker_config: dict[str, Any] | None = None
+    sessions: list[AgentCheckerSessionConfig] = Field(default_factory=list)
+
+
+class CheckerOption(BaseModel):
+    name: str
+    description: str = ""
+    event_types: list[str] = Field(default_factory=list)
+
+
+class AgentCheckerAvailableResponse(BaseModel):
+    agent_id: str
+    local_checkers: list[CheckerOption] = Field(default_factory=list)
+    remote_checkers: list[CheckerOption] = Field(default_factory=list)
+
+
 class SkillRunRequest(BaseModel):
     skill_name: str
     input: dict[str, Any] = Field(default_factory=dict)

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgentGuard Frontend Preview</title>
+  <script>
+    (function () {
+      try {
+        if (!String(window.localStorage.getItem("agentguard.selectedAgentId") || "").trim()) {
+          window.location.replace("/agents.html");
+        }
+      } catch {
+        window.location.replace("/agents.html");
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/common/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+{{ shared:sidebar }}
+
+    <main class="app-main home-main">
+      <section class="page-intro-card home-hero">
+        <div class="home-hero-copy">
+          <p class="page-kicker">Checker Selection</p>
+          <h1>Choose a checker flow for <span id="checker-selected-agent">the selected agent</span>.</h1>
+          <p class="subtle">
+            Rule-based checker opens tag and rule management. Other checkers go straight to runtime dashboard.
+          </p>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="heading-row">
+          <div>
+            <h3>Available Checkers</h3>
+            <p class="subtle" id="checker-config-status">Loading checker catalog...</p>
+          </div>
+          <div class="heading-actions">
+            <button class="icon-label" id="refresh-checkers" type="button" aria-label="Refresh checker catalog" title="Refresh checker catalog">
+              <img class="btn-icon-image" src="/assets/refresh.png" alt="">
+            </button>
+          </div>
+        </div>
+        <div class="agent-list" id="checker-list"></div>
+      </section>
+
+      <section class="card">
+        <div class="heading-row">
+          <div>
+            <h3>Next Step</h3>
+            <p class="subtle" id="checker-next-step-status">Choose a checker to unlock the next workspace.</p>
+          </div>
+        </div>
+        <div class="toolbar" id="checker-next-step-actions">
+          <a class="btn" href="/agents.html">Back To Agents</a>
+        </div>
+      </section>
+    </main>
+
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <script src="/static/common/messages.js"></script>
+  <script src="/static/common/page-shell.js"></script>
+  <script src="/static/common/app.js"></script>
+  <script src="/static/pages/checkers/checkers.js"></script>
+</body>
+</html>
