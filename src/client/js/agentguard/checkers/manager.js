@@ -1,6 +1,8 @@
 "use strict";
 
+const fs = require("fs");
 const { CheckResult, BaseChecker } = require("./base");
+const { getCheckerClass } = require("./registry");
 const { LLMInputChecker } = require("./llm_before/llm_input");
 const { LLMOutputChecker } = require("./llm_after/llm_output");
 const { ToolInvokeChecker } = require("./tool_before/tool_invoke");
@@ -13,9 +15,55 @@ const EVENT_PHASE = {
   tool_invoke: "tool_before",
   tool_result: "tool_after",
 };
+const BUILTIN_CHECKERS = {
+  llm_input: LLMInputChecker,
+  llm_output: LLMOutputChecker,
+  tool_invoke: ToolInvokeChecker,
+  tool_result: ToolResultChecker,
+};
 
 function defaultCheckers() {
   return [new LLMInputChecker(), new LLMOutputChecker(), new ToolInvokeChecker(), new ToolResultChecker()];
+}
+
+function loadCheckerConfig(source = null) {
+  if (source == null) {
+    return null;
+  }
+  let data;
+  if (typeof source === "string") {
+    data = JSON.parse(fs.readFileSync(source, "utf-8"));
+  } else {
+    data = { ...source };
+  }
+  const phases = data.phases;
+  if (!phases || typeof phases !== "object" || Array.isArray(phases)) {
+    throw new Error("checker config must contain a 'phases' object");
+  }
+  const config = {};
+  for (const phase of PHASE_ORDER) {
+    if (phase in phases) {
+      config[phase] = checkerSpecsForScope(phases[phase], "local");
+    }
+  }
+  return config;
+}
+
+function checkerSpecsForScope(value, scope) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("checker phase config must be an object with 'local' and 'remote'");
+  }
+  if (!("local" in value) || !("remote" in value)) {
+    throw new Error("checker phase config must include both 'local' and 'remote'");
+  }
+  const specs = value[scope];
+  if (specs == null) {
+    return [];
+  }
+  if (!Array.isArray(specs)) {
+    throw new Error(`checker phase '${scope}' config must be a list`);
+  }
+  return [...specs];
 }
 
 function buildCheckersByPhase(config = null) {
@@ -36,17 +84,32 @@ function instantiateChecker(spec) {
   if (typeof spec === "function") {
     return new spec();
   }
+  if (typeof spec === "string") {
+    const CheckerClass = BUILTIN_CHECKERS[spec] || getCheckerClass(spec);
+    if (!CheckerClass) {
+      throw new Error(`invalid checker config entry: ${String(spec)}`);
+    }
+    return new CheckerClass();
+  }
+  if (spec && typeof spec === "object") {
+    const target = spec.class || spec.checker || spec.name;
+    const CheckerClass = typeof target === "function" ? target : BUILTIN_CHECKERS[target] || getCheckerClass(target);
+    if (!CheckerClass) {
+      throw new Error(`invalid checker config entry: ${JSON.stringify(spec)}`);
+    }
+    return new CheckerClass();
+  }
   throw new Error(`invalid checker config entry: ${String(spec)}`);
 }
 
 class CheckerManager {
   constructor({ checkers = null, config = null } = {}) {
-    this.checkers_by_phase = checkers ? { global: [...checkers] } : buildCheckersByPhase(config);
+    this.checkers_by_phase = checkers ? { global: [...checkers] } : buildCheckersByPhase(loadCheckerConfig(config));
     this.refresh();
   }
 
   update_config(config = null) {
-    this.checkers_by_phase = buildCheckersByPhase(config);
+    this.checkers_by_phase = buildCheckersByPhase(loadCheckerConfig(config));
     this.refresh();
   }
 
@@ -104,4 +167,6 @@ module.exports = {
   PHASE_ORDER,
   CheckerManager,
   defaultCheckers,
+  loadCheckerConfig,
+  load_checker_config: loadCheckerConfig,
 };

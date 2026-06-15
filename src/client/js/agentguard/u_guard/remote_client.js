@@ -40,6 +40,8 @@ class RemoteGuardClient {
     this.server_url = (server_url || "").replace(/\/$/, "");
     this.api_key = options.api_key || options.apiKey || null;
     this.session_id = options.session_id || options.sessionId || null;
+    this.agent_id = options.agent_id || options.agentId || null;
+    this.user_id = options.user_id || options.userId || null;
     this.session_key = options.session_key || options.sessionKey || null;
     this.timeout_s = options.timeout_s ?? options.timeoutS ?? 5.0;
     this.retries = options.retries ?? 2;
@@ -47,6 +49,7 @@ class RemoteGuardClient {
     this.snapshot_path = options.snapshot_path || "/v1/server/policy/snapshot";
     this.trace_path = options.trace_path || "/v1/server/trace/upload";
     this.tool_report_path = options.tool_report_path || "/v1/server/tools/report";
+    this.register_path = options.register_path || "/v1/server/session/register";
     this.unregister_path = options.unregister_path || "/v1/server/session/unregister";
     this.breaker = new CircuitBreaker();
   }
@@ -99,6 +102,12 @@ class RemoteGuardClient {
     });
   }
 
+  register_session(context) {
+    return this.post(this.register_path, {
+      context: context.toDict(),
+    });
+  }
+
   unregister_session() {
     return this.post(this.unregister_path, {});
   }
@@ -125,6 +134,12 @@ class RemoteGuardClient {
     }
     if (this.session_id) {
       headers["X-AgentGuard-Session-Id"] = this.session_id;
+    }
+    if (this.agent_id) {
+      headers["X-AgentGuard-Agent-Id"] = this.agent_id;
+    }
+    if (this.user_id) {
+      headers["X-AgentGuard-User-Id"] = this.user_id;
     }
     if (this.session_key) {
       headers["X-AgentGuard-Session-Key"] = this.session_key;

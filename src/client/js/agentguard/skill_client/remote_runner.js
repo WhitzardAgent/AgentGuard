@@ -10,17 +10,28 @@ class RemoteSkillRunner {
     if (!this.server_url) {
       throw new Error("no remote skill server configured");
     }
+    const headers = {
+      "Content-Type": "application/json",
+      ...(this.options.api_key ? { Authorization: `Bearer ${this.options.api_key}` } : {}),
+    };
+    if (this.options.session_id) {
+      headers["X-AgentGuard-Session-Id"] = this.options.session_id;
+    }
+    if (this.options.agent_id) {
+      headers["X-AgentGuard-Agent-Id"] = this.options.agent_id;
+    }
+    if (this.options.user_id) {
+      headers["X-AgentGuard-User-Id"] = this.options.user_id;
+    }
+    if (this.options.session_key) {
+      headers["X-AgentGuard-Session-Key"] = this.options.session_key;
+    }
     const response = await fetch(`${this.server_url.replace(/\/$/, "")}/v1/server/skills/run`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(this.options.api_key ? { Authorization: `Bearer ${this.options.api_key}` } : {}),
-      },
+      headers,
       body: JSON.stringify({
         skill_name,
-        input_data,
-        session_id: this.options.session_id || null,
-        session_key: this.options.session_key || null,
+        input: input_data,
       }),
     });
     return response.json();

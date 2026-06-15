@@ -1,6 +1,7 @@
 "use strict";
 
 const crypto = require("crypto");
+const fs = require("fs");
 const path = require("path");
 const { defaultLLMAdapters, selectLLMAdapter } = require("./adapters/llm");
 const { AgentDoGProxyPlugin } = require("./plugins/builtin/agentdog_proxy");
@@ -28,6 +29,7 @@ const { OpenAIAgentsAdapter } = require("./adapters/agent/openai_agents");
 
 class AgentGuard {
   constructor(session_id, options = {}) {
+    const checkerPayload = checkerConfigPayload(options.checker_config || options.checkerConfig || null);
     const snapshot = this.loadSnapshot(options.policy || null);
     this.session_key = options.session_key || options.sessionKey || generateSessionKey();
     this.context = new RuntimeContext({
@@ -37,11 +39,17 @@ class AgentGuard {
       policy: options.policy || null,
       policy_version: snapshot.version,
       environment: options.environment || null,
-      metadata: { client_session_key: this.session_key },
+      metadata: {
+        client_session_key: this.session_key,
+        client_checker_config: checkerPayload,
+        remote_checker_config: checkerPayload,
+      },
     });
     this.remote = new RemoteGuardClient(options.server_url || options.serverUrl || null, {
       api_key: options.api_key || options.apiKey || null,
       session_id: this.context.session_id,
+      agent_id: this.context.agent_id,
+      user_id: this.context.user_id,
       session_key: this.session_key,
       timeout_s: options.remote_timeout_s ?? options.remoteTimeoutS ?? 5.0,
       retries: options.remote_retries ?? options.remoteRetries ?? 2,
@@ -49,7 +57,7 @@ class AgentGuard {
     this.enforcer = new UGuardEnforcer({
       snapshot,
       remote: this.remote,
-      checker_manager: new CheckerManager({ config: options.checker_config || null }),
+      checker_manager: new CheckerManager({ config: options.checker_config || options.checkerConfig || null }),
     });
     this.sandbox = new SandboxExecutor(options.sandbox || "local", options.sandbox_profile || options.sandboxProfile || null);
     this.audit = new AuditRecorder(session_id, new AuditLogger(options.audit_path || options.auditPath || null));
@@ -77,6 +85,8 @@ class AgentGuard {
         ? new RemoteSkillRunner(options.server_url || options.serverUrl, {
             api_key: options.api_key || options.apiKey || null,
             session_id: this.context.session_id,
+            agent_id: this.context.agent_id,
+            user_id: this.context.user_id,
             session_key: this.session_key,
           })
         : null,
@@ -85,6 +95,8 @@ class AgentGuard {
       this.register_plugin(new AgentDoGProxyPlugin());
     }
     this.plugins.start_session(this.context);
+    this.remote_session_registration = null;
+    this.ensureRemoteSessionRegistered();
   }
 
   loadSnapshot(policy) {
@@ -115,6 +127,9 @@ class AgentGuard {
   }
 
   update_checker_config(checker_config) {
+    const payload = checkerConfigPayload(checker_config);
+    this.context.metadata.client_checker_config = payload;
+    this.context.metadata.remote_checker_config = payload;
     this.enforcer.update_checker_config(checker_config);
   }
 
@@ -155,6 +170,7 @@ class AgentGuard {
   }
 
   async run_skill(skill_name, input_data = {}) {
+    await this.ensureRemoteSessionRegistered();
     return this.skills.run(skill_name, input_data);
   }
 
@@ -184,11 +200,25 @@ class AgentGuard {
     this.plugins.end_session(this.runtime.session.trace, this.context);
     if (this.remote.enabled) {
       try {
+        await this.ensureRemoteSessionRegistered();
         await this.remote.unregister_session();
       } catch (_) {
         return;
       }
     }
+  }
+
+  ensureRemoteSessionRegistered() {
+    if (!this.remote.enabled) {
+      return Promise.resolve(false);
+    }
+    if (this.remote_session_registration) {
+      return this.remote_session_registration;
+    }
+    this.remote_session_registration = this.remote.register_session(this.context)
+      .then(() => true)
+      .catch(() => false);
+    return this.remote_session_registration;
   }
 
   reportToolMetadata(metadata) {
@@ -207,12 +237,29 @@ class AgentGuard {
         tags: [ ...(((metadata.metadata || {}).tags || metadata.capabilities || []).map((tag) => String(tag)).filter(Boolean)) ],
       },
     };
-    this.remote.report_tool(this.context, toolPayload).catch(() => {});
+    this.ensureRemoteSessionRegistered()
+      .then((registered) => (registered ? this.remote.report_tool(this.context, toolPayload) : null))
+      .catch(() => {});
   }
 }
 
 function generateSessionKey() {
   return `sk-${crypto.randomBytes(32).toString("base64url")}`;
+}
+
+function checkerConfigPayload(checker_config) {
+  if (checker_config == null) {
+    return null;
+  }
+  if (typeof checker_config === "object") {
+    return JSON.parse(JSON.stringify(checker_config));
+  }
+  const raw = fs.readFileSync(checker_config, "utf-8");
+  const data = JSON.parse(raw);
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("checker config file must contain a JSON object");
+  }
+  return data;
 }
 
 module.exports = {
