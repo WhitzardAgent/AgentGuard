@@ -1,8 +1,8 @@
 """Deprecated checker for removed LLM thought events."""
 from __future__ import annotations
 
-from agentguard.checkers.base import BaseChecker, CheckResult
-from agentguard.checkers.registry import register
+from agentguard.plugins.base import BaseChecker, CheckResult
+from agentguard.plugins.registry import register
 from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.events import RuntimeEvent
 

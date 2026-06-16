@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from agentguard.checkers.registry import registered_checkers
+from agentguard.plugins.registry import registered_checkers
 from agentguard.utils.json import safe_dumps, safe_loads
 
 CHECKER_CONFIG_PATH = "/v1/client/checkers/config"
@@ -214,7 +214,7 @@ def _install_checker_code(body: dict[str, Any]) -> dict[str, Any]:
     target = phase_dir / filename
     target.write_text(code.rstrip() + "\n", encoding="utf-8")
 
-    module_name = f"agentguard.checkers.{phase}.{target.stem}"
+    module_name = f"agentguard.plugins.{phase}.{target.stem}"
     importlib.invalidate_caches()
     if module_name in sys.modules:
         importlib.reload(sys.modules[module_name])

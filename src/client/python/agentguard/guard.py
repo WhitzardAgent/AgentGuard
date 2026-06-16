@@ -9,13 +9,13 @@ from typing import Any, Callable
 from agentguard.adapters.llm import default_llm_adapters, select_llm_adapter
 from agentguard.audit.logger import AuditLogger
 from agentguard.audit.recorder import AuditRecorder
-from agentguard.checkers.manager import CheckerManager
+from agentguard.plugins.manager import CheckerManager
 from agentguard.config_api import ClientConfigAPIServer
 from agentguard.harness.event_bus import EventBus
 from agentguard.harness.lifecycle import Lifecycle
 from agentguard.harness.runtime import HarnessRuntime
-from agentguard.plugins.builtin.agentdog_proxy import AgentDoGProxyPlugin
-from agentguard.plugins.manager import PluginManager
+# from agentguard.plugins.builtin.agentdog_proxy import AgentDoGProxyPlugin
+# from agentguard.plugins.manager import PluginManager
 from agentguard.rules.loader import load_policy
 from agentguard.sandbox.executor import SandboxExecutor
 from agentguard.schemas.context import RuntimeContext

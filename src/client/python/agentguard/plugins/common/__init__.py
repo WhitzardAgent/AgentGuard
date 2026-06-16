@@ -1,7 +1,7 @@
 """Shared checker helpers."""
 from __future__ import annotations
 
-from agentguard.checkers.common.patterns import (
+from agentguard.plugins.common.patterns import (
     API_KEY_RE,
     CARD_RE,
     EMAIL_RE,

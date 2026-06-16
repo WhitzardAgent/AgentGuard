@@ -303,8 +303,8 @@ Client checkers must be placed in the phase folder that matches the event type:
 Example:
 
 ```python
-from agentguard.checkers.base import BaseChecker, CheckResult
-from agentguard.checkers.registry import register
+from agentguard.plugins.base import BaseChecker, CheckResult
+from agentguard.plugins.registry import register
 from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.events import EventType, RuntimeEvent
 

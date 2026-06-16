@@ -224,8 +224,8 @@ TOOL_RESULT -> tool_after
 ## 自定义 checker 示例
 
 ```python
-from agentguard.checkers.base import BaseChecker, CheckResult
-from agentguard.checkers.registry import register
+from agentguard.plugins.base import BaseChecker, CheckResult
+from agentguard.plugins.registry import register
 from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.decisions import GuardDecision
 from agentguard.schemas.events import EventType, RuntimeEvent
@@ -349,7 +349,7 @@ curl -X POST http://127.0.0.1:38181/v1/client/checkers/update \
   -d '{
     "event_type": "llm_input",
     "filename": "my_llm_input_checker.py",
-    "code": "from agentguard.checkers.base import BaseChecker, CheckResult\nfrom agentguard.checkers.registry import register\nfrom agentguard.schemas.events import EventType\n\n@register(name=\"my_llm_input\", description=\"My checker.\")\nclass MyLLMInputChecker(BaseChecker):\n    event_types = [EventType.LLM_INPUT]\n    def check(self, event, context):\n        return CheckResult(risk_signals=[\"my_signal\"])\n"
+    "code": "from agentguard.plugins.base import BaseChecker, CheckResult\nfrom agentguard.plugins.registry import register\nfrom agentguard.schemas.events import EventType\n\n@register(name=\"my_llm_input\", description=\"My checker.\")\nclass MyLLMInputChecker(BaseChecker):\n    event_types = [EventType.LLM_INPUT]\n    def check(self, event, context):\n        return CheckResult(risk_signals=[\"my_signal\"])\n"
   }'
 ```
 
@@ -366,7 +366,7 @@ curl -X POST http://127.0.0.1:38181/v1/client/checkers/update \
 ## 新增 checker 时如何配置
 
 新增 checker 时，把 checker 类放到对应阶段文件夹里，然后在 class 上添加
-`@register(name=..., description=...)`。manager 会自动 discovery `agentguard.checkers`
+`@register(name=..., description=...)`。manager 会自动 discovery `agentguard.plugins`
 下面的 checker 模块，让装饰器完成注册；配置文件里直接写注册的 `name` 即可。
 使用这种方式，不需要修改 `__init__.py`，也不需要维护内置 checker map。
 
@@ -383,8 +383,8 @@ agentguard/checkers/llm_before/my_checker.py
 示例 checker：
 
 ```python
-from agentguard.checkers.base import BaseChecker, CheckResult
-from agentguard.checkers.registry import register
+from agentguard.plugins.base import BaseChecker, CheckResult
+from agentguard.plugins.registry import register
 from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.events import EventType, RuntimeEvent
 

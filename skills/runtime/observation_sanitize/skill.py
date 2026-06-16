@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 
 from agentguard.audit.redactor import redact
-from agentguard.checkers.common.patterns import INJECTION_PHRASES
+from agentguard.plugins.common.patterns import INJECTION_PHRASES
 from skills.base import BaseSkill, SkillInput, SkillOutput
 
 

@@ -10,7 +10,12 @@
     },
     "tool_before": {
       "local": [],
-      "remote": ["rule_based_check"]
+      "remote": [
+        {
+          "name": "rule_based_check",
+          "env": {}
+        }
+      ]
     },
     "tool_after": {
       "local": [],

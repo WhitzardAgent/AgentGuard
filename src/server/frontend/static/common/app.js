@@ -11,6 +11,7 @@
   const LEGACY_TOOL_CATALOG_KEY = "agentguard.toolCatalog";
   const LEGACY_TOOL_SYNC_KEY = "agentguard.toolCatalogSyncedAt";
   const LEGACY_TOOL_SCOPE_KEY = "agentguard.toolCatalogApiBase";
+  const DEFAULT_REQUEST_TIMEOUT_MS = 6000;
   const text = window.AgentGuardText || {};
   const shell = window.AgentGuardShell || null;
   const EVENT_TYPE_PHASE_MAP = {
@@ -475,21 +476,87 @@
     return String(fallback || text.genericRequestError || "Request failed.");
   }
 
+  function buildTimedFetchOptions(url, options = {}) {
+    const timeoutMs = Number(options?.timeoutMs);
+    const normalizedTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs > 0
+      ? timeoutMs
+      : DEFAULT_REQUEST_TIMEOUT_MS;
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    const upstreamSignal = options?.signal;
+    const fetchOptions = {
+      cache: "no-store",
+      ...options,
+    };
+    let timeoutId = null;
+    let abortHandler = null;
+
+    delete fetchOptions.timeoutMs;
+
+    if (!controller) {
+      return {
+        fetchOptions,
+        cleanup() {},
+        didTimeout() {
+          return false;
+        },
+      };
+    }
+
+    let timedOut = false;
+
+    if (upstreamSignal instanceof AbortSignal) {
+      if (upstreamSignal.aborted) {
+        controller.abort(upstreamSignal.reason);
+      } else {
+        abortHandler = () => controller.abort(upstreamSignal.reason);
+        upstreamSignal.addEventListener("abort", abortHandler, { once: true });
+      }
+    }
+
+    timeoutId = setTimeout(() => {
+      if (!controller.signal.aborted) {
+        timedOut = true;
+        controller.abort(new Error(`Request timed out after ${normalizedTimeoutMs}ms`));
+      }
+    }, normalizedTimeoutMs);
+
+    fetchOptions.signal = controller.signal;
+
+    return {
+      fetchOptions,
+      cleanup() {
+        if (timeoutId !== null) {
+          clearTimeout(timeoutId);
+        }
+        if (abortHandler && upstreamSignal instanceof AbortSignal) {
+          upstreamSignal.removeEventListener("abort", abortHandler);
+        }
+      },
+      didTimeout() {
+        return timedOut;
+      },
+      timeoutMessage: `Request timed out after ${normalizedTimeoutMs}ms while fetching ${url}.`,
+    };
+  }
+
   async function fetchJson(url, options = {}) {
     let response;
     let payload;
+    const timedFetch = buildTimedFetchOptions(url, options);
 
     try {
-      response = await fetch(url, {
-        cache: "no-store",
-        ...options,
-      });
+      response = await fetch(url, timedFetch.fetchOptions);
     } catch (error) {
+      timedFetch.cleanup();
       if (shell?.setApiStatus) {
         shell.setApiStatus(text.sidebarApiUnavailable || "Unavailable", "danger");
       }
+      if (timedFetch.didTimeout()) {
+        throw new Error(timedFetch.timeoutMessage);
+      }
       throw new Error(formatErrorMessage(error, text.unreachableApi || "Cannot reach the AgentGuard API."));
     }
+    timedFetch.cleanup();
 
     try {
       payload = await response.json();

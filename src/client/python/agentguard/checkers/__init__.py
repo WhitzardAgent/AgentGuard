@@ -1,18 +1,44 @@
-"""Local risk checkers."""
+"""Compatibility aliases for legacy checker imports."""
 from __future__ import annotations
 
-from agentguard.checkers.base import BaseChecker, CheckResult
-from agentguard.checkers.manager import CheckerManager, default_checkers
-from agentguard.checkers.registry import (
+import importlib
+import sys
+
+from agentguard.plugins import (
+    BaseChecker,
+    CheckResult,
+    CheckerManager,
+    LLMInputChecker,
+    LLMOutputChecker,
+    ToolInvokeChecker,
+    ToolResultChecker,
     checker_descriptions,
+    default_checkers,
     get_checker_class,
     register,
     registered_checkers,
 )
-from agentguard.checkers.llm_after import LLMOutputChecker
-from agentguard.checkers.llm_before import LLMInputChecker
-from agentguard.checkers.tool_after import ToolResultChecker
-from agentguard.checkers.tool_before import ToolInvokeChecker
+
+_ALIASES = (
+    "base",
+    "manager",
+    "registry",
+    "common",
+    "common.patterns",
+    "llm_before",
+    "llm_before.llm_input",
+    "llm_after",
+    "llm_after.final_response",
+    "llm_after.llm_output",
+    "llm_after.llm_thought",
+    "tool_before",
+    "tool_before.tool_invoke",
+    "tool_after",
+    "tool_after.tool_result",
+)
+
+for alias in _ALIASES:
+    sys.modules[f"{__name__}.{alias}"] = importlib.import_module(f"agentguard.plugins.{alias}")
 
 __all__ = [
     "BaseChecker",

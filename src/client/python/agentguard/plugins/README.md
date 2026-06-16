@@ -241,8 +241,8 @@ break the main runtime flow.
 ## Custom Checker Example
 
 ```python
-from agentguard.checkers.base import BaseChecker, CheckResult
-from agentguard.checkers.registry import register
+from agentguard.plugins.base import BaseChecker, CheckResult
+from agentguard.plugins.registry import register
 from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.decisions import GuardDecision
 from agentguard.schemas.events import EventType, RuntimeEvent
@@ -368,7 +368,7 @@ curl -X POST http://127.0.0.1:38181/v1/client/checkers/update \
   -d '{
     "event_type": "llm_input",
     "filename": "my_llm_input_checker.py",
-    "code": "from agentguard.checkers.base import BaseChecker, CheckResult\nfrom agentguard.checkers.registry import register\nfrom agentguard.schemas.events import EventType\n\n@register(name=\"my_llm_input\", description=\"My checker.\")\nclass MyLLMInputChecker(BaseChecker):\n    event_types = [EventType.LLM_INPUT]\n    def check(self, event, context):\n        return CheckResult(risk_signals=[\"my_signal\"])\n"
+    "code": "from agentguard.plugins.base import BaseChecker, CheckResult\nfrom agentguard.plugins.registry import register\nfrom agentguard.schemas.events import EventType\n\n@register(name=\"my_llm_input\", description=\"My checker.\")\nclass MyLLMInputChecker(BaseChecker):\n    event_types = [EventType.LLM_INPUT]\n    def check(self, event, context):\n        return CheckResult(risk_signals=[\"my_signal\"])\n"
   }'
 ```
 
@@ -387,7 +387,7 @@ then be used directly in checker config.
 
 To add a checker, put the checker class in the matching phase folder and decorate
 the class with `@register(name=..., description=...)`. The manager discovers checker
-modules under `agentguard.checkers`, runs the decorator, and then lets the config
+modules under `agentguard.plugins`, runs the decorator, and then lets the config
 refer to the checker by `name`. With this mode, you do not need to modify
 `__init__.py` or a built-in checker map.
 
@@ -404,8 +404,8 @@ agentguard/checkers/llm_before/my_checker.py
 Example checker:
 
 ```python
-from agentguard.checkers.base import BaseChecker, CheckResult
-from agentguard.checkers.registry import register
+from agentguard.plugins.base import BaseChecker, CheckResult
+from agentguard.plugins.registry import register
 from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.events import EventType, RuntimeEvent
 

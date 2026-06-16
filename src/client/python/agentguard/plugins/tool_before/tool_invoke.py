@@ -1,9 +1,9 @@
 """Checker for tool invocation events."""
 from __future__ import annotations
 
-from agentguard.checkers.base import BaseChecker, CheckResult
-from agentguard.checkers.common.patterns import SHELL_RE, find_signals, text_of
-from agentguard.checkers.registry import register
+from agentguard.plugins.base import BaseChecker, CheckResult
+from agentguard.plugins.common.patterns import SHELL_RE, find_signals, text_of
+from agentguard.plugins.registry import register
 from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.decisions import GuardDecision
 from agentguard.schemas.events import EventType, RuntimeEvent

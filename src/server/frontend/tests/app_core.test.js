@@ -307,6 +307,51 @@ test("shared app core updates scoped tool labels through the new patch endpoint"
   assert.equal(global.window.AgentGuardData.loadToolCatalog("agent-a")[0].labels.sensitivity, "low");
 });
 
+test("shared app core times out hanging requests instead of waiting forever", async () => {
+  const listeners = {};
+  let timeoutCallback = null;
+
+  global.window = {
+    AgentGuardConfig: { apiBase: "http://127.0.0.1:38080" },
+    AgentGuardShell: {
+      setToolStatus() {},
+      setApiStatus() {},
+    },
+    addEventListener(name, handler) {
+      listeners[name] = handler;
+    },
+  };
+  global.localStorage = createStorage();
+  global.document = {
+    getElementById() {
+      return createToastElement();
+    },
+  };
+  global.fetch = async (_url, options) => new Promise((_resolve, reject) => {
+    if (options?.signal) {
+      options.signal.addEventListener("abort", () => {
+        reject(new Error("aborted"));
+      }, { once: true });
+    }
+  });
+  global.setTimeout = (fn) => {
+    timeoutCallback = fn;
+    return 1;
+  };
+  global.clearTimeout = () => {};
+
+  delete require.cache[require.resolve("../static/common/app.js")];
+  require("../static/common/app.js");
+
+  const pending = global.window.AgentGuardApi.fetchJson("/api/tools");
+  assert.equal(typeof timeoutCallback, "function");
+  timeoutCallback();
+  await assert.rejects(
+    pending,
+    /Request timed out after 6000ms while fetching \/api\/tools\./,
+  );
+});
+
 test("shared app core clears scoped caches when selected agent changes", async () => {
   const listeners = {};
   global.window = {

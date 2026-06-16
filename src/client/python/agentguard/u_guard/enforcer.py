@@ -5,8 +5,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from agentguard.checkers.base import CheckResult
-from agentguard.checkers.manager import CheckerManager
+from agentguard.plugins.base import CheckResult
+from agentguard.plugins.manager import CheckerManager
 from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.decisions import GuardDecision
 from agentguard.schemas.events import RuntimeEvent

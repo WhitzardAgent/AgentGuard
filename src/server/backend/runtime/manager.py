@@ -13,8 +13,8 @@ from shared.schemas.decisions import DecisionType, GuardDecision
 from shared.schemas.events import RuntimeEvent
 from backend.audit import AuditTraceEntry
 from backend.audit.audit_logger import AuditLogger
-from backend.plugins.loader import load_builtin_plugins
-from backend.plugins.manager import PluginManager
+# from backend.plugins.loader import load_builtin_plugins
+# from backend.plugins.manager import PluginManager
 from backend.runtime.checkers.base import CheckResult
 from backend.runtime.checkers.config_utils import merge_checker_configs, normalize_checker_config
 from backend.runtime.checkers import server_checker_manager
@@ -41,9 +41,9 @@ class RuntimeManager:
         enable_session_health_monitor: bool = True,
     ) -> None:
         self.policy = policy or PolicyEngine()
-        self.plugins = plugins or load_builtin_plugins(
-            PluginManager(), enable_agentdog=enable_agentdog
-        )
+        # self.plugins = plugins or load_builtin_plugins(
+        #     PluginManager(), enable_agentdog=enable_agentdog
+        # )
         self.checkers = server_checker_manager(checker_config)
         self.checker_config = checker_config
         self._agent_checker_configs: dict[str, dict[str, dict[str, Any] | None]] = {}

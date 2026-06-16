@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from agentguard.checkers.common.patterns import find_signals, text_of
+from agentguard.plugins.common.patterns import find_signals, text_of
 from agentguard.parser.tool_call_parser import parse_tool_calls
 from agentguard.schemas.tool import ToolCall
 

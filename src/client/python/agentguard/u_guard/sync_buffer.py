@@ -4,7 +4,7 @@ from __future__ import annotations
 import threading
 from typing import Any
 
-from agentguard.checkers.base import CheckResult
+from agentguard.plugins.base import CheckResult
 from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.decisions import GuardDecision
 from agentguard.schemas.events import RuntimeEvent

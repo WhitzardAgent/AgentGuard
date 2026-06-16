@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from agentguard.checkers.base import CheckResult
+from agentguard.plugins.base import CheckResult
 from agentguard.schemas.decisions import DecisionType
 from agentguard.schemas.events import RuntimeEvent
 from agentguard.tools.capability import HIGH_RISK_CAPABILITIES

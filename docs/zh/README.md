@@ -295,8 +295,8 @@ Client checker 需要放到与事件阶段对应的目录中：
 示例：
 
 ```python
-from agentguard.checkers.base import BaseChecker, CheckResult
-from agentguard.checkers.registry import register
+from agentguard.plugins.base import BaseChecker, CheckResult
+from agentguard.plugins.registry import register
 from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.events import EventType, RuntimeEvent
 
