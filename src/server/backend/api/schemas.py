@@ -61,29 +61,17 @@ class AgentCheckerConfigUpdateRequest(BaseModel):
     timeout_s: float = 2.0
 
 
-class AgentCheckerSessionConfig(BaseModel):
-    session_id: str
-    agent_id: str | None = None
-    user_id: str | None = None
-    last_seen: float | None = None
-    client_config_url: str | None = None
-    client_checker_config: dict[str, Any] | None = None
-    remote_checker_config: dict[str, Any] | None = None
-
-
 class AgentCheckerConfigResponse(BaseModel):
     agent_id: str
-    session_count: int = 0
-    config_status: Literal["none", "consistent", "mixed"] = "none"
-    client_checker_config: dict[str, Any] | None = None
-    remote_checker_config: dict[str, Any] | None = None
-    sessions: list[AgentCheckerSessionConfig] = Field(default_factory=list)
+    checker_config: dict[str, Any] | None = None
+    config_source: Literal["agent_override", "server_default", "none"] = "none"
 
 
 class CheckerOption(BaseModel):
     name: str
     description: str = ""
     event_types: list[str] = Field(default_factory=list)
+    phases: list[str] = Field(default_factory=list)
 
 
 class AgentCheckerAvailableResponse(BaseModel):

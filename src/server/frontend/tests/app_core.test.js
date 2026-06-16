@@ -352,3 +352,189 @@ test("shared app core clears scoped caches when selected agent changes", async (
   assert.equal(global.localStorage.getItem("agentguard.scopedToolCatalog"), null);
   assert.equal(global.localStorage.getItem("agentguard.scopedRuleList"), null);
 });
+
+test("shared app core builds multi-checker config while preserving unrelated phase data", async () => {
+  const listeners = {};
+  global.window = {
+    AgentGuardConfig: { apiBase: "http://127.0.0.1:38080" },
+    AgentGuardShell: {
+      setToolStatus() {},
+      setApiStatus() {},
+    },
+    addEventListener(name, handler) {
+      listeners[name] = handler;
+    },
+  };
+  global.localStorage = createStorage();
+  global.document = {
+    getElementById() {
+      return createToastElement();
+    },
+  };
+  global.fetch = async () => ({
+    ok: true,
+    async json() {
+      return [];
+    },
+  });
+  global.setTimeout = (fn) => {
+    fn();
+    return 1;
+  };
+  global.clearTimeout = () => {};
+
+  delete require.cache[require.resolve("../static/common/app.js")];
+  require("../static/common/app.js");
+
+  const available = [
+    { name: "rule_based_check", description: "", event_types: [], phases: ["tool_before"] },
+    { name: "tool_invoke", description: "", event_types: ["tool_invoke"], phases: ["tool_before"] },
+    { name: "llm_input", description: "", event_types: ["llm_input"], phases: ["llm_before"] },
+  ];
+  const existingConfig = {
+    phases: {
+      llm_before: {
+        local: ["local_llm_guard"],
+        remote: ["llm_input"],
+      },
+      tool_before: {
+        local: ["local_tool_guard"],
+        remote: ["custom_hidden_checker", "tool_invoke", "rule_based_check"],
+      },
+    },
+  };
+
+  const config = global.window.AgentGuardData.buildCheckerConfig(
+    [available[2]],
+    available,
+    existingConfig,
+  );
+
+  assert.deepEqual(config, {
+    phases: {
+      llm_before: {
+        local: ["local_llm_guard"],
+        remote: ["llm_input"],
+      },
+      tool_before: {
+        local: ["local_tool_guard"],
+        remote: ["custom_hidden_checker"],
+      },
+    },
+  });
+});
+
+test("shared app core derives active checker names and primary checker from config", async () => {
+  const listeners = {};
+  global.window = {
+    AgentGuardConfig: { apiBase: "http://127.0.0.1:38080" },
+    AgentGuardShell: {
+      setToolStatus() {},
+      setApiStatus() {},
+    },
+    addEventListener(name, handler) {
+      listeners[name] = handler;
+    },
+  };
+  global.localStorage = createStorage();
+  global.document = {
+    getElementById() {
+      return createToastElement();
+    },
+  };
+  global.fetch = async () => ({
+    ok: true,
+    async json() {
+      return [];
+    },
+  });
+  global.setTimeout = (fn) => {
+    fn();
+    return 1;
+  };
+  global.clearTimeout = () => {};
+
+  delete require.cache[require.resolve("../static/common/app.js")];
+  require("../static/common/app.js");
+
+  const configResponse = {
+    agent_id: "agent-a",
+    checker_config: {
+      phases: {
+        llm_before: { local: [], remote: ["llm_input"] },
+        tool_before: { local: [], remote: ["tool_invoke", "rule_based_check"] },
+        tool_after: { local: [], remote: [{ name: "tool_result" }] },
+      },
+    },
+  };
+
+  assert.deepEqual(
+    global.window.AgentGuardData.selectedCheckersFromConfig(configResponse),
+    ["llm_input", "tool_invoke", "rule_based_check", "tool_result"],
+  );
+  assert.deepEqual(
+    global.window.AgentGuardData.collapseCheckerSelection(
+      global.window.AgentGuardData.selectedCheckersFromConfig(configResponse),
+    ),
+    ["llm_input", "tool_invoke", "rule_based_check", "tool_result"],
+  );
+  assert.deepEqual(
+    global.window.AgentGuardData.expandCheckerSelection(["rule_based_check", "tool_result"]),
+    ["rule_based_check", "tool_result"],
+  );
+  assert.equal(
+    global.window.AgentGuardData.selectedCheckerFromConfig(configResponse),
+    "rule_based_check",
+  );
+});
+
+test("shared app core preserves checker config source from the agent config endpoint", async () => {
+  const listeners = {};
+  global.window = {
+    AgentGuardConfig: { apiBase: "http://127.0.0.1:38080" },
+    AgentGuardShell: {
+      getState() {
+        return { selectedAgentId: "agent-a" };
+      },
+      setToolStatus() {},
+      setApiStatus() {},
+    },
+    addEventListener(name, handler) {
+      listeners[name] = handler;
+    },
+  };
+  global.localStorage = createStorage();
+  global.document = {
+    getElementById() {
+      return createToastElement();
+    },
+  };
+  global.fetch = async () => ({
+    ok: true,
+    async json() {
+      return {
+        agent_id: "agent-a",
+        checker_config: {
+          phases: {
+            tool_before: { local: [], remote: ["rule_based_check"] },
+          },
+        },
+        config_source: "server_default",
+      };
+    },
+  });
+  global.setTimeout = (fn) => {
+    fn();
+    return 1;
+  };
+  global.clearTimeout = () => {};
+
+  delete require.cache[require.resolve("../static/common/app.js")];
+  require("../static/common/app.js");
+
+  const config = await global.window.AgentGuardData.getAgentCheckerConfig("agent-a");
+
+  assert.equal(config.agent_id, "agent-a");
+  assert.equal(config.config_source, "server_default");
+  assert.deepEqual(config.checker_config?.phases?.tool_before?.remote, ["rule_based_check"]);
+});

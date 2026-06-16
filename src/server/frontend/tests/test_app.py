@@ -389,11 +389,8 @@ def test_agent_checker_config_get_proxy_forwards_request():
             observed["path"] = self.path
             body = json.dumps({
                 "agent_id": "agent-a",
-                "session_count": 1,
-                "config_status": "consistent",
-                "client_checker_config": {"phases": {}},
-                "remote_checker_config": {"phases": {}},
-                "sessions": [],
+                "checker_config": {"phases": {}},
+                "config_source": "server_default",
             }).encode("utf-8")
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -415,6 +412,7 @@ def test_agent_checker_config_get_proxy_forwards_request():
 
     assert status == 200
     assert payload["agent_id"] == "agent-a"
+    assert payload["config_source"] == "server_default"
     assert observed["path"] == "/v1/backend/agents/agent-a/checkers/config"
 
 
@@ -467,8 +465,8 @@ def test_agent_checker_available_get_proxy_forwards_request():
             observed["path"] = self.path
             body = json.dumps({
                 "agent_id": "agent-a",
-                "local_checkers": [{"name": "tool_invoke", "description": "", "event_types": ["tool_invoke"]}],
-                "remote_checkers": [{"name": "rule_based_check", "description": "", "event_types": ["tool_invoke"]}],
+                "local_checkers": [{"name": "tool_invoke", "description": "", "event_types": ["tool_invoke"], "phases": ["tool_before"]}],
+                "remote_checkers": [{"name": "rule_based_check", "description": "", "event_types": [], "phases": ["tool_before"]}],
             }).encode("utf-8")
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "application/json; charset=utf-8")

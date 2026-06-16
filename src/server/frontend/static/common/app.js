@@ -21,6 +21,7 @@
     llm_thought: "llm_after",
     final_response: "llm_after",
   };
+  const CHECKER_PHASE_ORDER = ["llm_before", "llm_after", "tool_before", "tool_after", "global"];
 
   function buildQuery(params) {
     const search = new URLSearchParams();
@@ -43,73 +44,167 @@
       name: String(item?.name || "").trim(),
       description: String(item?.description || "").trim(),
       event_types: Array.isArray(item?.event_types) ? item.event_types.map(String).filter(Boolean) : [],
+      phases: Array.isArray(item?.phases) ? item.phases.map(String).filter(Boolean) : [],
     };
   }
 
   function normalizeAgentCheckerConfig(item) {
     return {
       agent_id: String(item?.agent_id || "").trim(),
-      session_count: Number.isFinite(Number(item?.session_count)) ? Number(item.session_count) : 0,
-      config_status: String(item?.config_status || "none").trim() || "none",
-      client_checker_config: item?.client_checker_config && typeof item.client_checker_config === "object"
-        ? item.client_checker_config
+      checker_config: item?.checker_config && typeof item.checker_config === "object"
+        ? item.checker_config
         : null,
-      remote_checker_config: item?.remote_checker_config && typeof item.remote_checker_config === "object"
-        ? item.remote_checker_config
-        : null,
-      sessions: Array.isArray(item?.sessions) ? item.sessions.slice() : [],
+      config_source: String(item?.config_source || "none").trim() || "none",
     };
   }
 
-  function buildCheckerConfig(checker) {
-    const option = normalizeCheckerOption(checker);
-    if (!option.name) {
-      throw new Error("checker name is required.");
+  function checkerNameFromSpec(spec) {
+    if (typeof spec === "string") {
+      return String(spec).trim();
     }
-    const phases = {};
-    option.event_types.forEach((eventType) => {
-      const phase = EVENT_TYPE_PHASE_MAP[String(eventType || "").trim()];
-      if (!phase) {
-        return;
-      }
-      if (!phases[phase]) {
-        phases[phase] = { local: [], remote: [] };
-      }
-      if (!phases[phase].remote.includes(option.name)) {
-        phases[phase].remote.push(option.name);
-      }
-    });
-    if (option.name === "rule_based_check") {
-      phases.tool_before = phases.tool_before || { local: [], remote: [] };
-      if (!phases.tool_before.remote.includes("tool_invoke")) {
-        phases.tool_before.remote.unshift("tool_invoke");
-      }
-      if (!phases.tool_before.remote.includes("rule_based_check")) {
-        phases.tool_before.remote.push("rule_based_check");
-      }
+    if (spec && typeof spec === "object") {
+      return String(spec.name || spec.checker || spec.class || "").trim();
     }
-    if (!Object.keys(phases).length) {
-      throw new Error(`checker '${option.name}' does not expose a supported event type.`);
-    }
-    return { phases };
+    return "";
   }
 
-  function selectedCheckerFromConfig(configResponse) {
-    const remoteConfig = normalizeAgentCheckerConfig(configResponse).remote_checker_config || {};
-    const phases = remoteConfig?.phases;
+  function uniqueCheckerNames(names) {
+    const seen = new Set();
+    return (Array.isArray(names) ? names : [])
+      .map((name) => String(name || "").trim())
+      .filter((name) => {
+        if (!name || seen.has(name)) {
+          return false;
+        }
+        seen.add(name);
+        return true;
+      });
+  }
+
+  function normalizePhaseConfig(phaseConfig) {
+    return {
+      local: Array.isArray(phaseConfig?.local) ? [...phaseConfig.local] : [],
+      remote: Array.isArray(phaseConfig?.remote) ? [...phaseConfig.remote] : [],
+    };
+  }
+
+  function expandCheckerSelection(names) {
+    return uniqueCheckerNames(names);
+  }
+
+  function collapseCheckerSelection(names) {
+    return uniqueCheckerNames(names);
+  }
+
+  function primaryCheckerName(names) {
+    const activeNames = uniqueCheckerNames(names);
+    if (activeNames.includes("rule_based_check")) {
+      return "rule_based_check";
+    }
+    return activeNames.find((name) => name !== "tool_invoke") || activeNames[0] || "";
+  }
+
+  function checkerPhases(option) {
+    const phases = new Set();
+    const normalized = normalizeCheckerOption(option);
+    normalized.phases.forEach((phase) => {
+      const phaseName = String(phase || "").trim();
+      if (phaseName) {
+        phases.add(phaseName);
+      }
+    });
+    normalized.event_types.forEach((eventType) => {
+      const phase = EVENT_TYPE_PHASE_MAP[String(eventType || "").trim()];
+      if (phase) {
+        phases.add(phase);
+      }
+    });
+    const inferredPhase = EVENT_TYPE_PHASE_MAP[normalized.name];
+    if (inferredPhase) {
+      phases.add(inferredPhase);
+    }
+    return [...phases];
+  }
+
+  function ensurePhase(phases, phase, basePhases) {
+    if (!phases[phase]) {
+      phases[phase] = normalizePhaseConfig(basePhases?.[phase]);
+    }
+    return phases[phase];
+  }
+
+  function buildCheckerConfig(checkers, availableCheckers = null, existingConfig = null) {
+    const selectedOptions = (Array.isArray(checkers) ? checkers : [checkers])
+      .map(normalizeCheckerOption)
+      .filter((option) => option.name);
+    const catalog = (Array.isArray(availableCheckers) ? availableCheckers : selectedOptions)
+      .map(normalizeCheckerOption)
+      .filter((option) => option.name);
+    const catalogByName = new Map(catalog.map((option) => [option.name, option]));
+    const manageableNames = new Set(catalog.map((option) => option.name));
+    const baseConfig = existingConfig && typeof existingConfig === "object" ? existingConfig : null;
+    const basePhases = baseConfig?.phases && typeof baseConfig.phases === "object" ? baseConfig.phases : {};
+    const phases = {};
+
+    Object.keys(basePhases).forEach((phase) => {
+      const normalized = normalizePhaseConfig(basePhases[phase]);
+      normalized.remote = normalized.remote.filter((spec) => {
+        const name = checkerNameFromSpec(spec);
+        return !name || !manageableNames.has(name);
+      });
+      if (normalized.local.length || normalized.remote.length) {
+        phases[phase] = normalized;
+      }
+    });
+
+    const expandedNames = expandCheckerSelection(selectedOptions.map((option) => option.name));
+    expandedNames.forEach((name) => {
+      const option = catalogByName.get(name) || normalizeCheckerOption({ name, event_types: [name] });
+      const phaseNames = checkerPhases(option);
+      if (!phaseNames.length) {
+        return;
+      }
+      phaseNames.forEach((phase) => {
+        const phaseConfig = ensurePhase(phases, phase, basePhases);
+        if (!phaseConfig.remote.some((spec) => checkerNameFromSpec(spec) === name)) {
+          phaseConfig.remote.push(name);
+        }
+      });
+    });
+
+    const orderedPhases = {};
+    const phaseNames = new Set([...CHECKER_PHASE_ORDER, ...Object.keys(phases)]);
+    [...phaseNames].forEach((phase) => {
+      const value = phases[phase];
+      if (!value) {
+        return;
+      }
+      if (!value.local.length && !value.remote.length) {
+        return;
+      }
+      orderedPhases[phase] = value;
+    });
+
+    return { phases: orderedPhases };
+  }
+
+  function selectedCheckersFromConfig(configResponse) {
+    const checkerConfig = normalizeAgentCheckerConfig(configResponse).checker_config || {};
+    const phases = checkerConfig?.phases;
     if (!phases || typeof phases !== "object") {
-      return "";
+      return [];
     }
     const found = Object.values(phases).flatMap((phase) => {
       if (!phase || typeof phase !== "object" || !Array.isArray(phase.remote)) {
         return [];
       }
-      return phase.remote.map(String).filter(Boolean);
+      return phase.remote.map(checkerNameFromSpec).filter(Boolean);
     });
-    if (found.includes("rule_based_check")) {
-      return "rule_based_check";
-    }
-    return found.find((name) => name !== "tool_invoke") || found[0] || "";
+    return uniqueCheckerNames(found);
+  }
+
+  function selectedCheckerFromConfig(configResponse) {
+    return primaryCheckerName(selectedCheckersFromConfig(configResponse));
   }
 
   function clearLegacyToolCache() {
@@ -586,7 +681,11 @@
     normalizeRule,
     normalizeTool,
     buildCheckerConfig,
+    collapseCheckerSelection,
+    expandCheckerSelection,
+    primaryCheckerName,
     selectedCheckerFromConfig,
+    selectedCheckersFromConfig,
     loadAgentCatalog,
     persistAgentCatalog,
     refreshAgentCatalog,

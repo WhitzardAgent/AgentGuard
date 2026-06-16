@@ -1,8 +1,11 @@
 """Frontend/admin API routes for checker config and session management."""
 from __future__ import annotations
 
+import copy
+import json
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -19,6 +22,7 @@ from backend.api.schemas import (
 from backend.app_state import get_console, get_manager
 from backend.audit import auditor_descriptions, auditor_manager
 from backend.runtime.checkers.registry import registered_checkers as registered_server_checkers
+from shared.schemas.events import EventType
 from shared.utils.json import safe_dumps, safe_loads
 
 router = APIRouter()
@@ -27,6 +31,14 @@ router = APIRouter()
 _manager = get_manager()
 get_console()
 _auditors = auditor_manager()
+
+_EVENT_PHASE = {
+    EventType.LLM_INPUT.value: "llm_before",
+    EventType.LLM_OUTPUT.value: "llm_after",
+    EventType.TOOL_INVOKE.value: "tool_before",
+    EventType.TOOL_RESULT.value: "tool_after",
+}
+_KNOWN_PHASES = ("llm_before", "llm_after", "tool_before", "tool_after", "global")
 
 
 @router.get("/v1/backend/sessions")
@@ -93,57 +105,11 @@ def update_checker_config(req: CheckerConfigUpdateRequest) -> CheckerConfigUpdat
 )
 def get_agent_checker_config(agent_id: str) -> AgentCheckerConfigResponse:
     sessions = _manager.sessions_for_principal({"agent_id": agent_id})
-    summaries = [
-        {
-            "session_id": str(session.get("session_id") or ""),
-            "agent_id": (
-                str(session.get("agent_id"))
-                if session.get("agent_id") is not None
-                else None
-            ),
-            "user_id": (
-                str(session.get("user_id"))
-                if session.get("user_id") is not None
-                else None
-            ),
-            "last_seen": (
-                float(session.get("last_seen"))
-                if session.get("last_seen") is not None
-                else None
-            ),
-            "client_config_url": (
-                str(session.get("client_config_url"))
-                if session.get("client_config_url")
-                else None
-            ),
-            "client_checker_config": session.get("client_checker_config"),
-            "remote_checker_config": session.get("remote_checker_config"),
-        }
-        for session in sessions
-    ]
-    client_configs = [
-        session.get("client_checker_config")
-        for session in sessions
-        if session.get("client_checker_config") is not None
-    ]
-    remote_configs = [
-        session.get("remote_checker_config")
-        for session in sessions
-        if session.get("remote_checker_config") is not None
-    ]
-    if not sessions:
-        status = "none"
-    elif _all_equal(client_configs) and _all_equal(remote_configs):
-        status = "consistent"
-    else:
-        status = "mixed"
+    checker_config, config_source = _agent_checker_config(sessions)
     return AgentCheckerConfigResponse(
         agent_id=agent_id,
-        session_count=len(sessions),
-        config_status=status,
-        client_checker_config=client_configs[0] if len(client_configs) == 1 or _all_equal(client_configs) else None,
-        remote_checker_config=remote_configs[0] if len(remote_configs) == 1 or _all_equal(remote_configs) else None,
-        sessions=summaries,
+        checker_config=checker_config,
+        config_source=config_source,
     )
 
 
@@ -280,11 +246,35 @@ def _client_key_for_url(url: str) -> str | None:
     return None
 
 
-def _all_equal(items: list[dict[str, Any]]) -> bool:
-    if len(items) < 2:
-        return True
-    first = items[0]
-    return all(item == first for item in items[1:])
+def _agent_checker_config(
+    sessions: list[dict[str, Any]],
+) -> tuple[dict[str, Any] | None, str]:
+    for session in sessions:
+        config = session.get("remote_checker_config")
+        if isinstance(config, dict):
+            return copy.deepcopy(config), "agent_override"
+    for session in sessions:
+        config = session.get("client_checker_config")
+        if isinstance(config, dict):
+            return copy.deepcopy(config), "agent_override"
+    default_config = _default_checker_config()
+    if isinstance(default_config, dict):
+        return default_config, "server_default"
+    return None, "none"
+
+
+def _default_checker_config() -> dict[str, Any] | None:
+    source = _manager.checker_config
+    if source is None:
+        return None
+    if isinstance(source, dict):
+        return copy.deepcopy(source)
+    try:
+        with Path(source).open("r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except Exception:
+        return None
+    return copy.deepcopy(payload) if isinstance(payload, dict) else None
 
 
 def _fetch_client_checker_list(
@@ -336,21 +326,46 @@ def _fetch_agent_local_checkers(agent_id: str) -> list[dict[str, Any]]:
 
 
 def _checker_option_dict(name: str, cls: type[Any]) -> dict[str, Any]:
+    event_types = [
+        getattr(event_type, "value", str(event_type))
+        for event_type in getattr(cls, "event_types", [])
+    ]
     return {
         "name": name,
         "description": str(getattr(cls, "description", "")),
-        "event_types": [
-            getattr(event_type, "value", str(event_type))
-            for event_type in getattr(cls, "event_types", [])
-        ],
+        "event_types": event_types,
+        "phases": _checker_phases(event_types, module_name=getattr(cls, "__module__", "")),
     }
 
 
 def _checker_payload_dict(payload: Any) -> dict[str, Any]:
     data = payload if isinstance(payload, dict) else {}
     event_types = data.get("event_types")
+    phases = data.get("phases")
+    normalized_event_types = [str(item) for item in event_types] if isinstance(event_types, list) else []
+    normalized_phases = [str(item) for item in phases] if isinstance(phases, list) else []
     return {
         "name": str(data.get("name") or ""),
         "description": str(data.get("description") or ""),
-        "event_types": [str(item) for item in event_types] if isinstance(event_types, list) else [],
+        "event_types": normalized_event_types,
+        "phases": normalized_phases or _checker_phases(normalized_event_types),
     }
+
+
+def _checker_phases(
+    event_types: list[str] | tuple[str, ...],
+    *,
+    module_name: str = "",
+) -> list[str]:
+    inferred: list[str] = []
+    for event_type in event_types:
+        phase = _EVENT_PHASE.get(str(event_type))
+        if phase and phase not in inferred:
+            inferred.append(phase)
+    if inferred:
+        return inferred
+    module_parts = str(module_name or "").split(".")
+    for phase in _KNOWN_PHASES:
+        if phase in module_parts and phase not in inferred:
+            inferred.append(phase)
+    return inferred
