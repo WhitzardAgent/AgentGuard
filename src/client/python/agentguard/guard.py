@@ -151,6 +151,7 @@ class AgentGuard:
         """Replace local checker configuration for subsequent guarded events."""
         self.context.metadata["client_checker_config"] = _checker_config_payload(checker_config)
         self._enforcer.update_checker_config(checker_config)
+        self._sync_remote_session()
 
     def start_config_api(
         self,

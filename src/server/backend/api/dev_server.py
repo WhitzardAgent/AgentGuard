@@ -111,7 +111,7 @@ class _Handler(BaseHTTPRequestHandler):
         elif self.path == "/v1/server/session/register":
             context = RuntimeContext.from_dict(body.get("context") or {})
             try:
-                record = self.manager.session_pool.upsert(
+                record = self.manager.register_client_session(
                     context,
                     client_ip=self.client_address[0],
                     client_key=self.headers.get("X-AgentGuard-Session-Key"),

@@ -422,6 +422,30 @@ test("shared app core builds multi-checker config while preserving unrelated pha
       },
     },
   });
+
+  const localConfig = global.window.AgentGuardData.buildCheckerConfig(
+    [{ name: "tool_result", description: "", event_types: ["tool_result"], phases: ["tool_after"] }],
+    [{ name: "tool_result", description: "", event_types: ["tool_result"], phases: ["tool_after"] }],
+    existingConfig,
+    "local",
+  );
+
+  assert.deepEqual(localConfig, {
+    phases: {
+      llm_before: {
+        local: ["local_llm_guard"],
+        remote: ["llm_input"],
+      },
+      tool_before: {
+        local: ["local_tool_guard"],
+        remote: ["custom_hidden_checker", "tool_invoke", "rule_based_check"],
+      },
+      tool_after: {
+        local: ["tool_result"],
+        remote: [],
+      },
+    },
+  });
 });
 
 test("shared app core derives active checker names and primary checker from config", async () => {
@@ -461,9 +485,9 @@ test("shared app core derives active checker names and primary checker from conf
     agent_id: "agent-a",
     checker_config: {
       phases: {
-        llm_before: { local: [], remote: ["llm_input"] },
+        llm_before: { local: ["local_prompt_guard"], remote: ["llm_input"] },
         tool_before: { local: [], remote: ["tool_invoke", "rule_based_check"] },
-        tool_after: { local: [], remote: [{ name: "tool_result" }] },
+        tool_after: { local: ["local_tool_result_guard"], remote: [{ name: "tool_result" }] },
       },
     },
   };
@@ -471,6 +495,21 @@ test("shared app core derives active checker names and primary checker from conf
   assert.deepEqual(
     global.window.AgentGuardData.selectedCheckersFromConfig(configResponse),
     ["llm_input", "tool_invoke", "rule_based_check", "tool_result"],
+  );
+  assert.deepEqual(
+    global.window.AgentGuardData.selectedCheckersFromConfig(configResponse, "local"),
+    ["local_prompt_guard", "local_tool_result_guard"],
+  );
+  assert.deepEqual(
+    global.window.AgentGuardData.activeCheckersFromConfig(configResponse),
+    [
+      "llm_input",
+      "tool_invoke",
+      "rule_based_check",
+      "tool_result",
+      "local_prompt_guard",
+      "local_tool_result_guard",
+    ],
   );
   assert.deepEqual(
     global.window.AgentGuardData.collapseCheckerSelection(

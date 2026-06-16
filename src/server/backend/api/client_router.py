@@ -67,7 +67,7 @@ def report_tool(req: ToolReportRequest, request: Request) -> dict[str, Any]:
 def register_session(req: SessionRegisterRequest, request: Request) -> dict[str, Any]:
     context = RuntimeContext.from_dict(req.context)
     try:
-        record = _manager.session_pool.upsert(
+        record = _manager.register_client_session(
             context,
             client_ip=_client_ip(request),
             client_key=request.headers.get("x-agentguard-session-key"),

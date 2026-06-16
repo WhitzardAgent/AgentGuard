@@ -21,6 +21,7 @@ from backend.api.schemas import (
 )
 from backend.app_state import get_console, get_manager
 from backend.audit import auditor_descriptions, auditor_manager
+from backend.runtime.checkers.config_utils import merge_checker_configs
 from backend.runtime.checkers.registry import registered_checkers as registered_server_checkers
 from shared.schemas.events import EventType
 from shared.utils.json import safe_dumps, safe_loads
@@ -39,6 +40,7 @@ _EVENT_PHASE = {
     EventType.TOOL_RESULT.value: "tool_after",
 }
 _KNOWN_PHASES = ("llm_before", "llm_after", "tool_before", "tool_after", "global")
+_DEPRECATED_CHECKER_NAMES = {"memory", "llm_thought", "final_response"}
 
 
 @router.get("/v1/backend/sessions")
@@ -105,7 +107,7 @@ def update_checker_config(req: CheckerConfigUpdateRequest) -> CheckerConfigUpdat
 )
 def get_agent_checker_config(agent_id: str) -> AgentCheckerConfigResponse:
     sessions = _manager.sessions_for_principal({"agent_id": agent_id})
-    checker_config, config_source = _agent_checker_config(sessions)
+    checker_config, config_source = _agent_checker_config(agent_id, sessions)
     return AgentCheckerConfigResponse(
         agent_id=agent_id,
         checker_config=checker_config,
@@ -142,6 +144,7 @@ def get_agent_available_checkers(agent_id: str) -> AgentCheckerAvailableResponse
     remote_options = [
         _checker_option_dict(name, cls)
         for name, cls in sorted(registered_server_checkers().items())
+        if name not in _DEPRECATED_CHECKER_NAMES
     ]
     return AgentCheckerAvailableResponse(
         agent_id=agent_id,
@@ -247,16 +250,19 @@ def _client_key_for_url(url: str) -> str | None:
 
 
 def _agent_checker_config(
+    agent_id: str,
     sessions: list[dict[str, Any]],
 ) -> tuple[dict[str, Any] | None, str]:
+    stored = _manager.get_agent_checker_config(agent_id)
+    if stored and isinstance(stored.get("checker_config"), dict):
+        return copy.deepcopy(stored["checker_config"]), "agent_override"
     for session in sessions:
-        config = session.get("remote_checker_config")
-        if isinstance(config, dict):
-            return copy.deepcopy(config), "agent_override"
-    for session in sessions:
-        config = session.get("client_checker_config")
-        if isinstance(config, dict):
-            return copy.deepcopy(config), "agent_override"
+        merged = merge_checker_configs(
+            session.get("remote_checker_config") if isinstance(session.get("remote_checker_config"), dict) else None,
+            session.get("client_checker_config") if isinstance(session.get("client_checker_config"), dict) else None,
+        )
+        if isinstance(merged, dict):
+            return merged, "agent_override"
     default_config = _default_checker_config()
     if isinstance(default_config, dict):
         return default_config, "server_default"
@@ -320,7 +326,7 @@ def _fetch_agent_local_checkers(agent_id: str) -> list[dict[str, Any]]:
         )
         for checker in result.get("checkers", []):
             name = str(checker.get("name") or "").strip()
-            if name:
+            if name and name not in _DEPRECATED_CHECKER_NAMES:
                 local_map.setdefault(name, checker)
     return [local_map[name] for name in sorted(local_map)]
 

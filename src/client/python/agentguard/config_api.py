@@ -24,6 +24,7 @@ _EVENT_PHASE = {
     "tool_invoke": "tool_before",
     "tool_result": "tool_after",
 }
+_DEPRECATED_CHECKER_NAMES = {"memory", "llm_thought", "final_response"}
 _SAFE_FILENAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\.py$")
 
 
@@ -138,6 +139,7 @@ class ClientConfigAPIServer:
                                     ],
                                 }
                                 for name, cls in sorted(checkers.items())
+                                if name not in _DEPRECATED_CHECKER_NAMES
                             ],
                         },
                     )

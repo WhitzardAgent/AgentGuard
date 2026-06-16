@@ -22,6 +22,7 @@
     final_response: "llm_after",
   };
   const CHECKER_PHASE_ORDER = ["llm_before", "llm_after", "tool_before", "tool_after", "global"];
+  const CHECKER_SCOPES = new Set(["local", "remote"]);
 
   function buildQuery(params) {
     const search = new URLSearchParams();
@@ -88,6 +89,10 @@
     };
   }
 
+  function normalizeCheckerScope(scope) {
+    return CHECKER_SCOPES.has(scope) ? scope : "remote";
+  }
+
   function expandCheckerSelection(names) {
     return uniqueCheckerNames(names);
   }
@@ -133,7 +138,8 @@
     return phases[phase];
   }
 
-  function buildCheckerConfig(checkers, availableCheckers = null, existingConfig = null) {
+  function buildCheckerConfig(checkers, availableCheckers = null, existingConfig = null, scope = "remote") {
+    const targetScope = normalizeCheckerScope(scope);
     const selectedOptions = (Array.isArray(checkers) ? checkers : [checkers])
       .map(normalizeCheckerOption)
       .filter((option) => option.name);
@@ -148,7 +154,7 @@
 
     Object.keys(basePhases).forEach((phase) => {
       const normalized = normalizePhaseConfig(basePhases[phase]);
-      normalized.remote = normalized.remote.filter((spec) => {
+      normalized[targetScope] = normalized[targetScope].filter((spec) => {
         const name = checkerNameFromSpec(spec);
         return !name || !manageableNames.has(name);
       });
@@ -166,8 +172,8 @@
       }
       phaseNames.forEach((phase) => {
         const phaseConfig = ensurePhase(phases, phase, basePhases);
-        if (!phaseConfig.remote.some((spec) => checkerNameFromSpec(spec) === name)) {
-          phaseConfig.remote.push(name);
+        if (!phaseConfig[targetScope].some((spec) => checkerNameFromSpec(spec) === name)) {
+          phaseConfig[targetScope].push(name);
         }
       });
     });
@@ -188,23 +194,31 @@
     return { phases: orderedPhases };
   }
 
-  function selectedCheckersFromConfig(configResponse) {
+  function selectedCheckersFromConfig(configResponse, scope = "remote") {
+    const targetScope = normalizeCheckerScope(scope);
     const checkerConfig = normalizeAgentCheckerConfig(configResponse).checker_config || {};
     const phases = checkerConfig?.phases;
     if (!phases || typeof phases !== "object") {
       return [];
     }
     const found = Object.values(phases).flatMap((phase) => {
-      if (!phase || typeof phase !== "object" || !Array.isArray(phase.remote)) {
+      if (!phase || typeof phase !== "object" || !Array.isArray(phase[targetScope])) {
         return [];
       }
-      return phase.remote.map(checkerNameFromSpec).filter(Boolean);
+      return phase[targetScope].map(checkerNameFromSpec).filter(Boolean);
     });
     return uniqueCheckerNames(found);
   }
 
+  function activeCheckersFromConfig(configResponse) {
+    return uniqueCheckerNames([
+      ...selectedCheckersFromConfig(configResponse, "remote"),
+      ...selectedCheckersFromConfig(configResponse, "local"),
+    ]);
+  }
+
   function selectedCheckerFromConfig(configResponse) {
-    return primaryCheckerName(selectedCheckersFromConfig(configResponse));
+    return primaryCheckerName(activeCheckersFromConfig(configResponse));
   }
 
   function clearLegacyToolCache() {
@@ -683,6 +697,7 @@
     buildCheckerConfig,
     collapseCheckerSelection,
     expandCheckerSelection,
+    activeCheckersFromConfig,
     primaryCheckerName,
     selectedCheckerFromConfig,
     selectedCheckersFromConfig,

@@ -124,3 +124,53 @@ test("agentguard auto-registers remote session with checker config metadata", as
 
   await guard.close();
 });
+
+test("agentguard local checker updates resync session without overwriting remote checker metadata", async () => {
+  const calls = [];
+  global.fetch = async (url, options = {}) => {
+    calls.push({ url, options });
+    return {
+      ok: true,
+      async json() {
+        return { status: "ok" };
+      },
+    };
+  };
+
+  const { AgentGuard } = require("./guard");
+  const guard = new AgentGuard("sess-5", {
+    server_url: "http://server.test",
+    agent_id: "agent-5",
+    user_id: "user-5",
+    checker_config: {
+      phases: {
+        tool_before: { local: ["tool_invoke"], remote: ["rule_based_check"] },
+      },
+    },
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  await guard.ensureRemoteSessionRegistered();
+  await guard.update_checker_config({
+    phases: {
+      tool_after: { local: ["tool_result"], remote: [] },
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const registerCalls = calls.filter((call) => call.url.endsWith("/v1/server/session/register"));
+  assert.equal(registerCalls.length, 2);
+  const body = JSON.parse(registerCalls[1].options.body);
+  assert.deepEqual(body.context.metadata.client_checker_config, {
+    phases: {
+      tool_after: { local: ["tool_result"], remote: [] },
+    },
+  });
+  assert.deepEqual(body.context.metadata.remote_checker_config, {
+    phases: {
+      tool_before: { local: ["tool_invoke"], remote: ["rule_based_check"] },
+    },
+  });
+
+  await guard.close();
+});

@@ -130,8 +130,8 @@ class AgentGuard {
   update_checker_config(checker_config) {
     const payload = checkerConfigPayload(checker_config);
     this.context.metadata.client_checker_config = payload;
-    this.context.metadata.remote_checker_config = payload;
     this.enforcer.update_checker_config(checker_config);
+    this.syncRemoteSession();
   }
 
   register_tool(fn, meta = {}) {
@@ -233,6 +233,18 @@ class AgentGuard {
         return false;
       });
     return this.remote_session_registration;
+  }
+
+  syncRemoteSession() {
+    if (!this.remote.enabled) {
+      return Promise.resolve(false);
+    }
+    return this.remote.register_session(this.context)
+      .then(() => {
+        this.remote_session_registered = true;
+        return true;
+      })
+      .catch(() => false);
   }
 
   reportToolMetadata(metadata) {

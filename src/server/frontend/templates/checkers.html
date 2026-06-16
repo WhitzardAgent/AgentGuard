@@ -27,7 +27,7 @@
           <p class="page-kicker">Checker Config</p>
           <h1>Configure checkers for <span id="checker-selected-agent">the selected agent</span>.</h1>
           <p class="subtle">
-            Turn remote checkers on or off with switches. You can enable multiple checkers together, and changes save immediately.
+            Configure remote server checkers and local client checkers separately. Changes save immediately and apply to the next guarded events.
           </p>
         </div>
       </section>
@@ -44,7 +44,26 @@
             </button>
           </div>
         </div>
-        <div class="agent-list" id="checker-list"></div>
+        <div class="grid two equal checker-scope-grid">
+          <section class="checker-scope-panel">
+            <div class="checker-scope-header">
+              <div>
+                <h4>Remote / Server</h4>
+                <p class="subtle" id="remote-checker-status">Loading remote checkers...</p>
+              </div>
+            </div>
+            <div class="agent-list" id="remote-checker-list"></div>
+          </section>
+          <section class="checker-scope-panel">
+            <div class="checker-scope-header">
+              <div>
+                <h4>Local / Client</h4>
+                <p class="subtle" id="local-checker-status">Loading local checkers...</p>
+              </div>
+            </div>
+            <div class="agent-list" id="local-checker-list"></div>
+          </section>
+        </div>
       </section>
 
       <section class="card">

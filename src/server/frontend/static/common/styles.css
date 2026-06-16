@@ -492,6 +492,23 @@ a {
   cursor: default;
 }
 
+.checker-scope-grid {
+  align-items: start;
+}
+
+.checker-scope-panel {
+  min-width: 0;
+}
+
+.checker-scope-header {
+  margin-bottom: 12px;
+}
+
+.checker-scope-header h4 {
+  margin: 0 0 4px;
+  font-size: 17px;
+}
+
 .checker-toggle-top {
   display: flex;
   align-items: flex-start;

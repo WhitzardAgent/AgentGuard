@@ -16,6 +16,7 @@ from backend.audit.audit_logger import AuditLogger
 from backend.plugins.loader import load_builtin_plugins
 from backend.plugins.manager import PluginManager
 from backend.runtime.checkers.base import CheckResult
+from backend.runtime.checkers.config_utils import merge_checker_configs, normalize_checker_config
 from backend.runtime.checkers import server_checker_manager
 from backend.runtime.degrade.planner import DegradePlanner
 from backend.runtime.policy.engine import PolicyEngine
@@ -45,6 +46,7 @@ class RuntimeManager:
         )
         self.checkers = server_checker_manager(checker_config)
         self.checker_config = checker_config
+        self._agent_checker_configs: dict[str, dict[str, dict[str, Any] | None]] = {}
         self._bind_rule_based_checkers()
         self.degrade = DegradePlanner()
         self.audit = audit or AuditLogger()
@@ -76,15 +78,67 @@ class RuntimeManager:
         self._bind_rule_based_checkers()
         return [checker.name for checker in getattr(self.checkers, "checkers", [])]
 
-    def register_client_session(self, context: RuntimeContext) -> dict[str, Any]:
-        return self.session_pool.upsert(
+    def register_client_session(
+        self,
+        context: RuntimeContext,
+        *,
+        client_ip: str | None = None,
+        client_key: str | None = None,
+        enforce_key: bool = False,
+        event_dict: dict[str, Any] | None = None,
+        timeout_s: float = 2.0,
+        push_config: bool = True,
+    ) -> dict[str, Any]:
+        record = self.session_pool.upsert(
             context,
-            client_ip=(context.metadata or {}).get("client_ip"),
-            client_key=(context.metadata or {}).get("client_session_key"),
+            client_ip=client_ip or (context.metadata or {}).get("client_ip"),
+            client_key=client_key or (context.metadata or {}).get("client_session_key"),
+            enforce_key=enforce_key,
+            event_dict=event_dict,
         )
+        applied = self._apply_agent_checker_config_to_session(record)
+        if push_config:
+            self._push_agent_checker_config_to_session(applied, timeout_s=timeout_s)
+        return applied
 
     def sessions_for_principal(self, principal: dict[str, Any]) -> list[dict[str, Any]]:
         return self.session_pool.find_by_principal(principal)
+
+    def set_agent_checker_config(
+        self,
+        agent_id: str,
+        checker_config: dict[str, Any],
+        *,
+        client_config: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized_agent_id = str(agent_id or "").strip()
+        if not normalized_agent_id:
+            raise ValueError("agent_id is required")
+        normalized_remote = normalize_checker_config(checker_config)
+        normalized_client = normalize_checker_config(client_config or checker_config)
+        self._agent_checker_configs[normalized_agent_id] = {
+            "remote": normalized_remote,
+            "client": normalized_client,
+        }
+        return merge_checker_configs(normalized_remote, normalized_client) or {"phases": {}}
+
+    def get_agent_checker_config(
+        self,
+        agent_id: str,
+    ) -> dict[str, dict[str, Any] | None] | None:
+        normalized_agent_id = str(agent_id or "").strip()
+        if not normalized_agent_id:
+            return None
+        current = self._agent_checker_configs.get(normalized_agent_id)
+        if not current:
+            return None
+        remote_config = copy.deepcopy(current.get("remote"))
+        client_config = copy.deepcopy(current.get("client"))
+        return {
+            "remote_checker_config": remote_config,
+            "client_checker_config": client_config,
+            "checker_config": merge_checker_configs(remote_config, client_config),
+        }
 
     def update_client_checker_config(
         self,
@@ -145,6 +199,11 @@ class RuntimeManager:
         normalized_agent_id = str(agent_id or "").strip()
         if not normalized_agent_id:
             return []
+        self.set_agent_checker_config(
+            normalized_agent_id,
+            checker_config,
+            client_config=client_config,
+        )
         return self.update_client_checker_config(
             {"agent_id": normalized_agent_id},
             client_config or checker_config,
@@ -240,16 +299,68 @@ class RuntimeManager:
                 )
         return results
 
+    def _apply_agent_checker_config_to_session(
+        self,
+        session: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        current = dict(session or {})
+        agent_id = str(current.get("agent_id") or "").strip()
+        if not agent_id:
+            return current
+        overrides = self.get_agent_checker_config(agent_id)
+        if not overrides:
+            return current
+        session_id = str(current.get("session_id") or "").strip() or None
+        user_id = str(current.get("user_id")) if current.get("user_id") is not None else None
+        if session_id and overrides.get("client_checker_config") is not None:
+            updated = self.session_pool.set_client_checker_config(
+                session_id,
+                agent_id,
+                user_id,
+                overrides.get("client_checker_config"),
+            )
+            if updated:
+                current = updated
+        if session_id and overrides.get("remote_checker_config") is not None:
+            updated = self.session_pool.set_remote_checker_config(
+                session_id,
+                agent_id,
+                user_id,
+                overrides.get("remote_checker_config"),
+            )
+            if updated:
+                current = updated
+        return current
+
+    def _push_agent_checker_config_to_session(
+        self,
+        session: dict[str, Any] | None,
+        *,
+        timeout_s: float,
+    ) -> dict[str, Any] | None:
+        current = dict(session or {})
+        url = current.get("client_config_url")
+        checker_config = current.get("client_checker_config")
+        if not url or not isinstance(checker_config, dict):
+            return None
+        return _push_client_checker_config(
+            str(url),
+            checker_config,
+            timeout_s,
+            client_key=current.get("client_key"),
+        )
+
     def decide(self, request: dict[str, Any]) -> dict[str, Any]:
         ctx_dict = request.get("context") or {}
         context = RuntimeContext.from_dict(ctx_dict)
         event_dict = request.get("current_event") or {}
-        self.session_pool.upsert(
+        self.register_client_session(
             context,
             client_ip=(request.get("_transport") or {}).get("client_ip"),
             client_key=(request.get("_transport") or {}).get("client_key"),
             enforce_key=bool((request.get("_transport") or {}).get("enforce_session_key")),
             event_dict=event_dict,
+            push_config=False,
         )
         event = RuntimeEvent.from_dict(event_dict)
         # Bind the request-level context to the event so audit/observers see the
@@ -282,6 +393,9 @@ class RuntimeManager:
             user_id=context.user_id,
         )
         effective_checker_config = session_cfg.get("remote_checker_config") if session_cfg else None
+        agent_checker_config = self.get_agent_checker_config(context.agent_id or "")
+        if agent_checker_config and agent_checker_config.get("remote_checker_config") is not None:
+            effective_checker_config = agent_checker_config.get("remote_checker_config")
         effective_checkers = self.checkers
         if effective_checker_config is not None:
             effective_checkers = server_checker_manager(effective_checker_config)
