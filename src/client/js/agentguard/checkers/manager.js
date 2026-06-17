@@ -2,7 +2,7 @@
 
 const fs = require("fs");
 const { CheckResult, BaseChecker } = require("./base");
-const { getCheckerClass } = require("./registry");
+const { getCheckerClass, discoverCheckers } = require("./registry");
 const { LLMInputChecker } = require("./llm_before/llm_input");
 const { LLMOutputChecker } = require("./llm_after/llm_output");
 const { ToolInvokeChecker } = require("./tool_before/tool_invoke");
@@ -23,7 +23,7 @@ const BUILTIN_CHECKERS = {
 };
 
 function defaultCheckers() {
-  return [new LLMInputChecker(), new LLMOutputChecker(), new ToolInvokeChecker(), new ToolResultChecker()];
+  return [];
 }
 
 function loadCheckerConfig(source = null) {
@@ -68,7 +68,7 @@ function checkerSpecsForScope(value, scope) {
 
 function buildCheckersByPhase(config = null) {
   if (!config) {
-    return { global: defaultCheckers() };
+    return {};
   }
   const result = {};
   for (const [phase, specs] of Object.entries(config)) {
@@ -82,24 +82,57 @@ function instantiateChecker(spec) {
     return spec;
   }
   if (typeof spec === "function") {
-    return new spec();
+    return buildChecker(spec);
   }
   if (typeof spec === "string") {
+    discoverCheckers();
     const CheckerClass = BUILTIN_CHECKERS[spec] || getCheckerClass(spec);
     if (!CheckerClass) {
       throw new Error(`invalid checker config entry: ${String(spec)}`);
     }
-    return new CheckerClass();
+    return buildChecker(CheckerClass);
   }
   if (spec && typeof spec === "object") {
     const target = spec.class || spec.checker || spec.name;
+    const kwargs = checkerKwargs(spec);
+    const env = checkerEnv(spec);
     const CheckerClass = typeof target === "function" ? target : BUILTIN_CHECKERS[target] || getCheckerClass(target);
     if (!CheckerClass) {
       throw new Error(`invalid checker config entry: ${JSON.stringify(spec)}`);
     }
-    return new CheckerClass();
+    return buildChecker(CheckerClass, { kwargs, env });
   }
   throw new Error(`invalid checker config entry: ${String(spec)}`);
+}
+
+function checkerKwargs(spec) {
+  const reserved = new Set(["class", "checker", "name", "kwargs", "env"]);
+  const kwargs = Object.fromEntries(Object.entries(spec).filter(([key]) => !reserved.has(key)));
+  if (spec.kwargs != null && (typeof spec.kwargs !== "object" || Array.isArray(spec.kwargs))) {
+    throw new Error(`checker kwargs config must be an object: ${JSON.stringify(spec)}`);
+  }
+  return { ...kwargs, ...(spec.kwargs || {}) };
+}
+
+function checkerEnv(spec) {
+  if (spec.env != null && (typeof spec.env !== "object" || Array.isArray(spec.env))) {
+    throw new Error(`checker env config must be an object: ${JSON.stringify(spec)}`);
+  }
+  return { ...(spec.env || {}) };
+}
+
+function buildChecker(CheckerClass, { kwargs = null, env = null } = {}) {
+  const checkerKwargs = { ...(kwargs || {}) };
+  const checkerEnv = { ...(env || {}) };
+  try {
+    return new CheckerClass({ env: checkerEnv, ...checkerKwargs });
+  } catch (_) {
+    const checker = new CheckerClass();
+    if (typeof checker.bind_config === "function") {
+      checker.bind_config({ env: checkerEnv, ...checkerKwargs });
+    }
+    return checker;
+  }
 }
 
 class CheckerManager {
@@ -113,8 +146,12 @@ class CheckerManager {
     this.refresh();
   }
 
+  updateConfig(config = null) {
+    this.update_config(config);
+  }
+
   add(checker, phase = null) {
-    const target = phase || "global";
+    const target = phase || inferPhase(checker);
     this.checkers_by_phase[target] = this.checkers_by_phase[target] || [];
     this.checkers_by_phase[target].push(checker);
     this.checkers.push(checker);
@@ -161,6 +198,16 @@ class CheckerManager {
       metadata,
     });
   }
+}
+
+function inferPhase(checker) {
+  for (const eventType of checker.event_types || []) {
+    const phase = EVENT_PHASE[eventType];
+    if (phase) {
+      return phase;
+    }
+  }
+  return "global";
 }
 
 module.exports = {

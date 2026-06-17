@@ -69,28 +69,10 @@ class HarnessRuntime {
     if (hook) {
       this.lifecycle.dispatch(hook, nextEvent, this.context);
     }
-    const ext = this.collectExtensions(nextEvent);
-    const result = await this.enforcer.enforce(nextEvent, this.context, {
-      plugin_extensions: ext,
-      force_remote,
-    });
-    if (result.route === "remote") {
-      this.lifecycle.dispatch("on_after_remote_decision", result.decision, this.context);
-    }
-    const pluginResults = result.decision.metadata.plugin_results || {};
-    this.audit.record(nextEvent, result.decision, pluginResults);
+    const result = await this.enforcer.enforce(nextEvent, this.context, { force_remote });
+    this.audit.record(nextEvent, result.decision);
     this.bus.publish(nextEvent);
     return result;
-  }
-
-  collectExtensions(event) {
-    const request = {
-      plugin_extensions: {},
-      trajectory_window: this.session.trace.window(this.window_size).map((entry) => entry.toDict()),
-      event: event.toDict(),
-    };
-    const out = this.lifecycle.dispatch("on_before_remote_decision", request, this.context);
-    return (out || {}).plugin_extensions || {};
   }
 
   async invoke_tool({ tool_name, arguments: arguments_, fn, metadata = null }) {

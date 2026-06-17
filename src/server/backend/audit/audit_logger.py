@@ -22,7 +22,6 @@ class AuditLogger:
         self,
         event: dict[str, Any],
         decision: dict[str, Any],
-        plugin_results: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         rec = redact(
             {
@@ -34,7 +33,6 @@ class AuditLogger:
                 "reason": decision.get("reason"),
                 "risk_signals": event.get("risk_signals") or [],
                 "policy_id": decision.get("policy_id"),
-                "plugin_results": plugin_results or {},
                 "metadata": decision.get("metadata") or {},
             }
         )

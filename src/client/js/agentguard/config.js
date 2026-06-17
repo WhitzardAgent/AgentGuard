@@ -14,7 +14,6 @@ class GuardConfig {
     this.environment = options.environment ?? null;
     this.sandbox = options.sandbox ?? "local";
     this.sandbox_profile = options.sandbox_profile ?? options.sandboxProfile ?? null;
-    this.enable_agentdog = options.enable_agentdog ?? options.enableAgentdog ?? false;
     this.max_steps = options.max_steps ?? options.maxSteps ?? 12;
     this.max_tool_calls = options.max_tool_calls ?? options.maxToolCalls ?? 24;
     this.window_size = options.window_size ?? options.windowSize ?? 8;

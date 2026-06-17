@@ -22,7 +22,7 @@ class EnforcementResult:
     event: RuntimeEvent
     route: str = "local"
     check: CheckResult | None = None
-    plugin_extensions: dict[str, Any] = field(default_factory=dict)
+    extensions: dict[str, Any] = field(default_factory=dict)
 
 
 class UGuardEnforcer:
@@ -60,7 +60,7 @@ class UGuardEnforcer:
         event: RuntimeEvent,
         context: RuntimeContext,
         *,
-        plugin_extensions: dict[str, Any] | None = None,
+        extensions: dict[str, Any] | None = None,
         force_remote: bool = False,
     ) -> EnforcementResult:
         _ = force_remote
@@ -81,28 +81,26 @@ class UGuardEnforcer:
                 check=check,
                 decision=decision,
                 route="local_checker",
-                plugin_extensions=plugin_extensions,
+                extensions=extensions,
             )
             return EnforcementResult(
                 decision,
                 event,
                 route="local_checker",
                 check=check,
-                plugin_extensions=plugin_extensions or {},
+                extensions=extensions or {},
             )
 
         # 3. No final local decision: send to remote and accept the server's
         # decision as authoritative.
         if self.server_available:
-            decision, final_route = self._decide_remote(
-                event, context, trace_window, plugin_extensions
-            )
+            decision, final_route = self._decide_remote(event, context, trace_window, extensions)
             return EnforcementResult(
                 decision,
                 event,
                 route=final_route,
                 check=check,
-                plugin_extensions=plugin_extensions or {},
+                extensions=extensions or {},
             )
 
         # 4. Local/dev mode without a remote server. This keeps wrappers usable
@@ -118,7 +116,7 @@ class UGuardEnforcer:
             event,
             route="local_no_remote",
             check=check,
-            plugin_extensions=plugin_extensions or {},
+            extensions=extensions or {},
         )
 
     # ---- helpers -------------------------------------------------------
@@ -127,7 +125,7 @@ class UGuardEnforcer:
         event: RuntimeEvent,
         context: RuntimeContext,
         trace_window: list[RuntimeEvent] | None,
-        plugin_extensions: dict[str, Any] | None,
+        extensions: dict[str, Any] | None,
     ) -> tuple[GuardDecision, str]:
         try:
             cached_entries = self.sync_buffer.pop_all()
@@ -136,7 +134,7 @@ class UGuardEnforcer:
                 context,
                 trajectory_window=trace_window,
                 local_signals=list(event.risk_signals),
-                plugin_extensions=plugin_extensions or {},
+                extensions=extensions or {},
                 client_cached_entries=cached_entries,
             )
             decision.metadata.setdefault("route", "remote")

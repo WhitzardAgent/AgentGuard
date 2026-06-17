@@ -11,7 +11,7 @@ from backend.runtime.manager import RuntimeManager
 
 
 def test_runtime_manager_persists_trace_window_and_current_event():
-    manager = RuntimeManager(enable_agentdog=False)
+    manager = RuntimeManager()
     manager.decide(
         {
             "request_id": "audit-trace",
@@ -62,7 +62,7 @@ def test_runtime_manager_persists_trace_window_and_current_event():
 
 
 def test_frontend_router_runs_custom_trace_audit(monkeypatch):
-    manager = RuntimeManager(enable_agentdog=False)
+    manager = RuntimeManager()
     manager.record_uploaded_trace(
         {
             "session_id": "audit-session",
@@ -111,7 +111,7 @@ def test_frontend_router_runs_custom_trace_audit(monkeypatch):
 
 
 def test_frontend_router_rejects_unknown_auditor(monkeypatch):
-    manager = RuntimeManager(enable_agentdog=False)
+    manager = RuntimeManager()
     manager.record_uploaded_trace(
         {
             "session_id": "audit-session",

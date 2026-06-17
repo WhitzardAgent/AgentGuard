@@ -44,7 +44,7 @@ class UGuardRouter:
         check: CheckResult,
         *,
         server_available: bool,
-        plugin_requests_remote: bool = False,
+        extension_requests_remote: bool = False,
         force_remote: bool = False,
     ) -> RouteDecision:
         decision = local_eval.decision
@@ -63,7 +63,7 @@ class UGuardRouter:
         high_risk = self.escalate_high_risk and bool(caps & HIGH_RISK_CAPABILITIES)
         wants_remote = (
             force_remote
-            or plugin_requests_remote
+            or extension_requests_remote
             or dtype == DecisionType.REQUIRE_REMOTE_REVIEW
             or high_risk
             or not local_eval.certain

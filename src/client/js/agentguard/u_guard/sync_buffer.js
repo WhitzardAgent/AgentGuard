@@ -5,7 +5,7 @@ class ClientSyncBuffer {
     this.entries = [];
   }
 
-  add_local_decision({ event, context, check, decision, route, plugin_extensions = {} }) {
+  add_local_decision({ event, context, check, decision, route, extensions = {} }) {
     this.entries.push({
       source: "client_local_checker",
       route,
@@ -22,7 +22,7 @@ class ClientSyncBuffer {
         event: event.toDict(),
         context: context.toDict(),
       },
-      plugin_extensions,
+      extensions,
     });
   }
 

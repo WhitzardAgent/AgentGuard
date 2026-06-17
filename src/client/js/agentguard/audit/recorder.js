@@ -12,7 +12,7 @@ class AuditRecorder {
     this.trace = new Trace({ session_id: sessionId });
   }
 
-  record(event, decision = null, plugin_results = {}) {
+  record(event, decision = null) {
     this.trace.add(event, decision);
     const record = {
       timestamp: isoNow(),
@@ -23,7 +23,6 @@ class AuditRecorder {
       reason: decision ? decision.reason : null,
       risk_signals: [...(event.risk_signals || [])],
       policy_id: decision ? decision.policy_id : null,
-      plugin_results,
       metadata: {
         payload: event.payload,
         decision_metadata: decision ? decision.metadata : {},

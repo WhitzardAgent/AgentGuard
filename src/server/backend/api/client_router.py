@@ -38,15 +38,13 @@ def guard_decide(req: GuardDecideRequest, request: Request) -> GuardDecideRespon
 @router.get("/v1/server/policy/snapshot")
 def policy_snapshot(request: Request) -> dict:
     _validate_client_session(request)
-    snap = snapshot_dict(_manager.policy.store)
-    return _manager.plugins.on_policy_snapshot_build(snap, {})
+    return snapshot_dict(_manager.policy.store)
 
 
 @router.post("/v1/server/trace/upload")
 def trace_upload(req: TraceUploadRequest, request: Request) -> dict:
     trace = req.model_dump()
     trace["_transport"] = _transport_metadata(request, enforce_session_key=True)
-    _manager.plugins.on_trace_uploaded(trace, {})
     try:
         count = _manager.record_uploaded_trace(trace)
     except PermissionError as exc:

@@ -81,34 +81,17 @@ class HarnessRuntime:
     def guard(
         self, event: RuntimeEvent, *, force_remote: bool = False, phase: str = "before"
     ) -> EnforcementResult:
-        """Run interceptors, plugin hooks, enforcement and audit for an event."""
+        """Run interceptors, lifecycle hooks, enforcement, and audit for an event."""
         event = self._intercept(event, phase)
         self.lifecycle.dispatch("on_event", event, self.context)
         hook = _HOOK_BY_TYPE.get(event.event_type)
         if hook:
             self.lifecycle.dispatch(hook, event, self.context)
 
-        ext = self._collect_extensions(event)
-        result = self.enforcer.enforce(
-            event, self.context, plugin_extensions=ext, force_remote=force_remote
-        )
-        if result.route == "remote":
-            self.lifecycle.dispatch(
-                "on_after_remote_decision", result.decision, self.context
-            )
-        plugin_results = result.decision.metadata.get("plugin_results") or {}
-        self.audit.record(event, result.decision, plugin_results)
+        result = self.enforcer.enforce(event, self.context, force_remote=force_remote)
+        self.audit.record(event, result.decision)
         self.bus.publish(event)
         return result
-
-    def _collect_extensions(self, event: RuntimeEvent) -> dict[str, Any]:
-        request = {
-            "plugin_extensions": {},
-            "trajectory_window": [e.to_dict() for e in self.session.trace.window(self.window_size)],
-            "event": event.to_dict(),
-        }
-        out = self.lifecycle.dispatch("on_before_remote_decision", request, self.context)
-        return (out or {}).get("plugin_extensions", {})
 
     # ---- tool flow -----------------------------------------------------
     def invoke_tool(

@@ -4,19 +4,19 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { defaultLLMAdapters, selectLLMAdapter } = require("./adapters/llm");
-const { AgentDoGProxyPlugin } = require("./plugins/builtin/agentdog_proxy");
 const { AuditLogger } = require("./audit/logger");
 const { AuditRecorder } = require("./audit/recorder");
 const { CheckerManager } = require("./checkers/manager");
+const { ClientConfigAPIServer } = require("./config_api");
 const { EventBus } = require("./harness/event_bus");
 const { Lifecycle } = require("./harness/lifecycle");
 const { HarnessRuntime } = require("./harness/runtime");
-const { PluginManager } = require("./plugins/manager");
 const { loadPolicy } = require("./rules/loader");
 const { SandboxExecutor } = require("./sandbox/executor");
 const { RuntimeContext } = require("./schemas/context");
 const { SkillRegistryProxy } = require("./skill_client/registry_proxy");
 const { RemoteSkillRunner } = require("./skill_client/remote_runner");
+const { ToolMetadata } = require("./tools/metadata");
 const { ToolDegradeManager } = require("./tools/degrade");
 const { ToolRegistry } = require("./tools/registry");
 const { ToolWrapper } = require("./tools/wrapper");
@@ -65,7 +65,7 @@ class AgentGuard {
     this.degrade = new ToolDegradeManager();
     this.lifecycle = new Lifecycle();
     this.bus = new EventBus();
-    this.plugins = new PluginManager(this.lifecycle);
+    this.config_api = null;
     this.runtime = new HarnessRuntime({
       context: this.context,
       enforcer: this.enforcer,
@@ -91,13 +91,9 @@ class AgentGuard {
           })
         : null,
     });
-    if (options.enable_agentdog || options.enableAgentdog) {
-      this.register_plugin(new AgentDoGProxyPlugin());
-    }
-    this.plugins.start_session(this.context);
     this.remote_session_registration = null;
     this.remote_session_registered = false;
-    this.ensureRemoteSessionRegistered();
+    this.registerRemoteSession();
   }
 
   loadSnapshot(policy) {
@@ -131,11 +127,49 @@ class AgentGuard {
     const payload = checkerConfigPayload(checker_config);
     this.context.metadata.client_checker_config = payload;
     this.enforcer.update_checker_config(checker_config);
-    this.syncRemoteSession();
+    return this.syncRemoteSession();
+  }
+
+  async start_config_api({ host = "127.0.0.1", port = 38181, sync_remote = true, syncRemote = sync_remote } = {}) {
+    const prevConfigUrl = this.context.metadata.client_config_url;
+    const prevCheckerListUrl = this.context.metadata.client_checker_list_url;
+    const prevHealthUrl = this.context.metadata.client_health_url;
+    if (!this.config_api) {
+      this.config_api = new ClientConfigAPIServer(this, { host, port });
+    }
+    this.context.metadata.client_config_url = this.config_api.checker_config_url;
+    this.context.metadata.client_checker_list_url = this.config_api.checker_list_url;
+    this.context.metadata.client_health_url = this.config_api.health_url;
+    const url = await this.config_api.start().catch(() => this.config_api.checker_config_url);
+    this.context.metadata.client_config_url = url;
+    this.context.metadata.client_checker_list_url = this.config_api.checker_list_url;
+    this.context.metadata.client_health_url = this.config_api.health_url;
+    const urlsChanged = (
+      prevConfigUrl !== url ||
+      prevCheckerListUrl !== this.config_api.checker_list_url ||
+      prevHealthUrl !== this.config_api.health_url
+    );
+    if (syncRemote && urlsChanged) {
+      await this.syncRemoteSession();
+    }
+    return url;
+  }
+
+  async stop_config_api() {
+    if (!this.config_api) {
+      return;
+    }
+    await this.config_api.stop();
+    this.config_api = null;
+    delete this.context.metadata.client_config_url;
+    delete this.context.metadata.client_checker_list_url;
+    delete this.context.metadata.client_health_url;
   }
 
   register_tool(fn, meta = {}) {
-    const metadata = this.registry.register(fn, null, meta);
+    const metadata = meta instanceof ToolMetadata
+      ? this.registry.register(fn, meta)
+      : this.registry.register(fn, null, meta);
     this.reportToolMetadata(metadata);
     return metadata;
   }
@@ -162,16 +196,17 @@ class AgentGuard {
     return new OpenAIAgentsAdapter().attach(agent, this, options);
   }
 
-  register_plugin(plugin) {
-    return this.plugins.register(plugin);
-  }
-
   register_skill(skill) {
+    try {
+      const { getRegistry } = require("./skill_client");
+      getRegistry().register(skill);
+    } catch (_) {
+      return skill;
+    }
     return skill;
   }
 
   async run_skill(skill_name, input_data = {}) {
-    await this.ensureRemoteSessionRegistered();
     return this.skills.run(skill_name, input_data);
   }
 
@@ -198,7 +233,6 @@ class AgentGuard {
 
   async close() {
     await this.runtime.sync_local_cache_now({ reason: "session_close" });
-    this.plugins.end_session(this.runtime.session.trace, this.context);
     if (this.remote.enabled) {
       try {
         const registered = await this.ensureRemoteSessionRegistered();
@@ -208,9 +242,10 @@ class AgentGuard {
           this.remote_session_registration = null;
         }
       } catch (_) {
-        return;
+        // swallow remote shutdown errors to match Python close()
       }
     }
+    await this.stop_config_api();
   }
 
   ensureRemoteSessionRegistered() {
@@ -226,6 +261,7 @@ class AgentGuard {
     this.remote_session_registration = this.remote.register_session(this.context)
       .then(() => {
         this.remote_session_registered = true;
+        this.remote_session_registration = null;
         return true;
       })
       .catch(() => {
@@ -245,6 +281,27 @@ class AgentGuard {
         return true;
       })
       .catch(() => false);
+  }
+
+  registerRemoteSession() {
+    if (!this.remote.enabled) {
+      return;
+    }
+    if (this.remote_session_registration) {
+      return;
+    }
+    this.remote_session_registration = this.start_config_api({ port: 0, syncRemote: false })
+      .catch(() => null)
+      .then(() => this.remote.register_session(this.context))
+      .then(() => {
+        this.remote_session_registered = true;
+        this.remote_session_registration = null;
+        return true;
+      })
+      .catch(() => {
+        this.remote_session_registration = null;
+        return false;
+      });
   }
 
   reportToolMetadata(metadata) {

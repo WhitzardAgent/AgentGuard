@@ -6,7 +6,6 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
-import warnings
 from typing import Any, Callable
 
 from shared.schemas.context import RuntimeContext
@@ -24,40 +23,6 @@ from shared.utils.json import safe_dumps, safe_loads
 from shared.utils.time import now_ts
 
 
-class _NoopPluginManager:
-    """Compatibility shim for the removed server PluginManager."""
-
-    def on_request_received(self, request: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
-        return request
-
-    def on_before_policy_decision(
-        self,
-        request: dict[str, Any],
-        context: dict[str, Any],
-    ) -> dict[str, Any]:
-        return request
-
-    def diagnose(self, request: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
-        return {}
-
-    def on_after_policy_decision(
-        self,
-        decision: GuardDecision,
-        context: dict[str, Any],
-    ) -> GuardDecision:
-        return decision
-
-    def on_trace_uploaded(self, trace: dict[str, Any], context: dict[str, Any]) -> None:
-        return None
-
-    def on_policy_snapshot_build(
-        self,
-        snapshot: dict[str, Any],
-        context: dict[str, Any],
-    ) -> dict[str, Any]:
-        return snapshot
-
-
 class RuntimeManager:
     """Coordinates server-side checkers, policy, and degradation."""
 
@@ -65,30 +30,13 @@ class RuntimeManager:
         self,
         *,
         policy: PolicyEngine | None = None,
-        plugins: Any | None = None,
         audit: AuditLogger | None = None,
-        enable_agentdog: bool = False,
         checker_config: str | dict[str, Any] | None = None,
         session_health_interval_s: float = 1800.0,
         session_health_max_age_s: float = 0.0,
         enable_session_health_monitor: bool = True,
     ) -> None:
         self.policy = policy or PolicyEngine()
-        if plugins is not None:
-            warnings.warn(
-                "RuntimeManager plugins are deprecated and ignored because the "
-                "server PluginManager has been removed.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        if enable_agentdog:
-            warnings.warn(
-                "enable_agentdog is deprecated and ignored because the server "
-                "PluginManager has been removed.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        self.plugins = _NoopPluginManager()
         self.checkers = server_checker_manager(checker_config)
         self.checker_config = checker_config
         self._agent_checker_configs: dict[str, dict[str, dict[str, Any] | None]] = {}
@@ -103,12 +51,12 @@ class RuntimeManager:
         self._session_health_thread: threading.Thread | None = None
         if enable_session_health_monitor:
             self.start_session_health_monitor()
-        # Observers receive (event, decision, request, plugin_results) after each
-        # decision; used by the console for traffic/telemetry/approval tracking.
-        self.observers: list[Callable[[RuntimeEvent, GuardDecision, dict, dict], None]] = []
+        # Observers receive (event, decision, request) after each decision; used
+        # by the console for traffic/telemetry/approval tracking.
+        self.observers: list[Callable[[RuntimeEvent, GuardDecision, dict], None]] = []
 
     def add_observer(
-        self, observer: Callable[[RuntimeEvent, GuardDecision, dict, dict], None]
+        self, observer: Callable[[RuntimeEvent, GuardDecision, dict], None]
     ) -> None:
         self.observers.append(observer)
 
@@ -446,50 +394,26 @@ class RuntimeManager:
             effective_checkers = server_checker_manager(effective_checker_config)
             self._bind_rule_based_checkers_for(effective_checkers)
 
-        # 1. Server checkers add signals.
+        for sig in request.get("local_signals") or []:
+            event.add_signal(sig)
+
         check = effective_checkers.run(
             event,
             context,
             trajectory_window=trace_window,
             stop_on_first_decision=True,
         )
-
-        # 2. Plugins: request lifecycle + diagnosis.
-        plugin_ctx: dict[str, Any] = {"context": ctx_dict}
-        request = self.plugins.on_request_received(request, plugin_ctx)
-        request = self.plugins.on_before_policy_decision(request, plugin_ctx)
-        plugin_results = self.plugins.diagnose(request, plugin_ctx)
-        plugin_ctx["plugin_results"] = plugin_results
-
-        # 3. Merge plugin-mapped risk signals into the event.
-        for res in plugin_results.values():
-            for sig in (res or {}).get("risk_signals", []) or []:
-                event.add_signal(sig)
-        for sig in request.get("local_signals") or []:
-            event.add_signal(sig)
-
-        # 4. Re-run configured checkers after plugin signals are attached. This
-        # keeps optional rule-based checkers out of the core path while still
-        # letting them see plugin-derived risk signals when they are enabled.
-        post_plugin_check = effective_checkers.run(
-            event,
-            context,
-            trajectory_window=trace_window,
-            stop_on_first_decision=True,
-        )
-        check = _merge_check_results(check, post_plugin_check)
         decision = _decision_from_checker_result(check)
-        decision = self.plugins.on_after_policy_decision(decision, plugin_ctx)
 
-        # 5. Degrade plan if needed.
+        # 2. Degrade plan if needed.
         if decision.decision_type == DecisionType.DEGRADE:
             plan = self.degrade.plan(
                 event.payload.get("tool_name", ""), event.payload.get("arguments") or {}, decision.reason
             )
             decision.metadata["degrade_plan"] = plan.to_dict()
 
-        # 6. Audit.
-        self.audit.record(event.to_dict(), decision.to_dict(), plugin_results)
+        # 3. Audit.
+        self.audit.record(event.to_dict(), decision.to_dict())
         self._store_trace_record(
             context.session_id or event.context.session_id or "unknown",
             AuditTraceEntry(
@@ -500,26 +424,24 @@ class RuntimeManager:
                 event=event,
                 decision=decision,
                 checker_result=_checker_result_dict(check),
-                plugin_results=plugin_results,
             ),
             agent_id=context.agent_id or event.context.agent_id,
             user_id=context.user_id or event.context.user_id,
         )
 
-        # 6b. Observers (traffic/telemetry/approvals for the console).
+        # 3b. Observers (traffic/telemetry/approvals for the console).
         for observer in self.observers:
             try:
-                observer(event, decision, request, plugin_results)
+                observer(event, decision, request)
             except Exception:
                 pass
 
-        # 7. Response.
+        # 4. Response.
         risk_signals = sorted(set(event.risk_signals) | set(check.risk_signals))
         return {
             "decision": decision.to_dict(),
             "risk_signals": risk_signals,
             "checker_result": _checker_result_dict(check),
-            "plugin_results": plugin_results,
         }
 
     def get_trace_records(
@@ -566,11 +488,7 @@ class RuntimeManager:
             if not stored:
                 continue
             if record.event is not None and record.decision is not None:
-                self.audit.record(
-                    record.event.to_dict(),
-                    record.decision.to_dict(),
-                    {"trace_upload": {"reason": trace.get("reason")}},
-                )
+                self.audit.record(record.event.to_dict(), record.decision.to_dict())
             count += 1
         return count
 
@@ -634,24 +552,6 @@ def _checker_result_dict(check: CheckResult) -> dict[str, Any]:
         ),
         "metadata": dict(check.metadata),
     }
-
-
-def _merge_check_results(first: CheckResult, second: CheckResult) -> CheckResult:
-    signals = list(first.risk_signals)
-    for signal in second.risk_signals:
-        if signal not in signals:
-            signals.append(signal)
-    metadata = dict(first.metadata)
-    metadata.update(second.metadata)
-    candidate = second.decision_candidate or first.decision_candidate
-    is_final = first.is_final or second.is_final
-    return CheckResult(
-        decision_candidate=candidate,
-        risk_signals=signals,
-        is_final=is_final,
-        metadata=metadata,
-    )
-
 
 def _decision_from_checker_result(check: CheckResult) -> GuardDecision:
     if check.is_final and check.decision_candidate is not None:

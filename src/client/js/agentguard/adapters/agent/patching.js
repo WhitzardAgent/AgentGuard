@@ -2,6 +2,7 @@
 
 const ev = require("../../schemas/events");
 const { DecisionType } = require("../../schemas/decisions");
+const { ToolMetadata } = require("../../tools/metadata");
 
 const PATCHED_ATTR = "__agentguard_patched__";
 const WRAPPED_ATTR = "__agentguard_wrapped__";
@@ -17,19 +18,36 @@ function markGuarded(obj) {
   return obj;
 }
 
+function markPatched(obj) {
+  if (obj) {
+    obj[PATCHED_ATTR] = true;
+  }
+}
+
 function toolName(tool, fn = null, fallback = "tool") {
   return String((tool && (tool.name || tool.__name__)) || (fn && fn.name) || fallback);
 }
 
-function bindArguments(args, kwargs = {}) {
-  if (args.length === 1 && args[0] && typeof args[0] === "object" && !Array.isArray(args[0])) {
-    return { ...args[0], ...kwargs };
+function bindArguments(fn, args, kwargs = {}) {
+  if (!args.length) {
+    return { ...kwargs };
   }
-  const out = { ...kwargs };
-  if (args.length) {
+  try {
+    const source = fn && typeof fn.toString === "function" ? fn.toString() : "";
+    const match = source.match(/^[^(]*\(([^)]*)\)/);
+    const names = match
+      ? match[1].split(",").map((part) => part.trim().replace(/=.*$/, "")).filter(Boolean)
+      : [];
+    const out = { ...kwargs };
+    args.forEach((value, index) => {
+      out[names[index] || "_args"] = names[index] ? value : [...args];
+    });
+    return out;
+  } catch (_) {
+    const out = { ...kwargs };
     out._args = [...args];
+    return out;
   }
-  return out;
 }
 
 function setAttr(obj, attr, value) {
@@ -44,11 +62,24 @@ function setAttr(obj, attr, value) {
 function registerToolMetadata(guard, fn, { name, tool = null, capabilities = null } = {}) {
   const description = (tool && tool.description) || "";
   const caps = capabilities || (tool && tool.capabilities) || [];
-  return guard.register_tool(fn, {
-    name,
-    description: String(description).trim().split("\n")[0],
-    capabilities: [...caps],
-  });
+  return guard.register_tool(
+    fn,
+    new ToolMetadata({
+      name,
+      description: String(description).trim().split("\n")[0],
+      capabilities: [...caps],
+      is_async: fn && fn.constructor && fn.constructor.name === "AsyncFunction",
+    })
+  );
+}
+
+async function guardLLMBefore(guard, { label, args = [], kwargs = {} } = {}) {
+  const request = { label, args: [...args], kwargs: { ...kwargs } };
+  return (await guard.runtime.guard(ev.llm_input(guard.context, request))).decision;
+}
+
+async function guardLLMAfter(guard, output) {
+  return (await guard.runtime.guard(ev.llm_output(guard.context, output), { phase: "after" })).decision;
 }
 
 async function guardToolBefore(guard, metadata, arguments_) {
@@ -96,7 +127,7 @@ function makeGuardedTool(guard, fn, { name, tool = null, capabilities = null } =
   const metadata = registerToolMetadata(guard, fn, { name, tool, capabilities });
   const wrapper = async (...args) => {
     try {
-      const arguments_ = bindArguments(args);
+      const arguments_ = bindArguments(fn, args);
       const decision = await guardToolBefore(guard, metadata, arguments_);
       const blocked = blockedToolValue(decision, metadata.name);
       if (blocked) {
@@ -127,9 +158,9 @@ function makeGuardedLLMCallable(guard, fn, { label } = {}) {
   }
   const wrapper = async (...args) => {
     try {
-      await guard.runtime.guard(ev.llm_input(guard.context, { label, args }));
+      await guardLLMBefore(guard, { label, args });
       const raw = await fn(...args);
-      const decision = (await guard.runtime.guard(ev.llm_output(guard.context, raw), { phase: "after" })).decision;
+      const decision = await guardLLMAfter(guard, raw);
       if (decision.decision_type === DecisionType.DENY) {
         return { agentguard: "blocked", reason: decision.reason };
       }
@@ -150,7 +181,22 @@ function makeGuardedLLMCallable(guard, fn, { label } = {}) {
 function patchLLMMethods(guard, obj, { methods = ["create", "complete", "completion", "generate", "invoke", "ainvoke", "predict", "chat"] } = {}) {
   let patched = 0;
   for (const name of methods) {
-    if (typeof obj[name] !== "function" || isGuarded(obj[name])) {
+    if (name.includes(".")) {
+      const parts = name.split(".");
+      let target = obj;
+      for (const part of parts.slice(0, -1)) {
+        target = target ? target[part] : null;
+      }
+      const leaf = parts[parts.length - 1];
+      if (!target || typeof target[leaf] !== "function" || isGuarded(target[leaf])) {
+        continue;
+      }
+      if (setAttr(target, leaf, makeGuardedLLMCallable(guard, target[leaf].bind(target), { label: name }))) {
+        patched += 1;
+      }
+      continue;
+    }
+    if (!obj || typeof obj[name] !== "function" || isGuarded(obj[name])) {
       continue;
     }
     if (setAttr(obj, name, makeGuardedLLMCallable(guard, obj[name].bind(obj), { label: name }))) {
@@ -163,9 +209,15 @@ function patchLLMMethods(guard, obj, { methods = ["create", "complete", "complet
 module.exports = {
   isGuarded,
   markGuarded,
+  markPatched,
   toolName,
   bindArguments,
   setAttr,
+  registerToolMetadata,
+  guardLLMBefore,
+  guardLLMAfter,
+  guardToolBefore,
+  guardToolAfter,
   makeGuardedTool,
   makeGuardedLLMCallable,
   patchLLMMethods,

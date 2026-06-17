@@ -37,7 +37,6 @@ class AuditTraceEntry:
     event: RuntimeEvent | None = None
     decision: GuardDecision | None = None
     checker_result: dict[str, Any] = field(default_factory=dict)
-    plugin_results: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AuditTraceEntry":
@@ -65,7 +64,6 @@ class AuditTraceEntry:
             event=event,
             decision=decision,
             checker_result=dict(data.get("checker_result") or {}),
-            plugin_results=dict(data.get("plugin_results") or {}),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -75,7 +73,6 @@ class AuditTraceEntry:
             "user_id": self.user_id,
             "reason": self.reason,
             "checker_result": dict(self.checker_result),
-            "plugin_results": dict(self.plugin_results),
         }
         if self.event is not None:
             data["event"] = self.event.to_dict()
@@ -86,8 +83,6 @@ class AuditTraceEntry:
     def merged_with(self, incoming: "AuditTraceEntry") -> "AuditTraceEntry":
         checker_result = dict(self.checker_result)
         checker_result.update(incoming.checker_result)
-        plugin_results = dict(self.plugin_results)
-        plugin_results.update(incoming.plugin_results)
         return AuditTraceEntry(
             session_id=incoming.session_id or self.session_id,
             agent_id=incoming.agent_id or self.agent_id,
@@ -96,7 +91,6 @@ class AuditTraceEntry:
             event=incoming.event or self.event,
             decision=incoming.decision or self.decision,
             checker_result=checker_result,
-            plugin_results=plugin_results,
         )
 
     @property

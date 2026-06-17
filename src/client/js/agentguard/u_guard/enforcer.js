@@ -6,12 +6,12 @@ const { ClientSyncBuffer } = require("./sync_buffer");
 const { RemoteGuardError } = require("../utils/errors");
 
 class EnforcementResult {
-  constructor({ decision, event, route = "local", check = null, plugin_extensions = {} }) {
+  constructor({ decision, event, route = "local", check = null, extensions = {} }) {
     this.decision = decision;
     this.event = event;
     this.route = route;
     this.check = check;
-    this.plugin_extensions = plugin_extensions;
+    this.extensions = extensions;
   }
 }
 
@@ -36,7 +36,7 @@ class UGuardEnforcer {
     return Boolean(this.remote && this.remote.enabled && !this.remote.breaker.is_open);
   }
 
-  async enforce(event, context, { plugin_extensions = null } = {}) {
+  async enforce(event, context, { extensions = null } = {}) {
     const check = this.checkers.run(event, context);
     const traceWindow = this.trace_window_provider ? this.trace_window_provider() : null;
     if (check.is_final && check.decision_candidate) {
@@ -48,24 +48,24 @@ class UGuardEnforcer {
         check,
         decision,
         route: "local_checker",
-        plugin_extensions: plugin_extensions || {},
+        extensions: extensions || {},
       });
       return new EnforcementResult({
         decision,
         event,
         route: "local_checker",
         check,
-        plugin_extensions: plugin_extensions || {},
+        extensions: extensions || {},
       });
     }
     if (this.server_available) {
-      const { decision, route } = await this.decideRemote(event, context, traceWindow, plugin_extensions || {});
+      const { decision, route } = await this.decideRemote(event, context, traceWindow, extensions || {});
       return new EnforcementResult({
         decision,
         event,
         route,
         check,
-        plugin_extensions: plugin_extensions || {},
+        extensions: extensions || {},
       });
     }
     return new EnforcementResult({
@@ -76,17 +76,17 @@ class UGuardEnforcer {
       event,
       route: "local_no_remote",
       check,
-      plugin_extensions: plugin_extensions || {},
+      extensions: extensions || {},
     });
   }
 
-  async decideRemote(event, context, traceWindow, pluginExtensions) {
+  async decideRemote(event, context, traceWindow, extensions) {
     const cachedEntries = this.sync_buffer.pop_all();
     try {
       const decision = await this.remote.decide(event, context, {
         trajectory_window: traceWindow,
         local_signals: [...(event.risk_signals || [])],
-        plugin_extensions: pluginExtensions,
+        extensions,
         client_cached_entries: cachedEntries,
       });
       decision.metadata.route = decision.metadata.route || "remote";

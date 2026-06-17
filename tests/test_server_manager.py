@@ -73,7 +73,7 @@ def test_manager_allows_benign_read():
 
 
 def test_manager_records_session_pool_metadata():
-    m = RuntimeManager(enable_agentdog=False)
+    m = RuntimeManager()
     m.decide(
         {
             "request_id": "session-pool",
@@ -117,7 +117,7 @@ def test_manager_records_session_pool_metadata():
 
 
 def test_session_pool_requires_exact_composite_key_for_lookup():
-    m = RuntimeManager(enable_agentdog=False)
+    m = RuntimeManager()
     m.session_pool.upsert(
         RuntimeContext(
             session_id="composite-session",
@@ -169,7 +169,6 @@ def test_server_registered_checker_can_be_loaded_by_name():
             return CheckResult(risk_signals=["server_registered_checker_seen"])
 
     m = RuntimeManager(
-        enable_agentdog=False,
         checker_config={
             "phases": {
                 "tool_before": {
@@ -201,7 +200,6 @@ def test_server_registered_checker_can_be_loaded_by_name():
 
 def test_manager_returns_checker_result():
     m = RuntimeManager(
-        enable_agentdog=False,
         checker_config={
             "phases": {
                 "llm_before": {"local": [], "remote": ["llm_input"]},
@@ -237,7 +235,7 @@ def test_manager_uses_checker_config_file(tmp_path):
     path = tmp_path / "server_checkers.json"
     path.write_text(json.dumps(cfg), encoding="utf-8")
 
-    m = RuntimeManager(enable_agentdog=False, checker_config=str(path))
+    m = RuntimeManager(checker_config=str(path))
     req = {
         "request_id": "r4",
         "context": {"session_id": "s4"},
@@ -278,7 +276,6 @@ class ShouldNotRunChecker(BaseChecker):
 
 def test_manager_uses_session_scoped_client_checker_config():
     m = RuntimeManager(
-        enable_agentdog=False,
         checker_config={
             "phases": {
                 "llm_before": {"local": [], "remote": ["llm_input"]},
@@ -322,7 +319,7 @@ def test_manager_uses_session_scoped_client_checker_config():
 
 
 def test_update_client_checker_config_updates_both_server_and_client_views():
-    m = RuntimeManager(enable_agentdog=False)
+    m = RuntimeManager()
     m.session_pool.upsert(
         RuntimeContext(
             session_id="principal-match",
@@ -346,7 +343,6 @@ def test_update_client_checker_config_updates_both_server_and_client_views():
 
 def test_manager_stops_remote_checker_chain_on_first_decision():
     m = RuntimeManager(
-        enable_agentdog=False,
         checker_config={
             "phases": {
                 "tool_before": {
@@ -386,7 +382,6 @@ class TraceAwareChecker(BaseChecker):
 
 def test_server_checker_receives_trajectory_window():
     m = RuntimeManager(
-        enable_agentdog=False,
         checker_config={
             "phases": {
                 "tool_before": {"local": [], "remote": [TraceAwareChecker]}
@@ -416,7 +411,6 @@ def test_server_checker_receives_trajectory_window():
 
 def test_server_merges_client_cached_entries_into_trajectory_window():
     m = RuntimeManager(
-        enable_agentdog=False,
         checker_config={
             "phases": {
                 "tool_before": {"local": [], "remote": [TraceAwareChecker]}
@@ -452,7 +446,7 @@ def test_server_merges_client_cached_entries_into_trajectory_window():
 
 
 def test_server_records_uploaded_trace():
-    m = RuntimeManager(enable_agentdog=False)
+    m = RuntimeManager()
     count = m.record_uploaded_trace(
         {
             "session_id": "s7",
@@ -495,7 +489,7 @@ def test_rule_based_check_is_a_checker():
 
 
 def test_rule_based_check_is_optional_in_runtime_manager():
-    m = RuntimeManager(enable_agentdog=False)
+    m = RuntimeManager()
     req = {
         "request_id": "r8",
         "context": {"session_id": "s8"},

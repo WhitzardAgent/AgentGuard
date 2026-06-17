@@ -34,7 +34,6 @@ def test_e2e_exfiltration_denied_over_http(server):
         session_id="e2e",
         server_url=server,
         policy="enterprise_default",
-        enable_agentdog=True,
         checker_config={
             "phases": {
                 "tool_after": {"local": ["tool_result"], "remote": []},
@@ -80,7 +79,7 @@ def test_e2e_skill_run_over_http(server):
 
 
 def test_agentguard_close_unregisters_server_session():
-    manager = RuntimeManager(enable_agentdog=False)
+    manager = RuntimeManager()
     base_url, srv, _ = start_dev_server(manager=manager)
     guard = AgentGuard(session_id="close-session", server_url=base_url)
     try:
@@ -97,7 +96,7 @@ def test_agentguard_close_unregisters_server_session():
 
 
 def test_backend_checker_config_update_changes_server_runtime():
-    manager = RuntimeManager(enable_agentdog=False)
+    manager = RuntimeManager()
     base_url, srv, _ = start_dev_server(manager=manager)
     try:
         payload = {
@@ -133,7 +132,7 @@ def test_backend_checker_config_update_changes_server_runtime():
 
 
 def test_backend_checker_config_update_pushes_to_client():
-    manager = RuntimeManager(enable_agentdog=False)
+    manager = RuntimeManager()
     base_url, srv, _ = start_dev_server(manager=manager)
     guard = AgentGuard("client-config-update")
     try:
@@ -167,7 +166,7 @@ def test_backend_checker_config_update_pushes_to_client():
 
 
 def test_client_registration_sends_checker_config_to_server():
-    manager = RuntimeManager(enable_agentdog=False)
+    manager = RuntimeManager()
     base_url, srv, _ = start_dev_server(manager=manager)
     checker_config = {
         "phases": {
@@ -201,7 +200,7 @@ def test_client_registration_sends_checker_config_to_server():
 
 
 def test_backend_checker_config_update_by_principal_updates_server_and_client():
-    manager = RuntimeManager(enable_agentdog=False)
+    manager = RuntimeManager()
     base_url, srv, _ = start_dev_server(manager=manager)
     guard = AgentGuard(
         session_id="principal-config-session",
@@ -275,7 +274,6 @@ def test_backend_checker_config_update_by_principal_updates_server_and_client():
 
 def test_backend_session_pool_records_client_metadata_over_http():
     manager = RuntimeManager(
-        enable_agentdog=False,
         checker_config={
             "phases": {
                 "llm_before": {"local": [], "remote": ["llm_input"]},
@@ -313,7 +311,7 @@ def test_backend_session_pool_records_client_metadata_over_http():
 
 
 def test_wrap_tool_reports_tool_to_server_before_invocation():
-    manager = RuntimeManager(enable_agentdog=False)
+    manager = RuntimeManager()
     base_url, srv, _ = start_dev_server(manager=manager)
     guard = AgentGuard(
         session_id="tool-report-session",
@@ -345,7 +343,7 @@ def test_wrap_tool_reports_tool_to_server_before_invocation():
 
 
 def test_backend_refreshes_stale_session_when_client_health_is_alive():
-    manager = RuntimeManager(enable_agentdog=False)
+    manager = RuntimeManager()
     guard = AgentGuard("stale-session", agent_id="stale-agent")
     try:
         guard.start_config_api(port=0)
@@ -369,7 +367,6 @@ def test_backend_refreshes_stale_session_when_client_health_is_alive():
 
 def test_backend_session_health_monitor_refreshes_sessions_async():
     manager = RuntimeManager(
-        enable_agentdog=False,
         session_health_interval_s=0.05,
         session_health_max_age_s=0.0,
     )
@@ -401,7 +398,7 @@ def test_backend_session_health_monitor_refreshes_sessions_async():
 
 
 def test_backend_rejects_missing_or_invalid_session_key_over_http():
-    manager = RuntimeManager(enable_agentdog=False)
+    manager = RuntimeManager()
     base_url, srv, _ = start_dev_server(manager=manager)
     body = {
         "context": {"session_id": "keyed-session", "agent_id": "keyed-agent", "user_id": "keyed-user"},
@@ -483,7 +480,7 @@ def test_backend_rejects_missing_or_invalid_session_key_over_http():
 
 def test_backend_frontend_api_requires_api_key(monkeypatch):
     monkeypatch.setenv("AGENTGUARD_API_KEY", "sk-test-backend-api-key")
-    manager = RuntimeManager(enable_agentdog=False)
+    manager = RuntimeManager()
     base_url, srv, _ = start_dev_server(manager=manager)
     try:
         with pytest.raises(urllib.error.HTTPError) as missing:

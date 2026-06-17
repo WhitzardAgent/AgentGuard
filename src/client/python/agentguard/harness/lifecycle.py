@@ -19,7 +19,7 @@ HOOKS = (
 
 
 class Lifecycle:
-    """Registers and dispatches lifecycle callbacks (used by plugins)."""
+    """Registers and dispatches runtime lifecycle callbacks."""
 
     def __init__(self) -> None:
         self._hooks: dict[str, list[Callable[..., Any]]] = defaultdict(list)

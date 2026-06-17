@@ -1,4 +1,4 @@
-"""Compatibility aliases for legacy checker imports."""
+"""Checker-centric mirror of the plugin facade."""
 from __future__ import annotations
 
 import importlib

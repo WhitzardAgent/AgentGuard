@@ -91,7 +91,7 @@ class RemoteGuardClient:
         *,
         trajectory_window: list[RuntimeEvent] | None = None,
         local_signals: list[str] | None = None,
-        plugin_extensions: dict[str, Any] | None = None,
+        extensions: dict[str, Any] | None = None,
         client_cached_entries: list[dict[str, Any]] | None = None,
     ) -> GuardDecision:
         if not self.enabled:
@@ -106,7 +106,7 @@ class RemoteGuardClient:
             "trajectory_window": [e.to_dict() for e in (trajectory_window or [])],
             "local_signals": list(local_signals or event.risk_signals),
             "policy_version": context.policy_version,
-            "plugin_extensions": plugin_extensions or {},
+            "extensions": extensions or {},
             "client_cached_entries": list(client_cached_entries or []),
         }
         payload = self._post(self.decide_path, body)
@@ -118,7 +118,6 @@ class RemoteGuardClient:
             if s not in gd.risk_signals:
                 gd.risk_signals.append(s)
         gd.metadata.setdefault("checker_result", payload.get("checker_result") or {})
-        gd.metadata.setdefault("plugin_results", payload.get("plugin_results") or {})
         gd.metadata.setdefault("source", "remote")
         return gd
 

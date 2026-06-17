@@ -25,7 +25,7 @@ class ClientSyncBuffer:
         check: CheckResult,
         decision: GuardDecision,
         route: str,
-        plugin_extensions: dict[str, Any] | None = None,
+        extensions: dict[str, Any] | None = None,
     ) -> None:
         entry = {
             "source": "client_local_checker",
@@ -38,7 +38,7 @@ class ClientSyncBuffer:
                 "event": event.to_dict(),
                 "context": context.to_dict(),
             },
-            "plugin_extensions": plugin_extensions or {},
+            "extensions": extensions or {},
         }
         with self._lock:
             self._entries.append(entry)

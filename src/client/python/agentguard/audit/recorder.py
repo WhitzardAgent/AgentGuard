@@ -1,8 +1,6 @@
 """Audit recorder: turns events+decisions into redacted audit records."""
 from __future__ import annotations
 
-from typing import Any
-
 from agentguard.audit.logger import AuditLogger
 from agentguard.audit.redactor import redact
 from agentguard.audit.trace import Trace
@@ -23,7 +21,6 @@ class AuditRecorder:
         self,
         event: RuntimeEvent,
         decision: GuardDecision | None = None,
-        plugin_results: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         self.trace.add(event, decision)
         record = {
@@ -35,7 +32,6 @@ class AuditRecorder:
             "reason": decision.reason if decision else None,
             "risk_signals": list(event.risk_signals),
             "policy_id": decision.policy_id if decision else None,
-            "plugin_results": plugin_results or {},
             "metadata": {
                 "payload": event.payload,
                 "decision_metadata": decision.metadata if decision else {},

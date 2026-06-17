@@ -13,7 +13,7 @@ class GuardDecideRequest(BaseModel):
     trajectory_window: list[dict[str, Any]] = Field(default_factory=list)
     local_signals: list[str] = Field(default_factory=list)
     policy_version: str | None = None
-    plugin_extensions: dict[str, Any] = Field(default_factory=dict)
+    extensions: dict[str, Any] = Field(default_factory=dict)
     client_cached_entries: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -21,7 +21,6 @@ class GuardDecideResponse(BaseModel):
     decision: dict[str, Any]
     risk_signals: list[str] = Field(default_factory=list)
     checker_result: dict[str, Any] = Field(default_factory=dict)
-    plugin_results: dict[str, Any] = Field(default_factory=dict)
 
 
 class TraceUploadRequest(BaseModel):

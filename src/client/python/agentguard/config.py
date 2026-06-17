@@ -19,9 +19,6 @@ class GuardConfig:
     sandbox: str = "local"
     sandbox_profile: Any = None
 
-    # plugins
-    enable_agentdog: bool = False
-
     # runtime limits
     max_steps: int = 12
     max_tool_calls: int = 24

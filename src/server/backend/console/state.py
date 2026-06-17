@@ -277,7 +277,6 @@ class ConsoleState:
         event: RuntimeEvent,
         decision: GuardDecision,
         request: dict[str, Any],
-        plugin_results: dict[str, Any],
     ) -> None:
         action = _DECISION_TO_ACTION.get(decision.decision_type, "allow")
         payload = event.payload or {}
@@ -287,9 +286,6 @@ class ConsoleState:
             [decision.policy_id] if decision.policy_id else []
         )
         risk = 0.0
-        ad = (plugin_results or {}).get("agentdog") or {}
-        if ad:
-            risk = float((ad.get("policy_metadata") or {}).get("agentdog_risk_score") or 0.0)
         now = time.time()
 
         entry = {

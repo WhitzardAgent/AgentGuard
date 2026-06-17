@@ -72,7 +72,7 @@ class RemoteGuardClient {
       trajectory_window: (options.trajectory_window || []).map((item) => item.toDict()),
       local_signals: options.local_signals || event.risk_signals || [],
       policy_version: context.policy_version,
-      plugin_extensions: options.plugin_extensions || {},
+      extensions: options.extensions || {},
       client_cached_entries: options.client_cached_entries || [],
     });
     const decision = GuardDecision.fromDict(payload.decision || {});
@@ -82,7 +82,6 @@ class RemoteGuardClient {
       }
     }
     decision.metadata.checker_result = decision.metadata.checker_result || payload.checker_result || {};
-    decision.metadata.plugin_results = decision.metadata.plugin_results || payload.plugin_results || {};
     decision.metadata.source = decision.metadata.source || "remote";
     return decision;
   }

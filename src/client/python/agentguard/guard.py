@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import secrets
-import warnings
 from pathlib import Path
 from typing import Any, Callable
 
@@ -44,7 +43,6 @@ class AgentGuard:
         environment: str | None = None,
         sandbox: str = "local",
         sandbox_profile: Any = None,
-        enable_agentdog: bool = False,
         max_steps: int = 12,
         max_tool_calls: int = 24,
         window_size: int = 8,
@@ -121,14 +119,6 @@ class AgentGuard:
             if server_url
             else None
         )
-
-        if enable_agentdog:
-            warnings.warn(
-                "enable_agentdog is deprecated and ignored because client PluginManager "
-                "has been removed. Use checker_config/custom checkers instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
         self._register_remote_session()
 
     # ---- policy --------------------------------------------------------
@@ -248,15 +238,6 @@ class AgentGuard:
         metadata = self._registry.register(fn, **meta)
         self._report_tool_metadata(metadata)
         return metadata
-
-    def register_plugin(self, plugin: Any) -> Any:
-        warnings.warn(
-            "register_plugin() is deprecated and is now a no-op because client "
-            "PluginManager has been removed. Use checker_config/custom checkers instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return plugin
 
     def register_skill(self, skill: Any) -> Any:
         try:

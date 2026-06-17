@@ -16,7 +16,7 @@ class RemoteGuardRequest:
     trajectory_window: list[dict[str, Any]] = field(default_factory=list)
     local_signals: list[str] = field(default_factory=list)
     policy_version: str | None = None
-    plugin_extensions: dict[str, Any] = field(default_factory=dict)
+    extensions: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -26,7 +26,7 @@ class RemoteGuardRequest:
             "trajectory_window": self.trajectory_window,
             "local_signals": list(self.local_signals),
             "policy_version": self.policy_version,
-            "plugin_extensions": self.plugin_extensions,
+            "extensions": self.extensions,
         }
 
     @classmethod
@@ -38,7 +38,7 @@ class RemoteGuardRequest:
             trajectory_window=list(data.get("trajectory_window") or []),
             local_signals=list(data.get("local_signals") or []),
             policy_version=data.get("policy_version"),
-            plugin_extensions=dict(data.get("plugin_extensions") or {}),
+            extensions=dict(data.get("extensions") or {}),
         )
 
 
@@ -48,13 +48,13 @@ class RemoteGuardResponse:
 
     decision: dict[str, Any]
     risk_signals: list[str] = field(default_factory=list)
-    plugin_results: dict[str, Any] = field(default_factory=dict)
+    checker_result: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "decision": self.decision,
             "risk_signals": list(self.risk_signals),
-            "plugin_results": self.plugin_results,
+            "checker_result": self.checker_result,
         }
 
     @classmethod
@@ -62,5 +62,5 @@ class RemoteGuardResponse:
         return cls(
             decision=dict(data.get("decision") or {}),
             risk_signals=list(data.get("risk_signals") or []),
-            plugin_results=dict(data.get("plugin_results") or {}),
+            checker_result=dict(data.get("checker_result") or {}),
         )
