@@ -1,7 +1,7 @@
 """Checker for LLM output events."""
 from __future__ import annotations
 
-from agentguard.plugins.base import BaseChecker, CheckResult
+from agentguard.plugins.base import BasePlugin, CheckResult
 from agentguard.plugins.common.patterns import find_signals, text_of
 from agentguard.plugins.registry import register
 from agentguard.schemas.context import RuntimeContext
@@ -12,7 +12,7 @@ from agentguard.schemas.events import EventType, RuntimeEvent
     name="llm_output",
     description="Detect risky content, secrets, and injection patterns in LLM output.",
 )
-class LLMOutputChecker(BaseChecker):
+class LLMOutputChecker(BasePlugin):
     event_types = [EventType.LLM_OUTPUT]
 
     def check(self, event: RuntimeEvent, context: RuntimeContext) -> CheckResult:

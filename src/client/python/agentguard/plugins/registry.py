@@ -1,58 +1,58 @@
-"""Checker class registry and registration decorator."""
+"""Plugin class registry and registration decorator."""
 from __future__ import annotations
 
 import importlib
 import pkgutil
 from typing import Callable
 
-from agentguard.plugins.base import BaseChecker
+from agentguard.plugins.base import BasePlugin
 
-_CHECKERS: dict[str, type[BaseChecker]] = {}
+_PLUGINS: dict[str, type[BasePlugin]] = {}
 _DESCRIPTIONS: dict[str, str] = {}
 _DISCOVERED = False
 
 
-def register(name: str, description: str) -> Callable[[type[BaseChecker]], type[BaseChecker]]:
-    """Register a checker class under a config-friendly name."""
+def register(name: str, description: str) -> Callable[[type[BasePlugin]], type[BasePlugin]]:
+    """Register a plugin class under a config-friendly name."""
     if not name:
-        raise ValueError("checker registration name must not be empty")
+        raise ValueError("plugin registration name must not be empty")
 
-    def _decorator(cls: type[BaseChecker]) -> type[BaseChecker]:
-        if not isinstance(cls, type) or not issubclass(cls, BaseChecker):
-            raise TypeError("@register can only decorate BaseChecker subclasses")
-        existing = _CHECKERS.get(name)
+    def _decorator(cls: type[BasePlugin]) -> type[BasePlugin]:
+        if not isinstance(cls, type) or not issubclass(cls, BasePlugin):
+            raise TypeError("@register can only decorate BasePlugin subclasses")
+        existing = _PLUGINS.get(name)
         if (
             existing is not None
             and existing is not cls
             and existing.__module__ != cls.__module__
         ):
-            raise ValueError(f"checker name already registered: {name}")
+            raise ValueError(f"plugin name already registered: {name}")
         cls.name = name
         cls.description = description
-        _CHECKERS[name] = cls
+        _PLUGINS[name] = cls
         _DESCRIPTIONS[name] = description
         return cls
 
     return _decorator
 
 
-def get_checker_class(name: str) -> type[BaseChecker] | None:
-    discover_checkers()
-    return _CHECKERS.get(name)
+def get_plugin_class(name: str) -> type[BasePlugin] | None:
+    discover_plugins()
+    return _PLUGINS.get(name)
 
 
-def checker_descriptions() -> dict[str, str]:
-    discover_checkers()
+def plugin_descriptions() -> dict[str, str]:
+    discover_plugins()
     return dict(_DESCRIPTIONS)
 
 
-def registered_checkers() -> dict[str, type[BaseChecker]]:
-    discover_checkers()
-    return dict(_CHECKERS)
+def registered_plugins() -> dict[str, type[BasePlugin]]:
+    discover_plugins()
+    return dict(_PLUGINS)
 
 
-def discover_checkers(package_name: str = "agentguard.plugins") -> None:
-    """Import checker modules so @register decorators run."""
+def discover_plugins(package_name: str = "agentguard.plugins") -> None:
+    """Import plugin modules so @register decorators run."""
     global _DISCOVERED
     if _DISCOVERED:
         return

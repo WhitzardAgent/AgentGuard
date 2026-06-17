@@ -1,7 +1,7 @@
 """Checker for user/LLM input events."""
 from __future__ import annotations
 
-from agentguard.plugins.base import BaseChecker, CheckResult
+from agentguard.plugins.base import BasePlugin, CheckResult
 from agentguard.plugins.common.patterns import find_signals, text_of
 from agentguard.plugins.registry import register
 from agentguard.schemas.context import RuntimeContext
@@ -12,7 +12,7 @@ from agentguard.schemas.events import EventType, RuntimeEvent
     name="llm_input",
     description="Detect prompt-injection and system-prompt leak attempts in LLM input.",
 )
-class LLMInputChecker(BaseChecker):
+class LLMInputChecker(BasePlugin):
     event_types = [EventType.LLM_INPUT]
 
     def check(self, event: RuntimeEvent, context: RuntimeContext) -> CheckResult:

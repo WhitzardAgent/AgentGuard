@@ -1,10 +1,10 @@
 "use strict";
 
-const { BaseChecker, CheckResult } = require("../base");
+const { BasePlugin, CheckResult } = require("../base");
 const { EventType } = require("../../schemas/events");
 const { matchSignals } = require("../common/patterns");
 
-class ToolInvokeChecker extends BaseChecker {
+class ToolInvokeChecker extends BasePlugin {
   constructor() {
     super();
     this.event_types = [EventType.TOOL_INVOKE];

@@ -81,7 +81,7 @@ test("remote skill runner sends triple identity headers and server input schema"
   assert.equal(calls[0].options.headers["X-AgentGuard-Session-Key"], "sk-skill");
 });
 
-test("agentguard auto-registers remote session with checker config metadata", async () => {
+test("agentguard auto-registers remote session with plugin config metadata", async () => {
   const calls = [];
   global.fetch = async (url, options = {}) => {
     calls.push({ url, options });
@@ -116,8 +116,8 @@ test("agentguard auto-registers remote session with checker config metadata", as
   assert.equal(body.context.session_id, "sess-4");
   assert.equal(body.context.agent_id, "agent-4");
   assert.equal(body.context.user_id, "user-4");
-  assert.ok(String(body.context.metadata.client_config_url || "").endsWith("/v1/client/checkers/config"));
-  assert.ok(String(body.context.metadata.client_checker_list_url || "").endsWith("/v1/client/checkers/list"));
+  assert.ok(String(body.context.metadata.client_config_url || "").endsWith("/v1/client/plugins/config"));
+  assert.ok(String(body.context.metadata.client_plugin_list_url || "").endsWith("/v1/client/plugins/list"));
   assert.ok(String(body.context.metadata.client_health_url || "").endsWith("/v1/client/health"));
   assert.deepEqual(body.context.metadata.client_checker_config, {
     phases: {
@@ -128,11 +128,11 @@ test("agentguard auto-registers remote session with checker config metadata", as
   await guard.close();
 });
 
-test("checker manager defaults to no local checkers when config is omitted", async () => {
+test("plugin manager defaults to no local plugins when config is omitted", async () => {
   const { AgentGuard } = require("./guard");
   const { llm_input } = require("./schemas/events");
 
-  const guard = new AgentGuard("sess-default-checkers", {
+  const guard = new AgentGuard("sess-default-plugins", {
     sandbox: "noop",
   });
 
@@ -158,7 +158,7 @@ test("agentguard can register and run a local skill", async () => {
   assert.deepEqual(result, { ok: true, echoed: { data: { value: 1 } } });
 });
 
-test("agentguard local checker updates resync session without overwriting remote checker metadata", async () => {
+test("agentguard local plugin updates resync session without overwriting remote config metadata", async () => {
   const calls = [];
   global.fetch = async (url, options = {}) => {
     calls.push({ url, options });

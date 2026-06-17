@@ -240,6 +240,7 @@ def _client_key_for_url(url: str) -> str | None:
     for session in _manager.session_pool.list():
         known_urls = {
             session.get("client_config_url"),
+            session.get("client_plugin_list_url"),
             session.get("client_checker_list_url"),
             session.get("client_health_url"),
         }
@@ -296,7 +297,9 @@ def _fetch_client_checker_list(
     try:
         with urllib.request.urlopen(request, timeout=max(timeout_s, 0.1)) as response:
             payload = safe_loads(response.read(), fallback={}) or {}
-        checkers = payload.get("checkers") if isinstance(payload, dict) else []
+        checkers = []
+        if isinstance(payload, dict):
+            checkers = payload.get("plugins") or payload.get("checkers") or []
         if not isinstance(checkers, list):
             checkers = []
         return {
@@ -317,7 +320,7 @@ def _fetch_client_checker_list(
 def _fetch_agent_local_checkers(agent_id: str) -> list[dict[str, Any]]:
     local_map: dict[str, dict[str, Any]] = {}
     for session in _manager.sessions_for_principal({"agent_id": agent_id}):
-        list_url = session.get("client_checker_list_url")
+        list_url = session.get("client_plugin_list_url") or session.get("client_checker_list_url")
         if not list_url:
             continue
         result = _fetch_client_checker_list(

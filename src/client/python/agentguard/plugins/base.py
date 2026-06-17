@@ -1,4 +1,4 @@
-"""Base checker interface and result type."""
+"""Base plugin interface and result type."""
 from __future__ import annotations
 
 import os
@@ -23,8 +23,8 @@ class CheckResult:
         return CheckResult()
 
 
-class BaseChecker:
-    """Local, non-networked risk checker for one or more event types."""
+class BasePlugin:
+    """Local, non-networked risk plugin for one or more event types."""
 
     name: str = "base"
     description: str = ""
@@ -47,6 +47,10 @@ class BaseChecker:
 
     def check(self, event: RuntimeEvent, context: RuntimeContext) -> CheckResult:
         raise NotImplementedError
+
+
+
+__all__ = ["BasePlugin", "CheckResult"]
 
 
 _ENV_TOKEN_RE = re.compile(

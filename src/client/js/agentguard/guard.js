@@ -6,7 +6,7 @@ const path = require("path");
 const { defaultLLMAdapters, selectLLMAdapter } = require("./adapters/llm");
 const { AuditLogger } = require("./audit/logger");
 const { AuditRecorder } = require("./audit/recorder");
-const { CheckerManager } = require("./checkers/manager");
+const { PluginManager } = require("./plugins/manager");
 const { ClientConfigAPIServer } = require("./config_api");
 const { EventBus } = require("./harness/event_bus");
 const { Lifecycle } = require("./harness/lifecycle");
@@ -29,7 +29,7 @@ const { OpenAIAgentsAdapter } = require("./adapters/agent/openai_agents");
 
 class AgentGuard {
   constructor(session_id, options = {}) {
-    const checkerPayload = checkerConfigPayload(options.checker_config || options.checkerConfig || null);
+    const pluginPayload = pluginConfigPayload(options.checker_config || options.checkerConfig || null);
     const snapshot = this.loadSnapshot(options.policy || null);
     this.session_key = options.session_key || options.sessionKey || generateSessionKey();
     this.context = new RuntimeContext({
@@ -41,8 +41,8 @@ class AgentGuard {
       environment: options.environment || null,
       metadata: {
         client_session_key: this.session_key,
-        client_checker_config: checkerPayload,
-        remote_checker_config: checkerPayload,
+        client_checker_config: pluginPayload,
+        remote_checker_config: pluginPayload,
       },
     });
     this.remote = new RemoteGuardClient(options.server_url || options.serverUrl || null, {
@@ -57,7 +57,7 @@ class AgentGuard {
     this.enforcer = new UGuardEnforcer({
       snapshot,
       remote: this.remote,
-      checker_manager: new CheckerManager({ config: options.checker_config || options.checkerConfig || null }),
+      plugin_manager: new PluginManager({ config: options.checker_config || options.checkerConfig || null }),
     });
     this.sandbox = new SandboxExecutor(options.sandbox || "local", options.sandbox_profile || options.sandboxProfile || null);
     this.audit = new AuditRecorder(session_id, new AuditLogger(options.audit_path || options.auditPath || null));
@@ -123,30 +123,33 @@ class AgentGuard {
     this.context.policy_version = next.version;
   }
 
-  update_checker_config(checker_config) {
-    const payload = checkerConfigPayload(checker_config);
+  update_checker_config(checker_config, { sync_remote = true, syncRemote = sync_remote } = {}) {
+    const payload = pluginConfigPayload(checker_config);
     this.context.metadata.client_checker_config = payload;
-    this.enforcer.update_checker_config(checker_config);
-    return this.syncRemoteSession();
+    this.enforcer.update_plugin_config(checker_config);
+    if (syncRemote) {
+      return this.syncRemoteSession();
+    }
+    return Promise.resolve();
   }
 
   async start_config_api({ host = "127.0.0.1", port = 38181, sync_remote = true, syncRemote = sync_remote } = {}) {
     const prevConfigUrl = this.context.metadata.client_config_url;
-    const prevCheckerListUrl = this.context.metadata.client_checker_list_url;
+    const prevPluginListUrl = this.context.metadata.client_plugin_list_url;
     const prevHealthUrl = this.context.metadata.client_health_url;
     if (!this.config_api) {
       this.config_api = new ClientConfigAPIServer(this, { host, port });
     }
-    this.context.metadata.client_config_url = this.config_api.checker_config_url;
-    this.context.metadata.client_checker_list_url = this.config_api.checker_list_url;
+    this.context.metadata.client_config_url = this.config_api.plugin_config_url;
+    this.context.metadata.client_plugin_list_url = this.config_api.plugin_list_url;
     this.context.metadata.client_health_url = this.config_api.health_url;
-    const url = await this.config_api.start().catch(() => this.config_api.checker_config_url);
+    const url = await this.config_api.start().catch(() => this.config_api.plugin_config_url);
     this.context.metadata.client_config_url = url;
-    this.context.metadata.client_checker_list_url = this.config_api.checker_list_url;
+    this.context.metadata.client_plugin_list_url = this.config_api.plugin_list_url;
     this.context.metadata.client_health_url = this.config_api.health_url;
     const urlsChanged = (
       prevConfigUrl !== url ||
-      prevCheckerListUrl !== this.config_api.checker_list_url ||
+      prevPluginListUrl !== this.config_api.plugin_list_url ||
       prevHealthUrl !== this.config_api.health_url
     );
     if (syncRemote && urlsChanged) {
@@ -162,7 +165,7 @@ class AgentGuard {
     await this.config_api.stop();
     this.config_api = null;
     delete this.context.metadata.client_config_url;
-    delete this.context.metadata.client_checker_list_url;
+    delete this.context.metadata.client_plugin_list_url;
     delete this.context.metadata.client_health_url;
   }
 
@@ -330,7 +333,7 @@ function generateSessionKey() {
   return `sk-${crypto.randomBytes(32).toString("base64url")}`;
 }
 
-function checkerConfigPayload(checker_config) {
+function pluginConfigPayload(checker_config) {
   if (checker_config == null) {
     return null;
   }
@@ -340,7 +343,7 @@ function checkerConfigPayload(checker_config) {
   const raw = fs.readFileSync(checker_config, "utf-8");
   const data = JSON.parse(raw);
   if (!data || typeof data !== "object" || Array.isArray(data)) {
-    throw new Error("checker config file must contain a JSON object");
+    throw new Error("plugin config file must contain a JSON object");
   }
   return data;
 }

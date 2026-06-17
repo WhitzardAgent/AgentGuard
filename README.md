@@ -68,7 +68,7 @@ According to configured safeguards, AgentGuard can intervene before each LLM cal
 
 #### Seamless Reuse of Existing Security Strategies
 
-AgentGuard provides a unified interface for adapting existing security protections. Through its modular checker architecture, rule-based and model-based strategies can be plugged in behind the same interface and enabled dynamically based on practical needs. Today, AgentGuard includes a built-in access-control strategy set, and users can build additional security policies through DSL definitions.
+AgentGuard provides a unified interface for adapting existing security protections. Through its modular plugin architecture, rule-based and model-based strategies can be plugged in behind the same interface and enabled dynamically based on practical needs. Today, AgentGuard includes a built-in access-control strategy set, and users can build additional security policies through DSL definitions.
 
 #### Single-Tool and Cross-Tool Protection
 
@@ -95,7 +95,7 @@ AgentGuard uses a centralized control-plane architecture to govern distributed a
 
 ## 🚀 Quick Start
 
-### 1. Write Checker Config, Then Write Access Control Policies and Start the Control Server
+### 1. Write Plugin Config, Then Write Access Control Policies and Start the Control Server
 
 > Docker must be installed first.
 
@@ -106,12 +106,12 @@ git clone https://github.com/WhitzardAgent/AgentGuard.git
 cd AgentGuard
 ```
 
-First, create a checker config file for the control server:
+First, create a plugin config file for the control server:
 
 ```bash
 mkdir -p config
 
-cat <<EOF > config/checkers.json
+cat <<EOF > config/plugins.json
 {
   "phases": {
     "llm_before": {
@@ -124,7 +124,12 @@ cat <<EOF > config/checkers.json
     },
     "tool_before": {
       "local": [],
-      "remote": ["rule_based_check"]
+      "remote": [
+        {
+          "name": "rule_based_check",
+          "env": {}
+        }
+      ]
     },
     "tool_after": {
       "local": [],
@@ -135,7 +140,7 @@ cat <<EOF > config/checkers.json
 EOF
 ```
 
-This config tells AgentGuard which checkers run in each runtime phase. In this quick start, only `tool_before` enables one remote checker: `rule_based_check`. That means the server evaluates access-control rules right before a tool call is executed, while all other phases stay empty. This keeps the first demo simple: the client forwards tool-invocation decisions to the server, and the server uses the built-in rule-based checker to match your policy rules and return an allow/deny decision.
+This config tells AgentGuard which plugins run in each runtime phase. In this quick start, only `tool_before` enables one remote plugin: `rule_based_check`. That means the server evaluates access-control rules right before a tool call is executed, while all other phases stay empty. This keeps the first demo simple: the client forwards tool-invocation decisions to the server, and the server uses the built-in rule-based plugin to match your policy rules and return an allow/deny decision.
 
 Then create an access control policy:
 
@@ -170,10 +175,10 @@ cp .env.example .env
 vi .env
 ```
 
-Set the server checker config path in `.env`:
+Set the server plugin config path in `.env`:
 
 ```bash
-AGENTGUARD_SERVER_CHECKER_CONFIG=./config/checkers.json
+AGENTGUARD_SERVER_PLUGIN_CONFIG=./config/plugins.json
 ```
 
 Start the control server:
@@ -357,9 +362,9 @@ The high-level architecture of AgentGuard is shown below.
   <img src="./docs/figs/overview.png" alt="AgentGuard architecture" width="50%" />
 </p>
 
-- **Client**: With minimal code modifications, the AgentGuard client integrates into agent frameworks and can intercept before and after LLM calls, as well as before and after tool invocations. It can perform lightweight local filtering on the client side and forward events to the server for deeper inspection by configured checkers.
-- **Server**: The server receives information from clients, uses configured checkers to evaluate agent actions against policies, produces policy decisions, and sends them back to clients. It also monitors agent status for administrative auditing.
-- **Checker Extensibility**: Both client and server support pluggable checkers. To add custom checkers, see the [client checker guide](./src/client/python/agentguard/checkers/README.md) and the [server checker guide](./src/server/backend/runtime/checkers/README.md).
+- **Client**: With minimal code modifications, the AgentGuard client integrates into agent frameworks and can intercept before and after LLM calls, as well as before and after tool invocations. It can perform lightweight local filtering on the client side and forward events to the server for deeper inspection by configured plugins.
+- **Server**: The server receives information from clients, uses configured plugins to evaluate agent actions against policies, produces policy decisions, and sends them back to clients. It also monitors agent status for administrative auditing.
+- **Plugin Extensibility**: Both client and server support pluggable plugins. To add custom plugins, see the [client plugin guide](./src/client/python/agentguard/plugins/README.md) and the [server plugin directory](./src/server/backend/plugins/).
 - **Custom Auditor Extensibility**: The backend also supports pluggable custom auditors for post-hoc trace review. Shared auditor abstractions live under `src/server/backend/audit/`, while concrete auditors live under `src/server/backend/audit/auditors/`. See the documentation chapter on custom auditors in `./docs/en/README.md`.
 
 ## 👥 Contributors
@@ -406,7 +411,7 @@ Listed in no particular order. Thanks to everyone who helped shape AgentGuard.
 - Support more mainstream frameworks
 - Support agent systems in more programming languages
 - Enable protection for multi-agent scenarios
-- Expand LLM input/output monitoring and checker coverage
+- Expand LLM input/output monitoring and plugin coverage
 - Add more varied policy actions
 - Provide automatic security policy recommendations
 

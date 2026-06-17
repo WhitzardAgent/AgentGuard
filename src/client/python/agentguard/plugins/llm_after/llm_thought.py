@@ -1,7 +1,7 @@
 """Deprecated checker for removed LLM thought events."""
 from __future__ import annotations
 
-from agentguard.plugins.base import BaseChecker, CheckResult
+from agentguard.plugins.base import BasePlugin, CheckResult
 from agentguard.plugins.registry import register
 from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.events import RuntimeEvent
@@ -11,7 +11,7 @@ from agentguard.schemas.events import RuntimeEvent
     name="llm_thought",
     description="Deprecated no-op checker for removed LLM thought events.",
 )
-class LLMThoughtChecker(BaseChecker):
+class LLMThoughtChecker(BasePlugin):
     event_types = []
 
     def applies(self, event: RuntimeEvent) -> bool:

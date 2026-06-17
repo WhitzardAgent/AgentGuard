@@ -1,6 +1,6 @@
 "use strict";
 
-const { CheckerManager } = require("../checkers/manager");
+const { PluginManager } = require("../plugins/manager");
 const { GuardDecision } = require("../schemas/decisions");
 const { ClientSyncBuffer } = require("./sync_buffer");
 const { RemoteGuardError } = require("../utils/errors");
@@ -16,10 +16,10 @@ class EnforcementResult {
 }
 
 class UGuardEnforcer {
-  constructor({ snapshot = null, remote = null, checker_manager = null, trace_window_provider = null, sync_buffer = null } = {}) {
+  constructor({ snapshot = null, remote = null, plugin_manager = null, trace_window_provider = null, sync_buffer = null } = {}) {
     this.snapshot = snapshot;
     this.remote = remote;
-    this.checkers = checker_manager || new CheckerManager();
+    this.plugins = plugin_manager || new PluginManager();
     this.trace_window_provider = trace_window_provider;
     this.sync_buffer = sync_buffer || new ClientSyncBuffer();
   }
@@ -28,8 +28,8 @@ class UGuardEnforcer {
     this.snapshot = snapshot;
   }
 
-  update_checker_config(config) {
-    this.checkers.update_config(config);
+  update_plugin_config(config) {
+    this.plugins.update_config(config);
   }
 
   get server_available() {
@@ -37,7 +37,7 @@ class UGuardEnforcer {
   }
 
   async enforce(event, context, { extensions = null } = {}) {
-    const check = this.checkers.run(event, context);
+    const check = this.plugins.run(event, context);
     const traceWindow = this.trace_window_provider ? this.trace_window_provider() : null;
     if (check.is_final && check.decision_candidate) {
       const decision = check.decision_candidate;
@@ -69,7 +69,7 @@ class UGuardEnforcer {
       });
     }
     return new EnforcementResult({
-      decision: GuardDecision.allow("No final local checker decision and no remote server configured.", {
+      decision: GuardDecision.allow("No final local plugin decision and no remote server configured.", {
         risk_signals: [...(event.risk_signals || [])],
         metadata: { route: "local_no_remote" },
       }),

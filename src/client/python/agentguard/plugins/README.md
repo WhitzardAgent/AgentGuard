@@ -1,6 +1,6 @@
 # AgentGuard Checkers
 
-`checkers` is the client-side local detection layer. It inspects normalized
+`plugins` is the client-side local detection layer. It inspects normalized
 `RuntimeEvent` objects before policy routing and returns a `CheckResult`.
 
 Checkers do not execute tools, call LLMs, or make network requests. They only
@@ -13,12 +13,12 @@ The active runtime event types are intentionally limited to:
 - `TOOL_INVOKE`
 - `TOOL_RESULT`
 
-## BaseChecker
+## BasePlugin
 
-All checkers should subclass `BaseChecker`:
+All checkers should subclass `BasePlugin`:
 
 ```python
-class BaseChecker:
+class BasePlugin:
     name: str = "base"
     event_types: list[EventType] = []
 
@@ -33,7 +33,7 @@ class BaseChecker:
 
 `name`
 
-A readable checker name. `CheckerManager` uses it when recording checker errors
+A readable checker name. `PluginManager` uses it when recording checker errors
 in metadata, for example `tool_invoke_error`.
 
 `event_types`
@@ -187,7 +187,7 @@ Risk labels detected by the checker, for example:
 ["prompt_injection", "secret_detected", "external_send"]
 ```
 
-`CheckerManager` merges all returned signals, deduplicates them, and writes them
+`PluginManager` merges all returned signals, deduplicates them, and writes them
 back to `event.risk_signals`.
 
 ### is_final
@@ -202,10 +202,10 @@ Only deterministic high-risk checks should normally set `is_final=True`.
 
 ### metadata
 
-Additional debug or detection information. `CheckerManager` merges metadata from
+Additional debug or detection information. `PluginManager` merges metadata from
 all checkers into the final `CheckResult.metadata`.
 
-## How CheckerManager Calls Checkers
+## How PluginManager Calls Plugins
 
 Checkers are configured and run by phase. No checker is enabled by default when
 `checker_config` is omitted. A typical client config enables checkers like this:
@@ -234,14 +234,14 @@ TOOL_RESULT -> tool_after
 
 If multiple checkers are configured for the same phase, they run in order.
 
-If a checker raises an exception, `CheckerManager` catches it, records the error
+If a checker raises an exception, `PluginManager` catches it, records the error
 in metadata, and continues with the remaining checkers. A checker should not
 break the main runtime flow.
 
 ## Custom Checker Example
 
 ```python
-from agentguard.plugins.base import BaseChecker, CheckResult
+from agentguard.plugins.base import BasePlugin, CheckResult
 from agentguard.plugins.registry import register
 from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.decisions import GuardDecision
@@ -252,7 +252,7 @@ from agentguard.schemas.events import EventType, RuntimeEvent
     name="block_private_tool",
     description="Block calls to private/internal tools.",
 )
-class BlockPrivateToolChecker(BaseChecker):
+class BlockPrivateToolChecker(BasePlugin):
     event_types = [EventType.TOOL_INVOKE]
 
     def check(self, event: RuntimeEvent, context: RuntimeContext) -> CheckResult:
@@ -315,13 +315,13 @@ The client can also expose a local HTTP endpoint for runtime updates:
 
 ```python
 url = guard.start_config_api()
-# default: http://127.0.0.1:38181/v1/client/checkers/config
+# default: http://127.0.0.1:38181/v1/client/plugins/config
 ```
 
-List locally registered checkers:
+List locally registered plugins:
 
 ```bash
-curl http://127.0.0.1:38181/v1/client/checkers/list \
+curl http://127.0.0.1:38181/v1/client/plugins/list \
   -H 'X-AgentGuard-Session-Key: sk-...'
 ```
 
@@ -330,7 +330,7 @@ Response:
 ```json
 {
   "status": "ok",
-  "checkers": [
+  "plugins": [
     {
       "name": "llm_input",
       "description": "Detect prompt-injection and system-prompt leak attempts in LLM input.",
@@ -343,7 +343,7 @@ Response:
 Request:
 
 ```bash
-curl -X POST http://127.0.0.1:38181/v1/client/checkers/config \
+curl -X POST http://127.0.0.1:38181/v1/client/plugins/config \
   -H 'Content-Type: application/json' \
   -H 'X-AgentGuard-Session-Key: sk-...' \
   -d '{"config":{"phases":{"llm_before":{"local":["llm_input"],"remote":[]},"llm_after":{"local":[],"remote":[]},"tool_before":{"local":["tool_invoke"],"remote":[]},"tool_after":{"local":["tool_result"],"remote":[]}}}}'
@@ -362,22 +362,22 @@ You can also pass a config file path:
 You can also upload new checker code through the local API:
 
 ```bash
-curl -X POST http://127.0.0.1:38181/v1/client/checkers/update \
+curl -X POST http://127.0.0.1:38181/v1/client/plugins/update \
   -H 'Content-Type: application/json' \
   -H 'X-AgentGuard-Session-Key: sk-...' \
   -d '{
     "event_type": "llm_input",
     "filename": "my_llm_input_checker.py",
-    "code": "from agentguard.plugins.base import BaseChecker, CheckResult\nfrom agentguard.plugins.registry import register\nfrom agentguard.schemas.events import EventType\n\n@register(name=\"my_llm_input\", description=\"My checker.\")\nclass MyLLMInputChecker(BaseChecker):\n    event_types = [EventType.LLM_INPUT]\n    def check(self, event, context):\n        return CheckResult(risk_signals=[\"my_signal\"])\n"
+    "code": "from agentguard.plugins.base import BasePlugin, CheckResult\nfrom agentguard.plugins.registry import register\nfrom agentguard.schemas.events import EventType\n\n@register(name=\"my_llm_input\", description=\"My checker.\")\nclass MyLLMInputChecker(BasePlugin):\n    event_types = [EventType.LLM_INPUT]\n    def check(self, event, context):\n        return CheckResult(risk_signals=[\"my_signal\"])\n"
   }'
 ```
 
 `event_type` determines where the code is written:
 
-- `llm_input` -> `checkers/llm_before/`
-- `llm_output` -> `checkers/llm_after/`
-- `tool_invoke` -> `checkers/tool_before/`
-- `tool_result` -> `checkers/tool_after/`
+- `llm_input` -> `plugins/llm_before/`
+- `llm_output` -> `plugins/llm_after/`
+- `tool_invoke` -> `plugins/tool_before/`
+- `tool_result` -> `plugins/tool_after/`
 
 After writing the file, the client imports/reloads that module immediately so
 `@register(...)` updates the runtime registry. The newly registered `name` can
@@ -398,13 +398,13 @@ runtime event kinds the checker applies to. Use `EventType.LLM_INPUT`,
 Example file layout:
 
 ```text
-agentguard/checkers/llm_before/my_checker.py
+agentguard/plugins/llm_before/my_checker.py
 ```
 
 Example checker:
 
 ```python
-from agentguard.plugins.base import BaseChecker, CheckResult
+from agentguard.plugins.base import BasePlugin, CheckResult
 from agentguard.plugins.registry import register
 from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.events import EventType, RuntimeEvent
@@ -414,7 +414,7 @@ from agentguard.schemas.events import EventType, RuntimeEvent
     name="my_checker",
     description="Short description of what this checker detects.",
 )
-class MyChecker(BaseChecker):
+class MyChecker(BasePlugin):
     event_types = [EventType.LLM_INPUT]
 
     def check(self, event: RuntimeEvent, context: RuntimeContext) -> CheckResult:

@@ -8,15 +8,14 @@ from pathlib import Path
 import pytest
 
 from agentguard.config_api import (
-    CHECKER_CONFIG_PATH,
-    CHECKER_LIST_PATH,
-    CHECKER_UPDATE_PATH,
     CLIENT_HEALTH_PATH,
+    PLUGIN_CONFIG_PATH,
+    PLUGIN_LIST_PATH,
+    PLUGIN_UPDATE_PATH,
 )
-from agentguard.checkers.base import BaseChecker as LegacyBaseChecker
-from agentguard.plugins.base import BaseChecker, CheckResult
-from agentguard.plugins.manager import CheckerManager, load_checker_config
-from agentguard.plugins.registry import checker_descriptions, register
+from agentguard.plugins.base import BasePlugin, CheckResult
+from agentguard.plugins.manager import PluginManager, load_plugin_config
+from agentguard.plugins.registry import plugin_descriptions, register
 from agentguard.schemas import events as ev
 from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.decisions import GuardDecision
@@ -43,8 +42,8 @@ def test_event_types_are_limited_to_runtime_phases():
     ]
 
 
-def test_legacy_checkers_imports_alias_plugins():
-    assert LegacyBaseChecker is BaseChecker
+def test_baseplugin_is_importable():
+    assert BasePlugin.__name__ == "BasePlugin"
 
 
 def test_agentguard_session_key_is_generated_or_configured():
@@ -60,7 +59,7 @@ def test_agentguard_session_key_is_generated_or_configured():
 
 
 def test_tool_result_detects_secret_and_api_key():
-    mgr = CheckerManager(
+    mgr = PluginManager(
         config={
             "phases": {
                 "tool_after": {"local": ["tool_result"], "remote": []},
@@ -76,7 +75,7 @@ def test_tool_result_detects_secret_and_api_key():
 
 
 def test_llm_input_detects_prompt_injection():
-    mgr = CheckerManager(
+    mgr = PluginManager(
         config={
             "phases": {
                 "llm_before": {"local": ["llm_input"], "remote": []},
@@ -89,7 +88,7 @@ def test_llm_input_detects_prompt_injection():
 
 
 def test_clean_event_has_no_signals():
-    mgr = CheckerManager()
+    mgr = PluginManager()
     e = ev.tool_invoke(_ctx(), "read_file", {"path": "/tmp/x"}, capabilities=["read_file"])
     res = mgr.run(e, _ctx())
     assert res.risk_signals == []
@@ -103,19 +102,19 @@ def test_client_checker_config_loads_only_local_scope():
         }
     }
 
-    assert load_checker_config(cfg) == {
+    assert load_plugin_config(cfg) == {
         "llm_before": ["llm_input"],
         "tool_before": [],
     }
 
 
 def test_client_without_checker_config_loads_no_checkers():
-    assert load_checker_config(None) == {}
+    assert load_plugin_config(None) == {}
 
 
 def test_client_rejects_legacy_checker_config_format():
     with pytest.raises(ValueError, match="phases"):
-        load_checker_config({"llm_before": ["llm_input"]})
+        load_plugin_config({"llm_before": ["llm_input"]})
 
 
 def test_registered_checker_can_be_loaded_by_name():
@@ -123,13 +122,13 @@ def test_registered_checker_can_be_loaded_by_name():
         name="test_registered_checker",
         description="test checker registered by decorator",
     )
-    class RegisteredChecker(BaseChecker):
+    class RegisteredChecker(BasePlugin):
         event_types = [EventType.LLM_INPUT]
 
         def check(self, event, context):
             return CheckResult(risk_signals=["registered_checker_seen"])
 
-    mgr = CheckerManager(
+    mgr = PluginManager(
         config={
             "phases": {
                 "llm_before": {"local": ["test_registered_checker"], "remote": []},
@@ -141,7 +140,7 @@ def test_registered_checker_can_be_loaded_by_name():
     res = mgr.run(event, _ctx())
 
     assert res.risk_signals == ["registered_checker_seen"]
-    assert checker_descriptions()["test_registered_checker"] == (
+    assert plugin_descriptions()["test_registered_checker"] == (
         "test checker registered by decorator"
     )
 
@@ -150,13 +149,13 @@ def test_checker_config_binds_top_level_params_and_env(monkeypatch):
     monkeypatch.setenv("TEST_PLUGIN_API_KEY", "sk-test-plugin")
     monkeypatch.setenv("TEST_PLUGIN_MODEL", "gpt-test-plugin")
 
-    class ConfiguredChecker(BaseChecker):
+    class ConfiguredChecker(BasePlugin):
         event_types = [EventType.LLM_INPUT]
 
         def check(self, event, context):
             return CheckResult.empty()
 
-    mgr = CheckerManager(
+    mgr = PluginManager(
         config={
             "phases": {
                 "llm_before": {
@@ -179,7 +178,7 @@ def test_checker_config_binds_top_level_params_and_env(monkeypatch):
         }
     )
 
-    checker = mgr.checkers_by_phase["llm_before"][0]
+    checker = mgr.plugins_by_phase["llm_before"][0]
 
     assert checker.threshold == 3
     assert checker.mode == "strict"
@@ -271,7 +270,7 @@ def test_checker_config_can_be_updated_over_local_http_api():
     )
     try:
         url = guard.start_config_api(port=0)
-        assert url.endswith(CHECKER_CONFIG_PATH)
+        assert url.endswith(PLUGIN_CONFIG_PATH)
         body = json.dumps(
             {
                 "config": {
@@ -307,11 +306,11 @@ def test_checker_config_can_be_updated_over_local_http_api():
         guard.close()
 
 
-def test_local_http_api_lists_registered_checkers():
-    guard = _agentguard_cls()("list-checkers-http")
+def test_local_http_api_lists_registered_plugins():
+    guard = _agentguard_cls()("list-plugins-http")
     try:
         config_url = guard.start_config_api(port=0)
-        list_url = config_url.replace(CHECKER_CONFIG_PATH, CHECKER_LIST_PATH)
+        list_url = config_url.replace(PLUGIN_CONFIG_PATH, PLUGIN_LIST_PATH)
         req = urllib.request.Request(
             list_url,
             headers={"X-AgentGuard-Session-Key": guard.session_key},
@@ -321,13 +320,13 @@ def test_local_http_api_lists_registered_checkers():
         with urllib.request.urlopen(req, timeout=2) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
 
-        checkers = {item["name"]: item for item in payload["checkers"]}
+        plugins = {item["name"]: item for item in payload["plugins"]}
         assert payload["status"] == "ok"
-        assert "llm_input" in checkers
-        assert "prompt-injection" in checkers["llm_input"]["description"]
-        assert checkers["llm_input"]["event_types"] == ["llm_input"]
-        assert "tool_result" in checkers
-        assert checkers["tool_result"]["event_types"] == ["tool_result"]
+        assert "llm_input" in plugins
+        assert "prompt-injection" in plugins["llm_input"]["description"]
+        assert plugins["llm_input"]["event_types"] == ["llm_input"]
+        assert "tool_result" in plugins
+        assert plugins["tool_result"]["event_types"] == ["tool_result"]
     finally:
         guard.close()
 
@@ -336,7 +335,7 @@ def test_local_http_api_health_endpoint_reports_identity():
     guard = _agentguard_cls()("health-session", user_id="health-user", agent_id="health-agent")
     try:
         config_url = guard.start_config_api(port=0)
-        health_url = config_url.replace(CHECKER_CONFIG_PATH, CLIENT_HEALTH_PATH)
+        health_url = config_url.replace(PLUGIN_CONFIG_PATH, CLIENT_HEALTH_PATH)
         req = urllib.request.Request(
             health_url,
             headers={"X-AgentGuard-Session-Key": guard.session_key},
@@ -359,7 +358,7 @@ def test_local_http_api_rejects_missing_or_invalid_session_key():
     guard = _agentguard_cls()("client-api-key-check")
     try:
         config_url = guard.start_config_api(port=0)
-        list_url = config_url.replace(CHECKER_CONFIG_PATH, CHECKER_LIST_PATH)
+        list_url = config_url.replace(PLUGIN_CONFIG_PATH, PLUGIN_LIST_PATH)
 
         with pytest.raises(urllib.error.HTTPError) as missing:
             urllib.request.urlopen(list_url, timeout=2)
@@ -377,14 +376,14 @@ def test_local_http_api_rejects_missing_or_invalid_session_key():
         guard.close()
 
 
-def test_local_http_api_updates_checker_code_and_registers_it():
-    guard = _agentguard_cls()("client-checker-update")
+def test_local_http_api_updates_plugin_code_and_registers_it():
+    guard = _agentguard_cls()("client-plugin-update")
     dynamic_path: Path | None = None
     try:
         config_url = guard.start_config_api(port=0)
-        update_url = config_url.replace(CHECKER_CONFIG_PATH, CHECKER_UPDATE_PATH)
+        update_url = config_url.replace(PLUGIN_CONFIG_PATH, PLUGIN_UPDATE_PATH)
         code = '''
-from agentguard.plugins.base import BaseChecker, CheckResult
+from agentguard.plugins.base import BasePlugin, CheckResult
 from agentguard.plugins.registry import register
 from agentguard.schemas.events import EventType
 
@@ -393,7 +392,7 @@ from agentguard.schemas.events import EventType
     name="uploaded_test_llm_input",
     description="Uploaded test checker.",
 )
-class UploadedTestLLMInputChecker(BaseChecker):
+class UploadedTestLLMInputChecker(BasePlugin):
     event_types = [EventType.LLM_INPUT]
 
     def check(self, event, context):
@@ -423,7 +422,7 @@ class UploadedTestLLMInputChecker(BaseChecker):
         assert payload["status"] == "ok"
         assert payload["event_type"] == "llm_input"
         assert payload["phase"] == "llm_before"
-        assert "uploaded_test_llm_input" in payload["registered_checkers"]
+        assert "uploaded_test_llm_input" in payload["registered_plugins"]
 
         guard.update_checker_config(
             {
@@ -461,7 +460,7 @@ class _Remote:
 
 def test_non_final_checker_result_goes_to_remote():
     remote = _Remote()
-    enforcer = UGuardEnforcer(remote=remote, checker_manager=CheckerManager())
+    enforcer = UGuardEnforcer(remote=remote, plugin_manager=PluginManager())
     event = ev.tool_invoke(_ctx(), "send_email", {"body": "ok"}, capabilities=[])
 
     result = enforcer.enforce(event, _ctx())
@@ -471,7 +470,7 @@ def test_non_final_checker_result_goes_to_remote():
     assert result.decision.decision_type.value == "deny"
 
 
-class _FinalDenyChecker(BaseChecker):
+class _FinalDenyChecker(BasePlugin):
     name = "final_deny"
     event_types = [EventType.TOOL_INVOKE]
 
@@ -486,7 +485,7 @@ def test_final_checker_result_skips_remote():
     remote = _Remote()
     enforcer = UGuardEnforcer(
         remote=remote,
-        checker_manager=CheckerManager(checkers=[_FinalDenyChecker()]),
+        plugin_manager=PluginManager(plugins=[_FinalDenyChecker()]),
     )
     event = ev.tool_invoke(_ctx(), "send_email", {"body": "ok"}, capabilities=[])
 
@@ -497,7 +496,7 @@ def test_final_checker_result_skips_remote():
     assert result.decision.reason == "local checker blocked"
 
 
-class _ConditionalFinalChecker(BaseChecker):
+class _ConditionalFinalChecker(BasePlugin):
     name = "conditional_final"
     event_types = [EventType.TOOL_INVOKE]
 
@@ -514,7 +513,7 @@ def test_local_checker_cache_is_sent_with_next_remote_decision():
     remote = _Remote()
     enforcer = UGuardEnforcer(
         remote=remote,
-        checker_manager=CheckerManager(checkers=[_ConditionalFinalChecker()]),
+        plugin_manager=PluginManager(plugins=[_ConditionalFinalChecker()]),
     )
 
     first = ev.tool_invoke(_ctx(), "blocked_local", {}, capabilities=[])

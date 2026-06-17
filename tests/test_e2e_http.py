@@ -185,7 +185,7 @@ def test_client_registration_sends_checker_config_to_server():
         assert record is not None
         assert record["client_checker_config"] == checker_config
         assert record["remote_checker_config"] == checker_config
-        assert str(record["client_config_url"]).endswith("/v1/client/checkers/config")
+        assert str(record["client_config_url"]).endswith("/v1/client/plugins/config")
 
         result = guard.runtime.guard(
             ev.llm_input(
@@ -303,7 +303,7 @@ def test_backend_session_pool_records_client_metadata_over_http():
         assert record["client_ip"] == "127.0.0.1"
         assert record["client_key"] == guard.session_key
         assert record["client_config_url"] == client_config_url
-        assert record["client_checker_list_url"].endswith("/v1/client/checkers/list")
+        assert record["client_plugin_list_url"].endswith("/v1/client/plugins/list")
         assert record["client_health_url"].endswith("/v1/client/health")
     finally:
         guard.close()

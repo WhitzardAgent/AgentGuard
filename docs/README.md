@@ -1,18 +1,18 @@
 # AgentGuard Documentation
 
-AgentGuard is a zero-trust security foundation for AI agents. The documentation covers deployment, checker extension, custom-auditor extension, and runtime observability.
+AgentGuard is a zero-trust security foundation for AI agents. The documentation covers deployment, plugin extension, custom-auditor extension, and runtime observability.
 
-- [中文](zh/)：包含快速部署、`AgentGuard Client Importing`、`AgentGuard Checkers`、`Custom Checker`、`Custom Auditor`，以及 `RuntimeEvent`、`RuntimeContext`、`trajectory_window` 的说明。
-- [English](en/)： includes quick deployment, `AgentGuard Client Importing`, `AgentGuard Checkers`, `Custom Checker`, `Custom Auditor`, and detailed explanations of `RuntimeEvent`, `RuntimeContext`, and `trajectory_window`.
+- [中文](zh/)：包含快速部署、`AgentGuard Client Importing`、`AgentGuard Plugins`、`Custom Plugin`、`Custom Auditor`，以及 `RuntimeEvent`、`RuntimeContext`、`trajectory_window` 的说明。
+- [English](en/)： includes quick deployment, `AgentGuard Client Importing`, `AgentGuard Plugins`, `Custom Plugin`, `Custom Auditor`, and detailed explanations of `RuntimeEvent`, `RuntimeContext`, and `trajectory_window`.
 
-## Checker References
+## Plugin References
 
-For implementation-level checker details, see these repository-relative references:
+For implementation-level plugin details, see these repository-relative references:
 
-- Client checker reference: `../src/client/python/agentguard/checkers/README.md`
-- Client checker reference (中文): `../src/client/python/agentguard/checkers/README_CN.md`
-- Server checker reference: `../src/server/backend/runtime/checkers/README.md`
-- Server checker reference (中文): `../src/server/backend/runtime/checkers/README_CN.md`
+- Client plugin reference: `../src/client/python/agentguard/plugins/README.md`
+- Client plugin reference (中文): `../src/client/python/agentguard/plugins/README_CN.md`
+- Server plugin reference: `../src/server/backend/plugins/`
+- Server plugin reference (中文): `../src/server/backend/plugins/`
 
 ## Local debugging
 At the **root directory** of the project, run the following command to start the local documentation server:

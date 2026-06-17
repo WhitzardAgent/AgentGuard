@@ -1,9 +1,9 @@
 "use strict";
 
-const { BaseChecker, CheckResult } = require("../base");
+const { BasePlugin, CheckResult } = require("../base");
 const { EventType } = require("../../schemas/events");
 
-class ToolResultChecker extends BaseChecker {
+class ToolResultChecker extends BasePlugin {
   constructor() {
     super();
     this.event_types = [EventType.TOOL_RESULT];

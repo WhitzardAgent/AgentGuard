@@ -11,7 +11,7 @@ def test_python_client_registers_remote_session_once_on_init(monkeypatch):
     def fake_start(self: ClientConfigAPIServer) -> str:
         if self.port == 0:
             self.port = 43123
-        return self.checker_config_url
+        return self.plugin_config_url
 
     def fake_register(self: RemoteGuardClient, context):
         payload = context.to_dict()
@@ -34,8 +34,8 @@ def test_python_client_registers_remote_session_once_on_init(monkeypatch):
         assert context["session_id"] == "sess-py-1"
         assert context["agent_id"] == "agent-py-1"
         assert context["user_id"] == "user-py-1"
-        assert context["metadata"]["client_config_url"] == "http://127.0.0.1:43123/v1/client/checkers/config"
-        assert context["metadata"]["client_checker_list_url"] == "http://127.0.0.1:43123/v1/client/checkers/list"
+        assert context["metadata"]["client_config_url"] == "http://127.0.0.1:43123/v1/client/plugins/config"
+        assert context["metadata"]["client_plugin_list_url"] == "http://127.0.0.1:43123/v1/client/plugins/list"
         assert context["metadata"]["client_health_url"] == "http://127.0.0.1:43123/v1/client/health"
     finally:
         guard.close()
@@ -47,7 +47,7 @@ def test_python_client_resyncs_session_when_config_api_url_changes(monkeypatch):
     def fake_start(self: ClientConfigAPIServer) -> str:
         if self.port == 0:
             self.port = 43123
-        return self.checker_config_url
+        return self.plugin_config_url
 
     def fake_register(self: RemoteGuardClient, context):
         payload = context.to_dict()
@@ -69,8 +69,8 @@ def test_python_client_resyncs_session_when_config_api_url_changes(monkeypatch):
         guard.stop_config_api()
         guard.start_config_api(port=43124)
         assert len(calls) == 2
-        assert calls[-1]["metadata"]["client_config_url"] == "http://127.0.0.1:43124/v1/client/checkers/config"
-        assert calls[-1]["metadata"]["client_checker_list_url"] == "http://127.0.0.1:43124/v1/client/checkers/list"
+        assert calls[-1]["metadata"]["client_config_url"] == "http://127.0.0.1:43124/v1/client/plugins/config"
+        assert calls[-1]["metadata"]["client_plugin_list_url"] == "http://127.0.0.1:43124/v1/client/plugins/list"
         assert calls[-1]["metadata"]["client_health_url"] == "http://127.0.0.1:43124/v1/client/health"
     finally:
         guard.close()

@@ -1,13 +1,13 @@
-"""Local risk checkers."""
+"""Local risk plugins."""
 from __future__ import annotations
 
-from agentguard.plugins.base import BaseChecker, CheckResult
-from agentguard.plugins.manager import CheckerManager, default_checkers
+from agentguard.plugins.base import BasePlugin, CheckResult
+from agentguard.plugins.manager import PluginManager, default_plugins
 from agentguard.plugins.registry import (
-    checker_descriptions,
-    get_checker_class,
+    get_plugin_class,
+    plugin_descriptions,
     register,
-    registered_checkers,
+    registered_plugins,
 )
 from agentguard.plugins.llm_after import LLMOutputChecker
 from agentguard.plugins.llm_before import LLMInputChecker
@@ -15,14 +15,14 @@ from agentguard.plugins.tool_after import ToolResultChecker
 from agentguard.plugins.tool_before import ToolInvokeChecker
 
 __all__ = [
-    "BaseChecker",
+    "BasePlugin",
     "CheckResult",
-    "CheckerManager",
-    "default_checkers",
+    "PluginManager",
+    "default_plugins",
     "register",
-    "get_checker_class",
-    "registered_checkers",
-    "checker_descriptions",
+    "get_plugin_class",
+    "registered_plugins",
+    "plugin_descriptions",
     "LLMInputChecker",
     "LLMOutputChecker",
     "ToolInvokeChecker",

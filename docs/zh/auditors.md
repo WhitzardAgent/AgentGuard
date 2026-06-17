@@ -1,0 +1,169 @@
+# Custom Auditors
+
+AgentGuard 支持在后端执行事后审计。与在运行时链路中同步执行的 plugin 不同，custom auditor 面向已经存储完成的完整 trace 工作：它会在 `session_id` / `agent_id` / `user_id` 对应的轨迹上做回溯分析。这类能力适合用于合规复核、事故排查、事后分析，以及为前端生成总结性的风险等级。
+
+公共 auditor 抽象位于：
+
+```text
+../../src/server/backend/audit/base.py
+../../src/server/backend/audit/manager.py
+../../src/server/backend/audit/registry.py
+```
+
+具体 auditor 实现需要放在：
+
+```text
+../../src/server/backend/audit/auditors/
+```
+
+后端发现并加载的 auditor 接口形态如下：
+
+```python
+from backend.audit.base import AuditResult, AuditTraceEntry, BaseAuditor
+from backend.audit.registry import register
+
+
+@register(
+    name="my_trace_auditor",
+    description="对已存储 trace 做风险等级总结。",
+)
+class MyTraceAuditor(BaseAuditor):
+    def audit(
+        self,
+        trace: list[AuditTraceEntry],
+    ) -> AuditResult:
+        if any((record.get("decision") or {}).get("decision_type") == "deny" for record in trace):
+            return AuditResult(level="high", reason="该轨迹中包含被拒绝的动作。")
+        return AuditResult.ok()
+```
+
+每个 `AuditTraceEntry` 都对应一条规范化 trace 记录，包含 `session_id`、`agent_id`、`user_id`、`reason`、`event`、`decision` 和 `checker_result` 这些字段。对 auditor 来说，`event` 是主要运行时负载，其余字段则是后端 trace 管线补充的上下文信息。
+
+`AuditResult` 当前统一使用四个等级：`critical`、`high`、`warning` 和 `ok`。每个结果还包含面向人的 `reason`，以及可选的 `metadata`。
+
+## AuditTraceEntry
+
+`AuditTraceEntry` 是传入 `BaseAuditor.audit()` 的规范化记录类型。一条 entry 通常表示一个已存储的运行时事件，以及该事件对应的决策和检测元数据。
+
+当前类型定义在 `../../src/server/backend/audit/base.py`：
+
+```python
+@dataclass
+class AuditTraceEntry:
+    session_id: str
+    agent_id: str | None = None
+    user_id: str | None = None
+    reason: str | None = None
+    event: RuntimeEvent | None = None
+    decision: GuardDecision | None = None
+    checker_result: dict[str, Any] = field(default_factory=dict)
+```
+
+### 字段说明
+
+| 字段 | 类型 | 含义 | 如何使用 |
+| --- | --- | --- | --- |
+| `session_id` | `str` | 该 trace entry 所属的 session / run 标识。 | 用来分组或确认多条 entry 是否属于同一次运行。 |
+| `agent_id` | `str or None` | 事件关联的智能体身份，如果可用则填写。 | 用来按 agent 维度限定审计结果，或写入结果 metadata。 |
+| `user_id` | `str or None` | 事件关联的最终用户身份，如果可用则填写。 | 用来检测用户维度风险模式，或在报告中保留用户上下文。 |
+| `reason` | `str or None` | 记录写入 trace 的原因，例如 `guard_decide`、`round_complete` 或 `client_error`。 | 用来区分正常远端判定、客户端本地缓存上传、异常路径同步等来源。 |
+| `event` | `RuntimeEvent or None` | 标准化运行时事件，可以是 LLM 输入、LLM 输出、工具调用或工具结果。 | 这是 auditor 最常读取的主负载：事件类型、工具名、参数、结果、风险信号和 metadata 都在这里。 |
+| `decision` | `GuardDecision or None` | 该事件对应的决策，如果存在则填写。 | 用来统计 deny / review，读取决策原因，或判断高风险动作是否已被阻断。 |
+| `checker_result` | `dict[str, Any]` | 该事件合并后的运行时检测结果。虽然字段名仍是历史命名，但这里保存的是 plugin/checker 风险元数据。 | 用来读取 `risk_signals`、检测 metadata，或运行时 plugin 附加的上下文。 |
+
+### 成员方法和属性
+
+| 成员 | 作用 | 什么时候用 |
+| --- | --- | --- |
+| `AuditTraceEntry.from_dict(data)` | 从原始 trace 字典构造规范化 entry。它会尽量提取 `event`、`decision`、身份字段、`reason` 和 `checker_result`。 | 当 auditor 或测试拿到的是原始存储字典，而不是 `AuditTraceEntry` 对象时使用。 |
+| `entry.to_dict()` | 将 entry 转成可序列化字典。如果存在 `event` 和 `decision`，会调用它们的 `to_dict()`。 | 用于调试、日志、测试快照，或返回规范化 trace 细节。 |
+| `entry.merged_with(incoming)` | 将另一条 entry 合并进当前 entry，并返回新对象。incoming 中存在的身份、事件、决策和 reason 会优先使用；`checker_result` 会做字典合并。 | 当服务端记录和客户端上传记录描述同一事件，需要合并为一条完整记录时使用。 |
+| `entry.event_id` | 便捷属性，返回 `entry.event.event_id`；如果没有 event，则返回 `None`。 | 用于事件去重，或把 event id 写入审计结果 metadata。 |
+
+### `event`、`decision` 和 `checker_result`
+
+这三个字段通常是 auditor 最主要的输入：
+
+- `event: RuntimeEvent | None = None`
+
+  `event` 是被审计的原始运行时事件。它说明“发生了什么”，包括事件类型、payload、上下文、风险信号和 adapter metadata。例如，`TOOL_INVOKE` 事件通常会包含 `payload["tool_name"]` 和 `payload["arguments"]`；`LLM_INPUT` 事件可能包含 messages 或 prompt 文本。
+
+  当 auditor 需要检查实际运行行为时读取 `event`：
+
+  ```python
+  if entry.event and entry.event.event_type.value == "tool_invoke":
+      tool_name = entry.event.payload.get("tool_name")
+      arguments = entry.event.payload.get("arguments") or {}
+  ```
+
+  如果存储的 trace record 中没有可解析的运行时事件，`event` 可能是 `None`，所以读取前需要先判断。
+
+- `decision: GuardDecision | None = None`
+
+  `decision` 是 AgentGuard 对该事件给出的决策。它说明运行时如何处理该事件，例如 allow、deny、review、degrade、sanitize 等。它还会携带决策原因、policy ID、风险信号和 metadata。
+
+  当 auditor 需要汇总执行结果时读取 `decision`：
+
+  ```python
+  if entry.decision and entry.decision.decision_type.value == "deny":
+      denied_event_ids.append(entry.event_id)
+      reasons.append(entry.decision.reason)
+  ```
+
+  对于没有最终决策的上传 trace，或只携带部分运行上下文的 entry，`decision` 可能是 `None`。
+
+- `checker_result: dict[str, Any] = field(default_factory=dict)`
+
+  `checker_result` 保存运行时合并后的检测结果。字段名是历史命名，但这里承载的是 plugin/checker 的输出。常见内容包括 `risk_signals`、`metadata`、`is_final`，以及某些运行路径中的候选决策信息。
+
+  当 auditor 需要查看最终决策之外的检测细节时读取 `checker_result`：
+
+  ```python
+  signals = entry.checker_result.get("risk_signals") or []
+  metadata = entry.checker_result.get("metadata") or {}
+  ```
+
+  与 `event` 和 `decision` 不同，这个字段始终是字典；如果没有保存 plugin/checker 元数据，则为空字典。
+
+### 常见用法
+
+大多数 auditor 会遍历完整 trace，并收集风险信号、决策、工具调用或身份信息：
+
+```python
+def audit(self, trace: list[AuditTraceEntry]) -> AuditResult:
+    denied_events = []
+    risky_signals = set()
+
+    for entry in trace:
+        if entry.decision and entry.decision.decision_type.value == "deny":
+            denied_events.append(entry.event_id)
+
+        if entry.event:
+            risky_signals.update(entry.event.risk_signals)
+            if entry.event.payload.get("tool_name") == "send_email":
+                recipient = (entry.event.payload.get("arguments") or {}).get("addr")
+                if recipient and not recipient.endswith("@example.com"):
+                    risky_signals.add("external_email")
+
+        risky_signals.update(entry.checker_result.get("risk_signals") or [])
+
+    if denied_events or risky_signals:
+        return AuditResult(
+            level="high",
+            reason="Trace contains risky signals or denied events.",
+            metadata={
+                "denied_events": denied_events,
+                "risk_signals": sorted(risky_signals),
+            },
+        )
+    return AuditResult.ok()
+```
+
+编写 auditor 时，建议把 `event`、`decision`、`agent_id` 和 `user_id` 都当作可选字段处理。Trace 可能来自不同运行路径，做好 `None` 判断可以让 auditor 更稳健。
+
+加入 auditor 实现后，后端会根据注册名自动发现它。此时前端可以：
+
+- 调用 `GET /v1/backend/auditors` 列出当前可用 auditor 及其描述
+- 调用 `POST /v1/backend/audit/custom/run`，传入 `session_id`、`agent_id`、`user_id` 和 `auditor_name`，对对应已存储 trace 执行一次审计
+
+如果想看一个内置的具体例子，可参考 `../../src/server/backend/audit/auditors/trace_risk_summary.py`。

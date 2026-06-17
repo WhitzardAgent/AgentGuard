@@ -1,5 +1,4 @@
 # Runtime Session Lifecycle
-
 This page documents the current end-to-end runtime path between the Python client and the server, and the exact shape of the session record stored on the server.
 
 ## Complete Flow
@@ -12,11 +11,11 @@ At initialization time, the current Python implementation behaves as follows:
 2. The client generates `session_key` automatically if the caller does not provide one.
 3. The client builds `RuntimeContext` with `session_id`, `agent_id`, `user_id`, and metadata such as:
    * `client_session_key`
-   * `client_checker_config`
-   * `remote_checker_config`
+   * `client_plugin_config`
+   * `remote_plugin_config`
 4. If remote mode is enabled, the client starts a local config API and writes these URLs into `context.metadata`:
    * `client_config_url`
-   * `client_checker_list_url`
+   * `client_plugin_list_url`
    * `client_health_url`
 5. The client then registers the session to the server.
 6. The server upserts a session record into the session pool.
@@ -33,12 +32,12 @@ Current code references:
 
 At decision time, the current path is:
 
-1. The client runs local checkers first.
+1. The client runs local plugins first.
 2. If the local result is final, the client applies it locally and stores the decision in `ClientSyncBuffer`.
 3. If the local result is not final, the client calls `/v1/server/guard/decide`.
 4. The server refreshes or upserts the session context for this request.
-5. The server looks up the session by the composite identity `session_id::agent_id::user_id` and reads the session's `remote_checker_config`.
-6. The server checker manager parses the checker config by phase and only executes the `remote` checker list for each phase.
+5. The server looks up the session by the composite identity `session_id::agent_id::user_id` and reads the session's `remote_plugin_config`.
+6. The server plugin manager parses the plugin config by phase and only executes the `remote` plugin list for each phase.
 7. The server returns the decision to the client.
 
 Current code references:
@@ -49,7 +48,7 @@ Current code references:
 * `src/client/python/agentguard/u_guard/remote_client.py:102`
 * `src/server/backend/runtime/manager.py:221`
 * `src/server/backend/runtime/manager.py:256`
-* `src/server/backend/runtime/checkers/manager.py:32`
+* `src/server/backend/plugins/manager.py:32`
 * `src/server/backend/runtime/manager.py:267`
 
 ### 3. Local Result Sync
@@ -87,53 +86,9 @@ Current code references:
 * `src/server/backend/runtime/manager.py:192`
 * `src/server/backend/runtime/manager.py:210`
 
-## Current HTTP Interfaces
+## Plugin Config Shape
 
-### Client-local API
-
-These endpoints are exposed by the client's local config API:
-
-* `/v1/client/checkers/config`
-* `/v1/client/checkers/list`
-* `/v1/client/health`
-
-Code references:
-
-* `src/client/python/agentguard/config_api.py:16`
-* `src/client/python/agentguard/config_api.py:17`
-* `src/client/python/agentguard/config_api.py:19`
-
-### Client-to-server API
-
-These endpoints are used directly by the client runtime:
-
-* `/v1/server/guard/decide`
-* `/v1/server/policy/snapshot`
-* `/v1/server/trace/upload`
-* `/v1/server/tools/report`
-* `/v1/server/session/register`
-* `/v1/server/session/unregister`
-* `/v1/server/skills/run`
-
-Code reference:
-
-* `src/server/backend/api/client_router.py:27`
-
-### Backend / Frontend-to-server API
-
-These endpoints are intended for backend or admin/frontend coordination instead of the runtime client path:
-
-* `/v1/backend/checkers/config`
-
-This API updates the server-side checker configuration and can also push checker configuration to registered clients.
-
-Code reference:
-
-* `src/server/backend/api/frontend_router.py:43`
-
-## Checker Config Shape
-
-The session-scoped `remote_checker_config` is not stored as a flattened remote-only structure. It keeps the same phased shape as the client-side checker config.
+The session-scoped `remote_plugin_config` is not stored as a flattened remote-only structure. It keeps the same phased shape as the client-side plugin config.
 
 A typical shape is:
 
@@ -143,7 +98,10 @@ A typical shape is:
     "tool_before": {
       "local": [],
       "remote": [
-        "rule_based_check"
+        {
+          "name": "rule_based_check",
+          "env": {}
+        }
       ]
     },
     "llm_before": {
@@ -171,23 +129,23 @@ Important behavior:
 * The parser requires a `phases` object.
 * Each configured phase must include both `local` and `remote` keys.
 * The server only reads the `remote` list for execution.
-* The client-side checker manager reads the same phased structure, but uses the `local` side.
+* The client-side plugin manager reads the same phased structure, but uses the `local` side.
 
 Code references:
 
 * `src/client/python/agentguard/guard.py:68`
-* `src/server/backend/runtime/checkers/manager.py:42`
-* `src/server/backend/runtime/checkers/manager.py:48`
-* `src/server/backend/runtime/checkers/manager.py:54`
+* `src/server/backend/plugins/manager.py:42`
+* `src/server/backend/plugins/manager.py:48`
+* `src/server/backend/plugins/manager.py:54`
 
 ## Default Server Decision
 
-If the server checker pipeline does not produce a final decision, the server returns a default `allow` decision.
+If the server plugin pipeline does not produce a final decision, the server returns a default `allow` decision.
 
-That default comes from `_decision_from_checker_result()`:
+That default comes from `_decision_from_plugin_result()`:
 
-* If `check.is_final` and `decision_candidate` exist, return that final checker decision.
-* Otherwise return `GuardDecision.allow("No server checker returned a final decision; default allow.")`.
+* If `check.is_final` and `decision_candidate` exist, return that final plugin decision.
+* Otherwise return `GuardDecision.allow("No server plugin returned a final decision; default allow.")`.
 
 Code reference:
 
@@ -217,23 +175,33 @@ The current session record shape is:
   "client_ip": "127.0.0.1",
   "client_key": "sk_xxx",
 
-  "client_config_url": "http://127.0.0.1:38181/v1/client/checkers/config",
-  "client_checker_list_url": "http://127.0.0.1:38181/v1/client/checkers/list",
+  "client_config_url": "http://127.0.0.1:38181/v1/client/plugins/config",
+  "client_plugin_list_url": "http://127.0.0.1:38181/v1/client/plugins/list",
   "client_health_url": "http://127.0.0.1:38181/v1/client/health",
 
-  "client_checker_config": {
+  "client_plugin_config": {
     "phases": {
       "tool_before": {
-        "local": ["tool_invoke"],
+        "local": [
+          {
+            "name": "tool_invoke",
+            "env": {}
+          }
+        ],
         "remote": []
       }
     }
   },
-  "remote_checker_config": {
+  "remote_plugin_config": {
     "phases": {
       "tool_before": {
         "local": [],
-        "remote": ["rule_based_check"]
+        "remote": [
+          {
+            "name": "rule_based_check",
+            "env": {}
+          }
+        ]
       }
     }
   },
@@ -245,22 +213,32 @@ The current session record shape is:
 
   "metadata": {
     "client_session_key": "sk_xxx",
-    "client_config_url": "http://127.0.0.1:38181/v1/client/checkers/config",
-    "client_checker_list_url": "http://127.0.0.1:38181/v1/client/checkers/list",
+    "client_config_url": "http://127.0.0.1:38181/v1/client/plugins/config",
+    "client_plugin_list_url": "http://127.0.0.1:38181/v1/client/plugins/list",
     "client_health_url": "http://127.0.0.1:38181/v1/client/health",
-    "client_checker_config": {
+    "client_plugin_config": {
       "phases": {
         "tool_before": {
-          "local": ["tool_invoke"],
+          "local": [
+            {
+              "name": "tool_invoke",
+              "env": {}
+            }
+          ],
           "remote": []
         }
       }
     },
-    "remote_checker_config": {
+    "remote_plugin_config": {
       "phases": {
         "tool_before": {
           "local": [],
-          "remote": ["rule_based_check"]
+          "remote": [
+            {
+              "name": "rule_based_check",
+              "env": {}
+            }
+          ]
         }
       }
     },
@@ -289,19 +267,3 @@ Code references:
 * `src/server/backend/runtime/storage/__init__.py:149`
 * `src/server/backend/runtime/manager.py:196`
 * `src/server/backend/runtime/manager.py:339`
-
-## Notes and Common Misunderstandings
-
-### `session_id` vs `session_key`
-
-The current Python client does not auto-generate `session_id`. The caller passes `session_id` into `AgentGuard`, while `session_key` is auto-generated if omitted.
-
-### Registration happens once during init
-
-When remote mode is enabled, the Python client now starts the local config API first and then performs a single `register_session`, so the server receives the local client URLs in that one registration payload.
-
-If `start_config_api()` is called later and the published local URLs change, the client may upsert the same session again to refresh those URLs on the server.
-
-### Unreachable clients are not auto-removed
-
-The health monitor reports `unreachable`, but the current code does not delete the session from the pool automatically.

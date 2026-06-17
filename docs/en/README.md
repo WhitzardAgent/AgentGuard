@@ -190,250 +190,12 @@ if __name__ == "__main__":
 * `guard.attach_langchain()`: attaches the client to a LangChain agent instance. Different frameworks use different adapters; see later sections for details.
 * `guard.close()`: closes the session and releases resources. Call this after the agent has finished all tasks.
 
-### Step 3: AgentGuard Checkers
+### Step 3: AgentGuard Plugins and Custom Auditors
 
-AgentGuard supports pluggable checkers on both the client and the server. Both sides use the same normalized runtime schema, but they do not see the same input scope and they are not deployed to the same location. For implementation-level details, see `../../src/client/python/agentguard/checkers/README.md` and `../../src/server/backend/runtime/checkers/README.md`.
+See the standalone extension chapters:
 
-#### 1. Client vs. Server Checkers
-
-- **Client checkers** run locally inside the agent process. They receive only the current `event: RuntimeEvent` and `context: RuntimeContext`, so they are best for lightweight low-latency filtering before a remote decision.
-- **Server checkers** run on the control server. They receive the current `event`, the current `context`, and `trajectory_window: list[RuntimeEvent]`, so they are best for cross-step detection, centralized policy evaluation, and auditing.
-- Client checker files must be placed under `../../src/client/python/agentguard/checkers/<phase>/`.
-- Server checker files must be placed under `../../src/server/backend/runtime/checkers/<phase>/`.
-
-#### 2. RuntimeEvent
-
-`RuntimeEvent` is the normalized event object shared by client and server checkers:
-
-```python
-RuntimeEvent(
-    event_id: str,
-    event_type: EventType,
-    timestamp: float,
-    context: RuntimeContext,
-    payload: dict[str, Any],
-    risk_signals: list[str] = [],
-    metadata: dict[str, Any] = {},
-)
-```
-
-- `event_id`: unique identifier for the current runtime event.
-- `event_type`: current runtime stage. Active values are `LLM_INPUT`, `LLM_OUTPUT`, `TOOL_INVOKE`, and `TOOL_RESULT`.
-- `timestamp`: event creation time.
-- `context`: the shared runtime context attached to this event.
-- `payload`: the stage-specific content the checker actually inspects.
-- `risk_signals`: risk labels already attached by earlier checkers or plugins.
-- `metadata`: extra debug or adapter-specific information carried with the event.
-
-Common payload shapes:
-
-```python
-# LLM_INPUT
-{"messages": [...]} 
-{"text": "..."}  # compatibility/simple adapters
-
-# LLM_OUTPUT
-{"output": ...}
-
-# TOOL_INVOKE
-{
-    "tool_name": "send_email",
-    "arguments": {"to": "...", "body": "..."},
-    "capabilities": ["external_send"],
-}
-
-# TOOL_RESULT
-{
-    "tool_name": "read_file",
-    "result": ...,
-    "error": None,
-}
-```
-
-#### 3. RuntimeContext
-
-`RuntimeContext` is the session-level context propagated across events:
-
-```python
-RuntimeContext(
-    session_id: str,
-    user_id: str | None = None,
-    agent_id: str | None = None,
-    task_id: str | None = None,
-    policy: str | None = None,
-    policy_version: str | None = None,
-    environment: str | None = None,
-    metadata: dict[str, Any] = {},
-)
-```
-
-- `session_id`: required session identifier used to associate all events in the same run.
-- `user_id`: optional end-user identity behind the agent request.
-- `agent_id`: optional agent instance or service identity.
-- `task_id`: optional task or workflow identifier for the current unit of work.
-- `policy`: optional logical policy name, source, or mode attached to the session.
-- `policy_version`: optional policy version or snapshot identifier.
-- `environment`: optional runtime environment such as `dev`, `staging`, or `prod`.
-- `metadata`: free-form additional context such as tenant info, framework labels, or adapter-specific fields.
-
-#### 4. `trajectory_window: list[RuntimeEvent]`
-
-`trajectory_window` is only available to server-side checkers.
-
-- It is a recent event window for the same session.
-- Each element in the list is a full `RuntimeEvent`.
-- Use it when detection depends on execution history instead of only the current event.
-- Typical cases include "tool result exposed sensitive data, then a later tool call tries to send it externally" or "untrusted LLM output later flows into a shell command."
-
-Client checkers do not receive `trajectory_window`. If your detection logic requires history, implement it as a server-side checker. In practice, the server window can include both the normal runtime trace and cached local decisions synchronized from the client.
-
-#### 5. Custom Checker
-
-##### Client-side checker
-
-Client checkers must be placed in the phase folder that matches the event type:
-
-```text
-../../src/client/python/agentguard/checkers/llm_before/
-../../src/client/python/agentguard/checkers/llm_after/
-../../src/client/python/agentguard/checkers/tool_before/
-../../src/client/python/agentguard/checkers/tool_after/
-```
-
-Example:
-
-```python
-from agentguard.plugins.base import BaseChecker, CheckResult
-from agentguard.plugins.registry import register
-from agentguard.schemas.context import RuntimeContext
-from agentguard.schemas.events import EventType, RuntimeEvent
-
-
-@register(
-    name="my_client_checker",
-    description="Detect risky tool arguments on the client side.",
-)
-class MyClientChecker(BaseChecker):
-    event_types = [EventType.TOOL_INVOKE]
-
-    def check(self, event: RuntimeEvent, context: RuntimeContext) -> CheckResult:
-        tool_name = event.payload.get("tool_name")
-        arguments = event.payload.get("arguments") or {}
-        if tool_name == "send_email" and arguments.get("to", "").endswith("@external.com"):
-            return CheckResult(risk_signals=["external_send"])
-        return CheckResult.empty()
-```
-
-##### Server-side checker
-
-Server checkers must be placed in the matching server folder:
-
-```text
-../../src/server/backend/runtime/checkers/llm_before/
-../../src/server/backend/runtime/checkers/llm_after/
-../../src/server/backend/runtime/checkers/tool_before/
-../../src/server/backend/runtime/checkers/tool_after/
-```
-
-Example:
-
-```python
-from backend.runtime.checkers.base import BaseChecker, CheckResult
-from backend.runtime.checkers.registry import register
-from shared.schemas.context import RuntimeContext
-from shared.schemas.events import EventType, RuntimeEvent
-
-
-@register(
-    name="my_server_checker",
-    description="Detect multi-step exfiltration on the server side.",
-)
-class MyServerChecker(BaseChecker):
-    event_types = [EventType.TOOL_INVOKE]
-
-    def check(
-        self,
-        event: RuntimeEvent,
-        context: RuntimeContext,
-        trajectory_window: list[RuntimeEvent] | None = None,
-    ) -> CheckResult:
-        trajectory_window = trajectory_window or []
-        if trajectory_window and event.payload.get("tool_name") == "send_email":
-            return CheckResult(risk_signals=["cross_step_review"])
-        return CheckResult.empty()
-```
-
-The server also includes a built-in rule-based checker at `../../src/server/backend/runtime/checkers/tool_before/rule_based_check/checker.py`. Its registered name is `rule_based_check`.
-
-##### Checker configuration
-
-After adding the checker classes, reference their registered names in checker config:
-
-```json
-{
-  "phases": {
-    "tool_before": {
-      "local": ["my_client_checker"],
-      "remote": ["rule_based_check", "my_server_checker"]
-    }
-  }
-}
-```
-
-- `local` is loaded by the client checker manager.
-- `remote` is loaded by the server checker manager.
-- Even if both names appear in the same config file, the implementation files must still be deployed to the correct client or server folder.
-
-
-#### 6. Custom Auditor
-
-AgentGuard also supports post-hoc auditing on the backend. Unlike checkers, which run inline during the live runtime, custom auditors run on the full stored trace for a `session_id` / `agent_id` / `user_id` tuple after events have already been recorded. This is useful for compliance review, incident triage, retrospective analysis, and generating summarized severity labels for the frontend.
-
-The shared auditor abstractions live under:
-
-```text
-../../src/server/backend/audit/base.py
-../../src/server/backend/audit/manager.py
-../../src/server/backend/audit/registry.py
-```
-
-Concrete auditor implementations must be placed under:
-
-```text
-../../src/server/backend/audit/auditors/
-```
-
-The backend-discovered auditor interface is:
-
-```python
-from backend.audit.base import AuditResult, AuditTraceEntry, BaseAuditor
-from backend.audit.registry import register
-
-
-@register(
-    name="my_trace_auditor",
-    description="Summarize a stored trace into a severity label.",
-)
-class MyTraceAuditor(BaseAuditor):
-    def audit(
-        self,
-        trace: list[AuditTraceEntry],
-    ) -> AuditResult:
-        if any((record.get("decision") or {}).get("decision_type") == "deny" for record in trace):
-            return AuditResult(level="high", reason="The trace contains denied actions.")
-        return AuditResult.ok()
-```
-
-Each `AuditTraceEntry` contains the canonical trace fields `session_id`, `agent_id`, `user_id`, `reason`, `event`, `decision`, `checker_result`, and `plugin_results`. Auditors should treat `event` as the primary runtime payload and the other fields as optional enrichments from the backend trace pipeline.
-
-`AuditResult` currently uses four normalized severity levels: `critical`, `high`, `warning`, and `ok`. Each result also includes a human-readable `reason` and optional `metadata`.
-
-After you add the auditor implementation, the backend discovers it by registered name. The frontend can then:
-
-- call `GET /v1/backend/auditors` to list available auditors and descriptions
-- call `POST /v1/backend/audit/custom/run` with `session_id`, `agent_id`, `user_id`, and `auditor_name` to run one auditor on the corresponding stored trace
-
-For a concrete built-in example, see `../../src/server/backend/audit/auditors/trace_risk_summary.py`.
+- [AgentGuard Plugins](plugins.md)
+- [Custom Auditors](auditors.md)
 
 ### Step 4: Write a policy and deploy the control server
 
@@ -448,14 +210,14 @@ git clone https://github.com/WhitzardAgent/AgentGuard.git
 cd AgentGuard
 ```
 
-#### 1. Write a checker config file
+#### 1. Write a plugin config file
 
-Before writing any access-control policy, first define which server-side checker is active in this quick start:
+Before writing any access-control policy, first define which server-side plugin is active in this quick start:
 
 ```bash
 mkdir -p config
 
-cat <<EOF > config/checkers.json
+cat <<EOF > config/plugins.json
 {
   "phases": {
     "llm_before": {
@@ -468,7 +230,12 @@ cat <<EOF > config/checkers.json
     },
     "tool_before": {
       "local": [],
-      "remote": ["rule_based_check"]
+      "remote": [
+        {
+          "name": "rule_based_check",
+          "env": {}
+        }
+      ]
     },
     "tool_after": {
       "local": [],
@@ -479,7 +246,7 @@ cat <<EOF > config/checkers.json
 EOF
 ```
 
-This config means: only the `tool_before` phase runs a remote checker, and that checker is the built-in `rule_based_check`. All other phases are empty. In other words, the server will evaluate your policy rules only right before a tool call runs. That keeps the quick start focused on access-control decisions around tool execution, without introducing additional LLM-phase or tool-result checkers yet.
+This config means: only the `tool_before` phase runs a remote plugin, and that plugin is the built-in `rule_based_check`. All other phases are empty. In other words, the server will evaluate your policy rules only right before a tool call runs. That keeps the quick start focused on access-control decisions around tool execution, without introducing additional LLM-phase or tool-result plugins yet.
 
 #### 2. Create an access control policy
 
@@ -503,7 +270,7 @@ Reason: "Low-trust principal cannot send document 0 to non-admin recipients"
 EOF
 ```
 
-AgentGuard provides a dedicated DSL for writing policies, which we'll cover in detail in [DSL Basic Structure](./policies/dsl_basic_structure.md).
+AgentGuard provides a dedicated DSL for writing policies consumed by the built-in `rule_based_check` plugin, which we'll cover in detail in [Policy DSL Structure](./policies/dsl_basic_structure.md).
 
 #### 3. Deploy the AgentGuard control server
 
@@ -513,12 +280,12 @@ We offer two deployment methods: Docker and source code.
 
 > You need Docker installed first.
 
-Docker deployment is straightforward. First set the checker config path in `.env`:
+Docker deployment is straightforward. First set the plugin config path in `.env`:
 
 ```bash
 cp .env.example .env
 # then set:
-# AGENTGUARD_SERVER_CHECKER_CONFIG=./config/checkers.json
+# AGENTGUARD_SERVER_PLUGIN_CONFIG=./config/plugins.json
 ```
 
 Then run this command from the project root:
@@ -535,7 +302,7 @@ Below is a screenshot of the interactive policy configuration UI:
 
 ![UI policy configuration](../figs/ui_configure_policy.png)
 
-We'll cover interactive policy configuration in detail in [Quick Configuration](./policies/quick_config.md).
+We'll cover interactive `rule_based_check` policy configuration in detail in [Visual Policy Configuration](./policies/quick_config.md).
 
 ##### Source-code deployment
 
@@ -548,7 +315,7 @@ pip install -e ".[server]"
 Then start the control server:
 
 ```bash
-AGENTGUARD_SERVER_CHECKER_CONFIG=./config/checkers.json \
+AGENTGUARD_SERVER_PLUGIN_CONFIG=./config/plugins.json \
 python -m agentguard serve \
     --host 0.0.0.0 \
     --port 38080 \

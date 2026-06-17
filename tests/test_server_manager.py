@@ -86,8 +86,8 @@ def test_manager_records_session_pool_metadata():
                 "policy_version": "v1",
                 "environment": "test",
                 "metadata": {
-                    "client_config_url": "http://client.local/v1/client/checkers/config",
-                    "client_checker_list_url": "http://client.local/v1/client/checkers/list",
+                    "client_config_url": "http://client.local/v1/client/plugins/config",
+                    "client_plugin_list_url": "http://client.local/v1/client/plugins/list",
                     "custom": "value",
                 },
             },
@@ -109,8 +109,8 @@ def test_manager_records_session_pool_metadata():
     assert record["agent_id"] == "agent-a"
     assert record["user_id"] == "user-a"
     assert record["client_ip"] == "10.1.2.3"
-    assert record["client_config_url"] == "http://client.local/v1/client/checkers/config"
-    assert record["client_checker_list_url"] == "http://client.local/v1/client/checkers/list"
+    assert record["client_config_url"] == "http://client.local/v1/client/plugins/config"
+    assert record["client_plugin_list_url"] == "http://client.local/v1/client/plugins/list"
     assert record["principal"] == {"role": "tester"}
     assert record["metadata"]["custom"] == "value"
     assert record["metadata"]["event_metadata"] == {"principal": {"role": "tester"}}

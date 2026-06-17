@@ -9,7 +9,7 @@ from typing import Any, Callable
 from agentguard.adapters.llm import default_llm_adapters, select_llm_adapter
 from agentguard.audit.logger import AuditLogger
 from agentguard.audit.recorder import AuditRecorder
-from agentguard.plugins.manager import CheckerManager
+from agentguard.plugins.manager import PluginManager
 from agentguard.config_api import ClientConfigAPIServer
 from agentguard.harness.event_bus import EventBus
 from agentguard.harness.lifecycle import Lifecycle
@@ -82,7 +82,7 @@ class AgentGuard:
         self._enforcer = UGuardEnforcer(
             snapshot=snapshot,
             remote=self._remote,
-            checker_manager=CheckerManager(config=checker_config),
+            plugin_manager=PluginManager(config=checker_config),
         )
         self._sandbox = SandboxExecutor(sandbox, sandbox_profile)
         self._audit = AuditRecorder(session_id, AuditLogger(audit_path))
@@ -139,11 +139,17 @@ class AgentGuard:
         self._enforcer.set_snapshot(snap)
         self.context.policy_version = snap.version
 
-    def update_checker_config(self, checker_config: str | dict[str, Any] | None) -> None:
-        """Replace local checker configuration for subsequent guarded events."""
+    def update_checker_config(
+        self,
+        checker_config: str | dict[str, Any] | None,
+        *,
+        sync_remote: bool = True,
+    ) -> None:
+        """Replace local plugin configuration for subsequent guarded events."""
         self.context.metadata["client_checker_config"] = _checker_config_payload(checker_config)
         self._enforcer.update_checker_config(checker_config)
-        self._sync_remote_session()
+        if sync_remote:
+            self._sync_remote_session()
 
     def start_config_api(
         self,
@@ -152,21 +158,21 @@ class AgentGuard:
         port: int = 38181,
         sync_remote: bool = True,
     ) -> str:
-        """Start a local HTTP API for checker configuration updates."""
+        """Start a local HTTP API for plugin configuration updates."""
         prev_config_url = self.context.metadata.get("client_config_url")
-        prev_checker_list_url = self.context.metadata.get("client_checker_list_url")
+        prev_plugin_list_url = self.context.metadata.get("client_plugin_list_url")
         prev_health_url = self.context.metadata.get("client_health_url")
         if self._config_api is None:
             self._config_api = ClientConfigAPIServer(self, host=host, port=port)
         url = self._config_api.start()
-        checker_list_url = self._config_api.checker_list_url
+        plugin_list_url = self._config_api.plugin_list_url
         health_url = self._config_api.health_url
         self.context.metadata["client_config_url"] = url
-        self.context.metadata["client_checker_list_url"] = checker_list_url
+        self.context.metadata["client_plugin_list_url"] = plugin_list_url
         self.context.metadata["client_health_url"] = health_url
         urls_changed = (
             prev_config_url != url
-            or prev_checker_list_url != checker_list_url
+            or prev_plugin_list_url != plugin_list_url
             or prev_health_url != health_url
         )
         if sync_remote and urls_changed:
@@ -174,12 +180,12 @@ class AgentGuard:
         return url
 
     def stop_config_api(self) -> None:
-        """Stop the local checker configuration HTTP API if it is running."""
+        """Stop the local plugin configuration HTTP API if it is running."""
         if self._config_api is not None:
             self._config_api.stop()
             self._config_api = None
             self.context.metadata.pop("client_config_url", None)
-            self.context.metadata.pop("client_checker_list_url", None)
+            self.context.metadata.pop("client_plugin_list_url", None)
             self.context.metadata.pop("client_health_url", None)
 
     # ---- wrapping ------------------------------------------------------

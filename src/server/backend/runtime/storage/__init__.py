@@ -183,8 +183,16 @@ class SessionPool:
                     context_metadata.get("client_config_url")
                     or current.get("client_config_url")
                 ),
+                "client_plugin_list_url": (
+                    context_metadata.get("client_plugin_list_url")
+                    or context_metadata.get("client_checker_list_url")
+                    or current.get("client_plugin_list_url")
+                    or current.get("client_checker_list_url")
+                ),
                 "client_checker_list_url": (
-                    context_metadata.get("client_checker_list_url")
+                    context_metadata.get("client_plugin_list_url")
+                    or context_metadata.get("client_checker_list_url")
+                    or current.get("client_plugin_list_url")
                     or current.get("client_checker_list_url")
                 ),
                 "client_health_url": (

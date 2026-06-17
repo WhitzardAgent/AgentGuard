@@ -10,6 +10,8 @@
   * [AutoGen](how-to-plugin/autogen.md)
   * [OpenAI Agents SDK](how-to-plugin/openai_agents_sdk.md)
   * [自定义框架](how-to-plugin/custom.md)
-* 策略编写
-  * [快速配置](policies/quick_config.md)
-  * [DSL基本结构](policies/dsl_basic_structure.md)
+* [AgentGuard Plugins](plugins.md)
+* [Custom Auditors](auditors.md)
+* rule_based_check Plugin 策略编写
+  * [可视化策略配置](policies/quick_config.md)
+  * [策略 DSL 基本结构](policies/dsl_basic_structure.md)

@@ -3,10 +3,12 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
-const { checkerDescriptions } = require("./checkers/registry");
+const { pluginDescriptions } = require("./plugins/registry");
 
-const CHECKER_CONFIG_PATH = "/v1/client/checkers/config";
-const CHECKER_LIST_PATH = "/v1/client/checkers/list";
+const PLUGIN_CONFIG_PATH = "/v1/client/plugins/config";
+const PLUGIN_LIST_PATH = "/v1/client/plugins/list";
+const LEGACY_CHECKER_CONFIG_PATH = "/v1/client/checkers/config";
+const LEGACY_CHECKER_LIST_PATH = "/v1/client/checkers/list";
 const CLIENT_HEALTH_PATH = "/v1/client/health";
 
 class ClientConfigAPIServer {
@@ -25,12 +27,12 @@ class ClientConfigAPIServer {
     return `http://${address.address}:${address.port}`;
   }
 
-  get checker_config_url() {
-    return `${this.base_url}${CHECKER_CONFIG_PATH}`;
+  get plugin_config_url() {
+    return `${this.base_url}${PLUGIN_CONFIG_PATH}`;
   }
 
-  get checker_list_url() {
-    return `${this.base_url}${CHECKER_LIST_PATH}`;
+  get plugin_list_url() {
+    return `${this.base_url}${PLUGIN_LIST_PATH}`;
   }
 
   get health_url() {
@@ -39,7 +41,7 @@ class ClientConfigAPIServer {
 
   start() {
     if (this.server) {
-      return Promise.resolve(this.checker_config_url);
+      return Promise.resolve(this.plugin_config_url);
     }
     this.server = http.createServer(async (req, res) => {
       try {
@@ -55,26 +57,27 @@ class ClientConfigAPIServer {
             user_id: this.guard.context.user_id,
           });
         }
-        if (req.method === "GET" && req.url === CHECKER_LIST_PATH) {
+        if (req.method === "GET" && [PLUGIN_LIST_PATH, LEGACY_CHECKER_LIST_PATH].includes(req.url)) {
+          const plugins = listRegisteredPlugins();
           return this.send(res, 200, {
             status: "ok",
-            checkers: listRegisteredCheckers(),
+            plugins,
           });
         }
-        if (req.method === "POST" && req.url === CHECKER_CONFIG_PATH) {
+        if (req.method === "POST" && [PLUGIN_CONFIG_PATH, LEGACY_CHECKER_CONFIG_PATH].includes(req.url)) {
           const body = await readJson(req);
           const config = Object.prototype.hasOwnProperty.call(body, "path")
             ? String(body.path)
             : (body.config || body);
           try {
-            await this.guard.update_checker_config(config);
+            await this.guard.update_checker_config(config, { syncRemote: false });
           } catch (error) {
             return this.send(res, 400, { status: "error", error: String(error.message || error) });
           }
           return this.send(res, 200, {
             status: "ok",
             applies: "next_event",
-            endpoint: CHECKER_CONFIG_PATH,
+            endpoint: PLUGIN_CONFIG_PATH,
           });
         }
         return this.send(res, 404, { error: "not found" });
@@ -86,7 +89,7 @@ class ClientConfigAPIServer {
       this.server.once("error", reject);
       this.server.listen(this.port, this.host, () => {
         this.server.removeListener("error", reject);
-        resolve(this.checker_config_url);
+        resolve(this.plugin_config_url);
       });
     });
   }
@@ -126,15 +129,15 @@ class ClientConfigAPIServer {
   }
 }
 
-function listRegisteredCheckers() {
-  const { registeredCheckers } = require("./checkers/registry");
-  const descriptions = checkerDescriptions();
+function listRegisteredPlugins() {
+  const { registeredPlugins } = require("./plugins/registry");
+  const descriptions = pluginDescriptions();
   const deprecated = new Set(["memory", "llm_thought", "final_response"]);
-  return Object.entries(registeredCheckers())
+  return Object.entries(registeredPlugins())
     .filter(([name]) => !deprecated.has(name))
     .sort(([left], [right]) => left.localeCompare(right))
-    .map(([name, CheckerClass]) => {
-      const instance = new CheckerClass();
+    .map(([name, PluginClass]) => {
+      const instance = new PluginClass();
       return {
         name,
         description: descriptions[name] || instance.description || "",
@@ -164,7 +167,7 @@ function readJson(req) {
 
 module.exports = {
   ClientConfigAPIServer,
-  CHECKER_CONFIG_PATH,
-  CHECKER_LIST_PATH,
+  PLUGIN_CONFIG_PATH,
+  PLUGIN_LIST_PATH,
   CLIENT_HEALTH_PATH,
 };

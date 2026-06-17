@@ -33,7 +33,7 @@ class CheckResult {
   }
 }
 
-class BaseChecker {
+class BasePlugin {
   constructor({ env = null, ...kwargs } = {}) {
     this.name = this.constructor.name || "base";
     this.description = "";
@@ -59,5 +59,5 @@ class BaseChecker {
 
 module.exports = {
   CheckResult,
-  BaseChecker,
+  BasePlugin,
 };

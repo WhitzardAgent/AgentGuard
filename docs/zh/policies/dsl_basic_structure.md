@@ -1,6 +1,24 @@
-# DSL 基本结构
+# rule_based_check 策略 DSL 基本结构
 
-本文面向需要用 DSL 语言手动编写 AgentGuard 访问控制策略的高级用户，重点介绍策略 DSL 的语法结构、常用字段、条件表达式、调用链规则以及动作语义。
+本文面向需要手动编写内置 `rule_based_check` server plugin 策略的高级用户。`rule_based_check` 会消费 AgentGuard 的访问控制 DSL，结合当前运行时事件和近期 session 上下文进行规则评估，通过配置规则识别并拦截工具调用中的安全风险。
+
+要让这些规则在运行时生效，需要先在 `config/plugins.json` 中启用该 plugin：
+
+```json
+{
+  "phases": {
+    "llm_before": {"local": [], "remote": []},
+    "llm_after": {"local": [], "remote": []},
+    "tool_before": {
+      "local": [],
+      "remote": [{"name": "rule_based_check", "env": {}}]
+    },
+    "tool_after": {"local": [], "remote": []}
+  }
+}
+```
+
+本文重点介绍策略 DSL 的语法结构、常用字段、条件表达式、调用链规则以及动作语义。
 
 AgentGuard 的策略文件通常使用 `.rules` 后缀。一个文件可以包含多条规则，每条规则描述一类工具调用在什么条件下应当被允许、拒绝或进入审批。
 

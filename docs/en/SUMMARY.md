@@ -10,6 +10,8 @@
   * [AutoGen](how-to-plugin/autogen.md)
   * [OpenAI Agents SDK](how-to-plugin/openai_agents_sdk.md)
   * [Custom Framework](how-to-plugin/custom.md)
-* Policy Writing
-  * [Quick Configuration](policies/quick_config.md)
-  * [DSL Basic Structure](policies/dsl_basic_structure.md)
+* [AgentGuard Plugins](plugins.md)
+* [Custom Auditors](auditors.md)
+* rule_based_check Plugin Policy Writing
+  * [Visual Policy Configuration](policies/quick_config.md)
+  * [Policy DSL Structure](policies/dsl_basic_structure.md)

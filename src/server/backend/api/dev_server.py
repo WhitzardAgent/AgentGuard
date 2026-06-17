@@ -345,6 +345,7 @@ def _client_key_for_url(manager: RuntimeManager, url: str) -> str | None:
     for session in manager.session_pool.list():
         known_urls = {
             session.get("client_config_url"),
+            session.get("client_plugin_list_url"),
             session.get("client_checker_list_url"),
             session.get("client_health_url"),
         }

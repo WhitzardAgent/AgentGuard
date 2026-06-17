@@ -2,109 +2,67 @@
 
 > This project is still under active development and may contain bugs. Contributions via Issues and PRs are welcome.
 
-AgentGuard is a runtime access control system designed for AI agent tool calls. It sits between the agent and its actual tools, inspecting each operation against predefined policies before the tool executes, and returning an appropriate decision.
+AgentGuard is a zero-trust security foundation for AI agents. It integrates with existing agent frameworks and provides a configurable security layer across the full agent runtime: before each LLM call, after each LLM output, before each tool invocation, and after tool execution. It also supports post-hoc auditing over stored traces through pluggable custom auditors.
 
-AgentGuard is most valuable when agents can:
+AgentGuard covers several key areas highlighted in Anthropic's [Zero Trust for AI Agents](https://claude.com/blog/zero-trust-for-ai-agents), including access control and privilege management, observability and auditing, and behavioral monitoring and response.
 
-* send emails
-* access external networks
-* execute shell commands
-* read and write files
-* access databases
+![AgentGuard positioning](../figs/positioning.png)
 
-These capabilities carry higher security risk. AgentGuard's role is to add a configurable control layer before these operations actually happen.
+## What AgentGuard Provides
 
-## Project scope
+### Multi-phase security protection
 
-AgentGuard doesn't focus on how to build agents — it focuses on governing how agents use their tools. It's designed to answer questions like:
+AgentGuard can intervene throughout an agent run instead of only checking a single tool call. It can inspect LLM inputs, LLM outputs, tool invocations, and tool results, then allow, deny, escalate, or record decisions according to configured safeguards.
 
-* Which tools may be called, and which must be blocked
-* Which destinations, email addresses, or paths are permitted
-* Which data should not be sent externally
-* Which operations require human approval
-* Which high-risk actions an agent has actually performed
+### Modular security strategies
 
-AgentGuard is best used as a security control layer within an agent system, not as a business orchestration layer.
+AgentGuard exposes a unified plugin architecture so rule-based and model-based security strategies can be plugged in behind the same interface. The current release includes a built-in server plugin named `rule_based_check`, which supports configurable DSL rules for identifying and intercepting security risks in tool calls before they execute.
 
-## Key capabilities
+### Single-tool and cross-tool protection
 
-The most important features in the current release:
+AgentGuard can evaluate both individual tool calls and cross-step attack chains. By storing runtime context, it can detect patterns such as:
 
-* Allow or deny tool calls
-* Require human approval for uncertain but high-risk operations
-* Audit critical operations
-* Make rule decisions based on task context and call history
+- read from a database, then send email
+- read a sensitive file, then upload it to an external HTTP endpoint
+- external input eventually flows into a shell command
 
-Typical configurations include:
+### Seamless framework integration
 
-* Blocking low-trust agents from running dangerous commands
-* Preventing sensitive data from being sent to external emails or websites
+AgentGuard sits between the LLM-based planning engine and tools. It does not replace the agent's planning, reasoning, or task orchestration logic. Adapters are provided for mainstream agent frameworks, so users can integrate AgentGuard with minimal code changes and without modifying framework internals.
 
-## When to use AgentGuard
+Currently supported frameworks include:
 
-If an agent is purely conversational and never calls external tools, there's usually no need for AgentGuard.
+- [LangChain](https://github.com/langchain-ai/langchain)
+- [AutoGen](https://github.com/microsoft/autogen)
+- [OpenAI Agents SDK](https://github.com/openai/openai-agents-python)
 
-If the agent can reach real system resources, you should consider integrating it — especially in these scenarios:
+### Visual policy configuration and audit
 
-* Office automation assistants
-* Automation agents with system-level capabilities
-* Multi-team shared agent platforms
-* Projects that need security policies separated from business code
+AgentGuard ships with a web console for managing agents. The console supports interactive policy configuration, runtime monitoring, pending approval review, and audit inspection. For any tool call that triggers a policy, users can inspect matched rules, risk scores, final decisions, and raw event or decision JSON.
 
-## How it works
+### Centralized control-plane management
 
-From a user's perspective, the workflow is:
-
-1. Define the agent and its available tools
-2. Integrate AgentGuard into the agent's runtime
-3. Write access control policies
-4. When the agent makes a tool call, AgentGuard inspects it first
-5. AgentGuard decides how to handle the call based on policy
-
-In other words, AgentGuard doesn't replace the agent's task logic — it provides a unified decision and constraint layer before the agent executes high-risk operations.
+AgentGuard uses a centralized control-plane architecture for distributed agent processes. Agents can run across multiple nodes, while policy configuration, runtime monitoring, and audit workflows are managed centrally by the control server. This is useful for organizations that need unified governance across many agent deployments.
 
 ## Architecture
 
 ![AgentGuard architecture](../figs/overview.png)
 
-## What to focus on
+At a high level:
 
-For most users, the most important thing is not the internal implementation, but the following aspects.
+- **Client**: integrates into agent frameworks, intercepts LLM and tool events, performs lightweight local filtering, and forwards events to the server when needed.
+- **Server**: receives runtime information from clients, evaluates configured plugins and policies, returns decisions, and stores trace data for monitoring and auditing.
+- **Plugins**: extend runtime inspection on the client or server side.
+- **Custom auditors**: run post-hoc analysis over stored traces to support review, compliance, and incident investigation.
 
-### Tool boundaries
+## When to Use AgentGuard
 
-First, identify which tool capabilities the agent actually has, especially these high-risk categories:
+AgentGuard is most useful when agents can interact with real resources, especially:
 
-* Outbound tools (email, HTTP)
-* System command tools
-* File write tools
-* Database write tools
-* Sensitive data read tools
+- outbound tools such as email, HTTP, or messaging
+- shell and system-command tools
+- filesystem read or write tools
+- database read or write tools
+- workflows where untrusted input may influence later actions
 
-These are the first things you should write policies for.
-
-### Deny rules
-
-Identify operations that must never happen, for example:
-
-* Sending internal data to external destinations
-* Running dangerous shell commands
-* Modifying critical system files or production databases
-
-These are best configured as direct denials.
-
-### Approval rules
-
-For operations that can't be easily classified as "safe" or "dangerous," add a human approval mechanism as a supplementary control.
-
-## What the current version handles best
-
-AgentGuard is currently best suited for tool-call governance scenarios, including:
-
-* Email outbound control
-* HTTP outbound control
-* Shell, filesystem, and database access control
-* Rule decisions based on task context and call history
-* Audit and human approval
-
-If your goal is to establish clear, configurable, auditable constraints on how agents use their tools, the current version provides solid support.
+Even without tool calls, AgentGuard can still inspect and intercept security risks in LLM inputs and outputs. If an agent is purely conversational and has very low risk, AgentGuard may be optional. If the agent handles sensitive prompts, untrusted inputs, regulated content, system data, or any action that can affect systems, data, or external destinations, AgentGuard provides a clear, configurable, and auditable control layer.

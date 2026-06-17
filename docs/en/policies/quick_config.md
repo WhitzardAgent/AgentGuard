@@ -1,6 +1,24 @@
-# Quick Configuration
+# rule_based_check Visual Policy Configuration
 
-The easiest way to configure policies is through the web UI, which provides an interactive, step-by-step interface with dropdowns and form fields to reduce the manual effort of policy writing.
+This page explains how to configure policies for the built-in `rule_based_check` server plugin through the web UI. `rule_based_check` evaluates access-control rules, usually in the `tool_before` phase, so AgentGuard can identify and intercept tool-call security risks before the tool executes.
+
+To use these policies, enable the plugin in `config/plugins.json`:
+
+```json
+{
+  "phases": {
+    "llm_before": {"local": [], "remote": []},
+    "llm_after": {"local": [], "remote": []},
+    "tool_before": {
+      "local": [],
+      "remote": [{"name": "rule_based_check", "env": {}}]
+    },
+    "tool_after": {"local": [], "remote": []}
+  }
+}
+```
+
+The easiest way to configure `rule_based_check` policies is through the web UI, which provides an interactive, step-by-step interface with dropdowns and form fields to reduce the manual effort of policy writing.
 
 Open the UI and select the `Agents` tab to see all agents currently connected to the control server.
 
