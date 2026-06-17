@@ -8,13 +8,9 @@
     (function () {
       try {
         const agentId = String(window.localStorage.getItem("agentguard.selectedAgentId") || "").trim();
-        const checkerName = String(window.localStorage.getItem("agentguard.selectedCheckerName") || "").trim();
         if (!agentId) {
           window.location.replace("/agents.html");
           return;
-        }
-        if (!checkerName) {
-          window.location.replace("/checkers.html");
         }
       } catch {
         window.location.replace("/agents.html");

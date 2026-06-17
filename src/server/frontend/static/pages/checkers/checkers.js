@@ -9,8 +9,6 @@
   const remoteCheckerStatus = document.getElementById("remote-checker-status");
   const localCheckerStatus = document.getElementById("local-checker-status");
   const statusText = document.getElementById("checker-config-status");
-  const nextStepStatus = document.getElementById("checker-next-step-status");
-  const nextStepActions = document.getElementById("checker-next-step-actions");
   const selectedAgentLabel = document.getElementById("checker-selected-agent");
 
   const CHECKER_SCOPES = ["remote", "local"];
@@ -18,12 +16,12 @@
     remote: {
       availableKey: "remote_checkers",
       heading: "remote",
-      empty: "No remote checkers are available for this agent yet.",
+      empty: "No remote plugins are available for this agent yet.",
     },
     local: {
       availableKey: "local_checkers",
       heading: "local",
-      empty: "No local checkers are available for this agent yet. Start a client config API to discover client-side checkers.",
+      empty: "No local plugins are available for this agent yet. Start a client config API to discover client-side plugins.",
     },
   };
 
@@ -40,8 +38,8 @@
   };
 
   shell?.setPageContext({
-    title: "Checker Config",
-    description: "Configure remote and local checker scopes for the selected agent.",
+    title: "Plugin Config",
+    description: "Configure remote and local plugin scopes for the selected agent.",
   });
 
   function showToast(message, tone) {
@@ -70,45 +68,6 @@
     return primary;
   }
 
-  function renderActions() {
-    nextStepActions.innerHTML = "";
-    const backLink = document.createElement("a");
-    backLink.className = "btn";
-    backLink.href = "/agents.html";
-    backLink.textContent = "Back To Agents";
-    nextStepActions.appendChild(backLink);
-
-    const activeNames = activeCheckerNames();
-    const remoteNames = scopeSelection("remote");
-    if (!activeNames.length) {
-      nextStepStatus.textContent = "Enable at least one local or remote checker to unlock the next workspace.";
-      return;
-    }
-
-    if (remoteNames.includes("rule_based_check")) {
-      nextStepStatus.textContent = "Rule-based remote checker is active. You can now manage tool tags, publish rules, or inspect runtime.";
-      [
-        { href: "/labels.html", label: "Open Tags" },
-        { href: "/rules.html", label: "Open Rules" },
-        { href: "/runtime.html", label: "Open DashBoard" },
-      ].forEach((item) => {
-        const link = document.createElement("a");
-        link.className = "btn primary";
-        link.href = item.href;
-        link.textContent = item.label;
-        nextStepActions.appendChild(link);
-      });
-      return;
-    }
-
-    nextStepStatus.textContent = `${activeNames.join(", ")} active. This checker set unlocks the runtime dashboard.`;
-    const runtimeLink = document.createElement("a");
-    runtimeLink.className = "btn primary";
-    runtimeLink.href = "/runtime.html";
-    runtimeLink.textContent = "Open DashBoard";
-    nextStepActions.appendChild(runtimeLink);
-  }
-
   function renderScopeList(scope, container, statusNode) {
     if (!container) {
       return;
@@ -120,11 +79,11 @@
 
     if (statusNode) {
       if (!state.selectedAgentId) {
-        statusNode.textContent = `Select an agent to view ${copy.heading} checkers.`;
+        statusNode.textContent = `Select an agent to view ${copy.heading} plugins.`;
       } else if (!items.length) {
         statusNode.textContent = copy.empty;
       } else {
-        statusNode.textContent = `${enabledNames.size} of ${items.length} ${copy.heading} checkers enabled.`;
+        statusNode.textContent = `${enabledNames.size} of ${items.length} ${copy.heading} plugins enabled.`;
       }
     }
 
@@ -140,7 +99,7 @@
       const eventsText = checker.event_types.length ? checker.event_types.join(", ") : "";
       const pillText = phaseText || eventsText || "Phase not declared";
       const switchLabel = isEnabled ? "On" : "Off";
-      const helperText = checker.description || "No checker description provided.";
+      const helperText = checker.description || "No plugin description provided.";
       card.className = "agent-list-card checker-toggle-card";
       if (isEnabled) {
         card.classList.add("selected");
@@ -154,7 +113,7 @@
             </div>
             <p class="subtle">${helperText}</p>
           </div>
-          <label class="checker-switch" aria-label="Toggle ${checker.name}">
+          <label class="checker-switch" aria-label="Toggle plugin ${checker.name}">
             <input
               type="checkbox"
               data-checker-name="${checker.name}"
@@ -177,7 +136,6 @@
     selectedAgentLabel.textContent = state.selectedAgentId || "the selected agent";
     renderScopeList("remote", remoteCheckerList, remoteCheckerStatus);
     renderScopeList("local", localCheckerList, localCheckerStatus);
-    renderActions();
   }
 
   function renderStatus() {
@@ -190,27 +148,27 @@
       return;
     }
     if (state.loading) {
-      statusText.textContent = `Updating checker config for ${state.selectedAgentId}...`;
+      statusText.textContent = `Updating plugin config for ${state.selectedAgentId}...`;
       return;
     }
     if (remoteNames.length || localNames.length) {
       const sourceText = configSource === "server_default"
-        ? "Using server default checker config"
-        : "Current checkers";
+        ? "Using server default plugin config"
+        : "Current plugins";
       const remoteText = remoteNames.length ? remoteNames.join(", ") : "none";
       const localText = localNames.length ? localNames.join(", ") : "none";
       statusText.textContent = `${sourceText} for ${state.selectedAgentId}: remote [${remoteText}], local [${localText}].`;
       return;
     }
     if (!hasConfig) {
-      statusText.textContent = `No checker config has been applied to ${state.selectedAgentId} yet.`;
+      statusText.textContent = `No plugin config has been applied to ${state.selectedAgentId} yet.`;
       return;
     }
     if (configSource === "server_default") {
-      statusText.textContent = `Using server default checker config for ${state.selectedAgentId}.`;
+      statusText.textContent = `Using server default plugin config for ${state.selectedAgentId}.`;
       return;
     }
-    statusText.textContent = `Loaded checker config for ${state.selectedAgentId}.`;
+    statusText.textContent = `Loaded plugin config for ${state.selectedAgentId}.`;
   }
 
   async function loadCheckerState({ manual = false } = {}) {
@@ -221,7 +179,7 @@
     }
     state.loading = true;
     refreshButton.disabled = true;
-    statusText.textContent = manual ? "Refreshing checker catalog..." : "Loading checker catalog...";
+    statusText.textContent = manual ? "Refreshing plugin catalog..." : "Loading plugin catalog...";
     renderCheckerLists();
     let loadFailed = false;
     try {
@@ -241,18 +199,17 @@
       renderStatus();
       renderCheckerLists();
       if (manual) {
-        showToast("Checker catalog refreshed.", "success");
+        showToast("Plugin catalog refreshed.", "success");
       }
     } catch (error) {
       loadFailed = true;
-      statusText.textContent = api.formatErrorMessage(error, "Failed to load checker catalog.");
+      statusText.textContent = api.formatErrorMessage(error, "Failed to load plugin catalog.");
       if (remoteCheckerList) {
         remoteCheckerList.innerHTML = `<div class="empty-state">${statusText.textContent}</div>`;
       }
       if (localCheckerList) {
         localCheckerList.innerHTML = `<div class="empty-state">${statusText.textContent}</div>`;
       }
-      renderActions();
     } finally {
       state.loading = false;
       refreshButton.disabled = false;
@@ -295,11 +252,11 @@
       shell?.setSelectedChecker?.(updatePrimaryCheckerSelection());
       renderStatus();
       renderCheckerLists();
-      showToast("Checker config updated.", "success");
+      showToast("Plugin config updated.", "success");
     } catch (error) {
       state.selections = previousSelections;
       updatePrimaryCheckerSelection();
-      showToast(api.formatErrorMessage(error, "Failed to update checker config."), "warning");
+      showToast(api.formatErrorMessage(error, "Failed to update plugin config."), "warning");
     } finally {
       state.loading = false;
       refreshButton.disabled = false;

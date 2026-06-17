@@ -16,8 +16,8 @@
           <p class="page-kicker">AgentGuard Home</p>
           <h1><span class="home-hero-name">AgentGuard</span> keeps your agent workflow in control.</h1>
           <p class="subtle">
-            Start from labels, move into rules, and keep an eye on runtime behavior with a
-            single control surface.
+            Start with agent selection, configure plugins when needed, and optionally add
+            rule-based controls for labels, rules, and runtime review.
           </p>
         </div>
       </section>
@@ -25,17 +25,17 @@
       <section class="grid home-link-grid">
         <div class="card home-link-card">
           <p class="page-kicker">01</p>
-          <h3>Labels</h3>
+          <h3>Agents</h3>
           <p class="subtle">
-            Review tool metadata, inspect defaults, and update label values before policies rely on them.
+            Choose which registered agent you want to inspect and use that selection to scope the rest of the frontend.
           </p>
         </div>
 
         <div class="card home-link-card">
           <p class="page-kicker">02</p>
-          <h3>Rules</h3>
+          <h3>Plugins</h3>
           <p class="subtle">
-            Draft rule logic, preview the DSL, and publish the rule set without leaving the frontend shell.
+            Enable remote or local plugins for the selected agent, including optional built-in policy and safety flows.
           </p>
         </div>
 
@@ -43,7 +43,7 @@
           <p class="page-kicker">03</p>
           <h3>DashBoard</h3>
           <p class="subtle">
-            Watch traffic, approvals, and audit signals to understand how rules behave in live flows.
+            Watch runtime activity for the selected agent. Rule-based plugins can add more policy-specific signals, but dashboard visibility is always available.
           </p>
         </div>
       </section>
@@ -65,7 +65,7 @@
   <script>
     window.AgentGuardShell?.setPageContext({
       title: "Home",
-      description: "Launch the core labels, rules, and runtime workflows.",
+      description: "Start with agent selection, then configure plugins and optional rule-based workflows.",
     });
   </script>
 </body>

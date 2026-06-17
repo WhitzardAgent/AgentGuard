@@ -47,8 +47,6 @@ function bootShell(selectedAgentId = "") {
   const elements = {};
   const agentRequired = [
     { hidden: false },
-  ];
-  const checkerRequired = [
     { hidden: false },
   ];
   const ruleBasedRequired = [
@@ -108,7 +106,6 @@ function bootShell(selectedAgentId = "") {
   return {
     elements,
     agentRequired,
-    checkerRequired,
     ruleBasedRequired,
     shell: global.window.AgentGuardShell,
   };
@@ -117,7 +114,6 @@ function bootShell(selectedAgentId = "") {
 test("sidebar hides agent-required links until an agent is selected", () => {
   const {
     agentRequired,
-    checkerRequired,
     ruleBasedRequired,
     elements,
     shell,
@@ -125,7 +121,6 @@ test("sidebar hides agent-required links until an agent is selected", () => {
 
   assert.equal(elements["sidebar-current-user"].textContent, "Current User");
   assert.equal(agentRequired.every((item) => item.hidden), true);
-  assert.equal(checkerRequired.every((item) => item.hidden), true);
   assert.equal(ruleBasedRequired.every((item) => item.hidden), true);
   assert.equal(elements["sidebar-agent-panel"].hidden, true);
   assert.equal(elements["sidebar-selected-agent-wrap"].hidden, true);
@@ -134,7 +129,6 @@ test("sidebar hides agent-required links until an agent is selected", () => {
   shell.setSelectedAgent("agent-a");
 
   assert.equal(agentRequired.every((item) => item.hidden === false), true);
-  assert.equal(checkerRequired.every((item) => item.hidden), true);
   assert.equal(ruleBasedRequired.every((item) => item.hidden), true);
   assert.equal(elements["sidebar-agent-panel"].hidden, false);
   assert.equal(elements["sidebar-selected-agent-wrap"].hidden, false);
@@ -142,7 +136,6 @@ test("sidebar hides agent-required links until an agent is selected", () => {
 
   shell.setSelectedChecker("rule_based_check");
 
-  assert.equal(checkerRequired.every((item) => item.hidden === false), true);
+  assert.equal(agentRequired.every((item) => item.hidden === false), true);
   assert.equal(ruleBasedRequired.every((item) => item.hidden === false), true);
-  assert.equal(elements["sidebar-selected-checker"].textContent, "rule_based_check");
 });

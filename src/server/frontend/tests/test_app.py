@@ -504,7 +504,7 @@ def test_runtime_page_renders_shared_sidebar_and_active_nav():
     assert 'href="/runtime.html"' in body
     assert "active" in body
     assert 'href="/labels.html"' in body
-    assert 'data-checker-required="true"' in body
+    assert 'data-agent-required="true"' in body
 
 
 def test_home_page_renders_intro_and_home_active_nav():
@@ -515,6 +515,7 @@ def test_home_page_renders_intro_and_home_active_nav():
     assert "AgentGuard Home" in body
     assert "AgentGuard" in body
     assert "keeps your agent workflow in control." in body
+    assert "DashBoard" in body
     assert 'href="/agents.html"' in body
     assert 'href="/checkers.html"' in body
     assert '<a class="sidebar-nav-item active" href="/">Home</a>' in body
@@ -537,9 +538,9 @@ def test_checkers_page_renders_checker_selection_workspace():
         status, body = _text_request("GET", preview.url, "/checkers.html")
 
     assert status == 200
-    assert "Available Checkers" in body
+    assert "Available Plugins" in body
     assert 'href="/checkers.html"' in body
-    assert 'Checkers</a>' in body
+    assert 'Plugins</a>' in body
 
 
 def test_mock_mode_lists_tools_and_agent_scoped_tools():

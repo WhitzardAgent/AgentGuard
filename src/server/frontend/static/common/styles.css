@@ -24,6 +24,7 @@ body {
   margin: 0;
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   color: var(--text);
+  overflow-x: hidden;
   background:
     radial-gradient(circle at top left, rgba(111, 159, 93, 0.15), transparent 26%),
     radial-gradient(circle at top right, rgba(47, 107, 59, 0.08), transparent 22%),
@@ -42,6 +43,7 @@ a {
   padding: 24px 24px 24px calc(284px + 32px);
   display: block;
   min-height: 100vh;
+  overflow-x: clip;
 }
 
 .app-sidebar {
@@ -493,6 +495,7 @@ a {
 }
 
 .checker-scope-grid {
+  grid-template-columns: 1fr;
   align-items: start;
 }
 
@@ -514,6 +517,7 @@ a {
   align-items: flex-start;
   justify-content: space-between;
   gap: 18px;
+  flex-wrap: wrap;
 }
 
 .checker-toggle-copy {

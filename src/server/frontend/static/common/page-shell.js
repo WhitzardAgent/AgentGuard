@@ -20,9 +20,6 @@
     "/rules.html",
     "/runtime.html",
   ]);
-  const CHECKER_REQUIRED_PATHS = new Set([
-    "/runtime.html",
-  ]);
   const RULE_BASED_REQUIRED_PATHS = new Set([
     "/labels.html",
     "/rules.html",
@@ -78,10 +75,6 @@
       redirectToAgentSelection();
       return false;
     }
-    if (!state.selectedCheckerName && CHECKER_REQUIRED_PATHS.has(currentPath())) {
-      redirectToCheckerSelection();
-      return false;
-    }
     if (
       state.selectedCheckerName
       && state.selectedCheckerName !== "rule_based_check"
@@ -107,11 +100,9 @@
     setText("sidebar-page-title", state.pageTitle);
     setText("sidebar-page-description", state.pageDescription);
     setText("sidebar-selected-agent", state.selectedAgentId || "");
-    setText("sidebar-selected-checker", state.selectedCheckerName || "");
     setText("sidebar-current-user", state.currentUserLabel || "");
 
     const selectedAgentWrap = getElement("sidebar-selected-agent-wrap");
-    const selectedCheckerWrap = getElement("sidebar-selected-checker-wrap");
     const selectedAgentPanel = getElement("sidebar-agent-panel");
     const clearSelectedAgentButton = getElement("sidebar-clear-agent");
     const selectedAgentValue = getElement("sidebar-selected-agent");
@@ -120,9 +111,6 @@
     }
     if (selectedAgentPanel) {
       selectedAgentPanel.hidden = !state.selectedAgentId;
-    }
-    if (selectedCheckerWrap) {
-      selectedCheckerWrap.hidden = !state.selectedCheckerName;
     }
     if (selectedAgentValue) {
       selectedAgentValue.hidden = !state.selectedAgentId;
@@ -134,9 +122,6 @@
     if (typeof document !== "undefined" && typeof document.querySelectorAll === "function") {
       document.querySelectorAll("[data-agent-required='true']").forEach((element) => {
         element.hidden = !state.selectedAgentId;
-      });
-      document.querySelectorAll("[data-checker-required='true']").forEach((element) => {
-        element.hidden = !state.selectedAgentId || !state.selectedCheckerName;
       });
       document.querySelectorAll("[data-rule-based-required='true']").forEach((element) => {
         element.hidden = !state.selectedAgentId || state.selectedCheckerName !== "rule_based_check";
