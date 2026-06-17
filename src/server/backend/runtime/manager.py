@@ -2,22 +2,21 @@
 from __future__ import annotations
 
 import copy
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
-import threading
+import warnings
 from typing import Any, Callable
 
 from shared.schemas.context import RuntimeContext
 from shared.schemas.decisions import DecisionType, GuardDecision
 from shared.schemas.events import RuntimeEvent
-from backend.audit import AuditTraceEntry
 from backend.audit.audit_logger import AuditLogger
-# from backend.plugins.loader import load_builtin_plugins
-# from backend.plugins.manager import PluginManager
+from backend.audit import AuditTraceEntry
 from backend.runtime.checkers.base import CheckResult
-from backend.runtime.checkers.config_utils import merge_checker_configs, normalize_checker_config
 from backend.runtime.checkers import server_checker_manager
+from backend.runtime.checkers.config_utils import merge_checker_configs, normalize_checker_config
 from backend.runtime.degrade.planner import DegradePlanner
 from backend.runtime.policy.engine import PolicyEngine
 from backend.runtime.storage import SessionPool, TraceStore, trace_entry_event_dict
@@ -25,25 +24,71 @@ from shared.utils.json import safe_dumps, safe_loads
 from shared.utils.time import now_ts
 
 
+class _NoopPluginManager:
+    """Compatibility shim for the removed server PluginManager."""
+
+    def on_request_received(self, request: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+        return request
+
+    def on_before_policy_decision(
+        self,
+        request: dict[str, Any],
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        return request
+
+    def diagnose(self, request: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+        return {}
+
+    def on_after_policy_decision(
+        self,
+        decision: GuardDecision,
+        context: dict[str, Any],
+    ) -> GuardDecision:
+        return decision
+
+    def on_trace_uploaded(self, trace: dict[str, Any], context: dict[str, Any]) -> None:
+        return None
+
+    def on_policy_snapshot_build(
+        self,
+        snapshot: dict[str, Any],
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        return snapshot
+
+
 class RuntimeManager:
-    """Coordinates checkers, plugins, policy and degradation server-side."""
+    """Coordinates server-side checkers, policy, and degradation."""
 
     def __init__(
         self,
         *,
         policy: PolicyEngine | None = None,
-        plugins: PluginManager | None = None,
+        plugins: Any | None = None,
         audit: AuditLogger | None = None,
-        enable_agentdog: bool = True,
+        enable_agentdog: bool = False,
         checker_config: str | dict[str, Any] | None = None,
         session_health_interval_s: float = 1800.0,
         session_health_max_age_s: float = 0.0,
         enable_session_health_monitor: bool = True,
     ) -> None:
         self.policy = policy or PolicyEngine()
-        # self.plugins = plugins or load_builtin_plugins(
-        #     PluginManager(), enable_agentdog=enable_agentdog
-        # )
+        if plugins is not None:
+            warnings.warn(
+                "RuntimeManager plugins are deprecated and ignored because the "
+                "server PluginManager has been removed.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        if enable_agentdog:
+            warnings.warn(
+                "enable_agentdog is deprecated and ignored because the server "
+                "PluginManager has been removed.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        self.plugins = _NoopPluginManager()
         self.checkers = server_checker_manager(checker_config)
         self.checker_config = checker_config
         self._agent_checker_configs: dict[str, dict[str, dict[str, Any] | None]] = {}

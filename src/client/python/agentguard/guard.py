@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import secrets
+import warnings
 from pathlib import Path
 from typing import Any, Callable
 
@@ -14,8 +15,6 @@ from agentguard.config_api import ClientConfigAPIServer
 from agentguard.harness.event_bus import EventBus
 from agentguard.harness.lifecycle import Lifecycle
 from agentguard.harness.runtime import HarnessRuntime
-# from agentguard.plugins.builtin.agentdog_proxy import AgentDoGProxyPlugin
-# from agentguard.plugins.manager import PluginManager
 from agentguard.rules.loader import load_policy
 from agentguard.sandbox.executor import SandboxExecutor
 from agentguard.schemas.context import RuntimeContext
@@ -93,7 +92,6 @@ class AgentGuard:
         self._degrade = ToolDegradeManager()
         self._lifecycle = Lifecycle()
         self._bus = EventBus()
-        self._plugins = PluginManager(self._lifecycle)
         self._config_api: ClientConfigAPIServer | None = None
 
         self.runtime = HarnessRuntime(
@@ -125,8 +123,12 @@ class AgentGuard:
         )
 
         if enable_agentdog:
-            self.register_plugin(AgentDoGProxyPlugin())
-        self._plugins.start_session(self.context)
+            warnings.warn(
+                "enable_agentdog is deprecated and ignored because client PluginManager "
+                "has been removed. Use checker_config/custom checkers instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         self._register_remote_session()
 
     # ---- policy --------------------------------------------------------
@@ -248,7 +250,13 @@ class AgentGuard:
         return metadata
 
     def register_plugin(self, plugin: Any) -> Any:
-        return self._plugins.register(plugin)
+        warnings.warn(
+            "register_plugin() is deprecated and is now a no-op because client "
+            "PluginManager has been removed. Use checker_config/custom checkers instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return plugin
 
     def register_skill(self, skill: Any) -> Any:
         try:
@@ -282,7 +290,6 @@ class AgentGuard:
 
     def close(self) -> None:
         self.runtime.sync_local_cache_now(reason="session_close")
-        self._plugins.end_session(self.runtime.session.trace, self.context)
         try:
             self._remote.unregister_session()
         except Exception:
