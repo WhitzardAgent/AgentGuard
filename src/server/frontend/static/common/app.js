@@ -22,8 +22,8 @@
     llm_thought: "llm_after",
     final_response: "llm_after",
   };
-  const CHECKER_PHASE_ORDER = ["llm_before", "llm_after", "tool_before", "tool_after", "global"];
-  const CHECKER_SCOPES = new Set(["local", "remote"]);
+  const PLUGIN_PHASE_ORDER = ["llm_before", "llm_after", "tool_before", "tool_after", "global"];
+  const PLUGIN_SCOPES = new Set(["local", "remote"]);
 
   function buildQuery(params) {
     const search = new URLSearchParams();
@@ -41,7 +41,7 @@
     return String(shell?.getState?.().selectedAgentId || "").trim();
   }
 
-  function normalizeCheckerOption(item) {
+  function normalizePluginOption(item) {
     return {
       name: String(item?.name || "").trim(),
       description: String(item?.description || "").trim(),
@@ -50,27 +50,27 @@
     };
   }
 
-  function normalizeAgentCheckerConfig(item) {
+  function normalizeAgentPluginConfig(item) {
     return {
       agent_id: String(item?.agent_id || "").trim(),
-      checker_config: item?.checker_config && typeof item.checker_config === "object"
-        ? item.checker_config
+      plugin_config: item?.plugin_config && typeof item.plugin_config === "object"
+        ? item.plugin_config
         : null,
       config_source: String(item?.config_source || "none").trim() || "none",
     };
   }
 
-  function checkerNameFromSpec(spec) {
+  function pluginNameFromSpec(spec) {
     if (typeof spec === "string") {
       return String(spec).trim();
     }
     if (spec && typeof spec === "object") {
-      return String(spec.name || spec.checker || spec.class || "").trim();
+      return String(spec.name || spec.plugin || spec.class || "").trim();
     }
     return "";
   }
 
-  function uniqueCheckerNames(names) {
+  function uniquePluginNames(names) {
     const seen = new Set();
     return (Array.isArray(names) ? names : [])
       .map((name) => String(name || "").trim())
@@ -90,29 +90,29 @@
     };
   }
 
-  function normalizeCheckerScope(scope) {
-    return CHECKER_SCOPES.has(scope) ? scope : "remote";
+  function normalizePluginScope(scope) {
+    return PLUGIN_SCOPES.has(scope) ? scope : "remote";
   }
 
-  function expandCheckerSelection(names) {
-    return uniqueCheckerNames(names);
+  function expandPluginSelection(names) {
+    return uniquePluginNames(names);
   }
 
-  function collapseCheckerSelection(names) {
-    return uniqueCheckerNames(names);
+  function collapsePluginSelection(names) {
+    return uniquePluginNames(names);
   }
 
-  function primaryCheckerName(names) {
-    const activeNames = uniqueCheckerNames(names);
-    if (activeNames.includes("rule_based_check")) {
-      return "rule_based_check";
+  function primaryPluginName(names) {
+    const activeNames = uniquePluginNames(names);
+    if (activeNames.includes("rule_based_plugin")) {
+      return "rule_based_plugin";
     }
     return activeNames.find((name) => name !== "tool_invoke") || activeNames[0] || "";
   }
 
-  function checkerPhases(option) {
+  function pluginPhases(option) {
     const phases = new Set();
-    const normalized = normalizeCheckerOption(option);
+    const normalized = normalizePluginOption(option);
     normalized.phases.forEach((phase) => {
       const phaseName = String(phase || "").trim();
       if (phaseName) {
@@ -139,13 +139,13 @@
     return phases[phase];
   }
 
-  function buildCheckerConfig(checkers, availableCheckers = null, existingConfig = null, scope = "remote") {
-    const targetScope = normalizeCheckerScope(scope);
-    const selectedOptions = (Array.isArray(checkers) ? checkers : [checkers])
-      .map(normalizeCheckerOption)
+  function buildPluginConfig(plugins, availablePlugins = null, existingConfig = null, scope = "remote") {
+    const targetScope = normalizePluginScope(scope);
+    const selectedOptions = (Array.isArray(plugins) ? plugins : [plugins])
+      .map(normalizePluginOption)
       .filter((option) => option.name);
-    const catalog = (Array.isArray(availableCheckers) ? availableCheckers : selectedOptions)
-      .map(normalizeCheckerOption)
+    const catalog = (Array.isArray(availablePlugins) ? availablePlugins : selectedOptions)
+      .map(normalizePluginOption)
       .filter((option) => option.name);
     const catalogByName = new Map(catalog.map((option) => [option.name, option]));
     const manageableNames = new Set(catalog.map((option) => option.name));
@@ -156,7 +156,7 @@
     Object.keys(basePhases).forEach((phase) => {
       const normalized = normalizePhaseConfig(basePhases[phase]);
       normalized[targetScope] = normalized[targetScope].filter((spec) => {
-        const name = checkerNameFromSpec(spec);
+        const name = pluginNameFromSpec(spec);
         return !name || !manageableNames.has(name);
       });
       if (normalized.local.length || normalized.remote.length) {
@@ -164,23 +164,23 @@
       }
     });
 
-    const expandedNames = expandCheckerSelection(selectedOptions.map((option) => option.name));
+    const expandedNames = expandPluginSelection(selectedOptions.map((option) => option.name));
     expandedNames.forEach((name) => {
-      const option = catalogByName.get(name) || normalizeCheckerOption({ name, event_types: [name] });
-      const phaseNames = checkerPhases(option);
+      const option = catalogByName.get(name) || normalizePluginOption({ name, event_types: [name] });
+      const phaseNames = pluginPhases(option);
       if (!phaseNames.length) {
         return;
       }
       phaseNames.forEach((phase) => {
         const phaseConfig = ensurePhase(phases, phase, basePhases);
-        if (!phaseConfig[targetScope].some((spec) => checkerNameFromSpec(spec) === name)) {
+        if (!phaseConfig[targetScope].some((spec) => pluginNameFromSpec(spec) === name)) {
           phaseConfig[targetScope].push(name);
         }
       });
     });
 
     const orderedPhases = {};
-    const phaseNames = new Set([...CHECKER_PHASE_ORDER, ...Object.keys(phases)]);
+    const phaseNames = new Set([...PLUGIN_PHASE_ORDER, ...Object.keys(phases)]);
     [...phaseNames].forEach((phase) => {
       const value = phases[phase];
       if (!value) {
@@ -195,10 +195,10 @@
     return { phases: orderedPhases };
   }
 
-  function selectedCheckersFromConfig(configResponse, scope = "remote") {
-    const targetScope = normalizeCheckerScope(scope);
-    const checkerConfig = normalizeAgentCheckerConfig(configResponse).checker_config || {};
-    const phases = checkerConfig?.phases;
+  function selectedPluginsFromConfig(configResponse, scope = "remote") {
+    const targetScope = normalizePluginScope(scope);
+    const pluginConfig = normalizeAgentPluginConfig(configResponse).plugin_config || {};
+    const phases = pluginConfig?.phases;
     if (!phases || typeof phases !== "object") {
       return [];
     }
@@ -206,20 +206,20 @@
       if (!phase || typeof phase !== "object" || !Array.isArray(phase[targetScope])) {
         return [];
       }
-      return phase[targetScope].map(checkerNameFromSpec).filter(Boolean);
+      return phase[targetScope].map(pluginNameFromSpec).filter(Boolean);
     });
-    return uniqueCheckerNames(found);
+    return uniquePluginNames(found);
   }
 
-  function activeCheckersFromConfig(configResponse) {
-    return uniqueCheckerNames([
-      ...selectedCheckersFromConfig(configResponse, "remote"),
-      ...selectedCheckersFromConfig(configResponse, "local"),
+  function activePluginsFromConfig(configResponse) {
+    return uniquePluginNames([
+      ...selectedPluginsFromConfig(configResponse, "remote"),
+      ...selectedPluginsFromConfig(configResponse, "local"),
     ]);
   }
 
-  function selectedCheckerFromConfig(configResponse) {
-    return primaryCheckerName(activeCheckersFromConfig(configResponse));
+  function selectedPluginFromConfig(configResponse) {
+    return primaryPluginName(activePluginsFromConfig(configResponse));
   }
 
   function clearLegacyToolCache() {
@@ -660,29 +660,29 @@
     return rules;
   }
 
-  async function listAgentAvailableCheckers(agentId = getSelectedAgentId()) {
+  async function listAgentAvailablePlugins(agentId = getSelectedAgentId()) {
     const normalizedAgentId = String(agentId || "").trim();
     if (!normalizedAgentId) {
-      return { agent_id: "", local_checkers: [], remote_checkers: [] };
+      return { agent_id: "", local_plugins: [], remote_plugins: [] };
     }
-    const payload = await fetchJson(`/api/agents/${encodeURIComponent(normalizedAgentId)}/checkers/available`);
+    const payload = await fetchJson(`/api/agents/${encodeURIComponent(normalizedAgentId)}/plugins/available`);
     return {
       agent_id: String(payload?.agent_id || normalizedAgentId).trim(),
-      local_checkers: Array.isArray(payload?.local_checkers) ? payload.local_checkers.map(normalizeCheckerOption) : [],
-      remote_checkers: Array.isArray(payload?.remote_checkers) ? payload.remote_checkers.map(normalizeCheckerOption) : [],
+      local_plugins: Array.isArray(payload?.local_plugins) ? payload.local_plugins.map(normalizePluginOption) : [],
+      remote_plugins: Array.isArray(payload?.remote_plugins) ? payload.remote_plugins.map(normalizePluginOption) : [],
     };
   }
 
-  async function getAgentCheckerConfig(agentId = getSelectedAgentId()) {
+  async function getAgentPluginConfig(agentId = getSelectedAgentId()) {
     const normalizedAgentId = String(agentId || "").trim();
     if (!normalizedAgentId) {
-      return normalizeAgentCheckerConfig({});
+      return normalizeAgentPluginConfig({});
     }
-    const payload = await fetchJson(`/api/agents/${encodeURIComponent(normalizedAgentId)}/checkers/config`);
-    return normalizeAgentCheckerConfig(payload);
+    const payload = await fetchJson(`/api/agents/${encodeURIComponent(normalizedAgentId)}/plugins/config`);
+    return normalizeAgentPluginConfig(payload);
   }
 
-  async function updateAgentCheckerConfig(agentId, config, clientConfig = null) {
+  async function updateAgentPluginConfig(agentId, config, clientConfig = null) {
     const normalizedAgentId = String(agentId || "").trim();
     if (!normalizedAgentId) {
       throw new Error("agent_id is required.");
@@ -690,7 +690,7 @@
     if (!config || typeof config !== "object") {
       throw new Error("config is required.");
     }
-    return fetchJson(`/api/agents/${encodeURIComponent(normalizedAgentId)}/checkers/config`, {
+    return fetchJson(`/api/agents/${encodeURIComponent(normalizedAgentId)}/plugins/config`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -758,16 +758,16 @@
     groupToolsByAgent,
     listAgentIds,
     normalizeAgentSummary,
-    normalizeCheckerOption,
+    normalizePluginOption,
     normalizeRule,
     normalizeTool,
-    buildCheckerConfig,
-    collapseCheckerSelection,
-    expandCheckerSelection,
-    activeCheckersFromConfig,
-    primaryCheckerName,
-    selectedCheckerFromConfig,
-    selectedCheckersFromConfig,
+    buildPluginConfig,
+    collapsePluginSelection,
+    expandPluginSelection,
+    activePluginsFromConfig,
+    primaryPluginName,
+    selectedPluginFromConfig,
+    selectedPluginsFromConfig,
     loadAgentCatalog,
     persistAgentCatalog,
     refreshAgentCatalog,
@@ -788,14 +788,14 @@
     refreshRuleList(agentId = getSelectedAgentId()) {
       return refreshScopedRuleList(agentId);
     },
-    listAgentAvailableCheckers(agentId = getSelectedAgentId()) {
-      return listAgentAvailableCheckers(agentId);
+    listAgentAvailablePlugins(agentId = getSelectedAgentId()) {
+      return listAgentAvailablePlugins(agentId);
     },
-    getAgentCheckerConfig(agentId = getSelectedAgentId()) {
-      return getAgentCheckerConfig(agentId);
+    getAgentPluginConfig(agentId = getSelectedAgentId()) {
+      return getAgentPluginConfig(agentId);
     },
-    updateAgentCheckerConfig(agentId, config, clientConfig = null) {
-      return updateAgentCheckerConfig(agentId, config, clientConfig);
+    updateAgentPluginConfig(agentId, config, clientConfig = null) {
+      return updateAgentPluginConfig(agentId, config, clientConfig);
     },
     clearToolCache: clearScopedAgentCache,
     clearScopedAgentCache,

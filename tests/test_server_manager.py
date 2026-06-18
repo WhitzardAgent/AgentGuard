@@ -4,10 +4,10 @@ import json
 
 import pytest
 
-from backend.runtime.checkers.base import BaseChecker, CheckResult
-from backend.runtime.checkers.manager import load_checker_config
-from backend.runtime.checkers.registry import checker_descriptions, register
-from backend.runtime.checkers.tool_before.rule_based_check import RuleBasedChecker
+from backend.runtime.plugins.base import BasePlugin, CheckResult
+from backend.runtime.plugins.manager import load_plugin_config
+from backend.runtime.plugins.registry import plugin_descriptions, register
+from backend.runtime.plugins.tool_before.rule_based_plugin import RuleBasedPlugin
 from backend.runtime.manager import RuntimeManager
 from shared.schemas.context import RuntimeContext
 from shared.schemas.events import EventType, RuntimeEvent
@@ -39,9 +39,9 @@ def _exfil_request():
 
 def test_manager_denies_exfiltration():
     m = RuntimeManager(
-        checker_config={
+        plugin_config={
             "phases": {
-                "tool_before": {"local": [], "remote": ["tool_invoke", "rule_based_check"]}
+                "tool_before": {"local": [], "remote": ["tool_invoke", "rule_based_plugin"]}
             }
         }
     )
@@ -134,42 +134,42 @@ def test_session_pool_requires_exact_composite_key_for_lookup():
     ) is not None
 
 
-def test_server_checker_config_loads_only_remote_scope():
+def test_server_plugin_config_loads_only_remote_scope():
     cfg = {
         "phases": {
             "llm_before": {"local": ["llm_input"], "remote": []},
-            "tool_before": {"local": ["tool_invoke"], "remote": ["rule_based_check"]},
+            "tool_before": {"local": ["tool_invoke"], "remote": ["rule_based_plugin"]},
         }
     }
 
-    assert load_checker_config(cfg) == {
+    assert load_plugin_config(cfg) == {
         "llm_before": [],
-        "tool_before": ["rule_based_check"],
+        "tool_before": ["rule_based_plugin"],
     }
 
 
-def test_server_without_checker_config_loads_no_checkers():
-    assert load_checker_config(None) == {}
+def test_server_without_plugin_config_loads_no_checkers():
+    assert load_plugin_config(None) == {}
 
 
-def test_server_rejects_legacy_checker_config_format():
+def test_server_rejects_legacy_plugin_config_format():
     with pytest.raises(ValueError, match="phases"):
-        load_checker_config({"tool_before": ["tool_invoke"]})
+        load_plugin_config({"tool_before": ["tool_invoke"]})
 
 
 def test_server_registered_checker_can_be_loaded_by_name():
     @register(
         name="test_server_registered_checker",
-        description="test server checker registered by decorator",
+        description="test server plugin registered by decorator",
     )
-    class RegisteredServerChecker(BaseChecker):
+    class RegisteredServerPlugin(BasePlugin):
         event_types = [EventType.TOOL_INVOKE]
 
         def check(self, event, context, trajectory_window=None):
             return CheckResult(risk_signals=["server_registered_checker_seen"])
 
     m = RuntimeManager(
-        checker_config={
+        plugin_config={
             "phases": {
                 "tool_before": {
                     "local": [],
@@ -192,15 +192,15 @@ def test_server_registered_checker_can_be_loaded_by_name():
 
     res = m.decide(req)
 
-    assert "server_registered_checker_seen" in res["checker_result"]["risk_signals"]
-    assert checker_descriptions()["test_server_registered_checker"] == (
-        "test server checker registered by decorator"
+    assert "server_registered_checker_seen" in res["plugin_result"]["risk_signals"]
+    assert plugin_descriptions()["test_server_registered_checker"] == (
+        "test server plugin registered by decorator"
     )
 
 
-def test_manager_returns_checker_result():
+def test_manager_returns_plugin_result():
     m = RuntimeManager(
-        checker_config={
+        plugin_config={
             "phases": {
                 "llm_before": {"local": [], "remote": ["llm_input"]},
             }
@@ -218,12 +218,12 @@ def test_manager_returns_checker_result():
         "local_signals": [],
     }
     res = m.decide(req)
-    assert "checker_result" in res
-    assert "prompt_injection" in res["checker_result"]["risk_signals"]
+    assert "plugin_result" in res
+    assert "prompt_injection" in res["plugin_result"]["risk_signals"]
     assert "prompt_injection" in res["risk_signals"]
 
 
-def test_manager_uses_checker_config_file(tmp_path):
+def test_manager_uses_plugin_config_file(tmp_path):
     cfg = {
         "phases": {
             "llm_before": {"local": ["llm_input"], "remote": []},
@@ -232,10 +232,10 @@ def test_manager_uses_checker_config_file(tmp_path):
             "tool_after": {"local": [], "remote": ["tool_result"]},
         }
     }
-    path = tmp_path / "server_checkers.json"
+    path = tmp_path / "server_plugins.json"
     path.write_text(json.dumps(cfg), encoding="utf-8")
 
-    m = RuntimeManager(checker_config=str(path))
+    m = RuntimeManager(plugin_config=str(path))
     req = {
         "request_id": "r4",
         "context": {"session_id": "s4"},
@@ -248,11 +248,11 @@ def test_manager_uses_checker_config_file(tmp_path):
         "local_signals": [],
     }
     res = m.decide(req)
-    assert res["checker_result"]["risk_signals"] == []
+    assert res["plugin_result"]["risk_signals"] == []
     assert "prompt_injection" not in res["risk_signals"]
 
 
-class StopsChainChecker(BaseChecker):
+class StopsChainPlugin(BasePlugin):
     name = "stops_chain"
     event_types = [EventType.TOOL_INVOKE]
 
@@ -266,7 +266,7 @@ class StopsChainChecker(BaseChecker):
         )
 
 
-class ShouldNotRunChecker(BaseChecker):
+class ShouldNotRunPlugin(BasePlugin):
     name = "should_not_run"
     event_types = [EventType.TOOL_INVOKE]
 
@@ -274,9 +274,9 @@ class ShouldNotRunChecker(BaseChecker):
         raise AssertionError("checker chain should have stopped before this checker")
 
 
-def test_manager_uses_session_scoped_client_checker_config():
+def test_manager_uses_session_scoped_client_plugin_config():
     m = RuntimeManager(
-        checker_config={
+        plugin_config={
             "phases": {
                 "llm_before": {"local": [], "remote": ["llm_input"]},
             }
@@ -288,9 +288,9 @@ def test_manager_uses_session_scoped_client_checker_config():
             agent_id="scoped-agent",
             user_id="scoped-user",
             metadata={
-                "remote_checker_config": {
+                "remote_plugin_config": {
                     "phases": {
-                        "tool_before": {"local": [], "remote": [StopsChainChecker]},
+                        "tool_before": {"local": [], "remote": [StopsChainPlugin]},
                     }
                 }
             },
@@ -315,10 +315,10 @@ def test_manager_uses_session_scoped_client_checker_config():
     res = m.decide(req)
 
     assert res["decision"]["decision_type"] == "deny"
-    assert "chain_stopped" in res["checker_result"]["risk_signals"]
+    assert "chain_stopped" in res["plugin_result"]["risk_signals"]
 
 
-def test_update_client_checker_config_updates_both_server_and_client_views():
+def test_update_client_plugin_config_updates_both_server_and_client_views():
     m = RuntimeManager()
     m.session_pool.upsert(
         RuntimeContext(
@@ -328,26 +328,26 @@ def test_update_client_checker_config_updates_both_server_and_client_views():
         )
     )
 
-    updates = m.update_client_checker_config(
+    updates = m.update_client_plugin_config(
         {"session_id": "principal-match", "agent_id": "agent-1", "user_id": "user-1"},
         {"phases": {"llm_before": {"local": ["llm_input"], "remote": []}}},
-        remote_checker_config={"phases": {"llm_before": {"local": [], "remote": ["llm_input"]}}},
+        remote_plugin_config={"phases": {"llm_before": {"local": [], "remote": ["llm_input"]}}},
     )
 
     assert updates[0]["status"] == "skipped"
     record = m.session_pool.get("principal-match", agent_id="agent-1", user_id="user-1")
     assert record is not None
-    assert record["client_checker_config"]["phases"]["llm_before"]["local"] == ["llm_input"]
-    assert record["remote_checker_config"]["phases"]["llm_before"]["remote"] == ["llm_input"]
+    assert record["client_plugin_config"]["phases"]["llm_before"]["local"] == ["llm_input"]
+    assert record["remote_plugin_config"]["phases"]["llm_before"]["remote"] == ["llm_input"]
 
 
-def test_manager_stops_remote_checker_chain_on_first_decision():
+def test_manager_stops_remote_plugin_chain_on_first_decision():
     m = RuntimeManager(
-        checker_config={
+        plugin_config={
             "phases": {
                 "tool_before": {
                     "local": [],
-                    "remote": [StopsChainChecker, ShouldNotRunChecker],
+                    "remote": [StopsChainPlugin, ShouldNotRunPlugin],
                 }
             }
         },
@@ -370,7 +370,7 @@ def test_manager_stops_remote_checker_chain_on_first_decision():
     assert res["decision"]["policy_id"] == "server:first"
 
 
-class TraceAwareChecker(BaseChecker):
+class TraceAwarePlugin(BasePlugin):
     name = "trace_aware"
     event_types = [EventType.TOOL_INVOKE]
 
@@ -382,9 +382,9 @@ class TraceAwareChecker(BaseChecker):
 
 def test_server_checker_receives_trajectory_window():
     m = RuntimeManager(
-        checker_config={
+        plugin_config={
             "phases": {
-                "tool_before": {"local": [], "remote": [TraceAwareChecker]}
+                "tool_before": {"local": [], "remote": [TraceAwarePlugin]}
             }
         },
     )
@@ -406,14 +406,14 @@ def test_server_checker_receives_trajectory_window():
         "local_signals": [],
     }
     res = m.decide(req)
-    assert "trace_window_seen" in res["checker_result"]["risk_signals"]
+    assert "trace_window_seen" in res["plugin_result"]["risk_signals"]
 
 
 def test_server_merges_client_cached_entries_into_trajectory_window():
     m = RuntimeManager(
-        checker_config={
+        plugin_config={
             "phases": {
-                "tool_before": {"local": [], "remote": [TraceAwareChecker]}
+                "tool_before": {"local": [], "remote": [TraceAwarePlugin]}
             }
         },
     )
@@ -435,13 +435,13 @@ def test_server_merges_client_cached_entries_into_trajectory_window():
                     "risk_signals": ["secret_detected"],
                 },
                 "decision": {"decision_type": "allow", "reason": "local"},
-                "checker_result": {"risk_signals": ["secret_detected"], "is_final": True},
+                "plugin_result": {"risk_signals": ["secret_detected"], "is_final": True},
             }
         ],
         "local_signals": [],
     }
     res = m.decide(req)
-    assert "trace_window_seen" in res["checker_result"]["risk_signals"]
+    assert "trace_window_seen" in res["plugin_result"]["risk_signals"]
     assert m.trace_store.get("s6")
 
 
@@ -468,7 +468,7 @@ def test_server_records_uploaded_trace():
     assert m.trace_store.get("s7")[0].reason == "round_complete"
 
 
-def test_rule_based_check_is_a_checker():
+def test_rule_based_plugin_is_a_checker():
     event = RuntimeEvent.from_dict(
         {
             "event_type": "tool_invoke",
@@ -480,15 +480,15 @@ def test_rule_based_check_is_a_checker():
             "risk_signals": ["secret_detected"],
         }
     )
-    check = RuleBasedChecker().check(event, RuntimeContext(session_id="s8"), [])
+    check = RuleBasedPlugin().check(event, RuntimeContext(session_id="s8"), [])
 
     assert check.is_final is True
     assert check.decision_candidate is not None
     assert check.decision_candidate.decision_type.value == "deny"
-    assert check.metadata["rule_based_check"]["rule_id"] == "deny_secret_exfiltration"
+    assert check.metadata["rule_based_plugin"]["rule_id"] == "deny_secret_exfiltration"
 
 
-def test_rule_based_check_is_optional_in_runtime_manager():
+def test_rule_based_plugin_is_optional_in_runtime_manager():
     m = RuntimeManager()
     req = {
         "request_id": "r8",
@@ -507,4 +507,4 @@ def test_rule_based_check_is_optional_in_runtime_manager():
     }
     res = m.decide(req)
     assert res["decision"]["decision_type"] == "allow"
-    assert res["decision"]["policy_id"] == "server:no_final_checker"
+    assert res["decision"]["policy_id"] == "server:no_final_plugin"

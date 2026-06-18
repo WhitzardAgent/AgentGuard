@@ -48,13 +48,13 @@ class RemoteGuardResponse:
 
     decision: dict[str, Any]
     risk_signals: list[str] = field(default_factory=list)
-    checker_result: dict[str, Any] = field(default_factory=dict)
+    plugin_result: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "decision": self.decision,
             "risk_signals": list(self.risk_signals),
-            "checker_result": self.checker_result,
+            "plugin_result": self.plugin_result,
         }
 
     @classmethod
@@ -62,5 +62,5 @@ class RemoteGuardResponse:
         return cls(
             decision=dict(data.get("decision") or {}),
             risk_signals=list(data.get("risk_signals") or []),
-            checker_result=dict(data.get("checker_result") or {}),
+            plugin_result=dict(data.get("plugin_result") or {}),
         )

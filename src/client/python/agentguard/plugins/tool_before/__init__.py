@@ -1,6 +1,6 @@
-"""Tool-before checkers."""
+"""Tool-before plugins."""
 from __future__ import annotations
 
-from agentguard.plugins.tool_before.tool_invoke import ToolInvokeChecker
+from agentguard.plugins.tool_before.tool_invoke import ToolInvokePlugin
 
-__all__ = ["ToolInvokeChecker"]
+__all__ = ["ToolInvokePlugin"]

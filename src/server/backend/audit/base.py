@@ -36,7 +36,10 @@ class AuditTraceEntry:
     reason: str | None = None
     event: RuntimeEvent | None = None
     decision: GuardDecision | None = None
-    checker_result: dict[str, Any] = field(default_factory=dict)
+    plugin_result: dict[str, Any] = field(default_factory=dict)
+    plugin_input: dict[str, Any] = field(default_factory=dict)
+    route: str | None = None
+    timestamp: float | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AuditTraceEntry":
@@ -56,6 +59,9 @@ class AuditTraceEntry:
             or (event_context.user_id if event_context else None)
         )
         reason = _string_or_none(data.get("reason"))
+        plugin_result = data.get("plugin_result") or {}
+        plugin_input = data.get("plugin_input") or {}
+        timestamp = data.get("timestamp")
         return cls(
             session_id=session_id,
             agent_id=agent_id,
@@ -63,7 +69,10 @@ class AuditTraceEntry:
             reason=reason,
             event=event,
             decision=decision,
-            checker_result=dict(data.get("checker_result") or {}),
+            plugin_result=dict(plugin_result) if isinstance(plugin_result, dict) else {},
+            plugin_input=dict(plugin_input) if isinstance(plugin_input, dict) else {},
+            route=_string_or_none(data.get("route")),
+            timestamp=float(timestamp) if isinstance(timestamp, (int, float)) else None,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -72,7 +81,10 @@ class AuditTraceEntry:
             "agent_id": self.agent_id,
             "user_id": self.user_id,
             "reason": self.reason,
-            "checker_result": dict(self.checker_result),
+            "plugin_result": dict(self.plugin_result),
+            "plugin_input": dict(self.plugin_input),
+            "route": self.route,
+            "timestamp": self.timestamp,
         }
         if self.event is not None:
             data["event"] = self.event.to_dict()
@@ -81,8 +93,10 @@ class AuditTraceEntry:
         return data
 
     def merged_with(self, incoming: "AuditTraceEntry") -> "AuditTraceEntry":
-        checker_result = dict(self.checker_result)
-        checker_result.update(incoming.checker_result)
+        plugin_result = dict(self.plugin_result)
+        plugin_result.update(incoming.plugin_result)
+        plugin_input = dict(self.plugin_input)
+        plugin_input.update(incoming.plugin_input)
         return AuditTraceEntry(
             session_id=incoming.session_id or self.session_id,
             agent_id=incoming.agent_id or self.agent_id,
@@ -90,7 +104,10 @@ class AuditTraceEntry:
             reason=incoming.reason or self.reason,
             event=incoming.event or self.event,
             decision=incoming.decision or self.decision,
-            checker_result=checker_result,
+            plugin_result=plugin_result,
+            plugin_input=plugin_input,
+            route=incoming.route or self.route,
+            timestamp=incoming.timestamp if incoming.timestamp is not None else self.timestamp,
         )
 
     @property
@@ -114,9 +131,9 @@ class BaseAuditor:
 def _runtime_event_from_trace_entry_data(data: dict[str, Any]) -> RuntimeEvent | None:
     event_data = data.get("event")
     if not isinstance(event_data, dict):
-        checker_input = data.get("checker_input")
-        if isinstance(checker_input, dict) and isinstance(checker_input.get("event"), dict):
-            event_data = checker_input["event"]
+        plugin_input = data.get("plugin_input")
+        if isinstance(plugin_input, dict) and isinstance(plugin_input.get("event"), dict):
+            event_data = plugin_input["event"]
         elif isinstance(data.get("event_type"), str):
             event_data = data
     if not isinstance(event_data, dict):

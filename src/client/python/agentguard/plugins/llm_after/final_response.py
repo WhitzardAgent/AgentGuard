@@ -1,4 +1,4 @@
-"""Deprecated checker for removed final response events."""
+"""Deprecated plugin for removed final response events."""
 from __future__ import annotations
 
 from agentguard.plugins.base import BasePlugin, CheckResult
@@ -9,9 +9,9 @@ from agentguard.schemas.events import RuntimeEvent
 
 @register(
     name="final_response",
-    description="Deprecated no-op checker for removed final response events.",
+    description="Deprecated no-op plugin for removed final response events.",
 )
-class FinalResponseChecker(BasePlugin):
+class FinalResponsePlugin(BasePlugin):
     event_types = []
 
     def applies(self, event: RuntimeEvent) -> bool:

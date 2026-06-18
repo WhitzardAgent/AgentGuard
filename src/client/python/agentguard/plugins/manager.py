@@ -79,7 +79,7 @@ def _instantiate_plugin(spec: Any) -> BasePlugin:
         cls = get_plugin_class(spec) or _load_plugin_class(spec)
         return _build_plugin(cls)
     if isinstance(spec, dict):
-        target = spec.get("class") or spec.get("plugin") or spec.get("checker") or spec.get("name")
+        target = spec.get("class") or spec.get("plugin") or spec.get("name")
         kwargs = _plugin_kwargs(spec)
         env = _plugin_env(spec)
         if isinstance(target, str):
@@ -93,7 +93,7 @@ def _instantiate_plugin(spec: Any) -> BasePlugin:
 
 
 def _plugin_kwargs(spec: dict[str, Any]) -> dict[str, Any]:
-    reserved = {"class", "plugin", "checker", "name", "kwargs", "env"}
+    reserved = {"class", "plugin", "name", "kwargs", "env"}
     kwargs = {key: value for key, value in spec.items() if key not in reserved}
     explicit_kwargs = spec.get("kwargs") or {}
     if not isinstance(explicit_kwargs, dict):
@@ -196,6 +196,7 @@ class PluginManager:
             for signal in res.risk_signals:
                 if signal not in merged_signals:
                     merged_signals.append(signal)
+                event.add_signal(signal)
             if res.metadata:
                 meta.update(res.metadata)
             if res.decision_candidate and (candidate is None or res.is_final):

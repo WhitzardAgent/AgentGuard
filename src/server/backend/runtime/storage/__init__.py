@@ -23,9 +23,9 @@ def trace_entry_event_dict(entry: AuditTraceEntry | dict[str, Any]) -> dict[str,
     event = entry.get("event")
     if isinstance(event, dict):
         return event
-    checker_input = entry.get("checker_input")
-    if isinstance(checker_input, dict) and isinstance(checker_input.get("event"), dict):
-        return checker_input["event"]
+    plugin_input = entry.get("plugin_input")
+    if isinstance(plugin_input, dict) and isinstance(plugin_input.get("event"), dict):
+        return plugin_input["event"]
     if isinstance(entry.get("event_type"), str):
         return entry
     return None
@@ -167,49 +167,40 @@ class SessionPool:
             metadata.update(context_metadata)
             if event_metadata:
                 metadata["event_metadata"] = event_metadata
+            plugin_list_url = (
+                context_metadata.get("client_plugin_list_url")
+                or current.get("client_plugin_list_url")
+            )
+            client_plugin_config = (
+                context_metadata.get("client_plugin_config")
+                if "client_plugin_config" in context_metadata
+                else current.get("client_plugin_config")
+            )
+            remote_plugin_config = (
+                context_metadata.get("remote_plugin_config")
+                if "remote_plugin_config" in context_metadata
+                else current.get("remote_plugin_config")
+            )
             record = {
                 **current,
                 "session_key": session_key,
                 "session_id": session_id,
                 "agent_id": context.agent_id or current.get("agent_id"),
                 "user_id": context.user_id or current.get("user_id"),
-                "task_id": context.task_id or current.get("task_id"),
-                "policy": context.policy or current.get("policy"),
-                "policy_version": context.policy_version or current.get("policy_version"),
-                "environment": context.environment or current.get("environment"),
+                "principal": principal or current.get("principal"),
                 "client_ip": client_ip or current.get("client_ip"),
                 "client_key": client_key or current.get("client_key"),
                 "client_config_url": (
                     context_metadata.get("client_config_url")
                     or current.get("client_config_url")
                 ),
-                "client_plugin_list_url": (
-                    context_metadata.get("client_plugin_list_url")
-                    or context_metadata.get("client_checker_list_url")
-                    or current.get("client_plugin_list_url")
-                    or current.get("client_checker_list_url")
-                ),
-                "client_checker_list_url": (
-                    context_metadata.get("client_plugin_list_url")
-                    or context_metadata.get("client_checker_list_url")
-                    or current.get("client_plugin_list_url")
-                    or current.get("client_checker_list_url")
-                ),
+                "client_plugin_list_url": plugin_list_url,
                 "client_health_url": (
                     context_metadata.get("client_health_url")
                     or current.get("client_health_url")
                 ),
-                "client_checker_config": (
-                    context_metadata.get("client_checker_config")
-                    if "client_checker_config" in context_metadata
-                    else current.get("client_checker_config")
-                ),
-                "remote_checker_config": (
-                    context_metadata.get("remote_checker_config")
-                    if "remote_checker_config" in context_metadata
-                    else current.get("remote_checker_config")
-                ),
-                "principal": principal or current.get("principal"),
+                "client_plugin_config": client_plugin_config,
+                "remote_plugin_config": remote_plugin_config,
                 "metadata": metadata,
                 "last_seen": now,
             }
@@ -331,12 +322,12 @@ class SessionPool:
             ]
         return sorted(matches, key=lambda item: (item.get("last_seen") or 0), reverse=True)
 
-    def set_client_checker_config(
+    def set_client_plugin_config(
         self,
         session_id: str | None,
         agent_id: str | None,
         user_id: str | None,
-        checker_config: dict[str, Any] | None,
+        plugin_config: dict[str, Any] | None,
     ) -> dict[str, Any] | None:
         if not session_id:
             return None
@@ -347,10 +338,10 @@ class SessionPool:
             if not current:
                 return None
             metadata = dict(current.get("metadata") or {})
-            metadata["client_checker_config"] = checker_config
+            metadata["client_plugin_config"] = plugin_config
             current.update(
                 {
-                    "client_checker_config": checker_config,
+                    "client_plugin_config": plugin_config,
                     "metadata": metadata,
                     "last_seen": now,
                 }
@@ -358,12 +349,12 @@ class SessionPool:
             self._sessions[session_key] = current
             return dict(current)
 
-    def set_remote_checker_config(
+    def set_remote_plugin_config(
         self,
         session_id: str | None,
         agent_id: str | None,
         user_id: str | None,
-        checker_config: dict[str, Any] | None,
+        plugin_config: dict[str, Any] | None,
     ) -> dict[str, Any] | None:
         if not session_id:
             return None
@@ -374,10 +365,10 @@ class SessionPool:
             if not current:
                 return None
             metadata = dict(current.get("metadata") or {})
-            metadata["remote_checker_config"] = checker_config
+            metadata["remote_plugin_config"] = plugin_config
             current.update(
                 {
-                    "remote_checker_config": checker_config,
+                    "remote_plugin_config": plugin_config,
                     "metadata": metadata,
                     "last_seen": now,
                 }

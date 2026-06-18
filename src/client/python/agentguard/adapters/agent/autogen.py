@@ -33,47 +33,38 @@ class AutogenAgentAdapter(BaseAgentAdapter):
                 raise AdapterError(f"autogen generate_reply failed: {exc}") from exc
         raise AdapterError("autogen agent exposes no generate_reply")
 
-    def attach(
-        self,
-        agent: Any,
-        guard: Any,
-        *,
-        wrap_tools: bool = True,
-        wrap_llm: bool = True,
-    ) -> dict[str, Any]:
-        """Patch AutoGen tools/LLM in-place while preserving AutoGen's own loop."""
-        patched = {"tools": 0, "llm": 0}
-        if wrap_tools:
-            patched["tools"] += self._patch_tools(agent, guard)
-        if wrap_llm:
-            patched["llm"] += self._patch_llm(agent, guard)
-        return patched
-
-    def _patch_llm(self, agent: Any, guard: Any) -> int:
+    def patchLLM(self, agent: Any, guard: Any) -> int:
         patched = 0
         model_client = getattr(agent, "_model_client", None)
         if model_client is None:
             return 0
-        methods = ()
-        client = None
+        methods: tuple[str, ...] = ("create", "create_stream")
         if type(model_client).__name__ == "BaseOpenAIChatCompletionClient":
-            methods = ("_client.beta.chat.completions.parse", "_client.chat.completions.create", "_client.beta.chat.completions.stream")
+            methods = (
+                "_client.beta.chat.completions.parse",
+                "_client.chat.completions.create",
+                "_client.beta.chat.completions.stream",
+            )
         elif type(model_client).__name__ == "BaseOllamaChatCompletionClient":
-            methods = ("_client.chat")
+            methods = ("_client.chat",)
         elif type(model_client).__name__ == "BaseAnthropicChatCompletionClient":
-            methods = ("_client.messages.create")
+            methods = ("_client.messages.create",)
         elif type(model_client).__name__ == "AzureAIChatCompletionClient":
-            methods = ("_client.complete")
+            methods = ("_client.complete",)
         elif type(model_client).__name__ == "LlamaCppChatCompletionClient":
-            methods = ("llm.create_chat_completion")
-        patched += patch_llm_methods(guard, model_client, methods)
+            methods = ("llm.create_chat_completion",)
+        patched += patch_llm_methods(guard, model_client, methods=methods)
         return patched
 
-    def _patch_tools(self, agent: Any, guard: Any) -> int:
+    def patchtool(self, agent: Any, guard: Any) -> int:
         patched = 0
         tools_list = getattr(agent, "_tools", None)
         if isinstance(tools_list, list):
             patched += self._patch_tools_list(tools_list, guard)
+
+        handoffs = getattr(agent, "_handoffs", None)
+        if isinstance(handoffs, list):
+            patched += self._patch_tools_list(handoffs, guard)
 
         registry = getattr(agent, "function_map", None)
         if isinstance(registry, dict):

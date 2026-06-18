@@ -1,4 +1,4 @@
-"""Frontend/admin API routes for checker config and session management."""
+"""Frontend/admin API routes for plugin config and session management."""
 from __future__ import annotations
 
 import copy
@@ -11,24 +11,23 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from backend.api.schemas import (
-    AgentCheckerAvailableResponse,
-    AgentCheckerConfigResponse,
-    AgentCheckerConfigUpdateRequest,
-    CheckerConfigUpdateRequest,
-    CheckerConfigUpdateResponse,
+    AgentPluginAvailableResponse,
+    AgentPluginConfigResponse,
+    AgentPluginConfigUpdateRequest,
+    PluginConfigUpdateRequest,
+    PluginConfigUpdateResponse,
     TraceAuditRequest,
     TraceAuditResponse,
 )
 from backend.app_state import get_console, get_manager
 from backend.audit import auditor_descriptions, auditor_manager
-from backend.runtime.checkers.config_utils import merge_checker_configs
-from backend.runtime.checkers.registry import registered_checkers as registered_server_checkers
+from backend.runtime.plugins.config_utils import merge_plugin_configs
+from backend.runtime.plugins.registry import registered_plugins as registered_server_plugins
 from shared.schemas.events import EventType
 from shared.utils.json import safe_dumps, safe_loads
 
 router = APIRouter()
 
-# Bind console observers to the shared manager during API startup.
 _manager = get_manager()
 get_console()
 _auditors = auditor_manager()
@@ -40,7 +39,7 @@ _EVENT_PHASE = {
     EventType.TOOL_RESULT.value: "tool_after",
 }
 _KNOWN_PHASES = ("llm_before", "llm_after", "tool_before", "tool_after", "global")
-_DEPRECATED_CHECKER_NAMES = {"memory", "llm_thought", "final_response"}
+_DEPRECATED_PLUGIN_NAMES = {"memory", "llm_thought", "final_response"}
 
 
 @router.get("/v1/backend/sessions")
@@ -65,10 +64,10 @@ def get_session(
     return record
 
 
-@router.post("/v1/backend/checkers/config", response_model=CheckerConfigUpdateResponse)
-def update_checker_config(req: CheckerConfigUpdateRequest) -> CheckerConfigUpdateResponse:
+@router.post("/v1/backend/plugins/config", response_model=PluginConfigUpdateResponse)
+def update_plugin_config(req: PluginConfigUpdateRequest) -> PluginConfigUpdateResponse:
     try:
-        loaded = _manager.update_checker_config(req.config)
+        loaded = _manager.update_plugin_config(req.config)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -76,16 +75,16 @@ def update_checker_config(req: CheckerConfigUpdateRequest) -> CheckerConfigUpdat
     client_updates = []
     for principal in req.client_principals:
         client_updates.extend(
-            _manager.update_client_checker_config(
+            _manager.update_client_plugin_config(
                 principal,
                 client_config,
-                remote_checker_config=req.config,
+                remote_plugin_config=req.config,
                 timeout_s=req.timeout_s,
             )
         )
     client_updates.extend(
         [
-            _push_client_checker_config(
+            _push_client_plugin_config(
                 url,
                 client_config,
                 req.timeout_s,
@@ -94,62 +93,63 @@ def update_checker_config(req: CheckerConfigUpdateRequest) -> CheckerConfigUpdat
             for url in req.client_config_urls
         ]
     )
-    return CheckerConfigUpdateResponse(
+    return PluginConfigUpdateResponse(
         status="ok",
-        loaded_checkers=loaded,
+        loaded_plugins=loaded,
         client_updates=client_updates,
     )
 
 
 @router.get(
-    "/v1/backend/agents/{agent_id}/checkers/config",
-    response_model=AgentCheckerConfigResponse,
+    "/v1/backend/agents/{agent_id}/plugins/config",
+    response_model=AgentPluginConfigResponse,
 )
-def get_agent_checker_config(agent_id: str) -> AgentCheckerConfigResponse:
+def get_agent_plugin_config(agent_id: str) -> AgentPluginConfigResponse:
     sessions = _manager.sessions_for_principal({"agent_id": agent_id})
-    checker_config, config_source = _agent_checker_config(agent_id, sessions)
-    return AgentCheckerConfigResponse(
+    plugin_config, config_source = _agent_plugin_config(agent_id, sessions)
+    return AgentPluginConfigResponse(
         agent_id=agent_id,
-        checker_config=checker_config,
+        plugin_config=plugin_config,
         config_source=config_source,
     )
 
 
 @router.post(
-    "/v1/backend/agents/{agent_id}/checkers/config",
-    response_model=CheckerConfigUpdateResponse,
+    "/v1/backend/agents/{agent_id}/plugins/config",
+    response_model=PluginConfigUpdateResponse,
 )
-def update_agent_checker_config(
+def update_agent_plugin_config(
     agent_id: str,
-    req: AgentCheckerConfigUpdateRequest,
-) -> CheckerConfigUpdateResponse:
-    client_updates = _manager.update_agent_checker_config(
+    req: AgentPluginConfigUpdateRequest,
+) -> PluginConfigUpdateResponse:
+    client_updates = _manager.update_agent_plugin_config(
         agent_id,
         req.config,
         client_config=req.client_config,
         timeout_s=req.timeout_s,
     )
-    return CheckerConfigUpdateResponse(
+    return PluginConfigUpdateResponse(
         status="ok",
-        loaded_checkers=[],
+        loaded_plugins=[],
         client_updates=client_updates,
     )
 
 
 @router.get(
-    "/v1/backend/agents/{agent_id}/checkers/available",
-    response_model=AgentCheckerAvailableResponse,
+    "/v1/backend/agents/{agent_id}/plugins/available",
+    response_model=AgentPluginAvailableResponse,
 )
-def get_agent_available_checkers(agent_id: str) -> AgentCheckerAvailableResponse:
+def get_agent_available_plugins(agent_id: str) -> AgentPluginAvailableResponse:
     remote_options = [
-        _checker_option_dict(name, cls)
-        for name, cls in sorted(registered_server_checkers().items())
-        if name not in _DEPRECATED_CHECKER_NAMES
+        _plugin_option_dict(name, cls)
+        for name, cls in sorted(registered_server_plugins().items())
+        if name not in _DEPRECATED_PLUGIN_NAMES
     ]
-    return AgentCheckerAvailableResponse(
+    local_plugins = _fetch_agent_local_plugins(agent_id)
+    return AgentPluginAvailableResponse(
         agent_id=agent_id,
-        local_checkers=_fetch_agent_local_checkers(agent_id),
-        remote_checkers=remote_options,
+        local_plugins=local_plugins,
+        remote_plugins=remote_options,
     )
 
 
@@ -179,10 +179,7 @@ def run_custom_trace_audit(req: TraceAuditRequest) -> TraceAuditResponse:
             ),
         )
     try:
-        result = _auditors.audit(
-            req.auditor_name,
-            trace,
-        )
+        result = _auditors.audit(req.auditor_name, trace)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return TraceAuditResponse(
@@ -197,7 +194,7 @@ def run_custom_trace_audit(req: TraceAuditRequest) -> TraceAuditResponse:
     )
 
 
-def _push_client_checker_config(
+def _push_client_plugin_config(
     url: str,
     config: dict[str, Any],
     timeout_s: float,
@@ -241,7 +238,6 @@ def _client_key_for_url(url: str) -> str | None:
         known_urls = {
             session.get("client_config_url"),
             session.get("client_plugin_list_url"),
-            session.get("client_checker_list_url"),
             session.get("client_health_url"),
         }
         if url in known_urls:
@@ -250,28 +246,28 @@ def _client_key_for_url(url: str) -> str | None:
     return None
 
 
-def _agent_checker_config(
+def _agent_plugin_config(
     agent_id: str,
     sessions: list[dict[str, Any]],
 ) -> tuple[dict[str, Any] | None, str]:
-    stored = _manager.get_agent_checker_config(agent_id)
-    if stored and isinstance(stored.get("checker_config"), dict):
-        return copy.deepcopy(stored["checker_config"]), "agent_override"
+    stored = _manager.get_agent_plugin_config(agent_id)
+    if stored and isinstance(stored.get("plugin_config"), dict):
+        return copy.deepcopy(stored["plugin_config"]), "agent_override"
     for session in sessions:
-        merged = merge_checker_configs(
-            session.get("remote_checker_config") if isinstance(session.get("remote_checker_config"), dict) else None,
-            session.get("client_checker_config") if isinstance(session.get("client_checker_config"), dict) else None,
+        merged = merge_plugin_configs(
+            session.get("remote_plugin_config") if isinstance(session.get("remote_plugin_config"), dict) else None,
+            session.get("client_plugin_config") if isinstance(session.get("client_plugin_config"), dict) else None,
         )
         if isinstance(merged, dict):
             return merged, "agent_override"
-    default_config = _default_checker_config()
+    default_config = _default_plugin_config()
     if isinstance(default_config, dict):
         return default_config, "server_default"
     return None, "none"
 
 
-def _default_checker_config() -> dict[str, Any] | None:
-    source = _manager.checker_config
+def _default_plugin_config() -> dict[str, Any] | None:
+    source = _manager.plugin_config
     if source is None:
         return None
     if isinstance(source, dict):
@@ -284,7 +280,7 @@ def _default_checker_config() -> dict[str, Any] | None:
     return copy.deepcopy(payload) if isinstance(payload, dict) else None
 
 
-def _fetch_client_checker_list(
+def _fetch_client_plugin_list(
     url: str,
     *,
     client_key: str | None = None,
@@ -297,44 +293,44 @@ def _fetch_client_checker_list(
     try:
         with urllib.request.urlopen(request, timeout=max(timeout_s, 0.1)) as response:
             payload = safe_loads(response.read(), fallback={}) or {}
-        checkers = []
+        plugins = []
         if isinstance(payload, dict):
-            checkers = payload.get("plugins") or payload.get("checkers") or []
-        if not isinstance(checkers, list):
-            checkers = []
+            plugins = payload.get("plugins") or []
+        if not isinstance(plugins, list):
+            plugins = []
         return {
             "status": "ok",
-            "checkers": [_checker_payload_dict(item) for item in checkers],
+            "plugins": [_plugin_payload_dict(item) for item in plugins],
         }
     except urllib.error.HTTPError as exc:
         raw = exc.read()
         return {
             "status": "error",
             "error": raw.decode("utf-8", errors="replace"),
-            "checkers": [],
+            "plugins": [],
         }
     except Exception as exc:
-        return {"status": "error", "error": str(exc), "checkers": []}
+        return {"status": "error", "error": str(exc), "plugins": []}
 
 
-def _fetch_agent_local_checkers(agent_id: str) -> list[dict[str, Any]]:
+def _fetch_agent_local_plugins(agent_id: str) -> list[dict[str, Any]]:
     local_map: dict[str, dict[str, Any]] = {}
     for session in _manager.sessions_for_principal({"agent_id": agent_id}):
-        list_url = session.get("client_plugin_list_url") or session.get("client_checker_list_url")
+        list_url = session.get("client_plugin_list_url")
         if not list_url:
             continue
-        result = _fetch_client_checker_list(
+        result = _fetch_client_plugin_list(
             str(list_url),
             client_key=session.get("client_key"),
         )
-        for checker in result.get("checkers", []):
-            name = str(checker.get("name") or "").strip()
-            if name and name not in _DEPRECATED_CHECKER_NAMES:
-                local_map.setdefault(name, checker)
+        for plugin in result.get("plugins", []):
+            name = str(plugin.get("name") or "").strip()
+            if name and name not in _DEPRECATED_PLUGIN_NAMES:
+                local_map.setdefault(name, plugin)
     return [local_map[name] for name in sorted(local_map)]
 
 
-def _checker_option_dict(name: str, cls: type[Any]) -> dict[str, Any]:
+def _plugin_option_dict(name: str, cls: type[Any]) -> dict[str, Any]:
     event_types = [
         getattr(event_type, "value", str(event_type))
         for event_type in getattr(cls, "event_types", [])
@@ -343,11 +339,11 @@ def _checker_option_dict(name: str, cls: type[Any]) -> dict[str, Any]:
         "name": name,
         "description": str(getattr(cls, "description", "")),
         "event_types": event_types,
-        "phases": _checker_phases(event_types, module_name=getattr(cls, "__module__", "")),
+        "phases": _plugin_phases(event_types, module_name=getattr(cls, "__module__", "")),
     }
 
 
-def _checker_payload_dict(payload: Any) -> dict[str, Any]:
+def _plugin_payload_dict(payload: Any) -> dict[str, Any]:
     data = payload if isinstance(payload, dict) else {}
     event_types = data.get("event_types")
     phases = data.get("phases")
@@ -357,11 +353,11 @@ def _checker_payload_dict(payload: Any) -> dict[str, Any]:
         "name": str(data.get("name") or ""),
         "description": str(data.get("description") or ""),
         "event_types": normalized_event_types,
-        "phases": normalized_phases or _checker_phases(normalized_event_types),
+        "phases": normalized_phases or _plugin_phases(normalized_event_types),
     }
 
 
-def _checker_phases(
+def _plugin_phases(
     event_types: list[str] | tuple[str, ...],
     *,
     module_name: str = "",

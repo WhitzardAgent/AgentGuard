@@ -50,9 +50,9 @@ class UGuardRouter:
         decision = local_eval.decision
         dtype = decision.decision_type
 
-        # 1. A final local checker verdict wins immediately.
+        # 1. A final local plugin verdict wins immediately.
         if check.is_final and check.decision_candidate is not None:
-            return RouteDecision(RouteTarget.LOCAL, "final local checker verdict")
+            return RouteDecision(RouteTarget.LOCAL, "final local plugin verdict")
 
         # 2. Explicit local deny is authoritative.
         if dtype == DecisionType.DENY and local_eval.certain:

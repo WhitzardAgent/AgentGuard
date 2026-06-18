@@ -1,64 +1,111 @@
 # Custom Framework
 
-We are actively working on adapters for mainstream agent frameworks. But if your agent isn't built with a supported framework — or your framework hasn't been adapted yet — this guide will walk you through writing a custom adapter.
+If your framework is not covered by a built-in AgentGuard adapter, implement a custom adapter against the shared adapter contract.
 
-## Step 1: Inherit `BaseAdapter` and implement `install`
+## Recommended reading
 
-Create a Python file under `agentguard/sdk/adapters/` and define a class that inherits `BaseAdapter`. Here we use `MyAdapter` as an example.
+Read the shared contract first:
 
-You need to implement the `install` method in your adapter class.
+- [Agent Adapter Contract](adapter_contract.md)
+
+That contract is the source of truth for both Python and JavaScript adapters.
+
+## Minimal workflow
+
+1. inherit `BaseAgentAdapter`
+2. implement `can_wrap(...)`
+3. implement `patchtool(...)`
+4. implement `patchLLM(...)`
+5. implement `generate(...)` as a best-effort fallback
+6. call `attach(...)` to patch the target agent in place
+
+## Python example
 
 ```python
-from agentguard.sdk.adapters.base import BaseAdapter
+from typing import Any
 
-class MyAdapter(BaseAdapter):
+from agentguard.adapters.agent.base import BaseAgentAdapter
+from agentguard.schemas.context import RuntimeContext
 
-    def install(self, agent):
+
+class MyAgentAdapter(BaseAgentAdapter):
+    name = "myframework"
+
+    def can_wrap(self, agent: Any) -> bool:
+        return hasattr(agent, "tools") and hasattr(agent, "model")
+
+    def patchtool(self, agent: Any, guard: Any) -> int:
+        patched = 0
+        tools = getattr(agent, "tools", None)
+        if isinstance(tools, list):
+            for tool in tools:
+                ...
+                patched += 1
+        return patched
+
+    def patchLLM(self, agent: Any, guard: Any) -> int:
+        model = getattr(agent, "model", None)
+        if model is None:
+            return 0
         ...
+        return 1
+
+    def generate(self, agent: Any, messages: list[dict[str, Any]], context: RuntimeContext) -> Any:
+        return agent.invoke(messages)
+
+
+adapter = MyAgentAdapter()
+patched = adapter.attach(agent, guard)
+print(patched)
 ```
 
-The `install()` method takes an agent instance as input. The choice of which instance to pass depends on your framework's implementation, but a key requirement is that you must be able to extract all tool metadata — tool names and function implementations (which typically include parameter signatures) — from that instance.
+## JavaScript example
 
-## Step 2: Extract tool metadata from the agent instance
+```js
+const { BaseAgentAdapter } = require("./adapters/agent/base");
 
-The exact method for extracting tool metadata depends on your framework. You can reference our existing adapters for LangChain, AutoGen, and OpenAI Agents SDK:
+class MyAgentAdapter extends BaseAgentAdapter {
+  constructor() {
+    super();
+    this.name = "myframework";
+  }
 
-* `agentguard/sdk/adapters/langchain.py`
-* `agentguard/sdk/adapters/autogen.py`
-* `agentguard/sdk/adapters/openai_agents.py`
+  can_wrap(agent) {
+    return Boolean(agent && agent.tools && agent.model);
+  }
 
-## Step 3: Bind tools with `wrap_tool`
-
-Once you have the tool names and their function implementations, use `wrap_tool(self.guard, tool_name, tool_function)` to bind each tool to the AgentGuard client.
-
-```python
-from agentguard.sdk.adapters.base import BaseAdapter
-from agentguard.sdk.wrappers import wrap_tool
-
-class MyAdapter(BaseAdapter):
-
-    def install(self, agent):
+  patchtool(agent, guard) {
+    let patched = 0;
+    const tools = agent && agent.tools;
+    if (Array.isArray(tools)) {
+      for (const tool of tools) {
         ...
-        # Assume you have obtained the
+        patched += 1;
+      }
+    }
+    return patched;
+  }
 
-        # tools_metadata = {
-        #   "<tool_name>": <tool_function>,
-        #   ...
-        # }
+  patchLLM(agent, guard) {
+    const model = agent && agent.model;
+    if (!model) {
+      return 0;
+    }
+    ...
+    return 1;
+  }
 
-        # from the agent instance.
-        for tool_name, tool_function in tools_metadata.items():
-            wrap_tool(self.guard, tool_name, tool_function)
+  async generate(agent, messages) {
+    return agent.invoke(messages);
+  }
+}
+
+const adapter = new MyAgentAdapter();
+const patched = adapter.attach(agent, guard);
+console.log(patched);
 ```
 
-## Step 4: Use the custom adapter in your agent
+## Notes
 
-Call `guard.attach_custom_agents()` to activate your custom adapter.
-
-```python
-agent = ...
-
-guard = Guard(...)
-guard.start(...)
-guard.attach_custom_agents(agent, MyAdapter)
-```
+- Implement only the canonical hooks `patchtool` and `patchLLM`.
+- If you need a convenience API such as `guard.attach_myframework(agent)`, add a thin wrapper around `new MyAgentAdapter().attach(agent, guard)`.

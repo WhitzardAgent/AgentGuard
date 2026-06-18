@@ -5,6 +5,7 @@ import json
 import pytest
 
 from agentguard import AgentGuard
+from agentguard.adapters.agent.base import BaseAgentAdapter
 
 
 def _event_types(guard: AgentGuard) -> list[str]:
@@ -13,6 +14,29 @@ def _event_types(guard: AgentGuard) -> list[str]:
 
 def _first_event(guard: AgentGuard, event_type: str):
     return next(entry.event for entry in guard.trace.entries if entry.event.event_type.value == event_type)
+
+
+def test_base_agent_adapter_attach_delegates_to_patch_hooks():
+    class DemoAdapter(BaseAgentAdapter):
+        name = "demo"
+
+        def can_wrap(self, agent):
+            return True
+
+        def patchtool(self, agent, guard):
+            return 2
+
+        def patchLLM(self, agent, guard):
+            return 3
+
+        def generate(self, agent, messages, context):
+            return None
+
+    adapter = DemoAdapter()
+    patched = adapter.attach(object(), object())
+
+    assert patched == {"tools": 2, "llm": 3}
+    assert adapter.patchLLM(object(), object()) == 3
 
 
 def test_wrap_agent_is_not_exposed():
@@ -88,6 +112,75 @@ def test_attach_langchain_patches_tools_by_name():
     assert "llm_input" in _event_types(guard)
     assert "llm_output" in _event_types(guard)
     assert _first_event(guard, "llm_output").metadata["output_type"] == "str"
+
+
+def test_attach_langchain_patches_agent_executor_llm_chain_model():
+    class Tool:
+        name = "lookup"
+
+        def func(self, value: str) -> str:
+            return value.upper()
+
+    class Model:
+        def invoke(self, prompt: str) -> str:
+            return f"reply:{prompt}"
+
+    class LLMChain:
+        def __init__(self) -> None:
+            self.llm = Model()
+
+    class InnerAgent:
+        def __init__(self) -> None:
+            self.llm_chain = LLMChain()
+
+    class AgentExecutor:
+        def __init__(self) -> None:
+            self.tools_by_name = {"lookup": Tool()}
+            self.agent = InnerAgent()
+
+    guard = AgentGuard("attach-langchain-llm-chain", sandbox="noop")
+    agent = AgentExecutor()
+
+    patched = guard.attach_langchain(agent)
+
+    assert patched["tools"] == 1
+    assert patched["llm"] == 1
+    assert agent.agent.llm_chain.llm.invoke("hello") == "reply:hello"
+    assert "llm_input" in _event_types(guard)
+    assert "llm_output" in _event_types(guard)
+
+
+@pytest.mark.asyncio
+async def test_attach_autogen_patches_handoffs_and_async_stream_client():
+    class Handoff:
+        name = "delegate"
+
+        async def _func(self, task: str) -> str:
+            return f"handoff:{task}"
+
+    class StreamClient:
+        async def create_stream(self, prompt: str) -> dict[str, str]:
+            return {"content": f"stream:{prompt}"}
+
+    class Agent:
+        def __init__(self) -> None:
+            self._tools = []
+            self._handoffs = [Handoff()]
+            self._model_client = StreamClient()
+
+    guard = AgentGuard("attach-autogen-stream", sandbox="noop")
+    agent = Agent()
+
+    patched = guard.attach_autogen(agent)
+
+    assert patched["tools"] == 1
+    assert patched["llm"] == 1
+    assert await agent._handoffs[0]._func(task="review") == "handoff:review"
+    assert await agent._model_client.create_stream("hello") == {"content": "stream:hello"}
+    assert "tool_invoke" in _event_types(guard)
+    assert "tool_result" in _event_types(guard)
+    assert "llm_input" in _event_types(guard)
+    assert "llm_output" in _event_types(guard)
 
 
 def test_attach_langchain_nested_llm_wrappers_emit_one_pair():

@@ -398,7 +398,7 @@ test("shared app core clears scoped caches when selected agent changes", async (
   assert.equal(global.localStorage.getItem("agentguard.scopedRuleList"), null);
 });
 
-test("shared app core builds multi-checker config while preserving unrelated phase data", async () => {
+test("shared app core builds multi-plugin config while preserving unrelated phase data", async () => {
   const listeners = {};
   global.window = {
     AgentGuardConfig: { apiBase: "http://127.0.0.1:38080" },
@@ -432,7 +432,7 @@ test("shared app core builds multi-checker config while preserving unrelated pha
   require("../static/common/app.js");
 
   const available = [
-    { name: "rule_based_check", description: "", event_types: [], phases: ["tool_before"] },
+    { name: "rule_based_plugin", description: "", event_types: [], phases: ["tool_before"] },
     { name: "tool_invoke", description: "", event_types: ["tool_invoke"], phases: ["tool_before"] },
     { name: "llm_input", description: "", event_types: ["llm_input"], phases: ["llm_before"] },
   ];
@@ -444,12 +444,12 @@ test("shared app core builds multi-checker config while preserving unrelated pha
       },
       tool_before: {
         local: ["local_tool_guard"],
-        remote: ["custom_hidden_checker", "tool_invoke", "rule_based_check"],
+        remote: ["custom_hidden_checker", "tool_invoke", "rule_based_plugin"],
       },
     },
   };
 
-  const config = global.window.AgentGuardData.buildCheckerConfig(
+  const config = global.window.AgentGuardData.buildPluginConfig(
     [available[2]],
     available,
     existingConfig,
@@ -468,7 +468,7 @@ test("shared app core builds multi-checker config while preserving unrelated pha
     },
   });
 
-  const localConfig = global.window.AgentGuardData.buildCheckerConfig(
+  const localConfig = global.window.AgentGuardData.buildPluginConfig(
     [{ name: "tool_result", description: "", event_types: ["tool_result"], phases: ["tool_after"] }],
     [{ name: "tool_result", description: "", event_types: ["tool_result"], phases: ["tool_after"] }],
     existingConfig,
@@ -483,7 +483,7 @@ test("shared app core builds multi-checker config while preserving unrelated pha
       },
       tool_before: {
         local: ["local_tool_guard"],
-        remote: ["custom_hidden_checker", "tool_invoke", "rule_based_check"],
+        remote: ["custom_hidden_checker", "tool_invoke", "rule_based_plugin"],
       },
       tool_after: {
         local: ["tool_result"],
@@ -493,7 +493,7 @@ test("shared app core builds multi-checker config while preserving unrelated pha
   });
 });
 
-test("shared app core derives active checker names and primary checker from config", async () => {
+test("shared app core derives active plugin names and primary plugin from config", async () => {
   const listeners = {};
   global.window = {
     AgentGuardConfig: { apiBase: "http://127.0.0.1:38080" },
@@ -528,51 +528,51 @@ test("shared app core derives active checker names and primary checker from conf
 
   const configResponse = {
     agent_id: "agent-a",
-    checker_config: {
+    plugin_config: {
       phases: {
         llm_before: { local: ["local_prompt_guard"], remote: ["llm_input"] },
-        tool_before: { local: [], remote: ["tool_invoke", "rule_based_check"] },
+        tool_before: { local: [], remote: ["tool_invoke", "rule_based_plugin"] },
         tool_after: { local: ["local_tool_result_guard"], remote: [{ name: "tool_result" }] },
       },
     },
   };
 
   assert.deepEqual(
-    global.window.AgentGuardData.selectedCheckersFromConfig(configResponse),
-    ["llm_input", "tool_invoke", "rule_based_check", "tool_result"],
+    global.window.AgentGuardData.selectedPluginsFromConfig(configResponse),
+    ["llm_input", "tool_invoke", "rule_based_plugin", "tool_result"],
   );
   assert.deepEqual(
-    global.window.AgentGuardData.selectedCheckersFromConfig(configResponse, "local"),
+    global.window.AgentGuardData.selectedPluginsFromConfig(configResponse, "local"),
     ["local_prompt_guard", "local_tool_result_guard"],
   );
   assert.deepEqual(
-    global.window.AgentGuardData.activeCheckersFromConfig(configResponse),
+    global.window.AgentGuardData.activePluginsFromConfig(configResponse),
     [
       "llm_input",
       "tool_invoke",
-      "rule_based_check",
+      "rule_based_plugin",
       "tool_result",
       "local_prompt_guard",
       "local_tool_result_guard",
     ],
   );
   assert.deepEqual(
-    global.window.AgentGuardData.collapseCheckerSelection(
-      global.window.AgentGuardData.selectedCheckersFromConfig(configResponse),
+    global.window.AgentGuardData.collapsePluginSelection(
+      global.window.AgentGuardData.selectedPluginsFromConfig(configResponse),
     ),
-    ["llm_input", "tool_invoke", "rule_based_check", "tool_result"],
+    ["llm_input", "tool_invoke", "rule_based_plugin", "tool_result"],
   );
   assert.deepEqual(
-    global.window.AgentGuardData.expandCheckerSelection(["rule_based_check", "tool_result"]),
-    ["rule_based_check", "tool_result"],
+    global.window.AgentGuardData.expandPluginSelection(["rule_based_plugin", "tool_result"]),
+    ["rule_based_plugin", "tool_result"],
   );
   assert.equal(
-    global.window.AgentGuardData.selectedCheckerFromConfig(configResponse),
-    "rule_based_check",
+    global.window.AgentGuardData.selectedPluginFromConfig(configResponse),
+    "rule_based_plugin",
   );
 });
 
-test("shared app core preserves checker config source from the agent config endpoint", async () => {
+test("shared app core preserves plugin config source from the agent config endpoint", async () => {
   const listeners = {};
   global.window = {
     AgentGuardConfig: { apiBase: "http://127.0.0.1:38080" },
@@ -598,9 +598,9 @@ test("shared app core preserves checker config source from the agent config endp
     async json() {
       return {
         agent_id: "agent-a",
-        checker_config: {
+        plugin_config: {
           phases: {
-            tool_before: { local: [], remote: ["rule_based_check"] },
+            tool_before: { local: [], remote: ["rule_based_plugin"] },
           },
         },
         config_source: "server_default",
@@ -616,9 +616,9 @@ test("shared app core preserves checker config source from the agent config endp
   delete require.cache[require.resolve("../static/common/app.js")];
   require("../static/common/app.js");
 
-  const config = await global.window.AgentGuardData.getAgentCheckerConfig("agent-a");
+  const config = await global.window.AgentGuardData.getAgentPluginConfig("agent-a");
 
   assert.equal(config.agent_id, "agent-a");
   assert.equal(config.config_source, "server_default");
-  assert.deepEqual(config.checker_config?.phases?.tool_before?.remote, ["rule_based_check"]);
+  assert.deepEqual(config.plugin_config?.phases?.tool_before?.remote, ["rule_based_plugin"]);
 });

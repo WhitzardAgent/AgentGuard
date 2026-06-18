@@ -126,7 +126,7 @@ cat <<EOF > config/plugins.json
       "local": [],
       "remote": [
         {
-          "name": "rule_based_check",
+          "name": "rule_based_plugin",
           "env": {}
         }
       ]
@@ -140,7 +140,7 @@ cat <<EOF > config/plugins.json
 EOF
 ```
 
-This config tells AgentGuard which plugins run in each runtime phase. In this quick start, only `tool_before` enables one remote plugin: `rule_based_check`. That means the server evaluates access-control rules right before a tool call is executed, while all other phases stay empty. This keeps the first demo simple: the client forwards tool-invocation decisions to the server, and the server uses the built-in rule-based plugin to match your policy rules and return an allow/deny decision.
+This config tells AgentGuard which plugins run in each runtime phase. In this quick start, only `tool_before` enables one remote plugin: `rule_based_plugin`. That means the server evaluates access-control rules right before a tool call is executed, while all other phases stay empty. This keeps the first demo simple: the client forwards tool-invocation decisions to the server, and the server uses the built-in rule-based plugin to match your policy rules and return an allow/deny decision.
 
 Then create an access control policy:
 
@@ -364,7 +364,7 @@ The high-level architecture of AgentGuard is shown below.
 
 - **Client**: With minimal code modifications, the AgentGuard client integrates into agent frameworks and can intercept before and after LLM calls, as well as before and after tool invocations. It can perform lightweight local filtering on the client side and forward events to the server for deeper inspection by configured plugins.
 - **Server**: The server receives information from clients, uses configured plugins to evaluate agent actions against policies, produces policy decisions, and sends them back to clients. It also monitors agent status for administrative auditing.
-- **Plugin Extensibility**: Both client and server support pluggable plugins. To add custom plugins, see the [client plugin guide](./src/client/python/agentguard/plugins/README.md) and the [server plugin directory](./src/server/backend/plugins/).
+- **Plugin Extensibility**: Both client and server support pluggable plugins. To add custom plugins, see the [client plugin guide](./src/client/python/agentguard/plugins/README.md) and the [server plugin directory](./src/server/backend/runtime/plugins/).
 - **Custom Auditor Extensibility**: The backend also supports pluggable custom auditors for post-hoc trace review. Shared auditor abstractions live under `src/server/backend/audit/`, while concrete auditors live under `src/server/backend/audit/auditors/`. See the documentation chapter on custom auditors in `./docs/en/README.md`.
 
 ## 👥 Contributors

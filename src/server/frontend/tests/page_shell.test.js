@@ -84,9 +84,6 @@ function bootShell(selectedAgentId = "") {
       if (selector === "[data-agent-required='true']") {
         return agentRequired;
       }
-      if (selector === "[data-checker-required='true']") {
-        return checkerRequired;
-      }
       if (selector === "[data-rule-based-required='true']") {
         return ruleBasedRequired;
       }
@@ -134,7 +131,7 @@ test("sidebar hides agent-required links until an agent is selected", () => {
   assert.equal(elements["sidebar-selected-agent-wrap"].hidden, false);
   assert.equal(elements["sidebar-selected-agent"].textContent, "agent-a");
 
-  shell.setSelectedChecker("rule_based_check");
+  shell.setSelectedPlugin("rule_based_plugin");
 
   assert.equal(agentRequired.every((item) => item.hidden === false), true);
   assert.equal(ruleBasedRequired.every((item) => item.hidden === false), true);

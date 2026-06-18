@@ -3,10 +3,14 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
-class GuardDecideRequest(BaseModel):
+class _ApiModel(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class GuardDecideRequest(_ApiModel):
     request_id: str = "req_unknown"
     current_event: dict[str, Any]
     context: dict[str, Any] = Field(default_factory=dict)
@@ -17,13 +21,13 @@ class GuardDecideRequest(BaseModel):
     client_cached_entries: list[dict[str, Any]] = Field(default_factory=list)
 
 
-class GuardDecideResponse(BaseModel):
+class GuardDecideResponse(_ApiModel):
     decision: dict[str, Any]
     risk_signals: list[str] = Field(default_factory=list)
-    checker_result: dict[str, Any] = Field(default_factory=dict)
+    plugin_result: dict[str, Any] = Field(default_factory=dict)
 
 
-class TraceUploadRequest(BaseModel):
+class TraceUploadRequest(_ApiModel):
     session_id: str | None = None
     agent_id: str | None = None
     user_id: str | None = None
@@ -31,16 +35,16 @@ class TraceUploadRequest(BaseModel):
     entries: list[dict[str, Any]] = Field(default_factory=list)
 
 
-class ToolReportRequest(BaseModel):
+class ToolReportRequest(_ApiModel):
     context: dict[str, Any] = Field(default_factory=dict)
     tool: dict[str, Any] = Field(default_factory=dict)
 
 
-class SessionRegisterRequest(BaseModel):
+class SessionRegisterRequest(_ApiModel):
     context: dict[str, Any] = Field(default_factory=dict)
 
 
-class CheckerConfigUpdateRequest(BaseModel):
+class PluginConfigUpdateRequest(_ApiModel):
     config: dict[str, Any]
     client_config: dict[str, Any] | None = None
     client_config_urls: list[str] = Field(default_factory=list)
@@ -48,50 +52,50 @@ class CheckerConfigUpdateRequest(BaseModel):
     timeout_s: float = 2.0
 
 
-class CheckerConfigUpdateResponse(BaseModel):
+class PluginConfigUpdateResponse(_ApiModel):
     status: str
-    loaded_checkers: list[str] = Field(default_factory=list)
+    loaded_plugins: list[str] = Field(default_factory=list)
     client_updates: list[dict[str, Any]] = Field(default_factory=list)
 
 
-class AgentCheckerConfigUpdateRequest(BaseModel):
+class AgentPluginConfigUpdateRequest(_ApiModel):
     config: dict[str, Any]
     client_config: dict[str, Any] | None = None
     timeout_s: float = 2.0
 
 
-class AgentCheckerConfigResponse(BaseModel):
+class AgentPluginConfigResponse(_ApiModel):
     agent_id: str
-    checker_config: dict[str, Any] | None = None
+    plugin_config: dict[str, Any] | None = None
     config_source: Literal["agent_override", "server_default", "none"] = "none"
 
 
-class CheckerOption(BaseModel):
+class PluginOption(_ApiModel):
     name: str
     description: str = ""
     event_types: list[str] = Field(default_factory=list)
     phases: list[str] = Field(default_factory=list)
 
 
-class AgentCheckerAvailableResponse(BaseModel):
+class AgentPluginAvailableResponse(_ApiModel):
     agent_id: str
-    local_checkers: list[CheckerOption] = Field(default_factory=list)
-    remote_checkers: list[CheckerOption] = Field(default_factory=list)
+    local_plugins: list[PluginOption] = Field(default_factory=list)
+    remote_plugins: list[PluginOption] = Field(default_factory=list)
 
 
-class SkillRunRequest(BaseModel):
+class SkillRunRequest(_ApiModel):
     skill_name: str
     input: dict[str, Any] = Field(default_factory=dict)
 
 
-class TraceAuditRequest(BaseModel):
+class TraceAuditRequest(_ApiModel):
     session_id: str
     agent_id: str | None = None
     user_id: str | None = None
     auditor_name: str
 
 
-class TraceAuditResponse(BaseModel):
+class TraceAuditResponse(_ApiModel):
     session_id: str
     agent_id: str | None = None
     user_id: str | None = None

@@ -1,4 +1,4 @@
-"""Shared checker helpers."""
+"""Shared plugin helpers."""
 from __future__ import annotations
 
 from agentguard.plugins.common.patterns import (

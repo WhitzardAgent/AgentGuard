@@ -8,13 +8,13 @@
     (function () {
       try {
         const agentId = String(window.localStorage.getItem("agentguard.selectedAgentId") || "").trim();
-        const checkerName = String(window.localStorage.getItem("agentguard.selectedCheckerName") || "").trim();
+        const pluginName = String(window.localStorage.getItem("agentguard.selectedPluginName") || "").trim();
         if (!agentId) {
           window.location.replace("/agents.html");
           return;
         }
-        if (checkerName !== "rule_based_check") {
-          window.location.replace("/checkers.html");
+        if (pluginName !== "rule_based_plugin") {
+          window.location.replace("/plugins.html");
         }
       } catch {
         window.location.replace("/agents.html");

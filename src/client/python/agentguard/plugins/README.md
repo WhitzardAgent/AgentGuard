@@ -1,9 +1,9 @@
-# AgentGuard Checkers
+# AgentGuard Plugins
 
 `plugins` is the client-side local detection layer. It inspects normalized
 `RuntimeEvent` objects before policy routing and returns a `CheckResult`.
 
-Checkers do not execute tools, call LLMs, or make network requests. They only
+Plugins do not execute tools, call LLMs, or make network requests. They only
 read event data and return risk signals plus an optional decision candidate.
 
 The active runtime event types are intentionally limited to:
@@ -15,7 +15,7 @@ The active runtime event types are intentionally limited to:
 
 ## BasePlugin
 
-All checkers should subclass `BasePlugin`:
+All plugins should subclass `BasePlugin`:
 
 ```python
 class BasePlugin:
@@ -33,13 +33,13 @@ class BasePlugin:
 
 `name`
 
-A readable checker name. `PluginManager` uses it when recording checker errors
+A readable plugin name. `PluginManager` uses it when recording plugin errors
 in metadata, for example `tool_invoke_error`.
 
 `event_types`
 
-The event types this checker handles. If empty, the checker applies to all
-events. In most cases, declare this explicitly so the checker only runs in the
+The event types this plugin handles. If empty, the plugin applies to all
+events. In most cases, declare this explicitly so the plugin only runs in the
 intended stage.
 
 Example:
@@ -52,12 +52,12 @@ event_types = [EventType.TOOL_INVOKE]
 
 `applies(event)`
 
-Returns whether this checker should process the event. The default behavior is:
+Returns whether this plugin should process the event. The default behavior is:
 
 - empty `event_types`: applies to all events
 - `event.event_type in event_types`: applies to matching events
 
-Usually you do not need to override this unless the checker needs additional
+Usually you do not need to override this unless the plugin needs additional
 payload or context filtering.
 
 `check(event, context)`
@@ -65,7 +65,7 @@ payload or context filtering.
 The actual detection method. Subclasses must implement it. It receives a runtime
 event and the current runtime context, and returns a `CheckResult`.
 
-Client checkers currently receive only the current event. They do not receive
+Client plugins currently receive only the current event. They do not receive
 `trajectory_window`; trajectory context is sent to the remote server instead.
 
 ## check() Input
@@ -86,7 +86,7 @@ RuntimeEvent(
 )
 ```
 
-Checkers usually read:
+Plugins usually read:
 
 - `event.event_type`: the current event type
 - `event.payload`: event content, with different shapes per stage
@@ -96,21 +96,21 @@ Checkers usually read:
 Common payload shapes:
 
 ```python
-# llm_before / LLMInputChecker
+# llm_before / LLMInputPlugin
 {"text": "..."}
 {"messages": [{"role": "user", "content": "..."}]}
 
-# llm_after / LLMOutputChecker
+# llm_after / LLMOutputPlugin
 {"output": output}
 
-# tool_before / ToolInvokeChecker
+# tool_before / ToolInvokePlugin
 {
     "tool_name": "send_email",
     "arguments": {"to": "...", "body": "..."},
     "capabilities": ["external_send"],
 }
 
-# tool_after / ToolResultChecker
+# tool_after / ToolResultPlugin
 {
     "tool_name": "read_file",
     "result": "...",
@@ -135,15 +135,15 @@ RuntimeContext(
 )
 ```
 
-Checkers can use it for user-, agent-, policy-, or environment-aware checks.
+Plugins can use it for user-, agent-, policy-, or environment-aware checks.
 
 ### trajectory_window
 
-Client checkers do not receive `trajectory_window`. If a check needs recent
-execution history, implement it as a server-side checker or server plugin.
+Client plugins do not receive `trajectory_window`. If a check needs recent
+execution history, implement it as a server-side plugin.
 
-When a client checker returns a final local decision (`is_final=True`), the
-client stores the checker input, checker result, event, context, and decision in
+When a client plugin returns a final local decision (`is_final=True`), the
+client stores the `plugin_input`, `plugin_result`, event, context, and decision in
 a local sync buffer. The next remote decision request sends those cached entries
 as `client_cached_entries`; if a whole LLM/tool round finishes without needing a
 remote decision, the runtime uploads the cached entries asynchronously for
@@ -166,14 +166,14 @@ class CheckResult:
 
 An optional `GuardDecision` recommendation.
 
-If the checker only detects risk signals and does not want to decide, leave it
+If the plugin only detects risk signals and does not want to decide, leave it
 as `None`.
 
-If the checker finds a case that must be blocked, it can return:
+If the plugin finds a case that must be blocked, it can return:
 
 ```python
 GuardDecision.deny(
-    "Destructive shell command blocked by local checker.",
+    "Destructive shell command blocked by local plugin.",
     policy_id="local:dangerous_shell",
     risk_signals=["shell_command"],
 )
@@ -181,7 +181,7 @@ GuardDecision.deny(
 
 ### risk_signals
 
-Risk labels detected by the checker, for example:
+Risk labels detected by the plugin, for example:
 
 ```python
 ["prompt_injection", "secret_detected", "external_send"]
@@ -192,23 +192,23 @@ back to `event.risk_signals`.
 
 ### is_final
 
-Whether this checker's `decision_candidate` should be treated as the final local
+Whether this plugin's `decision_candidate` should be treated as the final local
 decision.
 
 - `False`: this is only a candidate; the client sends the event to the remote server for the authoritative decision
-- `True`: the checker has made the final client-side decision; the remote server is skipped
+- `True`: the plugin has made the final client-side decision; the remote server is skipped
 
 Only deterministic high-risk checks should normally set `is_final=True`.
 
 ### metadata
 
 Additional debug or detection information. `PluginManager` merges metadata from
-all checkers into the final `CheckResult.metadata`.
+all plugins into the final `CheckResult.metadata`.
 
 ## How PluginManager Calls Plugins
 
-Checkers are configured and run by phase. No checker is enabled by default when
-`checker_config` is omitted. A typical client config enables checkers like this:
+Plugins are configured and run by phase. No plugin is enabled by default when
+`plugin_config` is omitted. A typical client config enables plugins like this:
 
 ```python
 llm_before -> local ["llm_input"], remote []
@@ -218,7 +218,7 @@ tool_after -> local ["tool_result"], remote []
 ```
 
 The client only loads the `local` list. The `remote` list is ignored by the
-client and is intended for the server-side checker manager.
+client and is intended for the server-side plugin manager.
 The config must use the `{"phases": {...}}` shape. Each configured phase must
 include both `local` and `remote`; legacy direct lists such as
 `{"llm_before": ["llm_input"]}` are not accepted.
@@ -232,13 +232,13 @@ TOOL_INVOKE -> tool_before
 TOOL_RESULT -> tool_after
 ```
 
-If multiple checkers are configured for the same phase, they run in order.
+If multiple plugins are configured for the same phase, they run in order.
 
-If a checker raises an exception, `PluginManager` catches it, records the error
-in metadata, and continues with the remaining checkers. A checker should not
+If a plugin raises an exception, `PluginManager` catches it, records the error
+in metadata, and continues with the remaining plugins. A plugin should not
 break the main runtime flow.
 
-## Custom Checker Example
+## Custom Plugin Example
 
 ```python
 from agentguard.plugins.base import BasePlugin, CheckResult
@@ -252,7 +252,7 @@ from agentguard.schemas.events import EventType, RuntimeEvent
     name="block_private_tool",
     description="Block calls to private/internal tools.",
 )
-class BlockPrivateToolChecker(BasePlugin):
+class BlockPrivateToolPlugin(BasePlugin):
     event_types = [EventType.TOOL_INVOKE]
 
     def check(self, event: RuntimeEvent, context: RuntimeContext) -> CheckResult:
@@ -291,14 +291,14 @@ Pass the config when creating the client:
 ```python
 guard = AgentGuard(
     session_id="s1",
-    checker_config="/path/to/checkers.json",
+    plugin_config="/path/to/plugins.json",
 )
 ```
 
-You can replace the checker configuration while the client is running:
+You can replace the plugin configuration while the client is running:
 
 ```python
-guard.update_checker_config({
+guard.update_plugin_config({
     "phases": {
         "llm_before": {"local": ["llm_input"], "remote": []},
         "llm_after": {"local": [], "remote": []},
@@ -356,10 +356,10 @@ the client generates a `sk-...` key automatically.
 You can also pass a config file path:
 
 ```json
-{"path": "/path/to/checkers.json"}
+{"path": "/path/to/plugins.json"}
 ```
 
-You can also upload new checker code through the local API:
+You can also upload new plugin code through the local API:
 
 ```bash
 curl -X POST http://127.0.0.1:38181/v1/client/plugins/update \
@@ -367,8 +367,8 @@ curl -X POST http://127.0.0.1:38181/v1/client/plugins/update \
   -H 'X-AgentGuard-Session-Key: sk-...' \
   -d '{
     "event_type": "llm_input",
-    "filename": "my_llm_input_checker.py",
-    "code": "from agentguard.plugins.base import BasePlugin, CheckResult\nfrom agentguard.plugins.registry import register\nfrom agentguard.schemas.events import EventType\n\n@register(name=\"my_llm_input\", description=\"My checker.\")\nclass MyLLMInputChecker(BasePlugin):\n    event_types = [EventType.LLM_INPUT]\n    def check(self, event, context):\n        return CheckResult(risk_signals=[\"my_signal\"])\n"
+    "filename": "my_llm_input_plugin.py",
+    "code": "from agentguard.plugins.base import BasePlugin, CheckResult\nfrom agentguard.plugins.registry import register\nfrom agentguard.schemas.events import EventType\n\n@register(name=\"my_llm_input\", description=\"My plugin.\")\nclass MyLLMInputPlugin(BasePlugin):\n    event_types = [EventType.LLM_INPUT]\n    def check(self, event, context):\n        return CheckResult(risk_signals=[\"my_signal\"])\n"
   }'
 ```
 
@@ -381,27 +381,27 @@ curl -X POST http://127.0.0.1:38181/v1/client/plugins/update \
 
 After writing the file, the client imports/reloads that module immediately so
 `@register(...)` updates the runtime registry. The newly registered `name` can
-then be used directly in checker config.
+then be used directly in plugin config.
 
-## Adding a New Checker
+## Adding a New Plugin
 
-To add a checker, put the checker class in the matching phase folder and decorate
-the class with `@register(name=..., description=...)`. The manager discovers checker
+To add a plugin, put the plugin class in the matching phase folder and decorate
+the class with `@register(name=..., description=...)`. The manager discovers plugin
 modules under `agentguard.plugins`, runs the decorator, and then lets the config
-refer to the checker by `name`. With this mode, you do not need to modify
-`__init__.py` or a built-in checker map.
+refer to the plugin by `name`. With this mode, you do not need to modify
+`__init__.py` or a built-in plugin map.
 
-Each custom checker must also define `event_types`. This tells the manager which
-runtime event kinds the checker applies to. Use `EventType.LLM_INPUT`,
+Each custom plugin must also define `event_types`. This tells the manager which
+runtime event kinds the plugin applies to. Use `EventType.LLM_INPUT`,
 `EventType.LLM_OUTPUT`, `EventType.TOOL_INVOKE`, or `EventType.TOOL_RESULT`.
 
 Example file layout:
 
 ```text
-agentguard/plugins/llm_before/my_checker.py
+agentguard/plugins/llm_before/my_plugin.py
 ```
 
-Example checker:
+Example plugin:
 
 ```python
 from agentguard.plugins.base import BasePlugin, CheckResult
@@ -411,10 +411,10 @@ from agentguard.schemas.events import EventType, RuntimeEvent
 
 
 @register(
-    name="my_checker",
-    description="Short description of what this checker detects.",
+    name="my_plugin",
+    description="Short description of what this plugin detects.",
 )
-class MyChecker(BasePlugin):
+class MyPlugin(BasePlugin):
     event_types = [EventType.LLM_INPUT]
 
     def check(self, event: RuntimeEvent, context: RuntimeContext) -> CheckResult:
@@ -428,7 +428,7 @@ Config:
   "phases": {
     "llm_before": {
       "local": [
-        "my_checker"
+        "my_plugin"
       ],
       "remote": []
     }
@@ -441,9 +441,9 @@ Then pass the config when creating the client:
 ```python
 guard = AgentGuard(
     session_id="s1",
-    checker_config="/path/to/checkers.json",
+    plugin_config="/path/to/plugins.json",
 )
 ```
 
-The important part is the registered name: `my_checker`. Checker configs should
+The important part is the registered name: `my_plugin`. Plugin configs should
 refer to registered names.

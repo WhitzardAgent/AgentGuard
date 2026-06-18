@@ -115,11 +115,11 @@ Server plugins:
 - can also use `trajectory_window` to inspect recent events from the same session
 - are useful for cross-step detection, centralized policy evaluation, and audit-oriented analysis
 
-Plugin configuration is phase-based. Each phase can define `local` plugins for the client and `remote` plugins for the server. Each plugin entry is a spec object such as `{"name": "rule_based_check", "env": {}}`. Implementation-level details live in [AgentGuard Plugins](plugins.md).
+Plugin configuration is phase-based. Each phase can define `local` plugins for the client and `remote` plugins for the server. Each plugin entry is a spec object such as `{"name": "rule_based_plugin", "env": {}}`. In the current implementation, `local` plugin specs can pass `env` and constructor settings into client plugins, while `remote` plugin specs are resolved by `name`/`class` only. Implementation-level details live in [AgentGuard Plugins](plugins.md).
 
 ## Policy
 
-A policy is a user-defined control rule. In the built-in flow, these DSL policies are consumed by the `rule_based_check` server plugin to specify when a runtime action should be allowed, denied, or sent to review.
+A policy is a user-defined control rule. In the built-in flow, these DSL policies are consumed by the `rule_based_plugin` server plugin to specify when a runtime action should be allowed, denied, or sent to review.
 
 AgentGuard includes a built-in access-control strategy set and supports policy definitions through DSL rules. Policies commonly express constraints such as:
 
@@ -128,7 +128,7 @@ AgentGuard includes a built-in access-control strategy set and supports policy d
 - access to unknown destinations requires human review
 - a cross-step sequence such as database read followed by external email should be blocked or reviewed
 
-Policies work together with plugins: `rule_based_check` evaluates explicit access-control rules, while other plugins can attach risk signals or produce additional decision candidates.
+Policies work together with plugins: `rule_based_plugin` evaluates explicit access-control rules, while other plugins can attach risk signals or produce additional decision candidates.
 
 ## Decision
 

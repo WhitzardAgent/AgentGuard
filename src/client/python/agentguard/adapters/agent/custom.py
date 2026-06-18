@@ -18,6 +18,12 @@ class CustomAgentAdapter(BaseAgentAdapter):
             or hasattr(agent, "step")
         )
 
+    def patchtool(self, agent: Any, guard: Any) -> int:
+        return 0
+
+    def patchLLM(self, agent: Any, guard: Any) -> int:
+        return 0
+
     def generate(self, agent: Any, messages: list[dict[str, Any]], context: RuntimeContext) -> Any:
         if hasattr(agent, "generate"):
             return agent.generate(messages)

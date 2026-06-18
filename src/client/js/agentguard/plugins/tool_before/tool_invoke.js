@@ -4,7 +4,7 @@ const { BasePlugin, CheckResult } = require("../base");
 const { EventType } = require("../../schemas/events");
 const { matchSignals } = require("../common/patterns");
 
-class ToolInvokeChecker extends BasePlugin {
+class ToolInvokePlugin extends BasePlugin {
   constructor() {
     super();
     this.event_types = [EventType.TOOL_INVOKE];
@@ -21,5 +21,5 @@ class ToolInvokeChecker extends BasePlugin {
 }
 
 module.exports = {
-  ToolInvokeChecker,
+  ToolInvokePlugin,
 };

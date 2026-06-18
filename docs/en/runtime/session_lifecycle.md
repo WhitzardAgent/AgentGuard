@@ -13,7 +13,7 @@ At initialization time, the current Python implementation behaves as follows:
    * `client_session_key`
    * `client_plugin_config`
    * `remote_plugin_config`
-4. If remote mode is enabled, the client starts a local config API and writes these URLs into `context.metadata`:
+4. If remote mode is enabled (`server_url` configured), the client constructor attempts to start a local config API immediately and writes these URLs into `context.metadata`:
    * `client_config_url`
    * `client_plugin_list_url`
    * `client_health_url`
@@ -36,8 +36,8 @@ At decision time, the current path is:
 2. If the local result is final, the client applies it locally and stores the decision in `ClientSyncBuffer`.
 3. If the local result is not final, the client calls `/v1/server/guard/decide`.
 4. The server refreshes or upserts the session context for this request.
-5. The server looks up the session by the composite identity `session_id::agent_id::user_id` and reads the session's `remote_plugin_config`.
-6. The server plugin manager parses the plugin config by phase and only executes the `remote` plugin list for each phase.
+5. The server looks up the session by the composite identity `session_id::agent_id::user_id`, then applies any agent-scoped plugin override on top of the stored session config.
+6. The server plugin manager parses the effective plugin config by phase and only executes the `remote` plugin list for each phase.
 7. The server returns the decision to the client.
 
 Current code references:
@@ -48,7 +48,7 @@ Current code references:
 * `src/client/python/agentguard/u_guard/remote_client.py:102`
 * `src/server/backend/runtime/manager.py:221`
 * `src/server/backend/runtime/manager.py:256`
-* `src/server/backend/plugins/manager.py:32`
+* `src/server/backend/runtime/plugins/manager.py:32`
 * `src/server/backend/runtime/manager.py:267`
 
 ### 3. Local Result Sync
@@ -75,8 +75,8 @@ Current code references:
 The server also maintains a background health check loop:
 
 1. The server periodically calls the client's `/v1/client/health` endpoint.
-2. If the client is reachable, the server refreshes `last_seen` and stores health metadata.
-3. If the client is unreachable, the server marks the health check result as `unreachable`.
+2. If the client is reachable, the server refreshes `last_seen` and stores health metadata on the session.
+3. If the client is unreachable, the returned health-check result is marked as `unreachable`, but the session record itself is left unchanged.
 4. The current code does not automatically delete the session when the client is dead or unreachable.
 
 Current code references:
@@ -88,7 +88,7 @@ Current code references:
 
 ## Plugin Config Shape
 
-The session-scoped `remote_plugin_config` is not stored as a flattened remote-only structure. It keeps the same phased shape as the client-side plugin config.
+The session-scoped `remote_plugin_config` is not stored as a flattened remote-only structure. It keeps the same phased shape as the client-side plugin config. During initial registration, clients populate it with the same payload as `client_plugin_config`; later local `update_plugin_config()` calls only update `client_plugin_config`, so the stored `remote_plugin_config` reflects the last server-synchronized remote view unless the client re-registers or the server applies overrides.
 
 A typical shape is:
 
@@ -99,7 +99,7 @@ A typical shape is:
       "local": [],
       "remote": [
         {
-          "name": "rule_based_check",
+          "name": "rule_based_plugin",
           "env": {}
         }
       ]
@@ -126,17 +126,18 @@ A typical shape is:
 
 Important behavior:
 
-* The parser requires a `phases` object.
-* Each configured phase must include both `local` and `remote` keys.
+* When a plugin manager loads config for execution, the parser requires a `phases` object.
+* When a phase is present, the execution parser expects both `local` and `remote` keys.
 * The server only reads the `remote` list for execution.
 * The client-side plugin manager reads the same phased structure, but uses the `local` side.
+* If the server already has a default `plugin_config` and the client mirrors that same structure into `remote_plugin_config`, the server clears the mirrored session-scoped remote override so the server default remains authoritative. Explicit session-scoped remote overrides are still preserved.
 
 Code references:
 
 * `src/client/python/agentguard/guard.py:68`
-* `src/server/backend/plugins/manager.py:42`
-* `src/server/backend/plugins/manager.py:48`
-* `src/server/backend/plugins/manager.py:54`
+* `src/server/backend/runtime/plugins/manager.py:42`
+* `src/server/backend/runtime/plugins/manager.py:48`
+* `src/server/backend/runtime/plugins/manager.py:54`
 
 ## Default Server Decision
 
@@ -159,7 +160,7 @@ The server stores one session record per composite identity:
 
 This `session_key` is an internal storage key. It is different from `client_key`, which is the client session secret used in headers.
 
-The current session record shape is:
+A typical healthy session record may look like this:
 
 ```json
 {
@@ -167,10 +168,6 @@ The current session record shape is:
   "session_id": "sess_123",
   "agent_id": "agent-alpha",
   "user_id": "user-1",
-  "task_id": null,
-  "policy": "builtin",
-  "policy_version": "builtin",
-  "environment": "prod",
 
   "client_ip": "127.0.0.1",
   "client_key": "sk_xxx",
@@ -198,7 +195,7 @@ The current session record shape is:
         "local": [],
         "remote": [
           {
-            "name": "rule_based_check",
+            "name": "rule_based_plugin",
             "env": {}
           }
         ]
@@ -206,10 +203,7 @@ The current session record shape is:
     }
   },
 
-  "principal": {
-    "agent_id": "agent-alpha",
-    "user_id": "user-1"
-  },
+  "principal": null,
 
   "metadata": {
     "client_session_key": "sk_xxx",
@@ -235,7 +229,7 @@ The current session record shape is:
           "local": [],
           "remote": [
             {
-              "name": "rule_based_check",
+              "name": "rule_based_plugin",
               "env": {}
             }
           ]
@@ -267,3 +261,9 @@ Code references:
 * `src/server/backend/runtime/storage/__init__.py:149`
 * `src/server/backend/runtime/manager.py:196`
 * `src/server/backend/runtime/manager.py:339`
+
+Notes:
+
+* `principal` is optional and only appears when incoming event metadata provides it.
+* `metadata.last_health_check_*` fields appear only after a successful health check.
+* The effective remote execution config can still be replaced by agent-scoped overrides at decision time.

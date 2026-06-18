@@ -16,9 +16,6 @@ from agentguard.utils.json import safe_dumps, safe_loads
 PLUGIN_CONFIG_PATH = "/v1/client/plugins/config"
 PLUGIN_LIST_PATH = "/v1/client/plugins/list"
 PLUGIN_UPDATE_PATH = "/v1/client/plugins/update"
-LEGACY_CHECKER_CONFIG_PATH = "/v1/client/checkers/config"
-LEGACY_CHECKER_LIST_PATH = "/v1/client/checkers/list"
-LEGACY_CHECKER_UPDATE_PATH = "/v1/client/checkers/update"
 CLIENT_HEALTH_PATH = "/v1/client/health"
 
 _EVENT_PHASE = {
@@ -29,9 +26,9 @@ _EVENT_PHASE = {
 }
 _DEPRECATED_PLUGIN_NAMES = {"memory", "llm_thought", "final_response"}
 _SAFE_FILENAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\.py$")
-_CONFIG_PATHS = {PLUGIN_CONFIG_PATH, LEGACY_CHECKER_CONFIG_PATH}
-_LIST_PATHS = {PLUGIN_LIST_PATH, LEGACY_CHECKER_LIST_PATH}
-_UPDATE_PATHS = {PLUGIN_UPDATE_PATH, LEGACY_CHECKER_UPDATE_PATH}
+_CONFIG_PATHS = {PLUGIN_CONFIG_PATH}
+_LIST_PATHS = {PLUGIN_LIST_PATH}
+_UPDATE_PATHS = {PLUGIN_UPDATE_PATH}
 
 
 class ClientConfigAPIServer:
@@ -167,7 +164,7 @@ class ClientConfigAPIServer:
                     else:
                         config = body.get("config", body)
                     try:
-                        guard.update_checker_config(config, sync_remote=False)
+                        guard.update_plugin_config(config, sync_remote=False)
                     except Exception as exc:
                         self._send(400, {"status": "error", "error": str(exc)})
                         return
@@ -216,7 +213,7 @@ def _install_plugin_code(body: dict[str, Any]) -> dict[str, Any]:
         filename = f"dynamic_{event_type}_{digest}.py"
     filename = str(filename)
     if not _SAFE_FILENAME.match(filename):
-        raise ValueError("filename must be a safe Python filename such as my_checker.py")
+        raise ValueError("filename must be a safe Python filename such as my_plugin.py")
 
     plugin_root = Path(__file__).resolve().parent / "plugins"
     phase_dir = plugin_root / phase

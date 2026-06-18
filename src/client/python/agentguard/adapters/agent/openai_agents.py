@@ -38,23 +38,7 @@ class OpenAIAgentsAdapter(BaseAgentAdapter):
                 raise AdapterError(f"openai agents run failed: {exc}") from exc
         raise AdapterError("openai agent exposes no run/invoke")
 
-    def attach(
-        self,
-        agent: Any,
-        guard: Any,
-        *,
-        wrap_tools: bool = True,
-        wrap_llm: bool = True,
-    ) -> dict[str, Any]:
-        """Patch OpenAI Agents SDK function tools while preserving Runner loop."""
-        patched = {"tools": 0, "llm": 0}
-        if wrap_tools:
-            patched["tools"] += self._patch_tools(agent, guard)
-        if wrap_llm:
-            patched["llm"] += self._patch_llm(agent, guard)
-        return patched
-
-    def _patch_tools(self, agent: Any, guard: Any) -> int:
+    def patchtool(self, agent: Any, guard: Any) -> int:
         patched = 0
         tools = getattr(agent, "tools", None) or getattr(agent, "_tools", None)
         if isinstance(tools, dict):
@@ -74,7 +58,7 @@ class OpenAIAgentsAdapter(BaseAgentAdapter):
                     patched += 1
         return patched
 
-    def _patch_llm(self, agent: Any, guard: Any) -> int:
+    def patchLLM(self, agent: Any, guard: Any) -> int:
         patched = 0
         seen: set[int] = set()
         for candidate in _iter_openai_llm_candidates(agent):

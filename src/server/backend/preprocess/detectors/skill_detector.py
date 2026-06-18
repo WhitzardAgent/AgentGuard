@@ -19,7 +19,7 @@ class SkillDetector(BaseDetector):
             name=name,
             risk_labels=[],
             policy_targets=["skill_run"],
-            suggested_checkers=[],
+            suggested_plugins=[],
             risk_level=risk,
             metadata={"category": category},
         )

@@ -98,7 +98,7 @@ test("agentguard auto-registers remote session with plugin config metadata", asy
     server_url: "http://server.test",
     agent_id: "agent-4",
     user_id: "user-4",
-    checker_config: {
+    plugin_config: {
       phases: {
         tool_before: { local: ["tool_invoke"], remote: [] },
       },
@@ -119,7 +119,7 @@ test("agentguard auto-registers remote session with plugin config metadata", asy
   assert.ok(String(body.context.metadata.client_config_url || "").endsWith("/v1/client/plugins/config"));
   assert.ok(String(body.context.metadata.client_plugin_list_url || "").endsWith("/v1/client/plugins/list"));
   assert.ok(String(body.context.metadata.client_health_url || "").endsWith("/v1/client/health"));
-  assert.deepEqual(body.context.metadata.client_checker_config, {
+  assert.deepEqual(body.context.metadata.client_plugin_config, {
     phases: {
       tool_before: { local: ["tool_invoke"], remote: [] },
     },
@@ -175,16 +175,16 @@ test("agentguard local plugin updates resync session without overwriting remote 
     server_url: "http://server.test",
     agent_id: "agent-5",
     user_id: "user-5",
-    checker_config: {
+    plugin_config: {
       phases: {
-        tool_before: { local: ["tool_invoke"], remote: ["rule_based_check"] },
+        tool_before: { local: ["tool_invoke"], remote: ["rule_based_plugin"] },
       },
     },
   });
 
   await new Promise((resolve) => setImmediate(resolve));
   await guard.ensureRemoteSessionRegistered();
-  await guard.update_checker_config({
+  await guard.update_plugin_config({
     phases: {
       tool_after: { local: ["tool_result"], remote: [] },
     },
@@ -194,16 +194,153 @@ test("agentguard local plugin updates resync session without overwriting remote 
   const registerCalls = calls.filter((call) => call.url.endsWith("/v1/server/session/register"));
   assert.equal(registerCalls.length, 2);
   const body = JSON.parse(registerCalls[1].options.body);
-  assert.deepEqual(body.context.metadata.client_checker_config, {
+  assert.deepEqual(body.context.metadata.client_plugin_config, {
     phases: {
       tool_after: { local: ["tool_result"], remote: [] },
     },
   });
-  assert.deepEqual(body.context.metadata.remote_checker_config, {
+  assert.deepEqual(body.context.metadata.remote_plugin_config, {
     phases: {
-      tool_before: { local: ["tool_invoke"], remote: ["rule_based_check"] },
+      tool_before: { local: ["tool_invoke"], remote: ["rule_based_plugin"] },
     },
   });
 
+  await guard.close();
+});
+
+test("adapters aggregate export skips missing optional agent adapters", () => {
+  const adapters = require("./adapters");
+
+  assert.ok(adapters);
+  assert.ok(adapters.agent);
+  assert.ok(adapters.llm);
+  assert.equal(typeof adapters.agent.LangChainAgentAdapter, "function");
+  assert.equal(typeof adapters.agent.OpenAIAgentsAdapter, "function");
+});
+
+test("js base agent adapter attach delegates to patch hooks", () => {
+  const { BaseAgentAdapter } = require("./adapters/agent/base");
+
+  class DemoAdapter extends BaseAgentAdapter {
+    can_wrap() {
+      return true;
+    }
+
+    patchtool() {
+      return 2;
+    }
+
+    patchLLM() {
+      return 3;
+    }
+
+    generate() {
+      return null;
+    }
+  }
+
+  const adapter = new DemoAdapter();
+  assert.deepEqual(adapter.attach({}, {}), { tools: 2, llm: 3 });
+  assert.equal(adapter.patchLLM({}, {}), 3);
+});
+
+test("js langchain adapter patches direct agent.model invoke", async () => {
+  const { AgentGuard } = require("./guard");
+
+  class Tool {
+    constructor() {
+      this.name = "lookup";
+      this.func = (value) => String(value).toUpperCase();
+    }
+  }
+
+  class Model {
+    async invoke(prompt) {
+      return `reply:${prompt}`;
+    }
+  }
+
+  class Agent {
+    constructor() {
+      this.tools_by_name = { lookup: new Tool() };
+      this.model = new Model();
+    }
+  }
+
+  const guard = new AgentGuard("js-langchain-direct-model", { sandbox: "noop" });
+  const agent = new Agent();
+  const patched = guard.attach_langchain(agent);
+
+  assert.equal(patched.tools, 1);
+  assert.equal(patched.llm, 1);
+  assert.equal(await agent.model.invoke("hello"), "reply:hello");
+  await guard.close();
+});
+
+test("js langchain adapter patches classic agent.llm_chain.llm", async () => {
+  const { AgentGuard } = require("./guard");
+
+  class Tool {
+    constructor() {
+      this.name = "lookup";
+      this.func = (value) => String(value).toUpperCase();
+    }
+  }
+
+  class Model {
+    async invoke(prompt) {
+      return `reply:${prompt}`;
+    }
+  }
+
+  class AgentExecutor {
+    constructor() {
+      this.tools_by_name = { lookup: new Tool() };
+      this.agent = { llm_chain: { llm: new Model() } };
+    }
+  }
+
+  const guard = new AgentGuard("js-langchain-llm-chain", { sandbox: "noop" });
+  const agent = new AgentExecutor();
+  const patched = guard.attach_langchain(agent);
+
+  assert.equal(patched.tools, 1);
+  assert.equal(patched.llm, 1);
+  assert.equal(await agent.agent.llm_chain.llm.invoke("hello"), "reply:hello");
+  await guard.close();
+});
+
+test("js autogen adapter patches handoffs and create_stream", async () => {
+  const { AgentGuard } = require("./guard");
+
+  class Handoff {
+    constructor() {
+      this.name = "delegate";
+      this._func = async ({ task }) => `handoff:${task}`;
+    }
+  }
+
+  class ModelClient {
+    async create_stream(prompt) {
+      return { content: `stream:${prompt}` };
+    }
+  }
+
+  class Agent {
+    constructor() {
+      this._tools = [];
+      this._handoffs = [new Handoff()];
+      this._model_client = new ModelClient();
+    }
+  }
+
+  const guard = new AgentGuard("js-autogen-handoffs", { sandbox: "noop" });
+  const agent = new Agent();
+  const patched = guard.attach_autogen(agent);
+
+  assert.equal(patched.tools, 1);
+  assert.equal(patched.llm, 1);
+  assert.equal(await agent._handoffs[0]._func({ task: "review" }), "handoff:review");
+  assert.deepEqual(await agent._model_client.create_stream("hello"), { content: "stream:hello" });
   await guard.close();
 });

@@ -345,7 +345,7 @@ def test_tool_label_patch_proxy_forwards_request():
     assert json.loads(str(observed["body"]))["boundary"] == "internal"
 
 
-def test_checkers_config_proxy_forwards_payload_and_api_key():
+def test_plugins_config_proxy_forwards_payload_and_api_key():
     observed: dict[str, object] = {}
 
     class UpstreamHandler(BaseHTTPRequestHandler):
@@ -354,7 +354,7 @@ def test_checkers_config_proxy_forwards_payload_and_api_key():
             observed["api_key"] = self.headers.get("X-Api-Key")
             length = int(self.headers.get("Content-Length", "0"))
             observed["body"] = self.rfile.read(length).decode("utf-8")
-            body = json.dumps({"status": "ok", "loaded_checkers": ["tool_invoke"], "client_updates": []}).encode("utf-8")
+            body = json.dumps({"status": "ok", "loaded_plugins": ["tool_invoke"], "client_updates": []}).encode("utf-8")
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -372,16 +372,16 @@ def test_checkers_config_proxy_forwards_payload_and_api_key():
     with _ThreadedServer(UpstreamHandler) as upstream:
         with patched_proxy_target(upstream.url, api_key="test-secret"):
             with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
-                status, payload = _json_request("POST", preview.url, "/api/checkers/config", request_body)
+                status, payload = _json_request("POST", preview.url, "/api/plugins/config", request_body)
 
     assert status == 200
     assert payload["status"] == "ok"
-    assert observed["path"] == "/v1/backend/checkers/config"
+    assert observed["path"] == "/v1/backend/plugins/config"
     assert observed["api_key"] == "test-secret"
     assert json.loads(str(observed["body"])) == request_body
 
 
-def test_agent_checker_config_get_proxy_forwards_request():
+def test_agent_plugin_config_get_proxy_forwards_request():
     observed: dict[str, object] = {}
 
     class UpstreamHandler(BaseHTTPRequestHandler):
@@ -389,7 +389,7 @@ def test_agent_checker_config_get_proxy_forwards_request():
             observed["path"] = self.path
             body = json.dumps({
                 "agent_id": "agent-a",
-                "checker_config": {"phases": {}},
+                "plugin_config": {"phases": {}},
                 "config_source": "server_default",
             }).encode("utf-8")
             self.send_response(HTTPStatus.OK)
@@ -407,16 +407,16 @@ def test_agent_checker_config_get_proxy_forwards_request():
                 status, payload = _json_request(
                     "GET",
                     preview.url,
-                    "/api/agents/agent-a/checkers/config",
+                    "/api/agents/agent-a/plugins/config",
                 )
 
     assert status == 200
     assert payload["agent_id"] == "agent-a"
     assert payload["config_source"] == "server_default"
-    assert observed["path"] == "/v1/backend/agents/agent-a/checkers/config"
+    assert observed["path"] == "/v1/backend/agents/agent-a/plugins/config"
 
 
-def test_agent_checker_config_post_proxy_forwards_payload_and_api_key():
+def test_agent_plugin_config_post_proxy_forwards_payload_and_api_key():
     observed: dict[str, object] = {}
 
     class UpstreamHandler(BaseHTTPRequestHandler):
@@ -425,7 +425,7 @@ def test_agent_checker_config_post_proxy_forwards_payload_and_api_key():
             observed["api_key"] = self.headers.get("X-Api-Key")
             length = int(self.headers.get("Content-Length", "0"))
             observed["body"] = self.rfile.read(length).decode("utf-8")
-            body = json.dumps({"status": "ok", "loaded_checkers": [], "client_updates": []}).encode("utf-8")
+            body = json.dumps({"status": "ok", "loaded_plugins": [], "client_updates": []}).encode("utf-8")
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -446,18 +446,18 @@ def test_agent_checker_config_post_proxy_forwards_payload_and_api_key():
                 status, payload = _json_request(
                     "POST",
                     preview.url,
-                    "/api/agents/agent-a/checkers/config",
+                    "/api/agents/agent-a/plugins/config",
                     request_body,
                 )
 
     assert status == 200
     assert payload["status"] == "ok"
-    assert observed["path"] == "/v1/backend/agents/agent-a/checkers/config"
+    assert observed["path"] == "/v1/backend/agents/agent-a/plugins/config"
     assert observed["api_key"] == "test-secret"
     assert json.loads(str(observed["body"])) == request_body
 
 
-def test_agent_checker_available_get_proxy_forwards_request():
+def test_agent_plugin_available_get_proxy_forwards_request():
     observed: dict[str, object] = {}
 
     class UpstreamHandler(BaseHTTPRequestHandler):
@@ -465,8 +465,8 @@ def test_agent_checker_available_get_proxy_forwards_request():
             observed["path"] = self.path
             body = json.dumps({
                 "agent_id": "agent-a",
-                "local_checkers": [{"name": "tool_invoke", "description": "", "event_types": ["tool_invoke"], "phases": ["tool_before"]}],
-                "remote_checkers": [{"name": "rule_based_check", "description": "", "event_types": [], "phases": ["tool_before"]}],
+                "local_plugins": [{"name": "tool_invoke", "description": "", "event_types": ["tool_invoke"], "phases": ["tool_before"]}],
+                "remote_plugins": [{"name": "rule_based_plugin", "description": "", "event_types": [], "phases": ["tool_before"]}],
             }).encode("utf-8")
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -483,12 +483,12 @@ def test_agent_checker_available_get_proxy_forwards_request():
                 status, payload = _json_request(
                     "GET",
                     preview.url,
-                    "/api/agents/agent-a/checkers/available",
+                    "/api/agents/agent-a/plugins/available",
                 )
 
     assert status == 200
     assert payload["agent_id"] == "agent-a"
-    assert observed["path"] == "/v1/backend/agents/agent-a/checkers/available"
+    assert observed["path"] == "/v1/backend/agents/agent-a/plugins/available"
 
 
 def test_runtime_page_renders_shared_sidebar_and_active_nav():
@@ -499,7 +499,7 @@ def test_runtime_page_renders_shared_sidebar_and_active_nav():
     assert 'id="app-sidebar"' in body
     assert 'href="/">Home</a>' in body
     assert 'href="/agents.html">Agents</a>' in body
-    assert 'href="/checkers.html"' in body
+    assert 'href="/plugins.html"' in body
     assert 'href="/user.html">User</a>' in body
     assert 'href="/runtime.html"' in body
     assert "active" in body
@@ -517,7 +517,7 @@ def test_home_page_renders_intro_and_home_active_nav():
     assert "keeps your agent workflow in control." in body
     assert "DashBoard" in body
     assert 'href="/agents.html"' in body
-    assert 'href="/checkers.html"' in body
+    assert 'href="/plugins.html"' in body
     assert '<a class="sidebar-nav-item active" href="/">Home</a>' in body
     assert 'href="/labels.html"' in body
     assert 'data-rule-based-required="true"' in body
@@ -533,13 +533,13 @@ def test_agents_page_renders_agent_selection_workspace():
     assert '<a class="sidebar-nav-item active" href="/agents.html">Agents</a>' in body
 
 
-def test_checkers_page_renders_checker_selection_workspace():
+def test_plugins_page_renders_plugin_selection_workspace():
     with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
-        status, body = _text_request("GET", preview.url, "/checkers.html")
+        status, body = _text_request("GET", preview.url, "/plugins.html")
 
     assert status == 200
     assert "Available Plugins" in body
-    assert 'href="/checkers.html"' in body
+    assert 'href="/plugins.html"' in body
     assert 'Plugins</a>' in body
 
 

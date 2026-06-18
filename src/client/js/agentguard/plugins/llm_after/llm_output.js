@@ -4,7 +4,7 @@ const { BasePlugin, CheckResult } = require("../base");
 const { EventType } = require("../../schemas/events");
 const { matchSignals } = require("../common/patterns");
 
-class LLMOutputChecker extends BasePlugin {
+class LLMOutputPlugin extends BasePlugin {
   constructor() {
     super();
     this.event_types = [EventType.LLM_OUTPUT];
@@ -17,5 +17,5 @@ class LLMOutputChecker extends BasePlugin {
 }
 
 module.exports = {
-  LLMOutputChecker,
+  LLMOutputPlugin,
 };

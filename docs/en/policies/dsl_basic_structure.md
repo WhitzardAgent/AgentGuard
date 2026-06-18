@@ -1,6 +1,6 @@
-# rule_based_check Policy DSL Structure
+# rule_based_plugin Policy DSL Structure
 
-This page is for advanced users who need to manually write policies for the built-in `rule_based_check` server plugin. `rule_based_check` consumes AgentGuard's access-control DSL, evaluates the current runtime event plus recent session context, and uses configured rules to identify and intercept security risks in tool calls.
+This page is for advanced users who need to manually write policies for the built-in `rule_based_plugin` server plugin. `rule_based_plugin` consumes AgentGuard's access-control DSL, evaluates the current runtime event plus recent session context, and uses configured rules to identify and intercept security risks in tool calls.
 
 Enable the plugin in `config/plugins.json` before relying on these rules at runtime:
 
@@ -11,7 +11,7 @@ Enable the plugin in `config/plugins.json` before relying on these rules at runt
     "llm_after": {"local": [], "remote": []},
     "tool_before": {
       "local": [],
-      "remote": [{"name": "rule_based_check", "env": {}}]
+      "remote": [{"name": "rule_based_plugin", "env": {}}]
     },
     "tool_after": {"local": [], "remote": []}
   }

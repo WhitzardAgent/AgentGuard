@@ -16,7 +16,7 @@ AgentGuard 不只检查单次工具调用，而是可以贯穿智能体运行过
 
 ### 模块化安全策略
 
-AgentGuard 通过统一的 plugin 架构适配规则型和模型型安全策略。当前版本内置了一个名为 `rule_based_check` 的 server plugin，支持通过可配置的 DSL 规则识别并拦截工具调用中的安全风险，避免高风险工具调用真正执行。
+AgentGuard 通过统一的 plugin 架构适配规则型和模型型安全策略。当前版本内置了一个名为 `rule_based_plugin` 的 server plugin，支持通过可配置的 DSL 规则识别并拦截工具调用中的安全风险，避免高风险工具调用真正执行。
 
 ### 单工具与跨工具链路保护
 

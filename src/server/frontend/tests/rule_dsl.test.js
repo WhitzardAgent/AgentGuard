@@ -302,30 +302,30 @@ test("serializeRule preserves info severity when selected from the UI enum", () 
   assert.match(dsl, /Severity: info/);
 });
 
-test("serializeRule rejects ON-only rules because TRACE is now required", () => {
-  assert.throws(
-    () => serializeRule({
-      name: "deny_shell_call",
-      onClause: "tool_call(shell.exec)",
-      action: "DENY",
-      conditionItems: [
-        {
-          connector: "",
-          openParen: "",
-          closeParen: "",
-          sourceType: "context",
-          contextPrefix: "tool",
-          contextField: "tool.syntax",
-          contextFieldName: "",
-          contextPath: "tool.cmd",
-          syntaxField: "cmd",
-          operator: "==",
-          value: "rm -rf /",
-        },
-      ],
-    }),
-    /TRACE \/ PATH is required|PATH is required/,
-  );
+test("serializeRule accepts ON-only rules when a formal ON clause is present", () => {
+  const dsl = serializeRule({
+    name: "deny_shell_call",
+    onClause: "tool_call(shell.exec)",
+    action: "DENY",
+    conditionItems: [
+      {
+        connector: "",
+        openParen: "",
+        closeParen: "",
+        sourceType: "context",
+        contextPrefix: "tool",
+        contextField: "tool.syntax",
+        contextFieldName: "",
+        contextPath: "tool.cmd",
+        syntaxField: "cmd",
+        operator: "==",
+        value: "rm -rf /",
+      },
+    ],
+  });
+
+  assert.match(dsl, /^ON: tool_call\(shell\.exec\)$/m);
+  assert.doesNotMatch(dsl, /^TRACE:/m);
 });
 
 test("serializeRule preserves single-step trace paths for backend v3 compatibility", () => {
@@ -354,7 +354,7 @@ test("serializeRule preserves single-step trace paths for backend v3 compatibili
 test("isValidOnClause accepts supported tool_call forms", () => {
   assert.equal(isValidOnClause("tool_call(shell.exec)"), true);
   assert.equal(isValidOnClause("tool_call.requested"), true);
-  assert.equal(isValidOnClause("tool_call.attempt"), true);
+  assert.equal(isValidOnClause("tool_call.completed"), true);
   assert.equal(isValidOnClause("tool_call.failed(http.post)"), true);
   assert.equal(isValidOnClause("shell.exec"), false);
 });

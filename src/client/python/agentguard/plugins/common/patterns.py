@@ -1,4 +1,4 @@
-"""Deterministic detection helpers shared by checkers."""
+"""Deterministic detection helpers shared by plugins."""
 from __future__ import annotations
 
 import re

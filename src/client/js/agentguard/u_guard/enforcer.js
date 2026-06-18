@@ -41,19 +41,19 @@ class UGuardEnforcer {
     const traceWindow = this.trace_window_provider ? this.trace_window_provider() : null;
     if (check.is_final && check.decision_candidate) {
       const decision = check.decision_candidate;
-      decision.metadata.route = decision.metadata.route || "local_checker";
+      decision.metadata.route = decision.metadata.route || "local_plugin";
       this.sync_buffer.add_local_decision({
         event,
         context,
         check,
         decision,
-        route: "local_checker",
+        route: "local_plugin",
         extensions: extensions || {},
       });
       return new EnforcementResult({
         decision,
         event,
-        route: "local_checker",
+        route: "local_plugin",
         check,
         extensions: extensions || {},
       });

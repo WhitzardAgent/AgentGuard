@@ -12,7 +12,7 @@
       "local": [],
       "remote": [
         {
-          "name": "rule_based_check",
+          "name": "rule_based_plugin",
           "env": {}
         }
       ]

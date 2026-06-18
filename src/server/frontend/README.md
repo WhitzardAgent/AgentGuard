@@ -21,12 +21,12 @@ http://127.0.0.1:38080
 ```
 
 This proxy layer includes the existing agent/rule/runtime routes plus the
-checker-config management route used by the frontend:
+plugin-config management routes used by the frontend:
 
-- `POST /api/checkers/config`
-- `GET /api/agents/{agent_id}/checkers/config`
-- `POST /api/agents/{agent_id}/checkers/config`
-- `GET /api/agents/{agent_id}/checkers/available`
+- `POST /api/plugins/config`
+- `GET /api/agents/{agent_id}/plugins/config`
+- `POST /api/agents/{agent_id}/plugins/config`
+- `GET /api/agents/{agent_id}/plugins/available`
 
 You can point the preview at another upstream API with:
 

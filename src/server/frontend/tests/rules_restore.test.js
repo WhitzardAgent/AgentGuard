@@ -670,4 +670,6 @@ test("buildRuleListSource keeps ON before TRACE in preview output", () => {
 test("normalizeEntryModeValue keeps legacy compatibility inference only", () => {
   assert.equal(normalizeEntryModeValue({ path: "A->B", onClause: "tool_call(shell.exec)" }), "trace");
   assert.equal(normalizeEntryModeValue({ onClause: "tool_call(shell.exec)" }), "on");
+  assert.equal(normalizeEntryModeValue({ entryMode: "on", path: "A->B", onClause: "tool_call(shell.exec)" }), "on");
+  assert.equal(normalizeEntryModeValue({ entryMode: "trace", onClause: "tool_call(shell.exec)" }), "trace");
 });

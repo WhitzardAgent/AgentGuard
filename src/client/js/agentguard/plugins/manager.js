@@ -3,10 +3,10 @@
 const fs = require("fs");
 const { CheckResult, BasePlugin } = require("./base");
 const { getPluginClass, discoverPlugins } = require("./registry");
-const { LLMInputChecker } = require("./llm_before/llm_input");
-const { LLMOutputChecker } = require("./llm_after/llm_output");
-const { ToolInvokeChecker } = require("./tool_before/tool_invoke");
-const { ToolResultChecker } = require("./tool_after/tool_result");
+const { LLMInputPlugin } = require("./llm_before/llm_input");
+const { LLMOutputPlugin } = require("./llm_after/llm_output");
+const { ToolInvokePlugin } = require("./tool_before/tool_invoke");
+const { ToolResultPlugin } = require("./tool_after/tool_result");
 
 const PHASE_ORDER = ["llm_before", "llm_after", "tool_before", "tool_after", "global"];
 const EVENT_PHASE = {
@@ -16,10 +16,10 @@ const EVENT_PHASE = {
   tool_result: "tool_after",
 };
 const BUILTIN_PLUGINS = {
-  llm_input: LLMInputChecker,
-  llm_output: LLMOutputChecker,
-  tool_invoke: ToolInvokeChecker,
-  tool_result: ToolResultChecker,
+  llm_input: LLMInputPlugin,
+  llm_output: LLMOutputPlugin,
+  tool_invoke: ToolInvokePlugin,
+  tool_result: ToolResultPlugin,
 };
 
 function defaultPlugins() {
@@ -93,7 +93,7 @@ function instantiatePlugin(spec) {
     return buildPlugin(PluginClass);
   }
   if (spec && typeof spec === "object") {
-    const target = spec.class || spec.plugin || spec.checker || spec.name;
+    const target = spec.class || spec.plugin || spec.name;
     const kwargs = pluginKwargs(spec);
     const env = pluginEnv(spec);
     const PluginClass = typeof target === "function" ? target : BUILTIN_PLUGINS[target] || getPluginClass(target);
@@ -106,7 +106,7 @@ function instantiatePlugin(spec) {
 }
 
 function pluginKwargs(spec) {
-  const reserved = new Set(["class", "plugin", "checker", "name", "kwargs", "env"]);
+  const reserved = new Set(["class", "plugin", "name", "kwargs", "env"]);
   const kwargs = Object.fromEntries(Object.entries(spec).filter(([key]) => !reserved.has(key)));
   if (spec.kwargs != null && (typeof spec.kwargs !== "object" || Array.isArray(spec.kwargs))) {
     throw new Error(`plugin kwargs config must be an object: ${JSON.stringify(spec)}`);

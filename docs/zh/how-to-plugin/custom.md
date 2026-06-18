@@ -1,62 +1,111 @@
 # 自定义框架
 
-我们后续会积极适配主流的智能体开发框架，提供可直接使用的 Adapter。但是若你使用的智能体不是用主流智能体框架开发的，或是开发框架尚未得到我们的适配，下面将给你一份操作指南，指导你如何自己编写定制化的 Adapter。
+如果你的框架还没有内置的 AgentGuard adapter，推荐按照统一的 adapter contract 来实现自定义接入。
 
-## 第 1 步：继承 `BaseAdapter` 并实现 `install` 方法
-首先，你需要在 `agentguard/sdk/adapters/` 目录下创建一个 `py` 文件，在该文件中创建一个继承 `BaseAdapter` 的类，这里我们以 `MyAdapter` 为例。
+## 建议先阅读
 
-我们要在 `MyAdapter` 类中实现 `install` 方法。
+先看这份统一约定文档：
+
+- [Agent Adapter 统一约定](adapter_contract.md)
+
+这份文档是 Python 和 JavaScript adapter 的共同规范来源。
+
+## 最小接入步骤
+
+1. 继承 `BaseAgentAdapter`
+2. 实现 `can_wrap(...)`
+3. 实现 `patchtool(...)`
+4. 实现 `patchLLM(...)`
+5. 实现 `generate(...)` 作为 best-effort 兜底入口
+6. 调用 `attach(...)` 对目标 agent 做原地 patch
+
+## Python 示例
 
 ```python
-from agentguard.sdk.adapters.base import BaseAdapter
+from typing import Any
 
-class MyAdapter(BaseAdapter):
+from agentguard.adapters.agent.base import BaseAgentAdapter
+from agentguard.schemas.context import RuntimeContext
 
-    def install(self, agent):
+
+class MyAgentAdapter(BaseAgentAdapter):
+    name = "myframework"
+
+    def can_wrap(self, agent: Any) -> bool:
+        return hasattr(agent, "tools") and hasattr(agent, "model")
+
+    def patchtool(self, agent: Any, guard: Any) -> int:
+        patched = 0
+        tools = getattr(agent, "tools", None)
+        if isinstance(tools, list):
+            for tool in tools:
+                ...
+                patched += 1
+        return patched
+
+    def patchLLM(self, agent: Any, guard: Any) -> int:
+        model = getattr(agent, "model", None)
+        if model is None:
+            return 0
         ...
+        return 1
+
+    def generate(self, agent: Any, messages: list[dict[str, Any]], context: RuntimeContext) -> Any:
+        return agent.invoke(messages)
+
+
+adapter = MyAgentAdapter()
+patched = adapter.attach(agent, guard)
+print(patched)
 ```
 
-`install()` 的输入参数是一个智能体实例，它依赖于你使用的智能体本身的实现。具体选择哪种智能体实例，由你自己决定，但一个基本原则是，你需要有条件从该实例中获取到智能体的所有工具的元数据，即工具的名称以及工具的函数实现，工具的函数实现中一般会包含参数的签名。
+## JavaScript 示例
 
-## 第 2 步：从智能体实例中获取工具的元数据
-我们无法具体说明如何从智能体实例中获取工具的元数据，因为这依赖于你使用的智能体本身的实现。你可以参考我们对 LangChain, AutoGen 和 OpenAI Agents SDK 的处理：
+```js
+const { BaseAgentAdapter } = require("./adapters/agent/base");
 
-* `agentguard/sdk/adapters/langchain.py`
-* `agentguard/sdk/adapters/autogen.py`
-* `agentguard/sdk/adapters/openai_agents.py`
+class MyAgentAdapter extends BaseAgentAdapter {
+  constructor() {
+    super();
+    this.name = "myframework";
+  }
 
-## 第 3 步：使用 `wrap_tool` 绑定工具
-当你获得了工具名和对应的工具函数实现后，你可以使用 `wrap_tool(self.guard, tool_name, tool_function)` 方法将 AgentGuard 客户端绑定到工具中。
+  can_wrap(agent) {
+    return Boolean(agent && agent.tools && agent.model);
+  }
 
-代码示例如下：
-
-```python
-from agentguard.sdk.adapters.base import BaseAdapter
-from agentguard.sdk.wrappers import wrap_tool
-
-class MyAdapter(BaseAdapter):
-
-    def install(self, agent):
+  patchtool(agent, guard) {
+    let patched = 0;
+    const tools = agent && agent.tools;
+    if (Array.isArray(tools)) {
+      for (const tool of tools) {
         ...
-        # Assume you have obtained the
+        patched += 1;
+      }
+    }
+    return patched;
+  }
 
-        # tools_metadata = {
-        #   "<tool_name>": <tool_function>,
-        #   ...
-        # }
+  patchLLM(agent, guard) {
+    const model = agent && agent.model;
+    if (!model) {
+      return 0;
+    }
+    ...
+    return 1;
+  }
 
-        # from the agent instance.
-        for tool_name, tool_function in tools_metadata.items():
-            wrap_tool(self.guard, tool_name, tool_function)
+  async generate(agent, messages) {
+    return agent.invoke(messages);
+  }
+}
+
+const adapter = new MyAgentAdapter();
+const patched = adapter.attach(agent, guard);
+console.log(patched);
 ```
 
-## 第 4 步：在智能体中使用自定义的 Adapter
-你可以使用 `guard.attach_custom_agents()` 来调用自定义的 Adapter。
+## 说明
 
-```python
-agent = ...
-
-guard = Guard(...)
-guard.start(...)
-guard.attach_custom_agents(agent, MyAdapter)
-```
+- 新 adapter 只实现规范名字 `patchtool` 和 `patchLLM`。
+- 如果你希望提供像 `guard.attach_myframework(agent)` 这样的快捷 API，可以在 guard 层增加一个薄封装，内部直接调用 `new MyAgentAdapter().attach(agent, guard)`。

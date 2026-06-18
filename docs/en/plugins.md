@@ -1,26 +1,26 @@
 # AgentGuard Plugins
 
-AgentGuard supports plugins on both the client and the server. Both sides use the same normalized runtime schema, but they do not see the same input scope and they are not deployed to the same location. For implementation-level details, see `../../src/client/python/agentguard/plugins/README.md` and `../../src/server/backend/plugins/`.
+AgentGuard supports plugins on both the client and the server. Both sides use the same normalized runtime schema, but they do not see the same input scope and they are not deployed to the same location. For implementation-level details, see `../../src/client/python/agentguard/plugins/README.md` and `../../src/server/backend/runtime/plugins/`.
 
 ## Client vs. Server Plugins
 
 - **Client plugins** run locally inside the agent process. They receive only the current `event: RuntimeEvent` and `context: RuntimeContext`, so they are best for lightweight low-latency filtering before a remote decision.
 - **Server plugins** run on the control server. They receive the current `event`, the current `context`, and `trajectory_window: list[RuntimeEvent]`, so they are best for cross-step detection, centralized policy evaluation, and auditing.
 - Client plugin files must be placed under `../../src/client/python/agentguard/plugins/<phase>/`.
-- Server plugin files must be placed under `../../src/server/backend/plugins/`.
+- Server plugin files must be placed under `../../src/server/backend/runtime/plugins/`.
 
-## Built-in `rule_based_check` Plugin
+## Built-in `rule_based_plugin` Plugin
 
-AgentGuard includes a built-in server plugin named `rule_based_check`. It is designed for rule-configured tool-call protection: users write or generate DSL policies, and the plugin evaluates those rules against the current tool invocation and recent session trajectory. When a rule matches, it can identify the security risk and return a decision such as `DENY`, `HUMAN_CHECK`, or `LLM_CHECK` before the tool call executes.
+AgentGuard includes a built-in server plugin named `rule_based_plugin`. It is designed for rule-configured tool-call protection: users write or generate DSL policies, and the plugin evaluates those rules against the current tool invocation and recent session trajectory. When a rule matches, it can identify the security risk and return a decision such as `DENY`, `HUMAN_CHECK`, or `LLM_CHECK` before the tool call executes.
 
-In the default quick-start flow, `rule_based_check` is configured as a remote plugin in the `tool_before` phase:
+In the default quick-start flow, `rule_based_plugin` is configured as a remote plugin in the `tool_before` phase:
 
 ```json
 {
   "phases": {
     "tool_before": {
       "local": [],
-      "remote": [{"name": "rule_based_check", "env": {}}]
+      "remote": [{"name": "rule_based_plugin", "env": {}}]
     }
   }
 }
@@ -156,14 +156,14 @@ class MyClientPlugin(BasePlugin):
 Server plugins must be placed under the server plugin directory:
 
 ```text
-../../src/server/backend/plugins/
+../../src/server/backend/runtime/plugins/
 ```
 
 Example:
 
 ```python
-from backend.plugins.base import BasePlugin, CheckResult
-from backend.plugins.registry import register
+from backend.runtime.plugins.base import BasePlugin, CheckResult
+from backend.runtime.plugins.registry import register
 from shared.schemas.context import RuntimeContext
 from shared.schemas.events import EventType, RuntimeEvent
 
@@ -187,11 +187,11 @@ class MyServerPlugin(BasePlugin):
         return CheckResult.empty()
 ```
 
-The server-side plugin directory is `../../src/server/backend/plugins/`.
+The server-side plugin directory is `../../src/server/backend/runtime/plugins/`.
 
 ### Plugin configuration
 
-After adding the plugin classes, reference them with plugin spec objects in plugin config. The `name` field is the registered plugin name, and `env` is an optional environment mapping passed to the plugin:
+After adding the plugin classes, reference them with plugin spec objects in plugin config. The `name` field is the registered plugin name. For client-side `local` plugins, `env`, `kwargs`, and top-level constructor keys are supported and passed into the plugin instance. For server-side `remote` plugins, the current runtime resolves the plugin by `name` or `class` and does not inject `env`/`kwargs` into the constructor.
 
 ```json
 {
@@ -205,7 +205,7 @@ After adding the plugin classes, reference them with plugin spec objects in plug
       ],
       "remote": [
         {
-          "name": "rule_based_check",
+          "name": "rule_based_plugin",
           "env": {}
         },
         {
@@ -220,5 +220,6 @@ After adding the plugin classes, reference them with plugin spec objects in plug
 
 - `local` is loaded by the client plugin manager.
 - `remote` is loaded by the server plugin manager.
-- Each list item can use `name`, optional `env`, and optional constructor settings through `kwargs` or top-level keys.
+- `local` plugin specs can use `name`, optional `env`, and optional constructor settings through `kwargs` or top-level keys.
+- `remote` plugin specs currently use `name` (or `class`) for resolution; extra fields may remain in config storage but are not injected into server plugin constructors.
 - Even if both plugin specs appear in the same config file, the implementation files must still be deployed to the correct client or server folder.

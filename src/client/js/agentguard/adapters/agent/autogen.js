@@ -35,20 +35,6 @@ class AutogenAgentAdapter extends BaseAgentAdapter {
     throw new AdapterError("autogen agent exposes no generate_reply");
   }
 
-  attach(agent, guard, { wrap_tools = true, wrap_llm = true } = {}) {
-    const patched = { tools: 0, llm: 0 };
-    if (wrap_tools) {
-      patched.tools += this.patchTools(agent, guard);
-    }
-    if (wrap_llm) {
-      patched.llm += this.patchLLM(agent, guard);
-    }
-    return {
-      tools: patched.tools,
-      llm: patched.llm,
-    };
-  }
-
   patchLLM(agent, guard) {
     const modelClient = agent && agent._model_client;
     if (!modelClient) {
@@ -67,16 +53,20 @@ class AutogenAgentAdapter extends BaseAgentAdapter {
     } else if (typeName === "LlamaCppChatCompletionClient") {
       methods = ["llm.create_chat_completion"];
     } else {
-      methods = ["create", "complete", "completion", "generate", "invoke", "predict", "chat"];
+      methods = ["create", "create_stream", "complete", "completion", "generate", "invoke", "predict", "chat"];
     }
     return patchLLMMethods(guard, modelClient, { methods });
   }
 
-  patchTools(agent, guard) {
+  patchtool(agent, guard) {
     let patched = 0;
     const toolsList = agent && agent._tools;
     if (Array.isArray(toolsList)) {
       patched += this.patchToolsList(toolsList, guard);
+    }
+    const handoffs = agent && agent._handoffs;
+    if (Array.isArray(handoffs)) {
+      patched += this.patchToolsList(handoffs, guard);
     }
     const registry = agent && agent.function_map;
     if (registry && typeof registry === "object") {

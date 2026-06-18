@@ -16,9 +16,9 @@ from backend.runtime.manager import RuntimeManager
 @pytest.fixture()
 def server():
     manager = RuntimeManager(
-        checker_config={
+        plugin_config={
             "phases": {
-                "tool_before": {"local": [], "remote": ["tool_invoke", "rule_based_check"]}
+                "tool_before": {"local": [], "remote": ["tool_invoke", "rule_based_plugin"]}
             }
         }
     )
@@ -34,7 +34,7 @@ def test_e2e_exfiltration_denied_over_http(server):
         session_id="e2e",
         server_url=server,
         policy="enterprise_default",
-        checker_config={
+        plugin_config={
             "phases": {
                 "tool_after": {"local": ["tool_result"], "remote": []},
             }
@@ -95,7 +95,7 @@ def test_agentguard_close_unregisters_server_session():
         srv.shutdown()
 
 
-def test_backend_checker_config_update_changes_server_runtime():
+def test_backend_plugin_config_update_changes_server_runtime():
     manager = RuntimeManager()
     base_url, srv, _ = start_dev_server(manager=manager)
     try:
@@ -106,9 +106,9 @@ def test_backend_checker_config_update_changes_server_runtime():
                 }
             }
         }
-        res = _post_json(f"{base_url}/v1/backend/checkers/config", payload)
+        res = _post_json(f"{base_url}/v1/backend/plugins/config", payload)
         assert res["status"] == "ok"
-        assert res["loaded_checkers"] == ["llm_input"]
+        assert res["loaded_plugins"] == ["llm_input"]
 
         decision = manager.decide(
             {
@@ -126,12 +126,12 @@ def test_backend_checker_config_update_changes_server_runtime():
                 "local_signals": [],
             }
         )
-        assert "prompt_injection" in decision["checker_result"]["risk_signals"]
+        assert "prompt_injection" in decision["plugin_result"]["risk_signals"]
     finally:
         srv.shutdown()
 
 
-def test_backend_checker_config_update_pushes_to_client():
+def test_backend_plugin_config_update_pushes_to_client():
     manager = RuntimeManager()
     base_url, srv, _ = start_dev_server(manager=manager)
     guard = AgentGuard("client-config-update")
@@ -150,7 +150,7 @@ def test_backend_checker_config_update_pushes_to_client():
             },
             "client_config_urls": [client_url],
         }
-        res = _post_json(f"{base_url}/v1/backend/checkers/config", payload)
+        res = _post_json(f"{base_url}/v1/backend/plugins/config", payload)
         assert res["status"] == "ok"
         assert res["client_updates"][0]["status"] == "ok"
 
@@ -165,10 +165,10 @@ def test_backend_checker_config_update_pushes_to_client():
         srv.shutdown()
 
 
-def test_client_registration_sends_checker_config_to_server():
+def test_client_registration_sends_plugin_config_to_server():
     manager = RuntimeManager()
     base_url, srv, _ = start_dev_server(manager=manager)
-    checker_config = {
+    plugin_config = {
         "phases": {
             "llm_before": {"local": [], "remote": ["llm_input"]},
         }
@@ -178,13 +178,13 @@ def test_client_registration_sends_checker_config_to_server():
         user_id="registered-user",
         agent_id="registered-agent",
         server_url=base_url,
-        checker_config=checker_config,
+        plugin_config=plugin_config,
     )
     try:
         record = manager.session_pool.get("registered-config-session", agent_id="registered-agent", user_id="registered-user")
         assert record is not None
-        assert record["client_checker_config"] == checker_config
-        assert record["remote_checker_config"] == checker_config
+        assert record["client_plugin_config"] == plugin_config
+        assert record["remote_plugin_config"] == plugin_config
         assert str(record["client_config_url"]).endswith("/v1/client/plugins/config")
 
         result = guard.runtime.guard(
@@ -199,7 +199,7 @@ def test_client_registration_sends_checker_config_to_server():
         srv.shutdown()
 
 
-def test_backend_checker_config_update_by_principal_updates_server_and_client():
+def test_backend_plugin_config_update_by_principal_updates_server_and_client():
     manager = RuntimeManager()
     base_url, srv, _ = start_dev_server(manager=manager)
     guard = AgentGuard(
@@ -230,14 +230,14 @@ def test_backend_checker_config_update_by_principal_updates_server_and_client():
                 }
             ],
         }
-        res = _post_json(f"{base_url}/v1/backend/checkers/config", payload)
+        res = _post_json(f"{base_url}/v1/backend/plugins/config", payload)
         assert res["status"] == "ok"
         assert res["client_updates"][0]["status"] == "ok"
 
         record = manager.session_pool.get("principal-config-session", agent_id="principal-agent", user_id="principal-user")
         assert record is not None
-        assert record["remote_checker_config"] == server_config
-        assert record["client_checker_config"] == client_config
+        assert record["remote_plugin_config"] == server_config
+        assert record["client_plugin_config"] == client_config
 
         server_decision = manager.decide(
             {
@@ -259,7 +259,7 @@ def test_backend_checker_config_update_by_principal_updates_server_and_client():
                 "local_signals": [],
             }
         )
-        assert "prompt_injection" in server_decision["checker_result"]["risk_signals"]
+        assert "prompt_injection" in server_decision["plugin_result"]["risk_signals"]
 
         event = ev.llm_input(
             guard.context,
@@ -274,7 +274,7 @@ def test_backend_checker_config_update_by_principal_updates_server_and_client():
 
 def test_backend_session_pool_records_client_metadata_over_http():
     manager = RuntimeManager(
-        checker_config={
+        plugin_config={
             "phases": {
                 "llm_before": {"local": [], "remote": ["llm_input"]},
             }

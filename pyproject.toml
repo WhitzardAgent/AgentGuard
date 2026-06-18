@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentguard"
-version = "0.2.0"
+version = "0.3.0"
 description = "Runtime access control plane for agent tool-use (allow / deny / human_check / degrade)."
 readme = "README.md"
 requires-python = ">=3.11"

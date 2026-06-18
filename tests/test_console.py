@@ -17,9 +17,9 @@ _DENY_RULE = (
 def _console() -> ConsoleState:
     return ConsoleState(
         RuntimeManager(
-            checker_config={
+            plugin_config={
                 "phases": {
-                    "tool_before": {"local": [], "remote": ["tool_invoke", "rule_based_check"]}
+                    "tool_before": {"local": [], "remote": ["tool_invoke", "rule_based_plugin"]}
                 }
             }
         )
@@ -84,8 +84,7 @@ def test_observer_records_traffic_audit_and_tickets():
         "context": {"session_id": "s2", "agent_id": "agent-alpha"},
         "current_event": {
             "event_type": "tool_invoke",
-            "payload": {"tool_name": "http.fetch", "capabilities": ["network"]},
-            "risk_signals": ["prompt_injection"],
+            "payload": {"tool_name": "payments.charge", "capabilities": ["payment"]},
         },
         "trajectory_window": [],
     })

@@ -3,7 +3,7 @@
 const { BasePlugin, CheckResult } = require("../base");
 const { EventType } = require("../../schemas/events");
 
-class ToolResultChecker extends BasePlugin {
+class ToolResultPlugin extends BasePlugin {
   constructor() {
     super();
     this.event_types = [EventType.TOOL_RESULT];
@@ -20,5 +20,5 @@ class ToolResultChecker extends BasePlugin {
 }
 
 module.exports = {
-  ToolResultChecker,
+  ToolResultPlugin,
 };

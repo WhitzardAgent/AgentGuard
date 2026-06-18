@@ -11,8 +11,8 @@ For implementation-level plugin details, see these repository-relative reference
 
 - Client plugin reference: `../src/client/python/agentguard/plugins/README.md`
 - Client plugin reference (中文): `../src/client/python/agentguard/plugins/README_CN.md`
-- Server plugin reference: `../src/server/backend/plugins/`
-- Server plugin reference (中文): `../src/server/backend/plugins/`
+- Server plugin reference: `../src/server/backend/runtime/plugins/`
+- Server plugin reference (中文): `../src/server/backend/runtime/plugins/`
 
 ## Local debugging
 At the **root directory** of the project, run the following command to start the local documentation server:

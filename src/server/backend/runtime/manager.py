@@ -13,9 +13,9 @@ from shared.schemas.decisions import DecisionType, GuardDecision
 from shared.schemas.events import RuntimeEvent
 from backend.audit.audit_logger import AuditLogger
 from backend.audit import AuditTraceEntry
-from backend.runtime.checkers.base import CheckResult
-from backend.runtime.checkers import server_checker_manager
-from backend.runtime.checkers.config_utils import merge_checker_configs, normalize_checker_config
+from backend.runtime.plugins.base import CheckResult
+from backend.runtime.plugins import server_plugin_manager
+from backend.runtime.plugins.config_utils import merge_plugin_configs, normalize_plugin_config
 from backend.runtime.degrade.planner import DegradePlanner
 from backend.runtime.policy.engine import PolicyEngine
 from backend.runtime.storage import SessionPool, TraceStore, trace_entry_event_dict
@@ -24,23 +24,23 @@ from shared.utils.time import now_ts
 
 
 class RuntimeManager:
-    """Coordinates server-side checkers, policy, and degradation."""
+    """Coordinates server-side plugins, policy, and degradation."""
 
     def __init__(
         self,
         *,
         policy: PolicyEngine | None = None,
         audit: AuditLogger | None = None,
-        checker_config: str | dict[str, Any] | None = None,
+        plugin_config: str | dict[str, Any] | None = None,
         session_health_interval_s: float = 1800.0,
         session_health_max_age_s: float = 0.0,
         enable_session_health_monitor: bool = True,
     ) -> None:
         self.policy = policy or PolicyEngine()
-        self.checkers = server_checker_manager(checker_config)
-        self.checker_config = checker_config
-        self._agent_checker_configs: dict[str, dict[str, dict[str, Any] | None]] = {}
-        self._bind_rule_based_checkers()
+        self.plugins = server_plugin_manager(plugin_config)
+        self.plugin_config = plugin_config
+        self._agent_plugin_configs: dict[str, dict[str, dict[str, Any] | None]] = {}
+        self._bind_rule_based_plugins()
         self.degrade = DegradePlanner()
         self.audit = audit or AuditLogger()
         self.trace_store = TraceStore()
@@ -64,12 +64,12 @@ class RuntimeManager:
     def policy_version(self) -> str:
         return self.policy.version
 
-    def update_checker_config(self, checker_config: str | dict[str, Any] | None) -> list[str]:
-        """Replace server-side checker configuration for subsequent decisions."""
-        self.checkers.update_config(checker_config)
-        self.checker_config = checker_config
-        self._bind_rule_based_checkers()
-        return [checker.name for checker in getattr(self.checkers, "checkers", [])]
+    def update_plugin_config(self, plugin_config: str | dict[str, Any] | None) -> list[str]:
+        """Replace server-side plugin configuration for subsequent decisions."""
+        self.plugins.update_config(plugin_config)
+        self.plugin_config = plugin_config
+        self._bind_rule_based_plugins()
+        return [plugin.name for plugin in getattr(self.plugins, "plugins", [])]
 
     def register_client_session(
         self,
@@ -89,56 +89,81 @@ class RuntimeManager:
             enforce_key=enforce_key,
             event_dict=event_dict,
         )
-        applied = self._apply_agent_checker_config_to_session(record)
+        if self.plugin_config is None:
+            if (
+                isinstance(record.get("client_plugin_config"), dict)
+                and record.get("remote_plugin_config") is None
+            ):
+                updated = self.session_pool.set_remote_plugin_config(
+                    str(record.get("session_id") or "") or None,
+                    str(record.get("agent_id")) if record.get("agent_id") is not None else None,
+                    str(record.get("user_id")) if record.get("user_id") is not None else None,
+                    copy.deepcopy(record.get("client_plugin_config")),
+                )
+                if updated:
+                    record = updated
+        elif (
+            isinstance(record.get("client_plugin_config"), dict)
+            and record.get("remote_plugin_config") == record.get("client_plugin_config")
+        ):
+            updated = self.session_pool.set_remote_plugin_config(
+                str(record.get("session_id") or "") or None,
+                str(record.get("agent_id")) if record.get("agent_id") is not None else None,
+                str(record.get("user_id")) if record.get("user_id") is not None else None,
+                None,
+            )
+            if updated:
+                record = updated
+        applied = self._apply_agent_plugin_config_to_session(record)
         if push_config:
-            self._push_agent_checker_config_to_session(applied, timeout_s=timeout_s)
+            self._push_agent_plugin_config_to_session(applied, timeout_s=timeout_s)
         return applied
 
     def sessions_for_principal(self, principal: dict[str, Any]) -> list[dict[str, Any]]:
         return self.session_pool.find_by_principal(principal)
 
-    def set_agent_checker_config(
+    def set_agent_plugin_config(
         self,
         agent_id: str,
-        checker_config: dict[str, Any],
+        plugin_config: dict[str, Any],
         *,
         client_config: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         normalized_agent_id = str(agent_id or "").strip()
         if not normalized_agent_id:
             raise ValueError("agent_id is required")
-        normalized_remote = normalize_checker_config(checker_config)
-        normalized_client = normalize_checker_config(client_config or checker_config)
-        self._agent_checker_configs[normalized_agent_id] = {
+        normalized_remote = normalize_plugin_config(plugin_config)
+        normalized_client = normalize_plugin_config(client_config or plugin_config)
+        self._agent_plugin_configs[normalized_agent_id] = {
             "remote": normalized_remote,
             "client": normalized_client,
         }
-        return merge_checker_configs(normalized_remote, normalized_client) or {"phases": {}}
+        return merge_plugin_configs(normalized_remote, normalized_client) or {"phases": {}}
 
-    def get_agent_checker_config(
+    def get_agent_plugin_config(
         self,
         agent_id: str,
     ) -> dict[str, dict[str, Any] | None] | None:
         normalized_agent_id = str(agent_id or "").strip()
         if not normalized_agent_id:
             return None
-        current = self._agent_checker_configs.get(normalized_agent_id)
+        current = self._agent_plugin_configs.get(normalized_agent_id)
         if not current:
             return None
         remote_config = copy.deepcopy(current.get("remote"))
         client_config = copy.deepcopy(current.get("client"))
         return {
-            "remote_checker_config": remote_config,
-            "client_checker_config": client_config,
-            "checker_config": merge_checker_configs(remote_config, client_config),
+            "remote_plugin_config": remote_config,
+            "client_plugin_config": client_config,
+            "plugin_config": merge_plugin_configs(remote_config, client_config),
         }
 
-    def update_client_checker_config(
+    def update_client_plugin_config(
         self,
         principal: dict[str, Any],
-        checker_config: dict[str, Any],
+        plugin_config: dict[str, Any],
         *,
-        remote_checker_config: dict[str, Any] | None = None,
+        remote_plugin_config: dict[str, Any] | None = None,
         timeout_s: float = 2.0,
     ) -> list[AuditTraceEntry]:
         matches = self.session_pool.find_by_principal(principal)
@@ -147,15 +172,15 @@ class RuntimeManager:
             session_id = session.get("session_id")
             agent_id = session.get("agent_id")
             user_id = session.get("user_id")
-            config_copy = copy.deepcopy(checker_config)
-            remote_copy = copy.deepcopy(remote_checker_config if remote_checker_config is not None else checker_config)
-            self.session_pool.set_client_checker_config(
+            config_copy = copy.deepcopy(plugin_config)
+            remote_copy = copy.deepcopy(remote_plugin_config if remote_plugin_config is not None else plugin_config)
+            self.session_pool.set_client_plugin_config(
                 str(session_id) if session_id else None,
                 str(agent_id) if agent_id is not None else None,
                 str(user_id) if user_id is not None else None,
                 config_copy,
             )
-            self.session_pool.set_remote_checker_config(
+            self.session_pool.set_remote_plugin_config(
                 str(session_id) if session_id else None,
                 str(agent_id) if agent_id is not None else None,
                 str(user_id) if user_id is not None else None,
@@ -171,7 +196,7 @@ class RuntimeManager:
                     }
                 )
                 continue
-            pushed = _push_client_checker_config(
+            pushed = _push_client_plugin_config(
                 str(url),
                 config_copy,
                 timeout_s,
@@ -181,10 +206,10 @@ class RuntimeManager:
             updates.append(pushed)
         return updates
 
-    def update_agent_checker_config(
+    def update_agent_plugin_config(
         self,
         agent_id: str,
-        checker_config: dict[str, Any],
+        plugin_config: dict[str, Any],
         *,
         client_config: dict[str, Any] | None = None,
         timeout_s: float = 2.0,
@@ -192,15 +217,15 @@ class RuntimeManager:
         normalized_agent_id = str(agent_id or "").strip()
         if not normalized_agent_id:
             return []
-        self.set_agent_checker_config(
+        self.set_agent_plugin_config(
             normalized_agent_id,
-            checker_config,
+            plugin_config,
             client_config=client_config,
         )
-        return self.update_client_checker_config(
+        return self.update_client_plugin_config(
             {"agent_id": normalized_agent_id},
-            client_config or checker_config,
-            remote_checker_config=checker_config,
+            client_config or plugin_config,
+            remote_plugin_config=plugin_config,
             timeout_s=timeout_s,
         )
 
@@ -292,7 +317,7 @@ class RuntimeManager:
                 )
         return results
 
-    def _apply_agent_checker_config_to_session(
+    def _apply_agent_plugin_config_to_session(
         self,
         session: dict[str, Any] | None,
     ) -> dict[str, Any]:
@@ -300,32 +325,32 @@ class RuntimeManager:
         agent_id = str(current.get("agent_id") or "").strip()
         if not agent_id:
             return current
-        overrides = self.get_agent_checker_config(agent_id)
+        overrides = self.get_agent_plugin_config(agent_id)
         if not overrides:
             return current
         session_id = str(current.get("session_id") or "").strip() or None
         user_id = str(current.get("user_id")) if current.get("user_id") is not None else None
-        if session_id and overrides.get("client_checker_config") is not None:
-            updated = self.session_pool.set_client_checker_config(
+        if session_id and overrides.get("client_plugin_config") is not None:
+            updated = self.session_pool.set_client_plugin_config(
                 session_id,
                 agent_id,
                 user_id,
-                overrides.get("client_checker_config"),
+                overrides.get("client_plugin_config"),
             )
             if updated:
                 current = updated
-        if session_id and overrides.get("remote_checker_config") is not None:
-            updated = self.session_pool.set_remote_checker_config(
+        if session_id and overrides.get("remote_plugin_config") is not None:
+            updated = self.session_pool.set_remote_plugin_config(
                 session_id,
                 agent_id,
                 user_id,
-                overrides.get("remote_checker_config"),
+                overrides.get("remote_plugin_config"),
             )
             if updated:
                 current = updated
         return current
 
-    def _push_agent_checker_config_to_session(
+    def _push_agent_plugin_config_to_session(
         self,
         session: dict[str, Any] | None,
         *,
@@ -333,12 +358,12 @@ class RuntimeManager:
     ) -> dict[str, Any] | None:
         current = dict(session or {})
         url = current.get("client_config_url")
-        checker_config = current.get("client_checker_config")
-        if not url or not isinstance(checker_config, dict):
+        plugin_config = current.get("client_plugin_config")
+        if not url or not isinstance(plugin_config, dict):
             return None
-        return _push_client_checker_config(
+        return _push_client_plugin_config(
             str(url),
-            checker_config,
+            plugin_config,
             timeout_s,
             client_key=current.get("client_key"),
         )
@@ -385,25 +410,27 @@ class RuntimeManager:
             agent_id=context.agent_id,
             user_id=context.user_id,
         )
-        effective_checker_config = session_cfg.get("remote_checker_config") if session_cfg else None
-        agent_checker_config = self.get_agent_checker_config(context.agent_id or "")
-        if agent_checker_config and agent_checker_config.get("remote_checker_config") is not None:
-            effective_checker_config = agent_checker_config.get("remote_checker_config")
-        effective_checkers = self.checkers
-        if effective_checker_config is not None:
-            effective_checkers = server_checker_manager(effective_checker_config)
-            self._bind_rule_based_checkers_for(effective_checkers)
+        effective_plugin_config = session_cfg.get("remote_plugin_config") if session_cfg else None
+        agent_plugin_config = self.get_agent_plugin_config(context.agent_id or "")
+        if agent_plugin_config and agent_plugin_config.get("remote_plugin_config") is not None:
+            effective_plugin_config = agent_plugin_config.get("remote_plugin_config")
+        effective_plugins = self.plugins
+        if effective_plugin_config is not None:
+            effective_plugins = server_plugin_manager(effective_plugin_config)
+            self._bind_rule_based_plugins_for(effective_plugins)
+        else:
+            self._bind_rule_based_plugins_for(effective_plugins)
 
         for sig in request.get("local_signals") or []:
             event.add_signal(sig)
 
-        check = effective_checkers.run(
+        check = effective_plugins.run(
             event,
             context,
             trajectory_window=trace_window,
             stop_on_first_decision=True,
         )
-        decision = _decision_from_checker_result(check)
+        decision = _decision_from_plugin_result(check)
 
         # 2. Degrade plan if needed.
         if decision.decision_type == DecisionType.DEGRADE:
@@ -423,7 +450,14 @@ class RuntimeManager:
                 reason="guard_decide",
                 event=event,
                 decision=decision,
-                checker_result=_checker_result_dict(check),
+                plugin_result=_plugin_result_dict(check),
+                plugin_input={
+                    "event": event.to_dict(),
+                    "context": context.to_dict(),
+                    "trajectory_window": [item.to_dict() for item in trace_window],
+                },
+                route=str((decision.metadata or {}).get("route") or "server"),
+                timestamp=now_ts(),
             ),
             agent_id=context.agent_id or event.context.agent_id,
             user_id=context.user_id or event.context.user_id,
@@ -441,7 +475,7 @@ class RuntimeManager:
         return {
             "decision": decision.to_dict(),
             "risk_signals": risk_signals,
-            "checker_result": _checker_result_dict(check),
+            "plugin_result": _plugin_result_dict(check),
         }
 
     def get_trace_records(
@@ -530,20 +564,20 @@ class RuntimeManager:
         )
         return status != "unchanged"
 
-    def _bind_rule_based_checkers(self) -> None:
-        self._bind_rule_based_checkers_for(self.checkers)
+    def _bind_rule_based_plugins(self) -> None:
+        self._bind_rule_based_plugins_for(self.plugins)
 
-    def _bind_rule_based_checkers_for(self, checker_manager: Any) -> None:
+    def _bind_rule_based_plugins_for(self, plugin_manager: Any) -> None:
         try:
-            from backend.runtime.checkers.tool_before.rule_based_check import RuleBasedChecker
+            from backend.runtime.plugins.tool_before.rule_based_plugin import RuleBasedPlugin
         except Exception:
             return
-        for checker in getattr(checker_manager, "checkers", []):
-            if isinstance(checker, RuleBasedChecker):
-                checker.set_policy_store(self.policy.store)
+        for plugin in getattr(plugin_manager, "plugins", []):
+            if isinstance(plugin, RuleBasedPlugin):
+                plugin.attach_policy(self.policy)
 
 
-def _checker_result_dict(check: CheckResult) -> dict[str, Any]:
+def _plugin_result_dict(check: CheckResult) -> dict[str, Any]:
     return {
         "risk_signals": list(check.risk_signals),
         "is_final": check.is_final,
@@ -553,14 +587,14 @@ def _checker_result_dict(check: CheckResult) -> dict[str, Any]:
         "metadata": dict(check.metadata),
     }
 
-def _decision_from_checker_result(check: CheckResult) -> GuardDecision:
+def _decision_from_plugin_result(check: CheckResult) -> GuardDecision:
     if check.is_final and check.decision_candidate is not None:
         return check.decision_candidate
     return GuardDecision.allow(
-        "No server checker returned a final decision; default allow.",
-        policy_id="server:no_final_checker",
+        "No server plugin returned a final decision; default allow.",
+        policy_id="server:no_final_plugin",
         risk_signals=list(check.risk_signals),
-        metadata={"explanation": "no final checker decision"},
+        metadata={"explanation": "no final plugin decision"},
     )
 
 
@@ -594,7 +628,7 @@ def _check_client_health(
         return False, str(exc)
 
 
-def _push_client_checker_config(
+def _push_client_plugin_config(
     url: str,
     config: dict[str, Any],
     timeout_s: float,

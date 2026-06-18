@@ -58,7 +58,7 @@
         renderAgentList();
         showToast(`Now watching ${agentId}.`, "success");
         if (typeof window !== "undefined" && window.location) {
-          window.location.assign("/checkers.html");
+          window.location.assign("/plugins.html");
         }
       });
 

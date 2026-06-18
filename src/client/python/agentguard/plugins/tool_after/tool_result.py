@@ -1,4 +1,4 @@
-"""Checker for tool result events (observation injection)."""
+"""Plugin for tool result events (observation injection)."""
 from __future__ import annotations
 
 from agentguard.plugins.base import BasePlugin, CheckResult
@@ -12,7 +12,7 @@ from agentguard.schemas.events import EventType, RuntimeEvent
     name="tool_result",
     description="Detect secrets and prompt-injection content in tool results.",
 )
-class ToolResultChecker(BasePlugin):
+class ToolResultPlugin(BasePlugin):
     event_types = [EventType.TOOL_RESULT]
 
     def check(self, event: RuntimeEvent, context: RuntimeContext) -> CheckResult:

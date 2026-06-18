@@ -42,23 +42,7 @@ class LangChainAgentAdapter(BaseAgentAdapter):
                     raise AdapterError(f"langchain agent invoke failed: {exc}") from exc
         raise AdapterError("langchain agent exposes no invoke/run/predict")
 
-    def attach(
-        self,
-        agent: Any,
-        guard: Any,
-        *,
-        wrap_tools: bool = True,
-        wrap_llm: bool = True,
-    ) -> dict[str, Any]:
-        """Patch LangChain/LangGraph tool and model call sites in-place."""
-        patched = {"tools": 0, "llm": 0}
-        if wrap_tools:
-            patched["tools"] += self._patch_tool_containers(agent, guard)
-        if wrap_llm:
-            patched["llm"] += self._patch_llm(agent, guard)
-        return patched
-
-    def _patch_tool_containers(self, agent: Any, guard: Any) -> int:
+    def patchtool(self, agent: Any, guard: Any) -> int:
         patched = 0
         patched += _patch_container_tools(agent, guard)
         for _, tool_node in _iter_tool_nodes(agent):
@@ -79,7 +63,7 @@ class LangChainAgentAdapter(BaseAgentAdapter):
                 patched += _patch_container_tools(runnable, guard)
         return patched
 
-    def _patch_llm(self, agent: Any, guard: Any) -> int:
+    def patchLLM(self, agent: Any, guard: Any) -> int:
         return _patch_langchain_llm(agent, guard)
 
 
@@ -188,6 +172,16 @@ def _get_langchain_model_runnable(agent: Any) -> Any | None:
 
 
 def _get_langchain_base_model(agent: Any) -> Any | None:
+    direct_model = getattr(agent, "model", None)
+    if direct_model is not None:
+        return direct_model
+
+    inner_agent = getattr(agent, "agent", None)
+    llm_chain = getattr(inner_agent, "llm_chain", None)
+    chain_model = getattr(llm_chain, "llm", None)
+    if chain_model is not None:
+        return chain_model
+
     runnable = _get_langchain_model_runnable(agent)
     if runnable is None:
         return None

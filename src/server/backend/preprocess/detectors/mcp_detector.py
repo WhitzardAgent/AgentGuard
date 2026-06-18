@@ -23,7 +23,7 @@ class MCPDetector(BaseDetector):
             capabilities=caps,
             risk_labels=labels,
             policy_targets=["tool_invoke"],
-            suggested_checkers=["tool_invoke", "tool_result"],
+            suggested_plugins=["tool_invoke", "tool_result"],
             risk_level=risk,
             metadata={"remote": remote},
         )

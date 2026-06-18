@@ -11,7 +11,7 @@ from agentguard.schemas.events import RuntimeEvent
 
 
 class ClientSyncBuffer:
-    """Thread-safe buffer for local checker decisions not yet seen by the server."""
+    """Thread-safe buffer for local plugin decisions not yet seen by the server."""
 
     def __init__(self) -> None:
         self._entries: list[dict[str, Any]] = []
@@ -28,13 +28,13 @@ class ClientSyncBuffer:
         extensions: dict[str, Any] | None = None,
     ) -> None:
         entry = {
-            "source": "client_local_checker",
+            "source": "client_local_plugin",
             "route": route,
             "event": event.to_dict(),
             "context": context.to_dict(),
             "decision": decision.to_dict(),
-            "checker_result": _checker_result_dict(check),
-            "checker_input": {
+            "plugin_result": _plugin_result_dict(check),
+            "plugin_input": {
                 "event": event.to_dict(),
                 "context": context.to_dict(),
             },
@@ -102,7 +102,7 @@ class ClientSyncBuffer:
         }
 
 
-def _checker_result_dict(check: CheckResult) -> dict[str, Any]:
+def _plugin_result_dict(check: CheckResult) -> dict[str, Any]:
     return {
         "risk_signals": list(check.risk_signals),
         "is_final": check.is_final,

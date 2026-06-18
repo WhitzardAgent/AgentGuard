@@ -222,7 +222,7 @@ cat <<EOF > config/plugins.json
       "local": [],
       "remote": [
         {
-          "name": "rule_based_check",
+          "name": "rule_based_plugin",
           "env": {}
         }
       ]
@@ -236,7 +236,7 @@ cat <<EOF > config/plugins.json
 EOF
 ```
 
-这份配置的含义是：只有 `tool_before` 阶段启用了一个远端 plugin，也就是内置的 `rule_based_check`；其他阶段全部留空。换句话说，server 只会在工具真正执行之前，根据你编写的访问控制策略去做规则匹配和 allow / deny 判定。这样可以让 quick start 聚焦在“工具调用前的访问控制”这一条主线，不引入额外的 LLM 阶段或 tool result 阶段 plugin。
+这份配置的含义是：只有 `tool_before` 阶段启用了一个远端 plugin，也就是内置的 `rule_based_plugin`；其他阶段全部留空。换句话说，server 只会在工具真正执行之前，根据你编写的访问控制策略去做规则匹配和 allow / deny 判定。这样可以让 quick start 聚焦在“工具调用前的访问控制”这一条主线，不引入额外的 LLM 阶段或 tool result 阶段 plugin。
 
 #### 2. 为智能体编写一套访问控制策略
 我们刚才编写的智能体包含两个工具：`retrieve_doc` 和 `send_email_to`，分别用于检索特定 id 的文档，以及将文档内容发送到指定的邮箱地址。假设我们希望信任级别小于 2 的智能体在执行任务时，只能将 id 为 0 的机密文件发送给 `admin@example.com` 邮箱，发送到其他地址一律不允许，我们可以创建一个策略文件：
@@ -258,7 +258,7 @@ Reason: "Low-trust principal cannot send document 0 to non-admin recipients"
 EOF
 ```
 
-AgentGuard 为内置 `rule_based_check` plugin 消费的访问控制策略专门设计了一套 DSL 语法，我们将在[策略 DSL 基本结构](./policies/dsl_basic_structure.md)章节中详细介绍它。
+AgentGuard 为内置 `rule_based_plugin` plugin 消费的访问控制策略专门设计了一套 DSL 语法，我们将在[策略 DSL 基本结构](./policies/dsl_basic_structure.md)章节中详细介绍它。
 
 #### 3. 部署 AgentGuard 中控服务
 我们提供了 Docker 部署和源码部署两种方式。
@@ -288,7 +288,7 @@ cp .env.example .env
 
 ![UI 配置访问控制策略](../figs/ui_configure_policy.png)
 
-我们将在[可视化策略配置](./policies/quick_config.md)章节中详细介绍如何通过交互式方式配置 `rule_based_check` 访问控制策略。
+我们将在[可视化策略配置](./policies/quick_config.md)章节中详细介绍如何通过交互式方式配置 `rule_based_plugin` 访问控制策略。
 
 ##### 源码部署
 若选择源码部署，你需要手动安装依赖

@@ -7,8 +7,6 @@ const { pluginDescriptions } = require("./plugins/registry");
 
 const PLUGIN_CONFIG_PATH = "/v1/client/plugins/config";
 const PLUGIN_LIST_PATH = "/v1/client/plugins/list";
-const LEGACY_CHECKER_CONFIG_PATH = "/v1/client/checkers/config";
-const LEGACY_CHECKER_LIST_PATH = "/v1/client/checkers/list";
 const CLIENT_HEALTH_PATH = "/v1/client/health";
 
 class ClientConfigAPIServer {
@@ -57,20 +55,20 @@ class ClientConfigAPIServer {
             user_id: this.guard.context.user_id,
           });
         }
-        if (req.method === "GET" && [PLUGIN_LIST_PATH, LEGACY_CHECKER_LIST_PATH].includes(req.url)) {
+        if (req.method === "GET" && req.url === PLUGIN_LIST_PATH) {
           const plugins = listRegisteredPlugins();
           return this.send(res, 200, {
             status: "ok",
             plugins,
           });
         }
-        if (req.method === "POST" && [PLUGIN_CONFIG_PATH, LEGACY_CHECKER_CONFIG_PATH].includes(req.url)) {
+        if (req.method === "POST" && [PLUGIN_CONFIG_PATH].includes(req.url)) {
           const body = await readJson(req);
           const config = Object.prototype.hasOwnProperty.call(body, "path")
             ? String(body.path)
             : (body.config || body);
           try {
-            await this.guard.update_checker_config(config, { syncRemote: false });
+            await this.guard.update_plugin_config(config, { syncRemote: false });
           } catch (error) {
             return this.send(res, 400, { status: "error", error: String(error.message || error) });
           }

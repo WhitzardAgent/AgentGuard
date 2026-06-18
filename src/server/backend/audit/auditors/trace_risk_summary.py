@@ -103,7 +103,7 @@ def _signals_from_entry(entry: AuditTraceEntry) -> list[str]:
     candidates = [
         entry.event.risk_signals if entry.event is not None else [],
         entry.decision.risk_signals if entry.decision is not None else [],
-        entry.checker_result.get("risk_signals") if isinstance(entry.checker_result, dict) else [],
+        entry.plugin_result.get("risk_signals") if isinstance(entry.plugin_result, dict) else [],
     ]
     for candidate in candidates:
         if not isinstance(candidate, list):

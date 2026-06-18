@@ -6,16 +6,16 @@
     pageTitle: "AgentGuard",
     pageDescription: "Shared frontend shell is ready.",
     selectedAgentId: "",
-    selectedCheckerName: "",
+    selectedPluginName: "",
     currentUserLabel: "",
   };
   const SELECTED_AGENT_KEY = "agentguard.selectedAgentId";
-  const SELECTED_CHECKER_KEY = "agentguard.selectedCheckerName";
+  const SELECTED_PLUGIN_KEY = "agentguard.selectedPluginName";
   const CURRENT_USER_KEY = "agentguard.currentUserLabel";
   const AGENT_SELECTION_PATH = "/agents.html";
-  const CHECKER_SELECTION_PATH = "/checkers.html";
+  const PLUGIN_SELECTION_PATH = "/plugins.html";
   const AGENT_REQUIRED_PATHS = new Set([
-    "/checkers.html",
+    "/plugins.html",
     "/labels.html",
     "/rules.html",
     "/runtime.html",
@@ -60,14 +60,14 @@
     window.location.replace(AGENT_SELECTION_PATH);
   }
 
-  function redirectToCheckerSelection() {
+  function redirectToPluginSelection() {
     if (typeof window === "undefined" || !window.location) {
       return;
     }
-    if (currentPath() === CHECKER_SELECTION_PATH) {
+    if (currentPath() === PLUGIN_SELECTION_PATH) {
       return;
     }
-    window.location.replace(CHECKER_SELECTION_PATH);
+    window.location.replace(PLUGIN_SELECTION_PATH);
   }
 
   function enforceSelectedAgentAccess() {
@@ -76,11 +76,11 @@
       return false;
     }
     if (
-      state.selectedCheckerName
-      && state.selectedCheckerName !== "rule_based_check"
+      state.selectedPluginName
+      && state.selectedPluginName !== "rule_based_plugin"
       && RULE_BASED_REQUIRED_PATHS.has(currentPath())
     ) {
-      redirectToCheckerSelection();
+      redirectToPluginSelection();
       return false;
     }
     return true;
@@ -124,7 +124,7 @@
         element.hidden = !state.selectedAgentId;
       });
       document.querySelectorAll("[data-rule-based-required='true']").forEach((element) => {
-        element.hidden = !state.selectedAgentId || state.selectedCheckerName !== "rule_based_check";
+        element.hidden = !state.selectedAgentId || state.selectedPluginName !== "rule_based_plugin";
       });
     }
 
@@ -153,9 +153,9 @@
     }
   }
 
-  function readSelectedCheckerName() {
+  function readSelectedPluginName() {
     try {
-      return String(window.localStorage?.getItem(SELECTED_CHECKER_KEY) || "").trim();
+      return String(window.localStorage?.getItem(SELECTED_PLUGIN_KEY) || "").trim();
     } catch {
       return "";
     }
@@ -172,7 +172,7 @@
 
   function initSelectedAgentState() {
     state.selectedAgentId = readSelectedAgentId();
-    state.selectedCheckerName = readSelectedCheckerName();
+    state.selectedPluginName = readSelectedPluginName();
     state.currentUserLabel = readCurrentUserLabel() || "Current User";
     enforceSelectedAgentAccess();
 
@@ -199,27 +199,29 @@
     render();
   }
 
-  function setSelectedChecker(checkerName) {
-    const normalized = String(checkerName || "").trim();
-    state.selectedCheckerName = normalized;
-    try {
-      if (normalized) {
-        window.localStorage?.setItem(SELECTED_CHECKER_KEY, normalized);
-      } else {
-        window.localStorage?.removeItem(SELECTED_CHECKER_KEY);
-      }
-    } catch {
-      // Ignore localStorage write issues in preview mode.
-    }
+  function dispatchSelectionEvent(name, detail) {
     if (
       typeof window !== "undefined"
       && typeof window.dispatchEvent === "function"
       && typeof CustomEvent === "function"
     ) {
-      window.dispatchEvent(new CustomEvent("agentguard:selected-checker-change", {
-        detail: { checkerName: normalized },
-      }));
+      window.dispatchEvent(new CustomEvent(name, { detail }));
     }
+  }
+
+  function setSelectedPlugin(pluginName) {
+    const normalized = String(pluginName || "").trim();
+    state.selectedPluginName = normalized;
+    try {
+      if (normalized) {
+        window.localStorage?.setItem(SELECTED_PLUGIN_KEY, normalized);
+      } else {
+        window.localStorage?.removeItem(SELECTED_PLUGIN_KEY);
+      }
+    } catch {
+      // Ignore localStorage write issues in preview mode.
+    }
+    dispatchSelectionEvent("agentguard:selected-plugin-change", { pluginName: normalized });
     enforceSelectedAgentAccess();
     render();
   }
@@ -238,17 +240,9 @@
       // Ignore localStorage write issues in preview mode.
     }
     if (changed) {
-      setSelectedChecker("");
+      setSelectedPlugin("");
     }
-    if (
-      typeof window !== "undefined"
-      && typeof window.dispatchEvent === "function"
-      && typeof CustomEvent === "function"
-    ) {
-      window.dispatchEvent(new CustomEvent("agentguard:selected-agent-change", {
-        detail: { agentId: normalized },
-      }));
-    }
+    dispatchSelectionEvent("agentguard:selected-agent-change", { agentId: normalized });
     enforceSelectedAgentAccess();
     render();
   }
@@ -265,7 +259,7 @@
     setApiStatus,
     setPageContext,
     setSelectedAgent,
-    setSelectedChecker,
+    setSelectedPlugin,
     setToolStatus,
   };
 })();

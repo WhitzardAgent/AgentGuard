@@ -47,7 +47,7 @@ class UGuardEnforcer:
     def set_snapshot(self, snapshot: PolicySnapshot) -> None:
         self.snapshot = snapshot
 
-    def update_checker_config(self, config: str | Path | dict[str, Any] | None) -> None:
+    def update_plugin_config(self, config: str | Path | dict[str, Any] | None) -> None:
         """Replace local plugin configuration for subsequent events."""
         self.plugins.update_config(config)
 
@@ -74,19 +74,19 @@ class UGuardEnforcer:
         # 2. A final plugin decision wins before remote.
         if check.is_final and check.decision_candidate is not None:
             decision = check.decision_candidate
-            decision.metadata.setdefault("route", "local_checker")
+            decision.metadata.setdefault("route", "local_plugin")
             self.sync_buffer.add_local_decision(
                 event=event,
                 context=context,
                 check=check,
                 decision=decision,
-                route="local_checker",
+                route="local_plugin",
                 extensions=extensions,
             )
             return EnforcementResult(
                 decision,
                 event,
-                route="local_checker",
+                route="local_plugin",
                 check=check,
                 extensions=extensions or {},
             )

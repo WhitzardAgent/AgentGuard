@@ -1,6 +1,6 @@
-"""LLM-before checkers."""
+"""LLM-before plugins."""
 from __future__ import annotations
 
-from agentguard.plugins.llm_before.llm_input import LLMInputChecker
+from agentguard.plugins.llm_before.llm_input import LLMInputPlugin
 
-__all__ = ["LLMInputChecker"]
+__all__ = ["LLMInputPlugin"]

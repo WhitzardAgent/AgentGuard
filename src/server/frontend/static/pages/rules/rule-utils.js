@@ -51,6 +51,9 @@
     }
     const hasPath = String(rule?.path || "").trim() !== "";
     const hasOnClause = String(rule?.onClause || "").trim() !== "" || String(rule?.on?.tool || "").trim() !== "";
+    if (hasPath) {
+      return "trace";
+    }
     if (hasOnClause) {
       return "on";
     }

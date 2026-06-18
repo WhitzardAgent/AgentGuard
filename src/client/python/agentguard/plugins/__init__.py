@@ -9,10 +9,10 @@ from agentguard.plugins.registry import (
     register,
     registered_plugins,
 )
-from agentguard.plugins.llm_after import LLMOutputChecker
-from agentguard.plugins.llm_before import LLMInputChecker
-from agentguard.plugins.tool_after import ToolResultChecker
-from agentguard.plugins.tool_before import ToolInvokeChecker
+from agentguard.plugins.llm_after import LLMOutputPlugin
+from agentguard.plugins.llm_before import LLMInputPlugin
+from agentguard.plugins.tool_after import ToolResultPlugin
+from agentguard.plugins.tool_before import ToolInvokePlugin
 
 __all__ = [
     "BasePlugin",
@@ -23,8 +23,8 @@ __all__ = [
     "get_plugin_class",
     "registered_plugins",
     "plugin_descriptions",
-    "LLMInputChecker",
-    "LLMOutputChecker",
-    "ToolInvokeChecker",
-    "ToolResultChecker",
+    "LLMInputPlugin",
+    "LLMOutputPlugin",
+    "ToolInvokePlugin",
+    "ToolResultPlugin",
 ]

@@ -64,46 +64,76 @@ const actionTone = uiHelpers.actionTone || function fallbackActionTone(action) {
   return "";
 };
 
+function queryElement(selector) {
+  if (typeof document === "undefined" || typeof document.querySelector !== "function") {
+    return null;
+  }
+  return document.querySelector(selector);
+}
+
+function queryElements(selector) {
+  if (typeof document === "undefined" || typeof document.querySelectorAll !== "function") {
+    return [];
+  }
+  return Array.from(document.querySelectorAll(selector));
+}
+
+function getElement(id) {
+  if (typeof document === "undefined" || typeof document.getElementById !== "function") {
+    return null;
+  }
+  return document.getElementById(id);
+}
+
+function queryChild(element, selector) {
+  if (!element || typeof element.querySelector !== "function") {
+    return null;
+  }
+  return element.querySelector(selector);
+}
+
+const pathContinueButton = getElement("path-continue-button");
+
 const elements = {
-  ruleGeneratorCard: document.querySelector(".rule-generator-card"),
-  ruleBuilderTitle: document.getElementById("rule-builder-title"),
-  ruleBuilderSubtitle: document.getElementById("rule-builder-subtitle"),
-  returnToWizardButton: document.getElementById("return-to-wizard-button"),
-  ruleBuilderStepper: document.getElementById("rule-builder-stepper"),
-  ruleStepButtons: Array.from(document.querySelectorAll(".rule-step-chip")),
-  wizardStepCards: Array.from(document.querySelectorAll(".wizard-step-card")),
-  wizardPrevButtons: Array.from(document.querySelectorAll("[data-prev-step]")),
-  wizardNextButtons: Array.from(document.querySelectorAll("[data-next-step]")),
-  matchModeInputs: Array.from(document.querySelectorAll("input[name='rule-match-mode']")),
-  ruleBuilderActions: document.querySelector(".rule-builder-actions"),
-  ruleNameInput: document.getElementById("rule-name-input"),
-  ruleActionInput: document.getElementById("rule-action-input"),
-  rulePromptInput: document.getElementById("rule-prompt-input"),
-  ruleDegradeTargetInput: document.getElementById("rule-degrade-target-input"),
-  ruleDescriptionInput: document.getElementById("rule-description-input"),
-  ruleOnSubtypeInput: document.getElementById("rule-on-subtype-input"),
-  ruleOnInput: document.getElementById("rule-on-input"),
-  ruleSeverityInput: document.getElementById("rule-severity-input"),
-  ruleCategoryInput: document.getElementById("rule-category-input"),
-  ruleReasonInput: document.getElementById("rule-reason-input"),
-  traceOnFieldHint: document.getElementById("trace-on-field-hint"),
-  pathField: document.getElementById("path-field"),
-  onField: document.getElementById("on-field"),
-  promptField: document.getElementById("prompt-field"),
-  degradeTargetField: document.getElementById("degrade-target-field"),
-  generateRuleButton: document.getElementById("generate-rule-button"),
-  checkRuleButton: document.getElementById("check-rule-button"),
-  clearRuleFormButton: document.getElementById("clear-rule-form-button"),
-  pathContinueButton: document.getElementById("path-continue-button"),
-  pathFinishButton: document.getElementById("path-finish-button"),
-  pathContinueButtonIcon: document.getElementById("path-continue-button").querySelector("img"),
-  addConditionButton: document.getElementById("add-condition-button"),
-  conditionBuilderStepModeButton: document.getElementById("condition-builder-step-mode-button"),
-  conditionBuilderDirectModeButton: document.getElementById("condition-builder-direct-mode-button"),
-  conditionBuilderModeCopy: document.getElementById("condition-builder-mode-copy"),
-  rulePreviewBlock: document.getElementById("rule-preview-block"),
-  ruleList: document.getElementById("rule-list"),
-  ruleFilterButtons: Array.from(document.querySelectorAll(".rule-list-filter .filter-chip")),
+  ruleGeneratorCard: queryElement(".rule-generator-card"),
+  ruleBuilderTitle: getElement("rule-builder-title"),
+  ruleBuilderSubtitle: getElement("rule-builder-subtitle"),
+  returnToWizardButton: getElement("return-to-wizard-button"),
+  ruleBuilderStepper: getElement("rule-builder-stepper"),
+  ruleStepButtons: queryElements(".rule-step-chip"),
+  wizardStepCards: queryElements(".wizard-step-card"),
+  wizardPrevButtons: queryElements("[data-prev-step]"),
+  wizardNextButtons: queryElements("[data-next-step]"),
+  matchModeInputs: queryElements("input[name='rule-match-mode']"),
+  ruleBuilderActions: queryElement(".rule-builder-actions"),
+  ruleNameInput: getElement("rule-name-input"),
+  ruleActionInput: getElement("rule-action-input"),
+  rulePromptInput: getElement("rule-prompt-input"),
+  ruleDegradeTargetInput: getElement("rule-degrade-target-input"),
+  ruleDescriptionInput: getElement("rule-description-input"),
+  ruleOnSubtypeInput: getElement("rule-on-subtype-input"),
+  ruleOnInput: getElement("rule-on-input"),
+  ruleSeverityInput: getElement("rule-severity-input"),
+  ruleCategoryInput: getElement("rule-category-input"),
+  ruleReasonInput: getElement("rule-reason-input"),
+  traceOnFieldHint: getElement("trace-on-field-hint"),
+  pathField: getElement("path-field"),
+  onField: getElement("on-field"),
+  promptField: getElement("prompt-field"),
+  degradeTargetField: getElement("degrade-target-field"),
+  generateRuleButton: getElement("generate-rule-button"),
+  checkRuleButton: getElement("check-rule-button"),
+  clearRuleFormButton: getElement("clear-rule-form-button"),
+  pathContinueButton,
+  pathFinishButton: getElement("path-finish-button"),
+  pathContinueButtonIcon: queryChild(pathContinueButton, "img"),
+  addConditionButton: getElement("add-condition-button"),
+  conditionBuilderStepModeButton: getElement("condition-builder-step-mode-button"),
+  conditionBuilderDirectModeButton: getElement("condition-builder-direct-mode-button"),
+  conditionBuilderModeCopy: getElement("condition-builder-mode-copy"),
+  rulePreviewBlock: getElement("rule-preview-block"),
+  ruleList: getElement("rule-list"),
+  ruleFilterButtons: queryElements(".rule-list-filter .filter-chip"),
 };
 
 const state = {

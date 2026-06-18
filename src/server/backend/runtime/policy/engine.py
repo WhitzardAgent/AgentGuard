@@ -21,7 +21,7 @@ class PolicyEngine:
     ) -> GuardDecision:
         _ = event, trace_window
         return GuardDecision.allow(
-            "No server checker returned a final decision; default allow.",
+            "No server plugin returned a final decision; default allow.",
             policy_id="server:no_match",
             metadata={"explanation": "rule-based checks are optional"},
         )

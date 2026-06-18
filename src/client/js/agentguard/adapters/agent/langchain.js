@@ -40,18 +40,7 @@ class LangChainAgentAdapter extends BaseAgentAdapter {
     throw new AdapterError("langchain agent exposes no invoke/run/predict");
   }
 
-  attach(agent, guard, { wrap_tools = true, wrap_llm = true } = {}) {
-    const patched = { tools: 0, llm: 0 };
-    if (wrap_tools) {
-      patched.tools += this.patchToolContainers(agent, guard);
-    }
-    if (wrap_llm) {
-      patched.llm += patchLangchainLLM(agent, guard);
-    }
-    return patched;
-  }
-
-  patchToolContainers(agent, guard) {
+  patchtool(agent, guard) {
     let patched = 0;
     patched += patchContainerTools(agent, guard);
     for (const [, toolNode] of iterToolNodes(agent)) {
@@ -68,6 +57,10 @@ class LangChainAgentAdapter extends BaseAgentAdapter {
       }
     }
     return patched;
+  }
+
+  patchLLM(agent, guard) {
+    return patchLangchainLLM(agent, guard);
   }
 }
 
@@ -217,10 +210,21 @@ function getLangchainModelRunnable(agent) {
 }
 
 function getLangchainBaseModel(agent) {
-  const directModel = agent?.options?.model;
-  if (directModel && typeof directModel === "object") {
-    return directModel;
+  const directAgentModel = agent?.model;
+  if (directAgentModel && typeof directAgentModel === "object") {
+    return directAgentModel;
   }
+
+  const directOptionsModel = agent?.options?.model;
+  if (directOptionsModel && typeof directOptionsModel === "object") {
+    return directOptionsModel;
+  }
+
+  const chainModel = agent?.agent?.llm_chain?.llm;
+  if (chainModel && typeof chainModel === "object") {
+    return chainModel;
+  }
+
   const runnable = getLangchainModelRunnable(agent);
   if (!runnable) {
     return null;

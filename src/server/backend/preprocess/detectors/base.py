@@ -13,7 +13,7 @@ class DetectionResult:
     capabilities: list[str] = field(default_factory=list)
     risk_labels: list[str] = field(default_factory=list)
     policy_targets: list[str] = field(default_factory=list)
-    suggested_checkers: list[str] = field(default_factory=list)
+    suggested_plugins: list[str] = field(default_factory=list)
     risk_level: str = "unknown"
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -25,7 +25,7 @@ class DetectionResult:
             "capabilities": list(self.capabilities),
             "risk_labels": list(self.risk_labels),
             "policy_targets": list(self.policy_targets),
-            "suggested_checkers": list(self.suggested_checkers),
+            "suggested_plugins": list(self.suggested_plugins),
             "risk_level": self.risk_level,
             "metadata": self.metadata,
         }

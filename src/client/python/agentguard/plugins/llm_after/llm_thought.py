@@ -1,4 +1,4 @@
-"""Deprecated checker for removed LLM thought events."""
+"""Deprecated plugin for removed LLM thought events."""
 from __future__ import annotations
 
 from agentguard.plugins.base import BasePlugin, CheckResult
@@ -9,9 +9,9 @@ from agentguard.schemas.events import RuntimeEvent
 
 @register(
     name="llm_thought",
-    description="Deprecated no-op checker for removed LLM thought events.",
+    description="Deprecated no-op plugin for removed LLM thought events.",
 )
-class LLMThoughtChecker(BasePlugin):
+class LLMThoughtPlugin(BasePlugin):
     event_types = []
 
     def applies(self, event: RuntimeEvent) -> bool:

@@ -49,10 +49,10 @@ class AgentGuard:
         audit_path: str | None = None,
         remote_timeout_s: float = 5.0,
         remote_retries: int = 2,
-        checker_config: str | dict[str, Any] | None = None,
+        plugin_config: str | dict[str, Any] | None = None,
         session_key: str | None = None,
     ) -> None:
-        checker_payload = _checker_config_payload(checker_config)
+        plugin_payload = _plugin_config_payload(plugin_config)
         snapshot = self._load_snapshot(policy)
         self.session_key = session_key or _generate_session_key()
         self.context = RuntimeContext(
@@ -64,8 +64,8 @@ class AgentGuard:
             environment=environment,
             metadata={
                 "client_session_key": self.session_key,
-                "client_checker_config": checker_payload,
-                "remote_checker_config": checker_payload,
+                "client_plugin_config": plugin_payload,
+                "remote_plugin_config": plugin_payload,
             },
         )
 
@@ -82,7 +82,7 @@ class AgentGuard:
         self._enforcer = UGuardEnforcer(
             snapshot=snapshot,
             remote=self._remote,
-            plugin_manager=PluginManager(config=checker_config),
+            plugin_manager=PluginManager(config=plugin_config),
         )
         self._sandbox = SandboxExecutor(sandbox, sandbox_profile)
         self._audit = AuditRecorder(session_id, AuditLogger(audit_path))
@@ -139,15 +139,15 @@ class AgentGuard:
         self._enforcer.set_snapshot(snap)
         self.context.policy_version = snap.version
 
-    def update_checker_config(
+    def update_plugin_config(
         self,
-        checker_config: str | dict[str, Any] | None,
+        plugin_config: str | dict[str, Any] | None,
         *,
         sync_remote: bool = True,
     ) -> None:
         """Replace local plugin configuration for subsequent guarded events."""
-        self.context.metadata["client_checker_config"] = _checker_config_payload(checker_config)
-        self._enforcer.update_checker_config(checker_config)
+        self.context.metadata["client_plugin_config"] = _plugin_config_payload(plugin_config)
+        self._enforcer.update_plugin_config(plugin_config)
         if sync_remote:
             self._sync_remote_session()
 
@@ -329,16 +329,16 @@ def _generate_session_key() -> str:
     return f"sk-{secrets.token_urlsafe(32)}"
 
 
-def _checker_config_payload(
-    checker_config: str | Path | dict[str, Any] | None,
+def _plugin_config_payload(
+    plugin_config: str | Path | dict[str, Any] | None,
 ) -> dict[str, Any] | None:
-    if checker_config is None:
+    if plugin_config is None:
         return None
-    if isinstance(checker_config, dict):
-        return json.loads(json.dumps(checker_config))
-    path = Path(checker_config)
+    if isinstance(plugin_config, dict):
+        return json.loads(json.dumps(plugin_config))
+    path = Path(plugin_config)
     with path.open("r", encoding="utf-8") as fh:
         data = json.load(fh)
     if not isinstance(data, dict):
-        raise ValueError("checker config file must contain a JSON object")
+        raise ValueError("plugin config file must contain a JSON object")
     return data

@@ -235,10 +235,18 @@
 
     function syncConditionLock(pathState = pathBuilder.getValue()) {
       const allowedSources = allowedConditionSourceTypes(pathState);
-      conditionBuilder.setCurrentCallToolKey(currentCallToolKey());
-      conditionBuilder.setCurrentCallSubtype(currentCallSubtype());
-      conditionBuilder.setAllowedSourceTypes(allowedSources);
-      conditionBuilder.setLocked(allowedSources.length === 0);
+      if (typeof conditionBuilder.setCurrentCallToolKey === "function") {
+        conditionBuilder.setCurrentCallToolKey(currentCallToolKey());
+      }
+      if (typeof conditionBuilder.setCurrentCallSubtype === "function") {
+        conditionBuilder.setCurrentCallSubtype(currentCallSubtype());
+      }
+      if (typeof conditionBuilder.setAllowedSourceTypes === "function") {
+        conditionBuilder.setAllowedSourceTypes(allowedSources);
+      }
+      if (typeof conditionBuilder.setLocked === "function") {
+        conditionBuilder.setLocked(allowedSources.length === 0);
+      }
     }
 
     function renderToolSelectOptions(select, catalog = currentToolCatalog(), selectedTool = "", { emptyLabel, allowEmpty = false } = {}) {
@@ -576,10 +584,12 @@
       }
       const pathState = pathBuilder.getValue();
       const finished = pathState.finished;
-      pathFinishButton.classList.toggle("primary", finished);
-      pathContinueButtonIcon.src = finished ? "/assets/modify.png" : "/assets/add.png";
-      pathContinueButton.setAttribute("aria-label", finished ? "Edit path" : "Add path segment");
-      pathContinueButton.setAttribute("title", finished ? "Edit path" : "Add path segment");
+      pathFinishButton?.classList?.toggle("primary", finished);
+      if (pathContinueButtonIcon) {
+        pathContinueButtonIcon.src = finished ? "/assets/modify.png" : "/assets/add.png";
+      }
+      pathContinueButton?.setAttribute("aria-label", finished ? "Edit path" : "Add path segment");
+      pathContinueButton?.setAttribute("title", finished ? "Edit path" : "Add path segment");
       changeHandler();
     }
 

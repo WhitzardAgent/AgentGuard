@@ -81,7 +81,7 @@ class RemoteGuardClient {
         decision.risk_signals.push(signal);
       }
     }
-    decision.metadata.checker_result = decision.metadata.checker_result || payload.checker_result || {};
+    decision.metadata.plugin_result = decision.metadata.plugin_result || payload.plugin_result || {};
     decision.metadata.source = decision.metadata.source || "remote";
     return decision;
   }

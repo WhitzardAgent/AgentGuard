@@ -1,6 +1,6 @@
-# rule_based_check 策略 DSL 基本结构
+# rule_based_plugin 策略 DSL 基本结构
 
-本文面向需要手动编写内置 `rule_based_check` server plugin 策略的高级用户。`rule_based_check` 会消费 AgentGuard 的访问控制 DSL，结合当前运行时事件和近期 session 上下文进行规则评估，通过配置规则识别并拦截工具调用中的安全风险。
+本文面向需要手动编写内置 `rule_based_plugin` server plugin 策略的高级用户。`rule_based_plugin` 会消费 AgentGuard 的访问控制 DSL，结合当前运行时事件和近期 session 上下文进行规则评估，通过配置规则识别并拦截工具调用中的安全风险。
 
 要让这些规则在运行时生效，需要先在 `config/plugins.json` 中启用该 plugin：
 
@@ -11,7 +11,7 @@
     "llm_after": {"local": [], "remote": []},
     "tool_before": {
       "local": [],
-      "remote": [{"name": "rule_based_check", "env": {}}]
+      "remote": [{"name": "rule_based_plugin", "env": {}}]
     },
     "tool_after": {"local": [], "remote": []}
   }

@@ -1,26 +1,26 @@
 # AgentGuard Plugins
 
-AgentGuard 同时支持部署在 client 和 server 两侧的 plugin。两侧共享同一套标准化运行时 schema，但可见信息范围不同，部署位置也不同。若需要查看实现级细节，可参考 `../../src/client/python/agentguard/plugins/README_CN.md` 和 `../../src/server/backend/plugins/`。
+AgentGuard 同时支持部署在 client 和 server 两侧的 plugin。两侧共享同一套标准化运行时 schema，但可见信息范围不同，部署位置也不同。若需要查看实现级细节，可参考 `../../src/client/python/agentguard/plugins/README_CN.md` 和 `../../src/server/backend/runtime/plugins/`。
 
 ## Client 与 Server Plugin 的区别
 
 - **Client plugin** 运行在智能体进程本地，只接收当前 `event: RuntimeEvent` 和 `context: RuntimeContext`，适合低延迟、轻量级的本地过滤。
 - **Server plugin** 运行在中控服务端，除了当前 `event` 和 `context`，还会接收到 `trajectory_window: list[RuntimeEvent]`，适合做跨步骤攻击链检测、集中策略评估与审计。
 - Client plugin 文件需要放在 `../../src/client/python/agentguard/plugins/<phase>/`。
-- Server plugin 文件需要放在 `../../src/server/backend/plugins/`。
+- Server plugin 文件需要放在 `../../src/server/backend/runtime/plugins/`。
 
-## 内置 `rule_based_check` Plugin
+## 内置 `rule_based_plugin` Plugin
 
-AgentGuard 内置了一个名为 `rule_based_check` 的 server plugin。它面向基于规则配置的工具调用防护：用户可以手写 DSL 策略，也可以通过 UI 生成策略；该 plugin 会结合当前工具调用和近期 session 轨迹评估这些规则。当规则命中时，它可以识别对应安全风险，并在工具真正执行前返回 `DENY`、`HUMAN_CHECK` 或 `LLM_CHECK` 等决策。
+AgentGuard 内置了一个名为 `rule_based_plugin` 的 server plugin。它面向基于规则配置的工具调用防护：用户可以手写 DSL 策略，也可以通过 UI 生成策略；该 plugin 会结合当前工具调用和近期 session 轨迹评估这些规则。当规则命中时，它可以识别对应安全风险，并在工具真正执行前返回 `DENY`、`HUMAN_CHECK` 或 `LLM_CHECK` 等决策。
 
-在默认 quick start 流程中，`rule_based_check` 会作为 `tool_before` 阶段的远端 plugin 启用：
+在默认 quick start 流程中，`rule_based_plugin` 会作为 `tool_before` 阶段的远端 plugin 启用：
 
 ```json
 {
   "phases": {
     "tool_before": {
       "local": [],
-      "remote": [{"name": "rule_based_check", "env": {}}]
+      "remote": [{"name": "rule_based_plugin", "env": {}}]
     }
   }
 }
@@ -156,14 +156,14 @@ class MyClientPlugin(BasePlugin):
 Server plugin 需要放到服务端 plugin 目录中：
 
 ```text
-../../src/server/backend/plugins/
+../../src/server/backend/runtime/plugins/
 ```
 
 示例：
 
 ```python
-from backend.plugins.base import BasePlugin, CheckResult
-from backend.plugins.registry import register
+from backend.runtime.plugins.base import BasePlugin, CheckResult
+from backend.runtime.plugins.registry import register
 from shared.schemas.context import RuntimeContext
 from shared.schemas.events import EventType, RuntimeEvent
 
@@ -187,11 +187,11 @@ class MyServerPlugin(BasePlugin):
         return CheckResult.empty()
 ```
 
-Server 侧 plugin 目录为 `../../src/server/backend/plugins/`。
+Server 侧 plugin 目录为 `../../src/server/backend/runtime/plugins/`。
 
 ### Plugin 配置
 
-加入 plugin 类之后，需要在 plugin 配置中用 plugin spec 对象引用它们。`name` 字段是注册名，`env` 是可选的环境变量映射，会传给对应 plugin：
+加入 plugin 类之后，需要在 plugin 配置中用 plugin spec 对象引用它们。`name` 字段是注册名。对于 client 侧 `local` plugin，`env`、`kwargs` 和顶层构造参数都会传入 plugin 实例；对于 server 侧 `remote` plugin，当前运行时只会按 `name` 或 `class` 解析 plugin，不会把 `env`/`kwargs` 注入构造函数。
 
 ```json
 {
@@ -205,7 +205,7 @@ Server 侧 plugin 目录为 `../../src/server/backend/plugins/`。
       ],
       "remote": [
         {
-          "name": "rule_based_check",
+          "name": "rule_based_plugin",
           "env": {}
         },
         {
@@ -220,5 +220,6 @@ Server 侧 plugin 目录为 `../../src/server/backend/plugins/`。
 
 - `local` 由 client 侧 plugin manager 加载。
 - `remote` 由 server 侧 plugin manager 加载。
-- 每个列表项可以使用 `name`、可选的 `env`，也可以通过 `kwargs` 或顶层字段传入构造参数。
+- `local` plugin spec 可以使用 `name`、可选的 `env`，也可以通过 `kwargs` 或顶层字段传入构造参数。
+- `remote` plugin spec 当前主要使用 `name`（或 `class`）做解析；额外字段会保留在配置里，但不会被注入 server plugin 构造函数。
 - 即使两个 plugin spec 出现在同一份配置文件里，对应实现文件仍然必须分别部署到正确的 client 或 server 目录下。

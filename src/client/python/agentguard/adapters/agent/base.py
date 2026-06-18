@@ -22,7 +22,18 @@ class BaseAgentAdapter:
         wrap_llm: bool = True,
     ) -> dict[str, Any]:
         """Patch a framework object in-place while preserving its native loop."""
-        raise AdapterError(f"{self.name}: attach is not implemented")
+        patched = {"tools": 0, "llm": 0}
+        if wrap_tools:
+            patched["tools"] += self.patchtool(agent, guard)
+        if wrap_llm:
+            patched["llm"] += self.patchLLM(agent, guard)
+        return patched
+
+    def patchtool(self, agent: Any, guard: Any) -> int:
+        return 0
+
+    def patchLLM(self, agent: Any, guard: Any) -> int:
+        return 0
 
     def run(self, agent: Any, input_data: Any, context: RuntimeContext) -> Any:
         """Raw, unguarded run of the underlying agent (best effort)."""

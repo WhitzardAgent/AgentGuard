@@ -1,4 +1,4 @@
-"""Checker for tool invocation events."""
+"""Plugin for tool invocation events."""
 from __future__ import annotations
 
 from agentguard.plugins.base import BasePlugin, CheckResult
@@ -19,7 +19,7 @@ _DANGEROUS_SHELL = ("rm -rf /", "mkfs", ":(){", "dd if=")
     name="tool_invoke",
     description="Detect risky tool invocation arguments and dangerous capabilities.",
 )
-class ToolInvokeChecker(BasePlugin):
+class ToolInvokePlugin(BasePlugin):
     event_types = [EventType.TOOL_INVOKE]
 
     def check(self, event: RuntimeEvent, context: RuntimeContext) -> CheckResult:
@@ -38,7 +38,7 @@ class ToolInvokeChecker(BasePlugin):
         low = args_text.lower()
         if any(d in low for d in _DANGEROUS_SHELL):
             candidate = GuardDecision.deny(
-                "Destructive shell command blocked by local checker.",
+                "Destructive shell command blocked by local plugin.",
                 policy_id="local:dangerous_shell",
                 risk_signals=["shell_command"],
             )

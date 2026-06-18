@@ -126,7 +126,7 @@ cat <<EOF > config/plugins.json
       "local": [],
       "remote": [
         {
-          "name": "rule_based_check",
+          "name": "rule_based_plugin",
           "env": {}
         }
       ]
@@ -140,7 +140,7 @@ cat <<EOF > config/plugins.json
 EOF
 ```
 
-这份配置用于告诉 AgentGuard：在不同运行阶段分别启用哪些 plugin。这个 quick start 里，只有 `tool_before` 阶段启用了一个远端 plugin：`rule_based_check`。这意味着 server 只会在工具真正执行之前，基于内置的规则型 plugin 去匹配访问控制策略；其他阶段都先保持为空。这样可以让第一个示例尽量简单：client 将工具调用前的判定请求发给 server，server 再用 `rule_based_check` 根据你写的策略返回 allow / deny 决策。
+这份配置用于告诉 AgentGuard：在不同运行阶段分别启用哪些 plugin。这个 quick start 里，只有 `tool_before` 阶段启用了一个远端 plugin：`rule_based_plugin`。这意味着 server 只会在工具真正执行之前，基于内置的规则型 plugin 去匹配访问控制策略；其他阶段都先保持为空。这样可以让第一个示例尽量简单：client 将工具调用前的判定请求发给 server，server 再用 `rule_based_plugin` 根据你写的策略返回 allow / deny 决策。
 
 然后，再编写一套访问控制策略：
 ```bash
@@ -361,7 +361,7 @@ https://github.com/user-attachments/assets/75a17e37-7f51-4c59-96fa-ea449eb79859
 
 - **客户端**：通过极少量代码修改，客户端可集成进智能体框架中，并能够在 LLM 调用前后、工具调用前后进行拦截。客户端可以先在本地执行轻量级过滤，再将事件发送到服务端，由服务端根据配置的 plugin 进一步检测。
 - **服务器**：服务器接收来自客户端的信息，并根据配置的 plugin 对智能体动作进行策略评估，生成策略决策并返回给客户端；同时服务器持续监控智能体状态，供管理员进行审计。
-- **Plugin 扩展**：客户端与服务器都支持灵活扩展各种 plugin。若需了解如何支持自定义 plugin，可参考客户端说明 `src/client/python/agentguard/plugins/README_CN.md` 与服务端目录 `src/server/backend/plugins/`。
+- **Plugin 扩展**：客户端与服务器都支持灵活扩展各种 plugin。若需了解如何支持自定义 plugin，可参考客户端说明 `src/client/python/agentguard/plugins/README_CN.md` 与服务端目录 `src/server/backend/runtime/plugins/`。
 - **Custom Auditor 扩展**：后端也支持面向事后轨迹审计的可插拔 custom auditor。公共抽象位于 `src/server/backend/audit/`，具体 auditor 实现位于 `src/server/backend/audit/auditors/`。可参考 `./docs/zh/README.md` 中新增的 custom auditor 章节。
 
 ## 👥 贡献者

@@ -7,18 +7,18 @@ class ClientSyncBuffer {
 
   add_local_decision({ event, context, check, decision, route, extensions = {} }) {
     this.entries.push({
-      source: "client_local_checker",
+      source: "client_local_plugin",
       route,
       event: event.toDict(),
       context: context.toDict(),
       decision: decision.toDict(),
-      checker_result: {
+      plugin_result: {
         risk_signals: [...(check.risk_signals || [])],
         is_final: Boolean(check.is_final),
         decision_candidate: check.decision_candidate ? check.decision_candidate.toDict() : null,
         metadata: { ...(check.metadata || {}) },
       },
-      checker_input: {
+      plugin_input: {
         event: event.toDict(),
         context: context.toDict(),
       },

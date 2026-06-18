@@ -490,29 +490,29 @@ a {
   gap: 12px;
 }
 
-.checker-toggle-card {
+.plugin-toggle-card {
   cursor: default;
 }
 
-.checker-scope-grid {
+.plugin-scope-grid {
   grid-template-columns: 1fr;
   align-items: start;
 }
 
-.checker-scope-panel {
+.plugin-scope-panel {
   min-width: 0;
 }
 
-.checker-scope-header {
+.plugin-scope-header {
   margin-bottom: 12px;
 }
 
-.checker-scope-header h4 {
+.plugin-scope-header h4 {
   margin: 0 0 4px;
   font-size: 17px;
 }
 
-.checker-toggle-top {
+.plugin-toggle-top {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -520,12 +520,12 @@ a {
   flex-wrap: wrap;
 }
 
-.checker-toggle-copy {
+.plugin-toggle-copy {
   min-width: 0;
   flex: 1 1 auto;
 }
 
-.checker-switch {
+.plugin-switch {
   display: inline-flex;
   align-items: center;
   gap: 10px;
@@ -534,13 +534,13 @@ a {
   user-select: none;
 }
 
-.checker-switch input {
+.plugin-switch input {
   position: absolute;
   opacity: 0;
   pointer-events: none;
 }
 
-.checker-switch-state {
+.plugin-switch-state {
   min-width: 32px;
   color: var(--muted);
   font-size: 13px;
@@ -550,7 +550,7 @@ a {
   text-transform: uppercase;
 }
 
-.checker-switch-track {
+.plugin-switch-track {
   position: relative;
   width: 54px;
   height: 32px;
@@ -561,7 +561,7 @@ a {
   transition: background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
-.checker-switch-thumb {
+.plugin-switch-thumb {
   position: absolute;
   top: 3px;
   left: 3px;
@@ -573,25 +573,25 @@ a {
   transition: transform 0.18s ease;
 }
 
-.checker-switch input:checked + .checker-switch-track {
+.plugin-switch input:checked + .plugin-switch-track {
   border-color: rgba(47, 107, 59, 0.34);
   background: linear-gradient(180deg, rgba(87, 148, 87, 0.9) 0%, rgba(47, 107, 59, 1) 100%);
 }
 
-.checker-switch input:checked + .checker-switch-track .checker-switch-thumb {
+.plugin-switch input:checked + .plugin-switch-track .plugin-switch-thumb {
   transform: translateX(22px);
 }
 
-.checker-switch input:focus-visible + .checker-switch-track {
+.plugin-switch input:focus-visible + .plugin-switch-track {
   box-shadow: 0 0 0 3px rgba(47, 107, 59, 0.18);
 }
 
-.checker-switch input:disabled + .checker-switch-track {
+.plugin-switch input:disabled + .plugin-switch-track {
   opacity: 0.72;
 }
 
-.checker-switch input:disabled ~ .checker-switch-state,
-.checker-switch input:disabled + .checker-switch-track {
+.plugin-switch input:disabled ~ .plugin-switch-state,
+.plugin-switch input:disabled + .plugin-switch-track {
   cursor: not-allowed;
 }
 

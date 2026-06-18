@@ -29,7 +29,7 @@ const { OpenAIAgentsAdapter } = require("./adapters/agent/openai_agents");
 
 class AgentGuard {
   constructor(session_id, options = {}) {
-    const pluginPayload = pluginConfigPayload(options.checker_config || options.checkerConfig || null);
+    const pluginPayload = pluginConfigPayload(options.plugin_config || null);
     const snapshot = this.loadSnapshot(options.policy || null);
     this.session_key = options.session_key || options.sessionKey || generateSessionKey();
     this.context = new RuntimeContext({
@@ -41,8 +41,8 @@ class AgentGuard {
       environment: options.environment || null,
       metadata: {
         client_session_key: this.session_key,
-        client_checker_config: pluginPayload,
-        remote_checker_config: pluginPayload,
+        client_plugin_config: pluginPayload,
+        remote_plugin_config: pluginPayload,
       },
     });
     this.remote = new RemoteGuardClient(options.server_url || options.serverUrl || null, {
@@ -57,7 +57,7 @@ class AgentGuard {
     this.enforcer = new UGuardEnforcer({
       snapshot,
       remote: this.remote,
-      plugin_manager: new PluginManager({ config: options.checker_config || options.checkerConfig || null }),
+      plugin_manager: new PluginManager({ config: options.plugin_config || null }),
     });
     this.sandbox = new SandboxExecutor(options.sandbox || "local", options.sandbox_profile || options.sandboxProfile || null);
     this.audit = new AuditRecorder(session_id, new AuditLogger(options.audit_path || options.auditPath || null));
@@ -123,10 +123,10 @@ class AgentGuard {
     this.context.policy_version = next.version;
   }
 
-  update_checker_config(checker_config, { sync_remote = true, syncRemote = sync_remote } = {}) {
-    const payload = pluginConfigPayload(checker_config);
-    this.context.metadata.client_checker_config = payload;
-    this.enforcer.update_plugin_config(checker_config);
+  update_plugin_config(plugin_config, { sync_remote = true, syncRemote = sync_remote } = {}) {
+    const payload = pluginConfigPayload(plugin_config);
+    this.context.metadata.client_plugin_config = payload;
+    this.enforcer.update_plugin_config(plugin_config);
     if (syncRemote) {
       return this.syncRemoteSession();
     }
@@ -333,14 +333,14 @@ function generateSessionKey() {
   return `sk-${crypto.randomBytes(32).toString("base64url")}`;
 }
 
-function pluginConfigPayload(checker_config) {
-  if (checker_config == null) {
+function pluginConfigPayload(plugin_config) {
+  if (plugin_config == null) {
     return null;
   }
-  if (typeof checker_config === "object") {
-    return JSON.parse(JSON.stringify(checker_config));
+  if (typeof plugin_config === "object") {
+    return JSON.parse(JSON.stringify(plugin_config));
   }
-  const raw = fs.readFileSync(checker_config, "utf-8");
+  const raw = fs.readFileSync(plugin_config, "utf-8");
   const data = JSON.parse(raw);
   if (!data || typeof data !== "object" || Array.isArray(data)) {
     throw new Error("plugin config file must contain a JSON object");

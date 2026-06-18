@@ -37,18 +37,7 @@ class OpenAIAgentsAdapter extends BaseAgentAdapter {
     throw new AdapterError("openai agent exposes no run/invoke");
   }
 
-  attach(agent, guard, { wrap_tools = true, wrap_llm = true } = {}) {
-    const patched = { tools: 0, llm: 0 };
-    if (wrap_tools) {
-      patched.tools += this.patchTools(agent, guard);
-    }
-    if (wrap_llm) {
-      patched.llm += this.patchLLM(agent, guard);
-    }
-    return patched;
-  }
-
-  patchTools(agent, guard) {
+  patchtool(agent, guard) {
     let patched = 0;
     const tools = agent?.tools || agent?._tools;
     if (tools && typeof tools === "object") {

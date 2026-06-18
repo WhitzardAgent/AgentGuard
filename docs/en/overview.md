@@ -16,7 +16,7 @@ AgentGuard can intervene throughout an agent run instead of only checking a sing
 
 ### Modular security strategies
 
-AgentGuard exposes a unified plugin architecture so rule-based and model-based security strategies can be plugged in behind the same interface. The current release includes a built-in server plugin named `rule_based_check`, which supports configurable DSL rules for identifying and intercepting security risks in tool calls before they execute.
+AgentGuard exposes a unified plugin architecture so rule-based and model-based security strategies can be plugged in behind the same interface. The current release includes a built-in server plugin named `rule_based_plugin`, which supports configurable DSL rules for identifying and intercepting security risks in tool calls before they execute.
 
 ### Single-tool and cross-tool protection
 

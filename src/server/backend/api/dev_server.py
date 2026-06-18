@@ -138,9 +138,9 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_session_key_error(exc)
                 return
             self._send(200, {"status": "ok", "session_id": session_id, "removed": removed})
-        elif self.path == "/v1/backend/checkers/config":
+        elif self.path == "/v1/backend/plugins/config":
             try:
-                loaded = self.manager.update_checker_config(body.get("config"))
+                loaded = self.manager.update_plugin_config(body.get("config"))
             except Exception as exc:
                 self._send(400, {"status": "error", "error": str(exc)})
                 return
@@ -149,16 +149,16 @@ class _Handler(BaseHTTPRequestHandler):
             client_updates = []
             for principal in body.get("client_principals") or []:
                 client_updates.extend(
-                    self.manager.update_client_checker_config(
+                    self.manager.update_client_plugin_config(
                         principal,
                         client_config,
-                        remote_checker_config=body.get("config"),
+                        remote_plugin_config=body.get("config"),
                         timeout_s=timeout_s,
                     )
                 )
             client_updates.extend(
                 [
-                    _push_client_checker_config(
+                    _push_client_plugin_config(
                         url,
                         client_config,
                         timeout_s,
@@ -171,7 +171,7 @@ class _Handler(BaseHTTPRequestHandler):
                 200,
                 {
                     "status": "ok",
-                    "loaded_checkers": loaded,
+                    "loaded_plugins": loaded,
                     "client_updates": client_updates,
                 },
             )
@@ -304,7 +304,7 @@ def start_dev_server(
     return base_url, server, thread
 
 
-def _push_client_checker_config(
+def _push_client_plugin_config(
     url: str,
     config: dict[str, Any],
     timeout_s: float,
@@ -346,7 +346,6 @@ def _client_key_for_url(manager: RuntimeManager, url: str) -> str | None:
         known_urls = {
             session.get("client_config_url"),
             session.get("client_plugin_list_url"),
-            session.get("client_checker_list_url"),
             session.get("client_health_url"),
         }
         if url in known_urls:

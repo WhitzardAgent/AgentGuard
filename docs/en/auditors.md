@@ -37,7 +37,7 @@ class MyTraceAuditor(BaseAuditor):
         return AuditResult.ok()
 ```
 
-Each `AuditTraceEntry` contains the canonical trace fields `session_id`, `agent_id`, `user_id`, `reason`, `event`, `decision`, and `checker_result`. Auditors should treat `event` as the primary runtime payload and the other fields as optional enrichments from the backend trace pipeline.
+Each `AuditTraceEntry` contains the canonical trace fields `session_id`, `agent_id`, `user_id`, `reason`, `event`, `decision`, `plugin_result`, `plugin_input`, `route`, and `timestamp`. Auditors should treat `event` as the primary runtime payload and the other fields as optional enrichments from the backend trace pipeline.
 
 `AuditResult` currently uses four normalized severity levels: `critical`, `high`, `warning`, and `ok`. Each result also includes a human-readable `reason` and optional `metadata`.
 
@@ -56,7 +56,10 @@ class AuditTraceEntry:
     reason: str | None = None
     event: RuntimeEvent | None = None
     decision: GuardDecision | None = None
-    checker_result: dict[str, Any] = field(default_factory=dict)
+    plugin_result: dict[str, Any] = field(default_factory=dict)
+    plugin_input: dict[str, Any] = field(default_factory=dict)
+    route: str | None = None
+    timestamp: float | None = None
 ```
 
 ### Fields
@@ -69,18 +72,21 @@ class AuditTraceEntry:
 | `reason` | `str or None` | Why the record was stored, such as `guard_decide`, `round_complete`, or `client_error`. | Distinguish normal remote decisions from uploaded local cache entries or error-path syncs. |
 | `event` | `RuntimeEvent or None` | The normalized runtime event: LLM input, LLM output, tool invocation, or tool result. | This is usually the main payload to inspect: event type, tool name, arguments, result, risk signals, and metadata. |
 | `decision` | `GuardDecision or None` | The decision returned for the event, if one exists. | Count denies/reviews, read the decision reason, or identify whether a risky action was blocked. |
-| `checker_result` | `dict[str, Any]` | Merged runtime detection output for the event. Despite the legacy name, this is where plugin/checker risk metadata is stored. | Read `risk_signals`, detection metadata, or plugin-produced context that was attached during runtime. |
+| `plugin_result` | `dict[str, Any]` | Merged runtime detection output for the event. This is where plugin risk metadata is stored. | Read `risk_signals`, detection metadata, or plugin-produced context that was attached during runtime. |
+| `plugin_input` | `dict[str, Any]` | The input payload passed into the plugin pipeline when available. | Inspect the raw event/context payload that led to a plugin result. |
+| `route` | `str or None` | The runtime path that produced the trace entry, if recorded. | Distinguish remote decisions, local sync uploads, and other runtime routes. |
+| `timestamp` | `float or None` | Trace entry timestamp, if recorded. | Order records or compute time windows during audit. |
 
 ### Helper methods and properties
 
 | Member | What it does | When to use it |
 | --- | --- | --- |
-| `AuditTraceEntry.from_dict(data)` | Builds a normalized entry from a raw trace dictionary. It extracts `event`, `decision`, identity fields, `reason`, and `checker_result` when present. | Use this when an auditor or test receives raw stored trace dictionaries instead of `AuditTraceEntry` objects. |
+| `AuditTraceEntry.from_dict(data)` | Builds a normalized entry from a raw trace dictionary. It extracts `event`, `decision`, identity fields, `reason`, `plugin_result`, `plugin_input`, `route`, and `timestamp` when present. | Use this when an auditor or test receives raw stored trace dictionaries instead of `AuditTraceEntry` objects. |
 | `entry.to_dict()` | Converts the entry back into a serializable dictionary. It includes `event.to_dict()` and `decision.to_dict()` when those objects exist. | Use this for debugging, logging, test snapshots, or returning normalized trace details. |
-| `entry.merged_with(incoming)` | Returns a new entry by merging another entry into the current one. Incoming identity, event, decision, and reason take precedence when present; `checker_result` dictionaries are merged. | Useful when server-side and client-uploaded records describe the same event and need to be consolidated. |
+| `entry.merged_with(incoming)` | Returns a new entry by merging another entry into the current one. Incoming identity, event, decision, reason, route, and timestamp take precedence when present; `plugin_result` and `plugin_input` dictionaries are merged. | Useful when server-side and client-uploaded records describe the same event and need to be consolidated. |
 | `entry.event_id` | Convenience property returning `entry.event.event_id`, or `None` if there is no event. | Use this to deduplicate events or include event IDs in audit metadata. |
 
-### `event`, `decision`, and `checker_result`
+### `event`, `decision`, and `plugin_result`
 
 These three fields are the main inputs most auditors read:
 
@@ -112,18 +118,22 @@ These three fields are the main inputs most auditors read:
 
   It can be `None` for trace entries that were uploaded without a final decision or entries that only carry partial runtime context.
 
-- `checker_result: dict[str, Any] = field(default_factory=dict)`
+- `plugin_result: dict[str, Any] = field(default_factory=dict)`
 
-  `checker_result` stores the merged detection result produced during runtime. The name is legacy, but the value is where plugin/checker output is attached. Typical contents include `risk_signals`, `metadata`, `is_final`, or decision-candidate details depending on the runtime path.
+  `plugin_result` stores the merged detection result produced during runtime. Typical contents include `risk_signals`, `metadata`, `is_final`, or decision-candidate details depending on the runtime path.
 
-  Use `checker_result` when the auditor wants the detection details that may not be visible from the final decision alone:
+  Use `plugin_result` when the auditor wants the detection details that may not be visible from the final decision alone:
 
   ```python
-  signals = entry.checker_result.get("risk_signals") or []
-  metadata = entry.checker_result.get("metadata") or {}
+  signals = entry.plugin_result.get("risk_signals") or []
+  metadata = entry.plugin_result.get("metadata") or {}
   ```
 
-  Unlike `event` and `decision`, this field is always a dictionary; it is empty when no plugin/checker metadata was stored.
+  Unlike `event` and `decision`, this field is always a dictionary; it is empty when no plugin metadata was stored.
+
+- `plugin_input: dict[str, Any] = field(default_factory=dict)`
+
+  `plugin_input` stores the input passed to the plugin pipeline when the trace source recorded it. Use it when an auditor needs to compare what the plugin saw with the normalized `event` or final `decision`.
 
 ### Common usage patterns
 
@@ -145,7 +155,7 @@ def audit(self, trace: list[AuditTraceEntry]) -> AuditResult:
                 if recipient and not recipient.endswith("@example.com"):
                     risky_signals.add("external_email")
 
-        risky_signals.update(entry.checker_result.get("risk_signals") or [])
+        risky_signals.update(entry.plugin_result.get("risk_signals") or [])
 
     if denied_events or risky_signals:
         return AuditResult(

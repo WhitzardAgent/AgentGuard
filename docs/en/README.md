@@ -232,7 +232,7 @@ cat <<EOF > config/plugins.json
       "local": [],
       "remote": [
         {
-          "name": "rule_based_check",
+          "name": "rule_based_plugin",
           "env": {}
         }
       ]
@@ -246,7 +246,7 @@ cat <<EOF > config/plugins.json
 EOF
 ```
 
-This config means: only the `tool_before` phase runs a remote plugin, and that plugin is the built-in `rule_based_check`. All other phases are empty. In other words, the server will evaluate your policy rules only right before a tool call runs. That keeps the quick start focused on access-control decisions around tool execution, without introducing additional LLM-phase or tool-result plugins yet.
+This config means: only the `tool_before` phase runs a remote plugin, and that plugin is the built-in `rule_based_plugin`. All other phases are empty. In other words, the server will evaluate your policy rules only right before a tool call runs. That keeps the quick start focused on access-control decisions around tool execution, without introducing additional LLM-phase or tool-result plugins yet.
 
 #### 2. Create an access control policy
 
@@ -270,7 +270,7 @@ Reason: "Low-trust principal cannot send document 0 to non-admin recipients"
 EOF
 ```
 
-AgentGuard provides a dedicated DSL for writing policies consumed by the built-in `rule_based_check` plugin, which we'll cover in detail in [Policy DSL Structure](./policies/dsl_basic_structure.md).
+AgentGuard provides a dedicated DSL for writing policies consumed by the built-in `rule_based_plugin` plugin, which we'll cover in detail in [Policy DSL Structure](./policies/dsl_basic_structure.md).
 
 #### 3. Deploy the AgentGuard control server
 
@@ -302,7 +302,7 @@ Below is a screenshot of the interactive policy configuration UI:
 
 ![UI policy configuration](../figs/ui_configure_policy.png)
 
-We'll cover interactive `rule_based_check` policy configuration in detail in [Visual Policy Configuration](./policies/quick_config.md).
+We'll cover interactive `rule_based_plugin` policy configuration in detail in [Visual Policy Configuration](./policies/quick_config.md).
 
 ##### Source-code deployment
 
