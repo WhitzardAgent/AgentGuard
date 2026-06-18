@@ -18,7 +18,7 @@ def server():
     manager = RuntimeManager(
         plugin_config={
             "phases": {
-                "tool_before": {"local": [], "remote": ["tool_invoke", "rule_based_plugin"]}
+                "tool_before": {"client": [], "server": ["tool_invoke", "rule_based_plugin"]}
             }
         }
     )
@@ -36,7 +36,7 @@ def test_e2e_exfiltration_denied_over_http(server):
         policy="enterprise_default",
         plugin_config={
             "phases": {
-                "tool_after": {"local": ["tool_result"], "remote": []},
+                "tool_after": {"client": ["tool_result"], "server": []},
             }
         },
     )
@@ -102,7 +102,7 @@ def test_backend_plugin_config_update_changes_server_runtime():
         payload = {
             "config": {
                 "phases": {
-                    "llm_before": {"local": [], "remote": ["llm_input"]},
+                    "llm_before": {"client": [], "server": ["llm_input"]},
                 }
             }
         }
@@ -145,7 +145,7 @@ def test_backend_plugin_config_update_pushes_to_client():
         payload = {
             "config": {
                 "phases": {
-                    "llm_before": {"local": ["llm_input"], "remote": []},
+                    "llm_before": {"client": ["llm_input"], "server": []},
                 }
             },
             "client_config_urls": [client_url],
@@ -170,7 +170,7 @@ def test_client_registration_sends_plugin_config_to_server():
     base_url, srv, _ = start_dev_server(manager=manager)
     plugin_config = {
         "phases": {
-            "llm_before": {"local": [], "remote": ["llm_input"]},
+            "llm_before": {"client": [], "server": ["llm_input"]},
         }
     }
     guard = AgentGuard(
@@ -210,12 +210,12 @@ def test_backend_plugin_config_update_by_principal_updates_server_and_client():
     )
     server_config = {
         "phases": {
-            "llm_before": {"local": [], "remote": ["llm_input"]},
+            "llm_before": {"client": [], "server": ["llm_input"]},
         }
     }
     client_config = {
         "phases": {
-            "llm_before": {"local": ["llm_input"], "remote": []},
+            "llm_before": {"client": ["llm_input"], "server": []},
         }
     }
     try:
@@ -276,7 +276,7 @@ def test_backend_session_pool_records_client_metadata_over_http():
     manager = RuntimeManager(
         plugin_config={
             "phases": {
-                "llm_before": {"local": [], "remote": ["llm_input"]},
+                "llm_before": {"client": [], "server": ["llm_input"]},
             }
         },
     )

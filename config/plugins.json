@@ -1,16 +1,16 @@
 {
   "phases": {
     "llm_before": {
-      "local": [],
-      "remote": []
+      "client": [],
+      "server": []
     },
     "llm_after": {
-      "local": [],
-      "remote": []
+      "client": [],
+      "server": []
     },
     "tool_before": {
-      "local": [],
-      "remote": [
+      "client": [],
+      "server": [
         {
           "name": "rule_based_plugin",
           "env": {}
@@ -18,8 +18,8 @@
       ]
     },
     "tool_after": {
-      "local": [],
-      "remote": []
+      "client": [],
+      "server": []
     }
   }
 }

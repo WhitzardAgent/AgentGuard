@@ -32,12 +32,12 @@ Current code references:
 
 At decision time, the current path is:
 
-1. The client runs local plugins first.
-2. If the local result is final, the client applies it locally and stores the decision in `ClientSyncBuffer`.
-3. If the local result is not final, the client calls `/v1/server/guard/decide`.
+1. The client runs client-side plugins first.
+2. If the client-side result is final, the client applies it locally and stores the decision in `ClientSyncBuffer`.
+3. If the client-side result is not final, the client calls `/v1/server/guard/decide`.
 4. The server refreshes or upserts the session context for this request.
 5. The server looks up the session by the composite identity `session_id::agent_id::user_id`, then applies any agent-scoped plugin override on top of the stored session config.
-6. The server plugin manager parses the effective plugin config by phase and only executes the `remote` plugin list for each phase.
+6. The server plugin manager parses the effective plugin config by phase and only executes the `server` plugin list for each phase.
 7. The server returns the decision to the client.
 
 Current code references:
@@ -51,9 +51,9 @@ Current code references:
 * `src/server/backend/runtime/plugins/manager.py:32`
 * `src/server/backend/runtime/manager.py:267`
 
-### 3. Local Result Sync
+### 3. Client-Side Result Sync
 
-Local-only decisions are not discarded. The client syncs them back to the server through two paths:
+Client-side-only decisions are not discarded. The client syncs them back to the server through two paths:
 
 1. At the end of a full round, the client asynchronously uploads trace entries.
 2. If another remote decision happens before the async upload completes, the buffered local entries are piggybacked in `client_cached_entries`.
@@ -88,7 +88,7 @@ Current code references:
 
 ## Plugin Config Shape
 
-The session-scoped `remote_plugin_config` is not stored as a flattened remote-only structure. It keeps the same phased shape as the client-side plugin config. During initial registration, clients populate it with the same payload as `client_plugin_config`; later local `update_plugin_config()` calls only update `client_plugin_config`, so the stored `remote_plugin_config` reflects the last server-synchronized remote view unless the client re-registers or the server applies overrides.
+The session-scoped `remote_plugin_config` is not stored as a flattened server-only structure. It keeps the same phased shape as the client-side plugin config. During initial registration, clients populate it with the same payload as `client_plugin_config`; later client-side `update_plugin_config()` calls only update `client_plugin_config`, so the stored `remote_plugin_config` reflects the last server-synchronized server-side view unless the client re-registers or the server applies overrides.
 
 A typical shape is:
 
@@ -96,8 +96,8 @@ A typical shape is:
 {
   "phases": {
     "tool_before": {
-      "local": [],
-      "remote": [
+      "client": [],
+      "server": [
         {
           "name": "rule_based_plugin",
           "env": {}
@@ -105,20 +105,20 @@ A typical shape is:
       ]
     },
     "llm_before": {
-      "local": [],
-      "remote": []
+      "client": [],
+      "server": []
     },
     "llm_after": {
-      "local": [],
-      "remote": []
+      "client": [],
+      "server": []
     },
     "tool_after": {
-      "local": [],
-      "remote": []
+      "client": [],
+      "server": []
     },
     "global": {
-      "local": [],
-      "remote": []
+      "client": [],
+      "server": []
     }
   }
 }
@@ -127,10 +127,10 @@ A typical shape is:
 Important behavior:
 
 * When a plugin manager loads config for execution, the parser requires a `phases` object.
-* When a phase is present, the execution parser expects both `local` and `remote` keys.
-* The server only reads the `remote` list for execution.
-* The client-side plugin manager reads the same phased structure, but uses the `local` side.
-* If the server already has a default `plugin_config` and the client mirrors that same structure into `remote_plugin_config`, the server clears the mirrored session-scoped remote override so the server default remains authoritative. Explicit session-scoped remote overrides are still preserved.
+* When a phase is present, the execution parser expects both `client` and `server` keys.
+* The server only reads the `server` list for execution.
+* The client-side plugin manager reads the same phased structure, but uses the `client` side.
+* If the server already has a default `plugin_config` and the client mirrors that same structure into `remote_plugin_config`, the server clears the mirrored session-scoped server override so the server default remains authoritative. Explicit session-scoped server overrides are still preserved.
 
 Code references:
 
@@ -179,21 +179,21 @@ A typical healthy session record may look like this:
   "client_plugin_config": {
     "phases": {
       "tool_before": {
-        "local": [
+        "client": [
           {
             "name": "tool_invoke",
             "env": {}
           }
         ],
-        "remote": []
+        "server": []
       }
     }
   },
   "remote_plugin_config": {
     "phases": {
       "tool_before": {
-        "local": [],
-        "remote": [
+        "client": [],
+        "server": [
           {
             "name": "rule_based_plugin",
             "env": {}
@@ -213,21 +213,21 @@ A typical healthy session record may look like this:
     "client_plugin_config": {
       "phases": {
         "tool_before": {
-          "local": [
+          "client": [
             {
               "name": "tool_invoke",
               "env": {}
             }
           ],
-          "remote": []
+          "server": []
         }
       }
     },
     "remote_plugin_config": {
       "phases": {
         "tool_before": {
-          "local": [],
-          "remote": [
+          "client": [],
+          "server": [
             {
               "name": "rule_based_plugin",
               "env": {}
@@ -266,4 +266,4 @@ Notes:
 
 * `principal` is optional and only appears when incoming event metadata provides it.
 * `metadata.last_health_check_*` fields appear only after a successful health check.
-* The effective remote execution config can still be replaced by agent-scoped overrides at decision time.
+* The effective server-side execution config can still be replaced by agent-scoped overrides at decision time.

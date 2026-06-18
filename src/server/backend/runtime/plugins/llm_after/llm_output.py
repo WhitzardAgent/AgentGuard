@@ -21,5 +21,5 @@ class LLMOutputPlugin(BasePlugin):
         context: RuntimeContext,
         trajectory_window: list[RuntimeEvent] | None = None,
     ) -> CheckResult:
-        text = text_of(event.payload.get("output"))
+        text = text_of(event.payload.output)
         return CheckResult(risk_signals=find_signals(text))

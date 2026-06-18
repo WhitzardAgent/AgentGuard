@@ -365,7 +365,7 @@ def test_plugins_config_proxy_forwards_payload_and_api_key():
             return
 
     request_body = {
-        "config": {"phases": {"tool_before": {"local": [], "remote": ["tool_invoke"]}}},
+        "config": {"phases": {"tool_before": {"client": [], "server": ["tool_invoke"]}}},
         "client_principals": [{"agent_id": "agent-a"}],
     }
 
@@ -436,8 +436,8 @@ def test_agent_plugin_config_post_proxy_forwards_payload_and_api_key():
             return
 
     request_body = {
-        "config": {"phases": {"tool_before": {"local": [], "remote": ["tool_invoke"]}}},
-        "client_config": {"phases": {"tool_after": {"local": ["tool_result"], "remote": []}}},
+        "config": {"phases": {"tool_before": {"client": [], "server": ["tool_invoke"]}}},
+        "client_config": {"phases": {"tool_after": {"client": ["tool_result"], "server": []}}},
     }
 
     with _ThreadedServer(UpstreamHandler) as upstream:

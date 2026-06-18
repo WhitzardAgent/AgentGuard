@@ -150,14 +150,13 @@ class PolicyRule:
         if self.event_types and event.event_type.value not in self.event_types:
             return False
 
-        payload = event.payload or {}
         if self.tool_names:
-            tool = payload.get("tool_name")
+            tool = getattr(event.payload, "tool_name", None)
             if not _wildcard_match(tool, self.tool_names):
                 return False
 
         if self.capabilities:
-            caps = set(payload.get("capabilities") or [])
+            caps = set(getattr(event.payload, "capabilities", []) or [])
             if not (caps & set(self.capabilities)):
                 return False
 

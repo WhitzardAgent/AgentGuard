@@ -24,7 +24,7 @@ class AuditRecorder {
       risk_signals: [...(event.risk_signals || [])],
       policy_id: decision ? decision.policy_id : null,
       metadata: {
-        payload: event.payload,
+        payload: event.payload && typeof event.payload.toDict === "function" ? event.payload.toDict() : event.payload,
         decision_metadata: decision ? decision.metadata : {},
       },
     };

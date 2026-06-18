@@ -56,7 +56,7 @@ Today, AgentGuard covers several key technical areas highlighted in Anthropic's 
 
 ![AgentGuard Positioning](./docs/figs/positioning.png)
 
-AgentGuard can be integrated into existing agent frameworks without modifying the underlying execution logic. Currently, it supports LangChain, AutoGen, and OpenAI Agents SDK, and we are continuously expanding support for additional agent ecosystems and frameworks.
+AgentGuard can be integrated into existing agent frameworks without modifying the underlying execution logic. Currently, it supports LangChain, AutoGen, OpenAI Agents SDK, and OpenClaw, and we are continuously expanding support for additional agent ecosystems and frameworks.
 
 ## ✨ Features
 
@@ -82,6 +82,7 @@ Currently, we support the following agent frameworks:
 - [LangChain](https://github.com/langchain-ai/langchain)
 - [AutoGen](https://github.com/microsoft/autogen)
 - [OpenAI Agents SDK](https://github.com/openai/openai-agents-python)
+- OpenClaw
 
 ### 3. Visual Policy Configuration & Audit
 
@@ -115,16 +116,16 @@ cat <<EOF > config/plugins.json
 {
   "phases": {
     "llm_before": {
-      "local": [],
-      "remote": []
+      "client": [],
+      "server": []
     },
     "llm_after": {
-      "local": [],
-      "remote": []
+      "client": [],
+      "server": []
     },
     "tool_before": {
-      "local": [],
-      "remote": [
+      "client": [],
+      "server": [
         {
           "name": "rule_based_plugin",
           "env": {}
@@ -132,15 +133,15 @@ cat <<EOF > config/plugins.json
       ]
     },
     "tool_after": {
-      "local": [],
-      "remote": []
+      "client": [],
+      "server": []
     }
   }
 }
 EOF
 ```
 
-This config tells AgentGuard which plugins run in each runtime phase. In this quick start, only `tool_before` enables one remote plugin: `rule_based_plugin`. That means the server evaluates access-control rules right before a tool call is executed, while all other phases stay empty. This keeps the first demo simple: the client forwards tool-invocation decisions to the server, and the server uses the built-in rule-based plugin to match your policy rules and return an allow/deny decision.
+This config tells AgentGuard which plugins run in each runtime phase. In this quick start, only `tool_before` enables one server plugin: `rule_based_plugin`. That means the server evaluates access-control rules right before a tool call is executed, while all other phases stay empty. This keeps the first demo simple: the client forwards tool-invocation decisions to the server, and the server uses the built-in rule-based plugin to match your policy rules and return an allow/deny decision.
 
 Then create an access control policy:
 
@@ -364,8 +365,8 @@ The high-level architecture of AgentGuard is shown below.
 
 - **Client**: With minimal code modifications, the AgentGuard client integrates into agent frameworks and can intercept before and after LLM calls, as well as before and after tool invocations. It can perform lightweight local filtering on the client side and forward events to the server for deeper inspection by configured plugins.
 - **Server**: The server receives information from clients, uses configured plugins to evaluate agent actions against policies, produces policy decisions, and sends them back to clients. It also monitors agent status for administrative auditing.
-- **Plugin Extensibility**: Both client and server support pluggable plugins. To add custom plugins, see the [client plugin guide](./src/client/python/agentguard/plugins/README.md) and the [server plugin directory](./src/server/backend/runtime/plugins/).
-- **Custom Auditor Extensibility**: The backend also supports pluggable custom auditors for post-hoc trace review. Shared auditor abstractions live under `src/server/backend/audit/`, while concrete auditors live under `src/server/backend/audit/auditors/`. See the documentation chapter on custom auditors in `./docs/en/README.md`.
+- **Plugin Extensibility**: Both client and server support pluggable plugins. To add custom plugins, see the [client plugin guide](https://whitzardagent.github.io/AgentGuard/plugins/custom_client_plugin.html) and the [server plugin guide](https://whitzardagent.github.io/AgentGuard/plugins/custom_server_plugin.html).
+- **Custom Auditor Extensibility**: The backend also supports pluggable custom auditors for post-hoc trace review. Shared auditor abstractions live under `src/server/backend/audit/`, while concrete auditors live under `src/server/backend/audit/auditors/`. See the documentation chapter on [custom auditors](https://whitzardagent.github.io/AgentGuard/auditors.html).
 
 ## 👥 Contributors
 

@@ -277,6 +277,36 @@ function resolveCapabilities(toolCapabilities, event) {
   return [];
 }
 
+function buildLlmInputMessages(event = {}) {
+  if (Array.isArray(event.messages) && event.messages.length) {
+    return event.messages;
+  }
+  const messages = [];
+  if (asNonEmptyString(event.systemPrompt)) {
+    messages.push({ role: "system", content: event.systemPrompt });
+  }
+  if (asNonEmptyString(event.prompt)) {
+    messages.push({ role: "user", content: event.prompt });
+  }
+  return messages;
+}
+
+function buildLlmOutputText(event = {}) {
+  if (typeof event.content === "string") {
+    return event.content;
+  }
+  if (Array.isArray(event.assistantTexts)) {
+    return event.assistantTexts.filter((item) => typeof item === "string").join("\n");
+  }
+  if (typeof event.text === "string") {
+    return event.text;
+  }
+  if (event.content != null) {
+    return String(event.content);
+  }
+  return "";
+}
+
 class AgentGuardOpenClawBridge {
   constructor(options = {}) {
     this.pluginId = options.pluginId || "agentguard";
@@ -486,13 +516,13 @@ class AgentGuardOpenClawBridge {
       payload: {
         tool_name: event.toolName,
         result: event.result,
-        error: event.error || null,
       },
       metadata: {
         phase: "tool_after",
         toolCallId: event.toolCallId || ctx.toolCallId,
         runId: event.runId || ctx.runId,
         durationMs: event.durationMs,
+        ...(event.error ? { error: event.error } : {}),
       },
     });
     await this.enforce(state, runtimeEvent, { phase: "tool_after" });
@@ -511,13 +541,13 @@ class AgentGuardOpenClawBridge {
       eventType: EventType.LLM_INPUT,
       context: state.context,
       payload: {
-        prompt: event.prompt,
-        messages: event.messages || [],
-        systemPrompt: event.systemPrompt,
+        messages: buildLlmInputMessages(event),
       },
       metadata: {
         phase: "llm_before",
         runId: ctx.runId,
+        ...(event.prompt ? { prompt: event.prompt } : {}),
+        ...(event.systemPrompt ? { systemPrompt: event.systemPrompt } : {}),
       },
     });
     const result = await this.enforce(state, runtimeEvent, { phase: "llm_before" });
@@ -553,18 +583,16 @@ class AgentGuardOpenClawBridge {
       eventType: EventType.LLM_OUTPUT,
       context: state.context,
       payload: {
-        output: {
-          to: event.to,
-          content: event.content,
-          replyToId: event.replyToId,
-          threadId: event.threadId,
-          metadata: event.metadata || {},
-        },
+        output: buildLlmOutputText(event),
       },
       metadata: {
         phase: "llm_after",
         runId: ctx.runId,
         channelId: ctx.channelId,
+        to: event.to,
+        replyToId: event.replyToId,
+        threadId: event.threadId,
+        messageMetadata: event.metadata || {},
       },
     });
     const result = await this.enforce(state, runtimeEvent, { phase: "llm_after" });
@@ -607,6 +635,8 @@ module.exports = {
     buildReplacementText,
     buildRewrittenParams,
     buildRuntimeContext,
+    buildLlmInputMessages,
+    buildLlmOutputText,
     buildUserBlockMessage,
     isRemoteUnavailableDecision,
     normalizePluginConfig,

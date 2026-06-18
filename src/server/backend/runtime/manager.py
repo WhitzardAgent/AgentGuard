@@ -435,7 +435,9 @@ class RuntimeManager:
         # 2. Degrade plan if needed.
         if decision.decision_type == DecisionType.DEGRADE:
             plan = self.degrade.plan(
-                event.payload.get("tool_name", ""), event.payload.get("arguments") or {}, decision.reason
+                getattr(event.payload, "tool_name", ""),
+                getattr(event.payload, "arguments", {}) or {},
+                decision.reason,
             )
             decision.metadata["degrade_plan"] = plan.to_dict()
 

@@ -1,4 +1,4 @@
-# rule_based_plugin Visual Policy Configuration
+# Visual Policy Configuration
 
 This page explains how to configure policies for the built-in `rule_based_plugin` server plugin through the web UI. `rule_based_plugin` evaluates access-control rules, usually in the `tool_before` phase, so AgentGuard can identify and intercept tool-call security risks before the tool executes.
 
@@ -7,13 +7,13 @@ To use these policies, enable the plugin in `config/plugins.json`:
 ```json
 {
   "phases": {
-    "llm_before": {"local": [], "remote": []},
-    "llm_after": {"local": [], "remote": []},
+    "llm_before": {"client": [], "server": []},
+    "llm_after": {"client": [], "server": []},
     "tool_before": {
-      "local": [],
-      "remote": [{"name": "rule_based_plugin", "env": {}}]
+      "client": [],
+      "server": [{"name": "rule_based_plugin", "env": {}}]
     },
-    "tool_after": {"local": [], "remote": []}
+    "tool_after": {"client": [], "server": []}
   }
 }
 ```

@@ -10,6 +10,6 @@ class ToolResultInterceptor(BaseInterceptor):
     name = "tool_result"
 
     def after(self, event: RuntimeEvent, context: RuntimeContext) -> RuntimeEvent:
-        if event.payload.get("error"):
+        if event.metadata.get("error"):
             event.metadata["had_error"] = True
         return self._tag(event)

@@ -22,7 +22,7 @@ function redact(record) {
     ...record,
     metadata: {
       ...(record.metadata || {}),
-      payload: event.payload,
+      payload: event.payload && typeof event.payload.toDict === "function" ? event.payload.toDict() : event.payload,
       decision_metadata: event.metadata.decision_metadata || (record.metadata || {}).decision_metadata || {},
     },
   };

@@ -21,7 +21,7 @@ class FallbackGuard:
         self.fail_closed = fail_closed
 
     def decide(self, event: RuntimeEvent) -> GuardDecision:
-        caps = set(event.payload.get("capabilities") or [])
+        caps = set(getattr(event.payload, "capabilities", []) or [])
         signals = set(event.risk_signals)
         high_risk = bool(caps & HIGH_RISK_CAPABILITIES) or bool(signals & _STRONG_SIGNALS)
         if high_risk and self.fail_closed:

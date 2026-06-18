@@ -30,8 +30,8 @@ class ToolInvokePlugin(BasePlugin):
         trajectory_window: list[RuntimeEvent] | None = None,
     ) -> CheckResult:
         payload = event.payload
-        caps = set(payload.get("capabilities") or [])
-        args_text = text_of(payload.get("arguments"))
+        caps = set(payload.capabilities)
+        args_text = text_of(payload.arguments)
         signals = find_signals(args_text)
 
         if CAP_EXTERNAL_SEND in caps:

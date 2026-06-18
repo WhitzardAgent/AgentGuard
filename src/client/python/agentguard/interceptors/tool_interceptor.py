@@ -10,5 +10,5 @@ class ToolInterceptor(BaseInterceptor):
     name = "tool"
 
     def before(self, event: RuntimeEvent, context: RuntimeContext) -> RuntimeEvent:
-        event.metadata.setdefault("tool_name", event.payload.get("tool_name"))
+        event.metadata.setdefault("tool_name", getattr(event.payload, "tool_name", None))
         return self._tag(event)

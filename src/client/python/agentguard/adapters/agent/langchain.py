@@ -430,13 +430,14 @@ def _patch_tool_object(tool: Any, guard: Any, *, name: str) -> int:
     if tool is None or is_guarded(tool):
         return 0
 
-    # Prefer raw tool callables so AgentGuard sees business arguments such as
-    # ``path``/``url`` instead of LangChain's generic ``input`` envelope.
+    # Prefer LangChain's public entrypoint when present to avoid double-counting
+    # tools whose invoke method delegates to func/_run internally.
+    if _patch_tool_attrs(tool, guard, name=name, attrs=("invoke", "ainvoke")):
+        return 1
+    # Fall back to raw tool callables when no public entrypoint exists.
     if _patch_tool_attrs(tool, guard, name=name, attrs=("func", "coroutine")):
         return 1
     if _patch_tool_attrs(tool, guard, name=name, attrs=("_run", "_arun")):
-        return 1
-    if _patch_tool_attrs(tool, guard, name=name, attrs=("invoke", "ainvoke")):
         return 1
     return 0
 
@@ -481,7 +482,7 @@ def _make_guarded_langchain_tool_method(
         @functools.wraps(fn)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
             try:
-                arguments = bind_arguments(fn, args, kwargs)
+                arguments = _build_langchain_tool_arguments(fn, args, kwargs)
                 decision = guard_tool_before(guard, metadata, arguments)
                 blocked = _blocked_langchain_tool_value(decision, metadata.name, args, kwargs)
                 if blocked is not None:
@@ -510,7 +511,7 @@ def _make_guarded_langchain_tool_method(
     @functools.wraps(fn)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         try:
-            arguments = bind_arguments(fn, args, kwargs)
+            arguments = _build_langchain_tool_arguments(fn, args, kwargs)
             decision = guard_tool_before(guard, metadata, arguments)
             blocked = _blocked_langchain_tool_value(decision, metadata.name, args, kwargs)
             if blocked is not None:
@@ -535,6 +536,20 @@ def _make_guarded_langchain_tool_method(
             _sync_local_cache_async(guard, reason="round_complete")
 
     return mark_guarded(wrapper)
+
+
+def _build_langchain_tool_arguments(
+    fn: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> dict[str, Any]:
+    tool_call = _extract_langchain_tool_call(args, kwargs)
+    if isinstance(tool_call, dict) and "args" in tool_call:
+        tool_args = _normalize_langchain_value(tool_call.get("args"))
+        if isinstance(tool_args, dict):
+            return tool_args
+        return {"args": tool_args}
+    return bind_arguments(fn, args, kwargs)
 
 
 def _blocked_langchain_tool_value(
@@ -653,12 +668,28 @@ def _extract_langchain_tool_call(
     candidates = list(args)
     if "input" in kwargs:
         candidates.append(kwargs["input"])
+    if "tool_call" in kwargs:
+        candidates.append(kwargs["tool_call"])
+    if "config" in kwargs:
+        candidates.append(kwargs["config"])
     for value in candidates:
         if not isinstance(value, dict):
             continue
-        if value.get("type") == "tool_call" and value.get("name"):
+        if _is_langchain_tool_call(value):
             return value
+        nested = value.get("toolCall") or value.get("tool_call")
+        if isinstance(nested, dict) and _is_langchain_tool_call(nested):
+            return nested
+        config = value.get("config")
+        if isinstance(config, dict):
+            nested = config.get("toolCall") or config.get("tool_call")
+            if isinstance(nested, dict) and _is_langchain_tool_call(nested):
+                return nested
     return None
+
+
+def _is_langchain_tool_call(value: dict[str, Any]) -> bool:
+    return isinstance(value.get("name"), str) and "args" in value
 
 
 @functools.lru_cache(maxsize=1)

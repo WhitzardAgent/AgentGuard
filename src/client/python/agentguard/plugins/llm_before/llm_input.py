@@ -16,6 +16,6 @@ class LLMInputPlugin(BasePlugin):
     event_types = [EventType.LLM_INPUT]
 
     def check(self, event: RuntimeEvent, context: RuntimeContext) -> CheckResult:
-        text = text_of(event.payload.get("text") or event.payload.get("messages"))
+        text = text_of(event.payload.messages)
         signals = [s for s in find_signals(text) if s in {"prompt_injection", "system_prompt_leak"}]
         return CheckResult(risk_signals=signals)

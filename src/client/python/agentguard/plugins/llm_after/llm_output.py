@@ -16,5 +16,5 @@ class LLMOutputPlugin(BasePlugin):
     event_types = [EventType.LLM_OUTPUT]
 
     def check(self, event: RuntimeEvent, context: RuntimeContext) -> CheckResult:
-        text = text_of(event.payload.get("output"))
+        text = text_of(event.payload.output)
         return CheckResult(risk_signals=find_signals(text))

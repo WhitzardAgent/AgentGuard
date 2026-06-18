@@ -1,19 +1,19 @@
-# Custom Auditors
+# 自定义审计器
 
-AgentGuard 支持在后端执行事后审计。与在运行时链路中同步执行的 plugin 不同，custom auditor 面向已经存储完成的完整 trace 工作：它会在 `session_id` / `agent_id` / `user_id` 对应的轨迹上做回溯分析。这类能力适合用于合规复核、事故排查、事后分析，以及为前端生成总结性的风险等级。
+AgentGuard 支持在后端执行事后审计。与在运行时链路中同步执行的 plugin 不同，自定义审计器面向已经存储完成的完整 trace 工作：它会在 `session_id` / `agent_id` / `user_id` 对应的轨迹上做回溯分析。这类能力适合用于合规复核、事故排查、事后分析，以及为前端生成总结性的风险等级。
 
 公共 auditor 抽象位于：
 
 ```text
-../../src/server/backend/audit/base.py
-../../src/server/backend/audit/manager.py
-../../src/server/backend/audit/registry.py
+src/server/backend/audit/base.py
+src/server/backend/audit/manager.py
+src/server/backend/audit/registry.py
 ```
 
 具体 auditor 实现需要放在：
 
 ```text
-../../src/server/backend/audit/auditors/
+src/server/backend/audit/auditors/
 ```
 
 后端发现并加载的 auditor 接口形态如下：
@@ -45,7 +45,7 @@ class MyTraceAuditor(BaseAuditor):
 
 `AuditTraceEntry` 是传入 `BaseAuditor.audit()` 的规范化记录类型。一条 entry 通常表示一个已存储的运行时事件，以及该事件对应的决策和检测元数据。
 
-当前类型定义在 `../../src/server/backend/audit/base.py`：
+当前类型定义在 `src/server/backend/audit/base.py`：
 
 ```python
 @dataclass
@@ -92,14 +92,14 @@ class AuditTraceEntry:
 
 - `event: RuntimeEvent | None = None`
 
-  `event` 是被审计的原始运行时事件。它说明“发生了什么”，包括事件类型、payload、上下文、风险信号和 adapter metadata。例如，`TOOL_INVOKE` 事件通常会包含 `payload["tool_name"]` 和 `payload["arguments"]`；`LLM_INPUT` 事件可能包含 messages 或 prompt 文本。
+  `event` 是被审计的原始运行时事件。它说明“发生了什么”，包括事件类型、类型化 payload、上下文、风险信号和 adapter metadata。例如，`TOOL_INVOKE` 事件会暴露 `event.payload.tool_name`、`event.payload.arguments` 和 `event.payload.capabilities`；`LLM_INPUT` 事件会暴露 `event.payload.messages`；`LLM_OUTPUT` 事件会暴露 `event.payload.output`。
 
   当 auditor 需要检查实际运行行为时读取 `event`：
 
   ```python
   if entry.event and entry.event.event_type.value == "tool_invoke":
-      tool_name = entry.event.payload.get("tool_name")
-      arguments = entry.event.payload.get("arguments") or {}
+      tool_name = entry.event.payload.tool_name
+      arguments = entry.event.payload.arguments
   ```
 
   如果存储的 trace record 中没有可解析的运行时事件，`event` 可能是 `None`，所以读取前需要先判断。
@@ -150,8 +150,8 @@ def audit(self, trace: list[AuditTraceEntry]) -> AuditResult:
 
         if entry.event:
             risky_signals.update(entry.event.risk_signals)
-            if entry.event.payload.get("tool_name") == "send_email":
-                recipient = (entry.event.payload.get("arguments") or {}).get("addr")
+            if entry.event.event_type.value == "tool_invoke" and entry.event.payload.tool_name == "send_email":
+                recipient = entry.event.payload.arguments.get("addr")
                 if recipient and not recipient.endswith("@example.com"):
                     risky_signals.add("external_email")
 
@@ -176,4 +176,4 @@ def audit(self, trace: list[AuditTraceEntry]) -> AuditResult:
 - 调用 `GET /v1/backend/auditors` 列出当前可用 auditor 及其描述
 - 调用 `POST /v1/backend/audit/custom/run`，传入 `session_id`、`agent_id`、`user_id` 和 `auditor_name`，对对应已存储 trace 执行一次审计
 
-如果想看一个内置的具体例子，可参考 `../../src/server/backend/audit/auditors/trace_risk_summary.py`。
+如果想看一个内置的具体例子，可参考 `src/server/backend/audit/auditors/trace_risk_summary.py`。

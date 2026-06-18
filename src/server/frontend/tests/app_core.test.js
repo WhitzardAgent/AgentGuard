@@ -439,12 +439,12 @@ test("shared app core builds multi-plugin config while preserving unrelated phas
   const existingConfig = {
     phases: {
       llm_before: {
-        local: ["local_llm_guard"],
-        remote: ["llm_input"],
+        client: ["client_llm_guard"],
+        server: ["llm_input"],
       },
       tool_before: {
-        local: ["local_tool_guard"],
-        remote: ["custom_hidden_checker", "tool_invoke", "rule_based_plugin"],
+        client: ["client_tool_guard"],
+        server: ["custom_hidden_plugin", "tool_invoke", "rule_based_plugin"],
       },
     },
   };
@@ -458,36 +458,36 @@ test("shared app core builds multi-plugin config while preserving unrelated phas
   assert.deepEqual(config, {
     phases: {
       llm_before: {
-        local: ["local_llm_guard"],
-        remote: ["llm_input"],
+        client: ["client_llm_guard"],
+        server: ["llm_input"],
       },
       tool_before: {
-        local: ["local_tool_guard"],
-        remote: ["custom_hidden_checker"],
+        client: ["client_tool_guard"],
+        server: ["custom_hidden_plugin"],
       },
     },
   });
 
-  const localConfig = global.window.AgentGuardData.buildPluginConfig(
+  const clientConfig = global.window.AgentGuardData.buildPluginConfig(
     [{ name: "tool_result", description: "", event_types: ["tool_result"], phases: ["tool_after"] }],
     [{ name: "tool_result", description: "", event_types: ["tool_result"], phases: ["tool_after"] }],
     existingConfig,
-    "local",
+    "client",
   );
 
-  assert.deepEqual(localConfig, {
+  assert.deepEqual(clientConfig, {
     phases: {
       llm_before: {
-        local: ["local_llm_guard"],
-        remote: ["llm_input"],
+        client: ["client_llm_guard"],
+        server: ["llm_input"],
       },
       tool_before: {
-        local: ["local_tool_guard"],
-        remote: ["custom_hidden_checker", "tool_invoke", "rule_based_plugin"],
+        client: ["client_tool_guard"],
+        server: ["custom_hidden_plugin", "tool_invoke", "rule_based_plugin"],
       },
       tool_after: {
-        local: ["tool_result"],
-        remote: [],
+        client: ["tool_result"],
+        server: [],
       },
     },
   });
@@ -530,9 +530,9 @@ test("shared app core derives active plugin names and primary plugin from config
     agent_id: "agent-a",
     plugin_config: {
       phases: {
-        llm_before: { local: ["local_prompt_guard"], remote: ["llm_input"] },
-        tool_before: { local: [], remote: ["tool_invoke", "rule_based_plugin"] },
-        tool_after: { local: ["local_tool_result_guard"], remote: [{ name: "tool_result" }] },
+        llm_before: { client: ["client_prompt_guard"], server: ["llm_input"] },
+        tool_before: { client: [], server: ["tool_invoke", "rule_based_plugin"] },
+        tool_after: { client: ["client_tool_result_guard"], server: [{ name: "tool_result" }] },
       },
     },
   };
@@ -542,8 +542,8 @@ test("shared app core derives active plugin names and primary plugin from config
     ["llm_input", "tool_invoke", "rule_based_plugin", "tool_result"],
   );
   assert.deepEqual(
-    global.window.AgentGuardData.selectedPluginsFromConfig(configResponse, "local"),
-    ["local_prompt_guard", "local_tool_result_guard"],
+    global.window.AgentGuardData.selectedPluginsFromConfig(configResponse, "client"),
+    ["client_prompt_guard", "client_tool_result_guard"],
   );
   assert.deepEqual(
     global.window.AgentGuardData.activePluginsFromConfig(configResponse),
@@ -552,8 +552,8 @@ test("shared app core derives active plugin names and primary plugin from config
       "tool_invoke",
       "rule_based_plugin",
       "tool_result",
-      "local_prompt_guard",
-      "local_tool_result_guard",
+      "client_prompt_guard",
+      "client_tool_result_guard",
     ],
   );
   assert.deepEqual(
@@ -600,7 +600,7 @@ test("shared app core preserves plugin config source from the agent config endpo
         agent_id: "agent-a",
         plugin_config: {
           phases: {
-            tool_before: { local: [], remote: ["rule_based_plugin"] },
+            tool_before: { client: [], server: ["rule_based_plugin"] },
           },
         },
         config_source: "server_default",
@@ -620,5 +620,5 @@ test("shared app core preserves plugin config source from the agent config endpo
 
   assert.equal(config.agent_id, "agent-a");
   assert.equal(config.config_source, "server_default");
-  assert.deepEqual(config.plugin_config?.phases?.tool_before?.remote, ["rule_based_plugin"]);
+  assert.deepEqual(config.plugin_config?.phases?.tool_before?.server, ["rule_based_plugin"]);
 });

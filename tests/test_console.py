@@ -19,7 +19,7 @@ def _console() -> ConsoleState:
         RuntimeManager(
             plugin_config={
                 "phases": {
-                    "tool_before": {"local": [], "remote": ["tool_invoke", "rule_based_plugin"]}
+                    "tool_before": {"client": [], "server": ["tool_invoke", "rule_based_plugin"]}
                 }
             }
         )

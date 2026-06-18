@@ -59,7 +59,7 @@ class UGuardRouter:
             return RouteDecision(RouteTarget.LOCAL, "clear local violation")
 
         # 3. Determine whether remote review is warranted.
-        caps = set(event.payload.get("capabilities") or [])
+        caps = set(getattr(event.payload, "capabilities", []) or [])
         high_risk = self.escalate_high_risk and bool(caps & HIGH_RISK_CAPABILITIES)
         wants_remote = (
             force_remote

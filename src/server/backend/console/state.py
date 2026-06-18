@@ -279,9 +279,8 @@ class ConsoleState:
         request: dict[str, Any],
     ) -> None:
         action = _DECISION_TO_ACTION.get(decision.decision_type, "allow")
-        payload = event.payload or {}
         ctx = event.context
-        tool = payload.get("tool_name") or event.event_type.value
+        tool = getattr(event.payload, "tool_name", None) or event.event_type.value
         matched = decision.metadata.get("matched_rule_ids") or (
             [decision.policy_id] if decision.policy_id else []
         )
@@ -317,7 +316,6 @@ class ConsoleState:
 
     @staticmethod
     def _build_event_dict(event: RuntimeEvent, ts: float) -> dict[str, Any]:
-        payload = event.payload or {}
         ctx = event.context
         return {
             "event_id": event.event_id,
@@ -331,15 +329,15 @@ class ConsoleState:
                 "trust_level": 0,
             },
             "tool_call": {
-                "tool_name": payload.get("tool_name"),
-                "args": payload.get("arguments") or {},
-                "target": payload.get("target") or {},
+                "tool_name": getattr(event.payload, "tool_name", None),
+                "args": getattr(event.payload, "arguments", {}) or {},
+                "target": {},
                 "sink_type": "none",
                 "label": {
                     "boundary": "internal",
                     "sensitivity": "low",
                     "integrity": "trusted",
-                    "tags": payload.get("capabilities") or [],
+                    "tags": getattr(event.payload, "capabilities", []) or [],
                 },
             },
         }

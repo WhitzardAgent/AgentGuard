@@ -33,7 +33,7 @@ class AuditRecorder:
             "risk_signals": list(event.risk_signals),
             "policy_id": decision.policy_id if decision else None,
             "metadata": {
-                "payload": event.payload,
+                "payload": event.payload.to_dict(),
                 "decision_metadata": decision.metadata if decision else {},
             },
         }

@@ -5,15 +5,15 @@ AgentGuard supports post-hoc auditing on the backend. Unlike plugins, which run 
 The shared auditor abstractions live under:
 
 ```text
-../../src/server/backend/audit/base.py
-../../src/server/backend/audit/manager.py
-../../src/server/backend/audit/registry.py
+src/server/backend/audit/base.py
+src/server/backend/audit/manager.py
+src/server/backend/audit/registry.py
 ```
 
 Concrete auditor implementations must be placed under:
 
 ```text
-../../src/server/backend/audit/auditors/
+src/server/backend/audit/auditors/
 ```
 
 The backend-discovered auditor interface is:
@@ -45,7 +45,7 @@ Each `AuditTraceEntry` contains the canonical trace fields `session_id`, `agent_
 
 `AuditTraceEntry` is the normalized record type passed into `BaseAuditor.audit()`. One entry usually represents one stored runtime event plus the decision and detection metadata produced for that event.
 
-The current type is defined in `../../src/server/backend/audit/base.py`:
+The current type is defined in `src/server/backend/audit/base.py`:
 
 ```python
 @dataclass
@@ -92,14 +92,14 @@ These three fields are the main inputs most auditors read:
 
 - `event: RuntimeEvent | None = None`
 
-  `event` is the original runtime event being audited. It tells you what happened: the event type, payload, context, risk signals, and adapter metadata. For example, a `TOOL_INVOKE` event usually contains `payload["tool_name"]` and `payload["arguments"]`; an `LLM_INPUT` event may contain messages or prompt text.
+  `event` is the original runtime event being audited. It tells you what happened: the event type, typed payload, context, risk signals, and adapter metadata. For example, a `TOOL_INVOKE` event exposes `event.payload.tool_name`, `event.payload.arguments`, and `event.payload.capabilities`; an `LLM_INPUT` event exposes `event.payload.messages`; an `LLM_OUTPUT` event exposes `event.payload.output`.
 
   Use `event` when the auditor needs to inspect the actual runtime behavior:
 
   ```python
   if entry.event and entry.event.event_type.value == "tool_invoke":
-      tool_name = entry.event.payload.get("tool_name")
-      arguments = entry.event.payload.get("arguments") or {}
+      tool_name = entry.event.payload.tool_name
+      arguments = entry.event.payload.arguments
   ```
 
   It can be `None` if the stored trace record did not contain a parseable runtime event, so auditors should always check it before reading event fields.
@@ -150,8 +150,8 @@ def audit(self, trace: list[AuditTraceEntry]) -> AuditResult:
 
         if entry.event:
             risky_signals.update(entry.event.risk_signals)
-            if entry.event.payload.get("tool_name") == "send_email":
-                recipient = (entry.event.payload.get("arguments") or {}).get("addr")
+            if entry.event.event_type.value == "tool_invoke" and entry.event.payload.tool_name == "send_email":
+                recipient = entry.event.payload.arguments.get("addr")
                 if recipient and not recipient.endswith("@example.com"):
                     risky_signals.add("external_email")
 
@@ -176,4 +176,4 @@ After you add the auditor implementation, the backend discovers it by registered
 - call `GET /v1/backend/auditors` to list available auditors and descriptions
 - call `POST /v1/backend/audit/custom/run` with `session_id`, `agent_id`, `user_id`, and `auditor_name` to run one auditor on the corresponding stored trace
 
-For a concrete built-in example, see `../../src/server/backend/audit/auditors/trace_risk_summary.py`.
+For a concrete built-in example, see `src/server/backend/audit/auditors/trace_risk_summary.py`.

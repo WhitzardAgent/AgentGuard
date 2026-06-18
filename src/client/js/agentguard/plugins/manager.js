@@ -43,7 +43,7 @@ function loadPluginConfig(source = null) {
   const config = {};
   for (const phase of PHASE_ORDER) {
     if (phase in phases) {
-      config[phase] = pluginSpecsForScope(phases[phase], "local");
+      config[phase] = pluginSpecsForScope(phases[phase], "client");
     }
   }
   return config;
@@ -51,12 +51,12 @@ function loadPluginConfig(source = null) {
 
 function pluginSpecsForScope(value, scope) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("plugin phase config must be an object with 'local' and 'remote'");
+    throw new Error("plugin phase config must be an object with 'client' and 'server'");
   }
-  if (!("local" in value) || !("remote" in value)) {
-    throw new Error("plugin phase config must include both 'local' and 'remote'");
+  if (!hasScope(value, "client") || !hasScope(value, "server")) {
+    throw new Error("plugin phase config must include both 'client' and 'server'");
   }
-  const specs = value[scope];
+  const specs = scopeValue(value, scope);
   if (specs == null) {
     return [];
   }
@@ -64,6 +64,22 @@ function pluginSpecsForScope(value, scope) {
     throw new Error(`plugin phase '${scope}' config must be a list`);
   }
   return [...specs];
+}
+
+function hasScope(value, scope) {
+  return Object.prototype.hasOwnProperty.call(value, scope)
+    || Object.prototype.hasOwnProperty.call(value, legacyScope(scope));
+}
+
+function scopeValue(value, scope) {
+  if (Object.prototype.hasOwnProperty.call(value, scope)) {
+    return value[scope];
+  }
+  return value[legacyScope(scope)];
+}
+
+function legacyScope(scope) {
+  return scope === "client" ? "local" : "remote";
 }
 
 function buildPluginsByPhase(config = null) {

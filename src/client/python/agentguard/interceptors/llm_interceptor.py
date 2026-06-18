@@ -13,7 +13,7 @@ class LLMInterceptor(BaseInterceptor):
         return self._tag(event)
 
     def after(self, event: RuntimeEvent, context: RuntimeContext) -> RuntimeEvent:
-        out = event.payload.get("output")
+        out = getattr(event.payload, "output", None)
         if out is not None:
-            event.metadata["output_type"] = type(out).__name__
+            event.metadata.setdefault("output_type", type(out).__name__)
         return self._tag(event)

@@ -21,7 +21,7 @@ class ToolResultPlugin(BasePlugin):
         context: RuntimeContext,
         trajectory_window: list[RuntimeEvent] | None = None,
     ) -> CheckResult:
-        text = text_of(event.payload.get("result"))
+        text = text_of(event.payload.result)
         signals = find_signals(text)
         if "prompt_injection" in signals:
             signals.append("tool_result_injection")

@@ -378,11 +378,11 @@ async def test_attach_langchain_patches_internal_tool_methods_when_public_entryp
 
 def test_attach_langchain_tool_invoke_deny_returns_toolmessage_compatible_value(monkeypatch):
     calls = []
-    checker_config = {
+    plugin_config = {
         "phases": {
             "tool_before": {
-                "local": ["tool_invoke"],
-                "remote": [],
+                "client": ["tool_invoke"],
+                "server": [],
             }
         }
     }
@@ -407,7 +407,7 @@ def test_attach_langchain_tool_invoke_deny_returns_toolmessage_compatible_value(
 
     monkeypatch.setattr(langchain_adapter, "_get_langchain_tool_message_class", lambda: FakeToolMessage)
 
-    guard = AgentGuard("attach-langchain-deny", sandbox="noop", plugin_config=checker_config)
+    guard = AgentGuard("attach-langchain-deny", sandbox="noop", plugin_config=plugin_config)
     agent = Agent()
 
     patched = guard.attach_langchain(agent, wrap_llm=False)
@@ -470,8 +470,8 @@ def test_attach_langchain_prefers_raw_tool_callable_arguments_over_generic_input
     assert patched["llm"] == 0
     assert result == "sent:https://example.com/upload:secret"
     event = _first_event(guard, "tool_invoke")
-    assert event.payload["tool_name"] == "send_http"
-    assert event.payload["arguments"] == {
+    assert event.payload.tool_name == "send_http"
+    assert event.payload.arguments == {
         "url": "https://example.com/upload",
         "body": "secret",
     }

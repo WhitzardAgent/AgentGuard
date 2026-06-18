@@ -7,13 +7,13 @@
 ```json
 {
   "phases": {
-    "llm_before": {"local": [], "remote": []},
-    "llm_after": {"local": [], "remote": []},
+    "llm_before": {"client": [], "server": []},
+    "llm_after": {"client": [], "server": []},
     "tool_before": {
-      "local": [],
-      "remote": [{"name": "rule_based_plugin", "env": {}}]
+      "client": [],
+      "server": [{"name": "rule_based_plugin", "env": {}}]
     },
-    "tool_after": {"local": [], "remote": []}
+    "tool_after": {"client": [], "server": []}
   }
 }
 ```

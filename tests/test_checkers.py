@@ -62,7 +62,7 @@ def test_tool_result_detects_secret_and_api_key():
     mgr = PluginManager(
         config={
             "phases": {
-                "tool_after": {"local": ["tool_result"], "remote": []},
+                "tool_after": {"client": ["tool_result"], "server": []},
             }
         }
     )
@@ -78,7 +78,7 @@ def test_llm_input_detects_prompt_injection():
     mgr = PluginManager(
         config={
             "phases": {
-                "llm_before": {"local": ["llm_input"], "remote": []},
+                "llm_before": {"client": ["llm_input"], "server": []},
             }
         }
     )
@@ -97,8 +97,8 @@ def test_clean_event_has_no_signals():
 def test_client_plugin_config_loads_only_local_scope():
     cfg = {
         "phases": {
-            "llm_before": {"local": ["llm_input"], "remote": ["remote_only"]},
-            "tool_before": {"local": [], "remote": ["tool_invoke"]},
+            "llm_before": {"client": ["llm_input"], "server": ["remote_only"]},
+            "tool_before": {"client": [], "server": ["tool_invoke"]},
         }
     }
 
@@ -131,7 +131,7 @@ def test_registered_checker_can_be_loaded_by_name():
     mgr = PluginManager(
         config={
             "phases": {
-                "llm_before": {"local": ["test_registered_checker"], "remote": []},
+                "llm_before": {"client": ["test_registered_checker"], "server": []},
             }
         }
     )
@@ -159,7 +159,7 @@ def test_plugin_config_binds_top_level_params_and_env(monkeypatch):
         config={
             "phases": {
                 "llm_before": {
-                    "local": [
+                    "client": [
                         {
                             "plugin": ConfiguredPlugin,
                             "threshold": 3,
@@ -172,7 +172,7 @@ def test_plugin_config_binds_top_level_params_and_env(monkeypatch):
                             },
                         }
                     ],
-                    "remote": [],
+                    "server": [],
                 },
             }
         }
@@ -197,10 +197,10 @@ def test_plugin_config_binds_top_level_params_and_env(monkeypatch):
 def test_plugin_config_file_controls_enabled_phases(tmp_path):
     cfg = {
         "phases": {
-            "llm_before": {"local": [], "remote": ["llm_input"]},
-            "llm_after": {"local": [], "remote": ["llm_output"]},
-            "tool_before": {"local": [], "remote": ["tool_invoke"]},
-            "tool_after": {"local": ["tool_result"], "remote": []},
+            "llm_before": {"client": [], "server": ["llm_input"]},
+            "llm_after": {"client": [], "server": ["llm_output"]},
+            "tool_before": {"client": [], "server": ["tool_invoke"]},
+            "tool_after": {"client": ["tool_result"], "server": []},
         }
     }
     path = tmp_path / "plugins.json"
@@ -224,10 +224,10 @@ def test_plugin_config_can_be_updated_for_next_event():
         "dynamic-checkers",
         plugin_config={
             "phases": {
-                "llm_before": {"local": [], "remote": ["llm_input"]},
-                "llm_after": {"local": [], "remote": ["llm_output"]},
-                "tool_before": {"local": [], "remote": ["tool_invoke"]},
-                "tool_after": {"local": [], "remote": ["tool_result"]},
+                "llm_before": {"client": [], "server": ["llm_input"]},
+                "llm_after": {"client": [], "server": ["llm_output"]},
+                "tool_before": {"client": [], "server": ["tool_invoke"]},
+                "tool_after": {"client": [], "server": ["tool_result"]},
             }
         },
     )
@@ -241,10 +241,10 @@ def test_plugin_config_can_be_updated_for_next_event():
     guard.update_plugin_config(
         {
             "phases": {
-                "llm_before": {"local": ["llm_input"], "remote": []},
-                "llm_after": {"local": [], "remote": []},
-                "tool_before": {"local": [], "remote": []},
-                "tool_after": {"local": [], "remote": []},
+                "llm_before": {"client": ["llm_input"], "server": []},
+                "llm_after": {"client": [], "server": []},
+                "tool_before": {"client": [], "server": []},
+                "tool_after": {"client": [], "server": []},
             }
         }
     )
@@ -261,10 +261,10 @@ def test_plugin_config_can_be_updated_over_local_http_api():
         "dynamic-checkers-http",
         plugin_config={
             "phases": {
-                "llm_before": {"local": [], "remote": ["llm_input"]},
-                "llm_after": {"local": [], "remote": ["llm_output"]},
-                "tool_before": {"local": [], "remote": ["tool_invoke"]},
-                "tool_after": {"local": [], "remote": ["tool_result"]},
+                "llm_before": {"client": [], "server": ["llm_input"]},
+                "llm_after": {"client": [], "server": ["llm_output"]},
+                "tool_before": {"client": [], "server": ["tool_invoke"]},
+                "tool_after": {"client": [], "server": ["tool_result"]},
             }
         },
     )
@@ -275,10 +275,10 @@ def test_plugin_config_can_be_updated_over_local_http_api():
             {
                 "config": {
                     "phases": {
-                        "llm_before": {"local": ["llm_input"], "remote": []},
-                        "llm_after": {"local": [], "remote": []},
-                        "tool_before": {"local": [], "remote": []},
-                        "tool_after": {"local": [], "remote": []},
+                        "llm_before": {"client": ["llm_input"], "server": []},
+                        "llm_after": {"client": [], "server": []},
+                        "tool_before": {"client": [], "server": []},
+                        "tool_after": {"client": [], "server": []},
                     }
                 }
             }
@@ -427,7 +427,7 @@ class UploadedTestLLMInputPlugin(BasePlugin):
         guard.update_plugin_config(
             {
                 "phases": {
-                    "llm_before": {"local": ["uploaded_test_llm_input"], "remote": []},
+                    "llm_before": {"client": ["uploaded_test_llm_input"], "server": []},
                 }
             }
         )
@@ -455,7 +455,7 @@ class _Remote:
     def decide(self, event, context, **kwargs):
         self.calls += 1
         self.kwargs = kwargs
-        return GuardDecision.deny("remote blocked", policy_id="remote:test")
+        return GuardDecision.deny("server blocked", policy_id="server:test")
 
 
 def test_non_final_plugin_result_goes_to_remote():
@@ -476,7 +476,7 @@ class _FinalDenyPlugin(BasePlugin):
 
     def check(self, event, context):
         return CheckResult(
-            decision_candidate=GuardDecision.deny("local plugin blocked"),
+            decision_candidate=GuardDecision.deny("client plugin blocked"),
             is_final=True,
         )
 
@@ -493,7 +493,7 @@ def test_final_plugin_result_skips_remote():
 
     assert remote.calls == 0
     assert result.route == "local_plugin"
-    assert result.decision.reason == "local plugin blocked"
+    assert result.decision.reason == "client plugin blocked"
 
 
 class _ConditionalFinalPlugin(BasePlugin):
@@ -501,15 +501,15 @@ class _ConditionalFinalPlugin(BasePlugin):
     event_types = [EventType.TOOL_INVOKE]
 
     def check(self, event, context):
-        if event.payload.get("tool_name") == "blocked_local":
+        if event.payload.tool_name == "blocked_local":
             return CheckResult(
-                decision_candidate=GuardDecision.deny("local plugin blocked"),
+                decision_candidate=GuardDecision.deny("client plugin blocked"),
                 is_final=True,
             )
         return CheckResult.empty()
 
 
-def test_local_plugin_cache_is_sent_with_next_remote_decision():
+def test_client_plugin_cache_is_sent_with_next_server_decision():
     remote = _Remote()
     enforcer = UGuardEnforcer(
         remote=remote,

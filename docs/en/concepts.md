@@ -27,7 +27,7 @@ The client is responsible for:
 
 - attaching to an agent framework or custom runtime
 - normalizing LLM and tool activity into `RuntimeEvent` objects
-- running local plugins when configured
+- running client-side plugins when configured
 - sending remote decision requests to the control server when needed
 - enforcing the returned decision in the agent process
 
@@ -40,7 +40,7 @@ The control server is AgentGuard's centralized management and decision component
 It typically handles:
 
 - receiving runtime events from AgentGuard clients
-- evaluating configured remote plugins and access-control policies
+- evaluating configured server-side plugins and access-control policies
 - returning allow, deny, or review decisions
 - storing traces for runtime monitoring and audit
 - supporting web-console workflows such as policy configuration and approval review
@@ -78,7 +78,14 @@ Common event types are:
 - `TOOL_INVOKE`
 - `TOOL_RESULT`
 
-The event payload carries the phase-specific data, such as LLM messages, model output, tool name and arguments, or tool result. Plugins and policies inspect this event data to identify risk and produce decisions.
+The event payload is typed by event phase:
+
+- `LLMInput(messages=[{"role": "...", "content": "..."}])`
+- `LLMOutput(output="...")`
+- `ToolInvoke(tool_name="...", arguments={...}, capabilities=[...])`
+- `ToolResult(tool_name="...", result="...")`
+
+Plugins and policies inspect these fields to identify risk and produce decisions.
 
 ## RuntimeContext
 
@@ -100,7 +107,7 @@ Tools are high-impact governance targets because they affect real systems and da
 
 ## Plugin
 
-Plugins are AgentGuard's modular runtime inspection units. They can run locally on the client side or remotely on the server side.
+Plugins are AgentGuard's modular runtime inspection units. They can run on the client side or on the server side.
 
 Client plugins:
 
@@ -115,7 +122,7 @@ Server plugins:
 - can also use `trajectory_window` to inspect recent events from the same session
 - are useful for cross-step detection, centralized policy evaluation, and audit-oriented analysis
 
-Plugin configuration is phase-based. Each phase can define `local` plugins for the client and `remote` plugins for the server. Each plugin entry is a spec object such as `{"name": "rule_based_plugin", "env": {}}`. In the current implementation, `local` plugin specs can pass `env` and constructor settings into client plugins, while `remote` plugin specs are resolved by `name`/`class` only. Implementation-level details live in [AgentGuard Plugins](plugins.md).
+Plugin configuration is phase-based. Each phase can define `client` plugins for the client runtime and `server` plugins for the control server. Each plugin entry is a spec object such as `{"name": "rule_based_plugin", "env": {}}`. In the current implementation, `client` plugin specs can pass `env` and constructor settings into client plugins, while `server` plugin specs are resolved by `name` or `class`. Implementation-level details live in [AgentGuard Plugins](plugins.md).
 
 ## Policy
 

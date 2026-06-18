@@ -114,7 +114,7 @@ test("agentguard auto-registers remote session with plugin config metadata", asy
     user_id: "user-4",
     plugin_config: {
       phases: {
-        tool_before: { local: ["tool_invoke"], remote: [] },
+        tool_before: { client: ["tool_invoke"], server: [] },
       },
     },
   });
@@ -135,7 +135,7 @@ test("agentguard auto-registers remote session with plugin config metadata", asy
   assert.ok(String(body.context.metadata.client_health_url || "").endsWith("/v1/client/health"));
   assert.deepEqual(body.context.metadata.client_plugin_config, {
     phases: {
-      tool_before: { local: ["tool_invoke"], remote: [] },
+      tool_before: { client: ["tool_invoke"], server: [] },
     },
   });
 
@@ -194,7 +194,7 @@ test("agentguard flushRemoteOperations waits for tool reports", async () => {
   await guard.close();
 });
 
-test("plugin manager defaults to no local plugins when config is omitted", async () => {
+test("plugin manager defaults to no client plugins when config is omitted", async () => {
   const { AgentGuard } = require("./guard");
   const { llm_input } = require("./schemas/events");
 
@@ -224,7 +224,7 @@ test("agentguard can register and run a local skill", async () => {
   assert.deepEqual(result, { ok: true, echoed: { data: { value: 1 } } });
 });
 
-test("agentguard local plugin updates resync session without overwriting remote config metadata", async () => {
+test("agentguard client plugin updates resync session without overwriting server config metadata", async () => {
   const calls = [];
   global.fetch = async (url, options = {}) => {
     calls.push({ url, options });
@@ -243,7 +243,7 @@ test("agentguard local plugin updates resync session without overwriting remote 
     user_id: "user-5",
     plugin_config: {
       phases: {
-        tool_before: { local: ["tool_invoke"], remote: ["rule_based_plugin"] },
+        tool_before: { client: ["tool_invoke"], server: ["rule_based_plugin"] },
       },
     },
   });
@@ -252,7 +252,7 @@ test("agentguard local plugin updates resync session without overwriting remote 
   await guard.ensureRemoteSessionRegistered();
   await guard.update_plugin_config({
     phases: {
-      tool_after: { local: ["tool_result"], remote: [] },
+      tool_after: { client: ["tool_result"], server: [] },
     },
   });
   await new Promise((resolve) => setImmediate(resolve));
@@ -262,12 +262,12 @@ test("agentguard local plugin updates resync session without overwriting remote 
   const body = JSON.parse(registerCalls[1].options.body);
   assert.deepEqual(body.context.metadata.client_plugin_config, {
     phases: {
-      tool_after: { local: ["tool_result"], remote: [] },
+      tool_after: { client: ["tool_result"], server: [] },
     },
   });
   assert.deepEqual(body.context.metadata.remote_plugin_config, {
     phases: {
-      tool_before: { local: ["tool_invoke"], remote: ["rule_based_plugin"] },
+      tool_before: { client: ["tool_invoke"], server: ["rule_based_plugin"] },
     },
   });
 

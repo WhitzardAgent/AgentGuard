@@ -221,16 +221,16 @@ cat <<EOF > config/plugins.json
 {
   "phases": {
     "llm_before": {
-      "local": [],
-      "remote": []
+      "client": [],
+      "server": []
     },
     "llm_after": {
-      "local": [],
-      "remote": []
+      "client": [],
+      "server": []
     },
     "tool_before": {
-      "local": [],
-      "remote": [
+      "client": [],
+      "server": [
         {
           "name": "rule_based_plugin",
           "env": {}
@@ -238,15 +238,15 @@ cat <<EOF > config/plugins.json
       ]
     },
     "tool_after": {
-      "local": [],
-      "remote": []
+      "client": [],
+      "server": []
     }
   }
 }
 EOF
 ```
 
-This config means: only the `tool_before` phase runs a remote plugin, and that plugin is the built-in `rule_based_plugin`. All other phases are empty. In other words, the server will evaluate your policy rules only right before a tool call runs. That keeps the quick start focused on access-control decisions around tool execution, without introducing additional LLM-phase or tool-result plugins yet.
+This config means: only the `tool_before` phase runs a server plugin, and that plugin is the built-in `rule_based_plugin`. All other phases are empty. In other words, the server will evaluate your policy rules only right before a tool call runs. That keeps the quick start focused on access-control decisions around tool execution, without introducing additional LLM-phase or tool-result plugins yet.
 
 #### 2. Create an access control policy
 

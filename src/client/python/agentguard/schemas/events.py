@@ -5,7 +5,7 @@ import re
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, TypeAlias
 
 from agentguard.schemas.context import RuntimeContext
 from agentguard.utils.hash import stable_hash
@@ -45,7 +45,62 @@ _REDACT_PATTERNS = [
 _REDACTED = "[REDACTED]"
 
 
+class _PayloadMapping:
+    def to_dict(self) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self.to_dict().get(key, default)
+
+    def __getitem__(self, key: str) -> Any:
+        return self.to_dict()[key]
+
+
+@dataclass
+class LLMInput(_PayloadMapping):
+    messages: list[dict[str, Any]]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"messages": [dict(item) for item in self.messages]}
+
+
+@dataclass
+class LLMOutput(_PayloadMapping):
+    output: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"output": self.output}
+
+
+@dataclass
+class ToolInvoke(_PayloadMapping):
+    tool_name: str
+    arguments: dict[str, Any]
+    capabilities: list[str]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tool_name": self.tool_name,
+            "arguments": dict(self.arguments),
+            "capabilities": list(self.capabilities),
+        }
+
+
+@dataclass
+class ToolResult(_PayloadMapping):
+    tool_name: str
+    result: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"tool_name": self.tool_name, "result": self.result}
+
+
+RuntimePayload: TypeAlias = LLMInput | LLMOutput | ToolInvoke | ToolResult
+
+
 def _redact_value(value: Any, key: str | None = None) -> Any:
+    if isinstance(value, _PayloadMapping):
+        return _redact_value(value.to_dict())
     if key and any(h in key.lower() for h in _SECRET_KEY_HINTS):
         return _REDACTED
     if isinstance(value, str):
@@ -68,7 +123,7 @@ class RuntimeEvent:
     event_type: EventType
     timestamp: float
     context: RuntimeContext
-    payload: dict[str, Any]
+    payload: RuntimePayload
     risk_signals: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -79,7 +134,7 @@ class RuntimeEvent:
             "event_type": self.event_type.value,
             "timestamp": self.timestamp,
             "context": self.context.to_dict(),
-            "payload": self.payload,
+            "payload": self.payload.to_dict(),
             "risk_signals": list(self.risk_signals),
             "metadata": self.metadata,
         }
@@ -91,7 +146,7 @@ class RuntimeEvent:
             event_type=EventType(data["event_type"]),
             timestamp=float(data.get("timestamp") or now_ts()),
             context=RuntimeContext.from_dict(data.get("context") or {}),
-            payload=dict(data.get("payload") or {}),
+            payload=_payload_from_dict(EventType(data["event_type"]), data.get("payload") or {}),
             risk_signals=list(data.get("risk_signals") or []),
             metadata=dict(data.get("metadata") or {}),
         )
@@ -103,7 +158,7 @@ class RuntimeEvent:
             event_type=self.event_type,
             timestamp=self.timestamp,
             context=self.context,
-            payload=_redact_value(self.payload),
+            payload=_payload_from_dict(self.event_type, _redact_value(self.payload)),
             risk_signals=list(self.risk_signals),
             metadata=_redact_value(self.metadata),
         )
@@ -118,7 +173,7 @@ class RuntimeEvent:
                     "policy": self.context.policy,
                     "policy_version": self.context.policy_version,
                 },
-                "payload": self.payload,
+                "payload": self.payload.to_dict(),
                 "risk_signals": sorted(self.risk_signals),
             }
         )
@@ -135,7 +190,7 @@ def _new_id() -> str:
 def _make(
     event_type: EventType,
     context: RuntimeContext,
-    payload: dict[str, Any] | None = None,
+    payload: RuntimePayload,
     *,
     risk_signals: list[str] | None = None,
     metadata: dict[str, Any] | None = None,
@@ -145,7 +200,7 @@ def _make(
         event_type=event_type,
         timestamp=now_ts(),
         context=context,
-        payload=payload or {},
+        payload=payload,
         risk_signals=risk_signals or [],
         metadata=metadata or {},
     )
@@ -157,22 +212,23 @@ def user_input(context: RuntimeContext, text: str, **meta: Any) -> RuntimeEvent:
     return _make(
         EventType.LLM_INPUT,
         context,
-        {"text": text, "messages": [{"role": "user", "content": text}]},
+        LLMInput(messages=[{"role": "user", "content": text}]),
         metadata=meta,
     )
 
 
 def llm_input(context: RuntimeContext, messages: Any, **meta: Any) -> RuntimeEvent:
-    return _make(EventType.LLM_INPUT, context, {"messages": messages}, metadata=meta)
+    return _make(EventType.LLM_INPUT, context, LLMInput(messages=_coerce_messages(messages)), metadata=meta)
 
 
 def llm_output(context: RuntimeContext, output: Any, **meta: Any) -> RuntimeEvent:
-    return _make(EventType.LLM_OUTPUT, context, {"output": output}, metadata=meta)
+    meta.setdefault("output_type", type(output).__name__)
+    return _make(EventType.LLM_OUTPUT, context, LLMOutput(output=_coerce_text(output)), metadata=meta)
 
 
 def llm_thought(context: RuntimeContext, thought: str, **meta: Any) -> RuntimeEvent:
     """Compatibility alias: thoughts are no longer a separate event type."""
-    return _make(EventType.LLM_OUTPUT, context, {"output": thought}, metadata=meta)
+    return _make(EventType.LLM_OUTPUT, context, LLMOutput(output=str(thought)), metadata=meta)
 
 
 def tool_invoke(
@@ -183,11 +239,11 @@ def tool_invoke(
     capabilities: list[str] | None = None,
     **meta: Any,
 ) -> RuntimeEvent:
-    payload = {
-        "tool_name": tool_name,
-        "arguments": arguments,
-        "capabilities": capabilities or [],
-    }
+    payload = ToolInvoke(
+        tool_name=str(tool_name),
+        arguments=dict(arguments or {}),
+        capabilities=[str(item) for item in (capabilities or [])],
+    )
     return _make(EventType.TOOL_INVOKE, context, payload, metadata=meta)
 
 
@@ -199,10 +255,76 @@ def tool_result(
     error: str | None = None,
     **meta: Any,
 ) -> RuntimeEvent:
-    payload = {"tool_name": tool_name, "result": result, "error": error}
+    payload = ToolResult(tool_name=str(tool_name), result=_coerce_text(result))
+    if error is not None:
+        meta.setdefault("error", error)
     return _make(EventType.TOOL_RESULT, context, payload, metadata=meta)
 
 
 def final_response(context: RuntimeContext, text: str, **meta: Any) -> RuntimeEvent:
     """Compatibility alias: final text is now represented as LLM_OUTPUT."""
-    return _make(EventType.LLM_OUTPUT, context, {"output": text}, metadata=meta)
+    return _make(EventType.LLM_OUTPUT, context, LLMOutput(output=str(text)), metadata=meta)
+
+
+def _payload_from_dict(event_type: EventType, payload: Any) -> RuntimePayload:
+    data = payload.to_dict() if isinstance(payload, _PayloadMapping) else dict(payload or {})
+    if event_type == EventType.LLM_INPUT:
+        messages = data.get("messages")
+        if messages is None:
+            messages = data.get("message")
+        if messages is None and data.get("text") is not None:
+            messages = [{"role": "user", "content": _coerce_text(data.get("text"))}]
+        return LLMInput(messages=_coerce_messages(messages or []))
+    if event_type == EventType.LLM_OUTPUT:
+        output = data.get("output")
+        if output is None:
+            output = data.get("message")
+        return LLMOutput(output=_coerce_text(output))
+    if event_type == EventType.TOOL_INVOKE:
+        return ToolInvoke(
+            tool_name=_coerce_text(data.get("tool_name")),
+            arguments=dict(data.get("arguments") or {}),
+            capabilities=[str(item) for item in (data.get("capabilities") or [])],
+        )
+    if event_type == EventType.TOOL_RESULT:
+        return ToolResult(
+            tool_name=_coerce_text(data.get("tool_name")),
+            result=_coerce_text(data.get("result")),
+        )
+    raise ValueError(f"unsupported event type: {event_type}")
+
+
+def _coerce_messages(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, list):
+        messages: list[dict[str, Any]] = []
+        for item in value:
+            if isinstance(item, dict):
+                role = _coerce_text(item.get("role") or "user")
+                content = _coerce_text(item.get("content"))
+                msg = dict(item)
+                msg["role"] = role
+                msg["content"] = content
+                messages.append(msg)
+            else:
+                messages.append({"role": "user", "content": _coerce_text(item)})
+        return messages
+    if isinstance(value, dict):
+        return [_coerce_message_dict(value)]
+    if value is None:
+        return []
+    return [{"role": "user", "content": _coerce_text(value)}]
+
+
+def _coerce_message_dict(value: dict[str, Any]) -> dict[str, Any]:
+    message = dict(value)
+    message["role"] = _coerce_text(message.get("role") or "user")
+    message["content"] = _coerce_text(message.get("content"))
+    return message
+
+
+def _coerce_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    return str(value)

@@ -10,7 +10,7 @@ class ThoughtInterceptor(BaseInterceptor):
     name = "thought"
 
     def before(self, event: RuntimeEvent, context: RuntimeContext) -> RuntimeEvent:
-        thought = event.payload.get("thought")
+        thought = getattr(event.payload, "output", None)
         if thought is not None:
             event.metadata["thought_length"] = len(str(thought))
         return self._tag(event)

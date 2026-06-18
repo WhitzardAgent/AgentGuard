@@ -10,7 +10,7 @@ class InputInterceptor(BaseInterceptor):
     name = "input"
 
     def before(self, event: RuntimeEvent, context: RuntimeContext) -> RuntimeEvent:
-        text = event.payload.get("text")
-        if text is not None:
-            event.metadata["input_length"] = len(str(text))
+        messages = getattr(event.payload, "messages", None)
+        if messages is not None:
+            event.metadata["input_length"] = len(str(messages))
         return self._tag(event)

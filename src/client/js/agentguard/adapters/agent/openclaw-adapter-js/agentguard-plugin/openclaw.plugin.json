@@ -53,14 +53,15 @@
           "llm_before": {
             "type": "object",
             "additionalProperties": false,
+            "required": ["client", "server"],
             "properties": {
-              "local": {
+              "client": {
                 "type": "array",
                 "items": {
                   "anyOf": [{ "type": "string" }, { "type": "object" }]
                 }
               },
-              "remote": {
+              "server": {
                 "type": "array",
                 "items": {
                   "anyOf": [{ "type": "string" }, { "type": "object" }]
@@ -71,14 +72,15 @@
           "llm_after": {
             "type": "object",
             "additionalProperties": false,
+            "required": ["client", "server"],
             "properties": {
-              "local": {
+              "client": {
                 "type": "array",
                 "items": {
                   "anyOf": [{ "type": "string" }, { "type": "object" }]
                 }
               },
-              "remote": {
+              "server": {
                 "type": "array",
                 "items": {
                   "anyOf": [{ "type": "string" }, { "type": "object" }]
@@ -89,14 +91,15 @@
           "tool_before": {
             "type": "object",
             "additionalProperties": false,
+            "required": ["client", "server"],
             "properties": {
-              "local": {
+              "client": {
                 "type": "array",
                 "items": {
                   "anyOf": [{ "type": "string" }, { "type": "object" }]
                 }
               },
-              "remote": {
+              "server": {
                 "type": "array",
                 "items": {
                   "anyOf": [{ "type": "string" }, { "type": "object" }]
@@ -107,14 +110,15 @@
           "tool_after": {
             "type": "object",
             "additionalProperties": false,
+            "required": ["client", "server"],
             "properties": {
-              "local": {
+              "client": {
                 "type": "array",
                 "items": {
                   "anyOf": [{ "type": "string" }, { "type": "object" }]
                 }
               },
-              "remote": {
+              "server": {
                 "type": "array",
                 "items": {
                   "anyOf": [{ "type": "string" }, { "type": "object" }]

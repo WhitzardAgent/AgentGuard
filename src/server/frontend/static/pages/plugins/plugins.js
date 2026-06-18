@@ -11,17 +11,17 @@
   const statusText = document.getElementById("plugin-config-status");
   const selectedAgentLabel = document.getElementById("plugin-selected-agent");
 
-  const PLUGIN_SCOPES = ["remote", "local"];
+  const PLUGIN_SCOPES = ["server", "client"];
   const SCOPE_COPY = {
-    remote: {
+    server: {
       availableKey: "remote_plugins",
-      heading: "remote",
-      empty: "No remote plugins are available for this agent yet.",
+      heading: "server",
+      empty: "No server plugins are available for this agent yet.",
     },
-    local: {
+    client: {
       availableKey: "local_plugins",
-      heading: "local",
-      empty: "No local plugins are available for this agent yet. Start a client config API to discover client-side plugins.",
+      heading: "client",
+      empty: "No client plugins are available for this agent yet. Start a client config API to discover client-side plugins.",
     },
   };
 
@@ -29,8 +29,8 @@
     selectedAgentId: String(shell?.getState?.().selectedAgentId || "").trim(),
     selectedPluginName: String(shell?.getState?.().selectedPluginName || "").trim(),
     selections: {
-      remote: [],
-      local: [],
+      server: [],
+      client: [],
     },
     available: { remote_plugins: [], local_plugins: [] },
     config: null,
@@ -39,7 +39,7 @@
 
   shell?.setPageContext({
     title: "Plugin Config",
-    description: "Configure remote and local plugin scopes for the selected agent.",
+    description: "Configure server and client plugin scopes for the selected agent.",
   });
 
   function showToast(message, tone) {
@@ -57,8 +57,8 @@
 
   function activePluginNames() {
     return toolData.collapsePluginSelection([
-      ...scopeSelection("remote"),
-      ...scopeSelection("local"),
+      ...scopeSelection("server"),
+      ...scopeSelection("client"),
     ]);
   }
 
@@ -134,13 +134,13 @@
 
   function renderPluginLists() {
     selectedAgentLabel.textContent = state.selectedAgentId || "the selected agent";
-    renderScopeList("remote", remotePluginList, remotePluginStatus);
-    renderScopeList("local", localPluginList, localPluginStatus);
+    renderScopeList("server", remotePluginList, remotePluginStatus);
+    renderScopeList("client", localPluginList, localPluginStatus);
   }
 
   function renderStatus() {
-    const remoteNames = scopeSelection("remote");
-    const localNames = scopeSelection("local");
+    const serverNames = scopeSelection("server");
+    const clientNames = scopeSelection("client");
     const hasConfig = Boolean(state.config?.plugin_config);
     const configSource = String(state.config?.config_source || "none").trim();
     if (!state.selectedAgentId) {
@@ -151,13 +151,13 @@
       statusText.textContent = `Updating plugin config for ${state.selectedAgentId}...`;
       return;
     }
-    if (remoteNames.length || localNames.length) {
+    if (serverNames.length || clientNames.length) {
       const sourceText = configSource === "server_default"
         ? "Using server default plugin config"
         : "Current plugins";
-      const remoteText = remoteNames.length ? remoteNames.join(", ") : "none";
-      const localText = localNames.length ? localNames.join(", ") : "none";
-      statusText.textContent = `${sourceText} for ${state.selectedAgentId}: remote [${remoteText}], local [${localText}].`;
+      const serverText = serverNames.length ? serverNames.join(", ") : "none";
+      const clientText = clientNames.length ? clientNames.join(", ") : "none";
+      statusText.textContent = `${sourceText} for ${state.selectedAgentId}: server [${serverText}], client [${clientText}].`;
       return;
     }
     if (!hasConfig) {
@@ -189,11 +189,11 @@
       ]);
       state.available = available;
       state.config = config;
-      state.selections.remote = toolData.collapsePluginSelection(
-        toolData.selectedPluginsFromConfig(config, "remote"),
+      state.selections.server = toolData.collapsePluginSelection(
+        toolData.selectedPluginsFromConfig(config, "server"),
       );
-      state.selections.local = toolData.collapsePluginSelection(
-        toolData.selectedPluginsFromConfig(config, "local"),
+      state.selections.client = toolData.collapsePluginSelection(
+        toolData.selectedPluginsFromConfig(config, "client"),
       );
       shell?.setSelectedPlugin?.(updatePrimaryPluginSelection());
       renderStatus();
@@ -225,8 +225,8 @@
       return;
     }
     const previousSelections = {
-      remote: [...state.selections.remote],
-      local: [...state.selections.local],
+      server: [...state.selections.server],
+      client: [...state.selections.client],
     };
     state.selections[scope] = toolData.collapsePluginSelection(nextPluginNames);
     state.loading = true;
@@ -294,7 +294,7 @@
   window.addEventListener("agentguard:selected-agent-change", (event) => {
     state.selectedAgentId = String(event?.detail?.agentId || "").trim();
     state.selectedPluginName = "";
-    state.selections = { remote: [], local: [] };
+    state.selections = { server: [], client: [] };
     state.available = { remote_plugins: [], local_plugins: [] };
     state.config = null;
     loadPluginState();

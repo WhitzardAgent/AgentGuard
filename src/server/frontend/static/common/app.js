@@ -23,7 +23,7 @@
     final_response: "llm_after",
   };
   const PLUGIN_PHASE_ORDER = ["llm_before", "llm_after", "tool_before", "tool_after", "global"];
-  const PLUGIN_SCOPES = new Set(["local", "remote"]);
+  const PLUGIN_SCOPES = new Set(["client", "server"]);
 
   function buildQuery(params) {
     const search = new URLSearchParams();
@@ -85,13 +85,23 @@
 
   function normalizePhaseConfig(phaseConfig) {
     return {
-      local: Array.isArray(phaseConfig?.local) ? [...phaseConfig.local] : [],
-      remote: Array.isArray(phaseConfig?.remote) ? [...phaseConfig.remote] : [],
+      client: Array.isArray(phaseConfig?.client)
+        ? [...phaseConfig.client]
+        : (Array.isArray(phaseConfig?.local) ? [...phaseConfig.local] : []),
+      server: Array.isArray(phaseConfig?.server)
+        ? [...phaseConfig.server]
+        : (Array.isArray(phaseConfig?.remote) ? [...phaseConfig.remote] : []),
     };
   }
 
   function normalizePluginScope(scope) {
-    return PLUGIN_SCOPES.has(scope) ? scope : "remote";
+    if (scope === "local") {
+      return "client";
+    }
+    if (scope === "remote") {
+      return "server";
+    }
+    return PLUGIN_SCOPES.has(scope) ? scope : "server";
   }
 
   function expandPluginSelection(names) {
@@ -139,7 +149,7 @@
     return phases[phase];
   }
 
-  function buildPluginConfig(plugins, availablePlugins = null, existingConfig = null, scope = "remote") {
+  function buildPluginConfig(plugins, availablePlugins = null, existingConfig = null, scope = "server") {
     const targetScope = normalizePluginScope(scope);
     const selectedOptions = (Array.isArray(plugins) ? plugins : [plugins])
       .map(normalizePluginOption)
@@ -159,7 +169,7 @@
         const name = pluginNameFromSpec(spec);
         return !name || !manageableNames.has(name);
       });
-      if (normalized.local.length || normalized.remote.length) {
+      if (normalized.client.length || normalized.server.length) {
         phases[phase] = normalized;
       }
     });
@@ -186,7 +196,7 @@
       if (!value) {
         return;
       }
-      if (!value.local.length && !value.remote.length) {
+      if (!value.client.length && !value.server.length) {
         return;
       }
       orderedPhases[phase] = value;
@@ -195,7 +205,7 @@
     return { phases: orderedPhases };
   }
 
-  function selectedPluginsFromConfig(configResponse, scope = "remote") {
+  function selectedPluginsFromConfig(configResponse, scope = "server") {
     const targetScope = normalizePluginScope(scope);
     const pluginConfig = normalizeAgentPluginConfig(configResponse).plugin_config || {};
     const phases = pluginConfig?.phases;
@@ -213,8 +223,8 @@
 
   function activePluginsFromConfig(configResponse) {
     return uniquePluginNames([
-      ...selectedPluginsFromConfig(configResponse, "remote"),
-      ...selectedPluginsFromConfig(configResponse, "local"),
+      ...selectedPluginsFromConfig(configResponse, "server"),
+      ...selectedPluginsFromConfig(configResponse, "client"),
     ]);
   }
 

@@ -25,27 +25,27 @@ def normalize_plugin_config(
         if phase not in phases:
             continue
         normalized_phase = normalize_phase_config(phases.get(phase))
-        if normalized_phase["local"] or normalized_phase["remote"]:
+        if normalized_phase["client"] or normalized_phase["server"]:
             normalized[phase] = normalized_phase
     return {"phases": normalized}
 
 
 def normalize_phase_config(value: Any) -> dict[str, list[Any]]:
     if value is None:
-        return {"local": [], "remote": []}
+        return {"client": [], "server": []}
     if not isinstance(value, dict):
-        raise ValueError("plugin phase config must be an object with 'local' and 'remote'")
-    local = value.get("local")
-    remote = value.get("remote")
-    if local is None:
-        local = []
-    if remote is None:
-        remote = []
-    if not isinstance(local, list) or not isinstance(remote, list):
-        raise ValueError("plugin phase config must include list-valued 'local' and 'remote'")
+        raise ValueError("plugin phase config must be an object with 'client' and 'server'")
+    client = value.get("client", value.get("local"))
+    server = value.get("server", value.get("remote"))
+    if client is None:
+        client = []
+    if server is None:
+        server = []
+    if not isinstance(client, list) or not isinstance(server, list):
+        raise ValueError("plugin phase config must include list-valued 'client' and 'server'")
     return {
-        "local": copy.deepcopy(local),
-        "remote": copy.deepcopy(remote),
+        "client": copy.deepcopy(client),
+        "server": copy.deepcopy(server),
     }
 
 
@@ -68,12 +68,12 @@ def merge_plugin_configs(
                 ordered_phases.append(phase)
 
     for phase in ordered_phases:
-        local_specs = _phase_specs(normalized_client, phase, "local")
-        remote_specs = _phase_specs(normalized_remote, phase, "remote")
-        if local_specs or remote_specs:
+        client_specs = _phase_specs(normalized_client, phase, "client")
+        server_specs = _phase_specs(normalized_remote, phase, "server")
+        if client_specs or server_specs:
             phases[phase] = {
-                "local": local_specs,
-                "remote": remote_specs,
+                "client": client_specs,
+                "server": server_specs,
             }
     return {"phases": phases}
 

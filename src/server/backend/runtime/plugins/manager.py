@@ -47,21 +47,35 @@ def load_plugin_config(source: str | Path | dict[str, Any] | None) -> dict[str, 
     config: dict[str, list[Any]] = {}
     for phase in PHASE_ORDER:
         if phase in phases:
-            config[phase] = _plugin_specs_for_scope(phases.get(phase), "remote")
+            config[phase] = _plugin_specs_for_scope(phases.get(phase), "server")
     return config
 
 
 def _plugin_specs_for_scope(value: Any, scope: str) -> list[Any]:
     if not isinstance(value, dict):
-        raise ValueError("plugin phase config must be an object with 'local' and 'remote'")
-    if "local" not in value or "remote" not in value:
-        raise ValueError("plugin phase config must include both 'local' and 'remote'")
-    specs = value.get(scope)
+        raise ValueError("plugin phase config must be an object with 'client' and 'server'")
+    if not _has_scope(value, "client") or not _has_scope(value, "server"):
+        raise ValueError("plugin phase config must include both 'client' and 'server'")
+    specs = _scope_value(value, scope)
     if specs is None:
         return []
     if not isinstance(specs, list):
         raise ValueError(f"plugin phase '{scope}' config must be a list")
     return list(specs)
+
+
+def _has_scope(value: dict[str, Any], scope: str) -> bool:
+    return scope in value or _legacy_scope(scope) in value
+
+
+def _scope_value(value: dict[str, Any], scope: str) -> Any:
+    if scope in value:
+        return value.get(scope)
+    return value.get(_legacy_scope(scope))
+
+
+def _legacy_scope(scope: str) -> str:
+    return "local" if scope == "client" else "remote"
 
 
 def build_plugins_by_phase(config: dict[str, list[Any]]) -> dict[str, list[BasePlugin]]:

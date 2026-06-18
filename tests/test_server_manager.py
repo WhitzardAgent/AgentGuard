@@ -41,7 +41,7 @@ def test_manager_denies_exfiltration():
     m = RuntimeManager(
         plugin_config={
             "phases": {
-                "tool_before": {"local": [], "remote": ["tool_invoke", "rule_based_plugin"]}
+                "tool_before": {"client": [], "server": ["tool_invoke", "rule_based_plugin"]}
             }
         }
     )
@@ -137,8 +137,8 @@ def test_session_pool_requires_exact_composite_key_for_lookup():
 def test_server_plugin_config_loads_only_remote_scope():
     cfg = {
         "phases": {
-            "llm_before": {"local": ["llm_input"], "remote": []},
-            "tool_before": {"local": ["tool_invoke"], "remote": ["rule_based_plugin"]},
+            "llm_before": {"client": ["llm_input"], "server": []},
+            "tool_before": {"client": ["tool_invoke"], "server": ["rule_based_plugin"]},
         }
     }
 
@@ -172,8 +172,8 @@ def test_server_registered_checker_can_be_loaded_by_name():
         plugin_config={
             "phases": {
                 "tool_before": {
-                    "local": [],
-                    "remote": ["test_server_registered_checker"],
+                    "client": [],
+                    "server": ["test_server_registered_checker"],
                 }
             }
         },
@@ -202,7 +202,7 @@ def test_manager_returns_plugin_result():
     m = RuntimeManager(
         plugin_config={
             "phases": {
-                "llm_before": {"local": [], "remote": ["llm_input"]},
+                "llm_before": {"client": [], "server": ["llm_input"]},
             }
         },
     )
@@ -226,10 +226,10 @@ def test_manager_returns_plugin_result():
 def test_manager_uses_plugin_config_file(tmp_path):
     cfg = {
         "phases": {
-            "llm_before": {"local": ["llm_input"], "remote": []},
-            "llm_after": {"local": ["llm_output"], "remote": []},
-            "tool_before": {"local": ["tool_invoke"], "remote": []},
-            "tool_after": {"local": [], "remote": ["tool_result"]},
+            "llm_before": {"client": ["llm_input"], "server": []},
+            "llm_after": {"client": ["llm_output"], "server": []},
+            "tool_before": {"client": ["tool_invoke"], "server": []},
+            "tool_after": {"client": [], "server": ["tool_result"]},
         }
     }
     path = tmp_path / "server_plugins.json"
@@ -278,7 +278,7 @@ def test_manager_uses_session_scoped_client_plugin_config():
     m = RuntimeManager(
         plugin_config={
             "phases": {
-                "llm_before": {"local": [], "remote": ["llm_input"]},
+                "llm_before": {"client": [], "server": ["llm_input"]},
             }
         },
     )
@@ -290,7 +290,7 @@ def test_manager_uses_session_scoped_client_plugin_config():
             metadata={
                 "remote_plugin_config": {
                     "phases": {
-                        "tool_before": {"local": [], "remote": [StopsChainPlugin]},
+                        "tool_before": {"client": [], "server": [StopsChainPlugin]},
                     }
                 }
             },
@@ -330,15 +330,15 @@ def test_update_client_plugin_config_updates_both_server_and_client_views():
 
     updates = m.update_client_plugin_config(
         {"session_id": "principal-match", "agent_id": "agent-1", "user_id": "user-1"},
-        {"phases": {"llm_before": {"local": ["llm_input"], "remote": []}}},
-        remote_plugin_config={"phases": {"llm_before": {"local": [], "remote": ["llm_input"]}}},
+        {"phases": {"llm_before": {"client": ["llm_input"], "server": []}}},
+        remote_plugin_config={"phases": {"llm_before": {"client": [], "server": ["llm_input"]}}},
     )
 
     assert updates[0]["status"] == "skipped"
     record = m.session_pool.get("principal-match", agent_id="agent-1", user_id="user-1")
     assert record is not None
-    assert record["client_plugin_config"]["phases"]["llm_before"]["local"] == ["llm_input"]
-    assert record["remote_plugin_config"]["phases"]["llm_before"]["remote"] == ["llm_input"]
+    assert record["client_plugin_config"]["phases"]["llm_before"]["client"] == ["llm_input"]
+    assert record["remote_plugin_config"]["phases"]["llm_before"]["server"] == ["llm_input"]
 
 
 def test_manager_stops_remote_plugin_chain_on_first_decision():
@@ -346,8 +346,8 @@ def test_manager_stops_remote_plugin_chain_on_first_decision():
         plugin_config={
             "phases": {
                 "tool_before": {
-                    "local": [],
-                    "remote": [StopsChainPlugin, ShouldNotRunPlugin],
+                    "client": [],
+                    "server": [StopsChainPlugin, ShouldNotRunPlugin],
                 }
             }
         },
@@ -384,7 +384,7 @@ def test_server_checker_receives_trajectory_window():
     m = RuntimeManager(
         plugin_config={
             "phases": {
-                "tool_before": {"local": [], "remote": [TraceAwarePlugin]}
+                "tool_before": {"client": [], "server": [TraceAwarePlugin]}
             }
         },
     )
@@ -413,7 +413,7 @@ def test_server_merges_client_cached_entries_into_trajectory_window():
     m = RuntimeManager(
         plugin_config={
             "phases": {
-                "tool_before": {"local": [], "remote": [TraceAwarePlugin]}
+                "tool_before": {"client": [], "server": [TraceAwarePlugin]}
             }
         },
     )

@@ -17,20 +17,20 @@
   },
   "phases": {
     "llm_before": {
-      "local": [],
-      "remote": []
+      "client": [],
+      "server": []
     },
     "llm_after": {
-      "local": [],
-      "remote": []
+      "client": [],
+      "server": []
     },
     "tool_before": {
-      "local": ["tool_invoke"],
-      "remote": []
+      "client": ["tool_invoke"],
+      "server": []
     },
     "tool_after": {
-      "local": [],
-      "remote": []
+      "client": [],
+      "server": []
     }
   }
 }

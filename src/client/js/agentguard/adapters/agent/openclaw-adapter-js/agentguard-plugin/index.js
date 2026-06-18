@@ -7,14 +7,15 @@ const { AgentGuardOpenClawBridge } = require("./bridge.cjs");
 const PHASE_SCHEMA = {
   type: "object",
   additionalProperties: false,
+  required: ["client", "server"],
   properties: {
-    local: {
+    client: {
       type: "array",
       items: {
         anyOf: [{ type: "string" }, { type: "object" }],
       },
     },
-    remote: {
+    server: {
       type: "array",
       items: {
         anyOf: [{ type: "string" }, { type: "object" }],

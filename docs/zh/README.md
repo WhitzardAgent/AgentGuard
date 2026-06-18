@@ -77,7 +77,7 @@ if __name__ == "__main__":
     run(agent, "Please retrieve document id=0 and send it to alice@example.com.")
 ```
 
-### 第 2 步：AgentGuard Client Importing
+### 第 2 步：导入 AgentGuard 客户端
 你需要在前面编写的智能体代码基础上导入我们的访问控制客户端，以便于与中控服务进行通信，传递智能体当前的运行状态，并接受中控服务的访问控制指令。
 
 #### 1. 安装 AgentGuard 的访问控制客户端 SDK
@@ -182,12 +182,12 @@ if __name__ == "__main__":
 * `guard.attach_langchain()`: 用于将访问控制客户端与 LangChain 智能体实例关联起来。不同智能体平台需要调用不同的 adapter，针对其他平台的处理方法请参考后续章节
 * `guard.close()`: 用于关闭访问控制会话，释放资源。需要在智能体执行完所有任务后调用
 
-### 第 3 步：AgentGuard Plugins 和 Custom Auditors
+### 第 3 步：AgentGuard插件和自定义审计器
 
 扩展能力请查看独立章节：
 
-- [AgentGuard Plugins](plugins.md)
-- [Custom Auditors](auditors.md)
+- [AgentGuard插件](plugins.md)
+- [自定义审计器](auditors.md)
 
 ### 第 4 步：在中控服务器上编写策略并启动中控服务
 该项目采用 C/S 架构，访问控制的所有管理操作，包括智能体的状态监控、策略配置、策略执行、访问控制指令下发等，都需要在中控服务器上进行。该架构尤其有利于一个组织内部有多套智能体资产时，能够统一管理。
@@ -211,16 +211,16 @@ cat <<EOF > config/plugins.json
 {
   "phases": {
     "llm_before": {
-      "local": [],
-      "remote": []
+      "client": [],
+      "server": []
     },
     "llm_after": {
-      "local": [],
-      "remote": []
+      "client": [],
+      "server": []
     },
     "tool_before": {
-      "local": [],
-      "remote": [
+      "client": [],
+      "server": [
         {
           "name": "rule_based_plugin",
           "env": {}
@@ -228,15 +228,15 @@ cat <<EOF > config/plugins.json
       ]
     },
     "tool_after": {
-      "local": [],
-      "remote": []
+      "client": [],
+      "server": []
     }
   }
 }
 EOF
 ```
 
-这份配置的含义是：只有 `tool_before` 阶段启用了一个远端 plugin，也就是内置的 `rule_based_plugin`；其他阶段全部留空。换句话说，server 只会在工具真正执行之前，根据你编写的访问控制策略去做规则匹配和 allow / deny 判定。这样可以让 quick start 聚焦在“工具调用前的访问控制”这一条主线，不引入额外的 LLM 阶段或 tool result 阶段 plugin。
+这份配置的含义是：只有 `tool_before` 阶段启用了一个 server plugin，也就是内置的 `rule_based_plugin`；其他阶段全部留空。换句话说，server 只会在工具真正执行之前，根据你编写的访问控制策略去做规则匹配和 allow / deny 判定。这样可以让 quick start 聚焦在“工具调用前的访问控制”这一条主线，不引入额外的 LLM 阶段或 tool result 阶段 plugin。
 
 #### 2. 为智能体编写一套访问控制策略
 我们刚才编写的智能体包含两个工具：`retrieve_doc` 和 `send_email_to`，分别用于检索特定 id 的文档，以及将文档内容发送到指定的邮箱地址。假设我们希望信任级别小于 2 的智能体在执行任务时，只能将 id 为 0 的机密文件发送给 `admin@example.com` 邮箱，发送到其他地址一律不允许，我们可以创建一个策略文件：
