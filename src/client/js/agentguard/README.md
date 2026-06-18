@@ -106,6 +106,10 @@ LangChain 的接入建议优先走这条路径：
 2. 调用 `guard.attach_langchain(agent)`
 3. 再执行 `agent.invoke(...)`
 
+不要同时把同一个 LangChain tool 先做 `guard.wrap_tool()`，再让
+`attach_langchain(..., { wrap_tools: true })` 去包一次；这样会造成重复
+guard 和重复审计。
+
 示意代码：
 
 ```js

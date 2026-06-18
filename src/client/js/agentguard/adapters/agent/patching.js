@@ -35,19 +35,79 @@ function bindArguments(fn, args, kwargs = {}) {
   try {
     const source = fn && typeof fn.toString === "function" ? fn.toString() : "";
     const match = source.match(/^[^(]*\(([^)]*)\)/);
-    const names = match
-      ? match[1].split(",").map((part) => part.trim().replace(/=.*$/, "")).filter(Boolean)
-      : [];
+    const params = match ? splitTopLevelParams(match[1]) : [];
     const out = { ...kwargs };
+    let remainder = [];
+    let offset = 0;
+
+    if (params.length && isStructuredParam(params[0]) && isPlainObject(args[0])) {
+      Object.assign(out, args[0]);
+      offset = 1;
+    }
+
     args.forEach((value, index) => {
-      out[names[index] || "_args"] = names[index] ? value : [...args];
+      if (index < offset) {
+        return;
+      }
+      const param = params[index];
+      const name = normalizeParamName(param);
+      if (!name || isStructuredParam(param)) {
+        remainder.push(value);
+        return;
+      }
+      out[name] = value;
     });
+
+    if (!Object.keys(out).length || remainder.length) {
+      if (!remainder.length && offset === 0) {
+        remainder = [...args];
+      }
+      out._args = remainder;
+    }
     return out;
   } catch (_) {
     const out = { ...kwargs };
     out._args = [...args];
     return out;
   }
+}
+
+function splitTopLevelParams(text) {
+  const parts = [];
+  let current = "";
+  let depth = 0;
+  for (const ch of text) {
+    if (ch === "," && depth === 0) {
+      if (current.trim()) {
+        parts.push(current.trim());
+      }
+      current = "";
+      continue;
+    }
+    if (ch === "{" || ch === "[" || ch === "(") {
+      depth += 1;
+    } else if ((ch === "}" || ch === "]" || ch === ")") && depth > 0) {
+      depth -= 1;
+    }
+    current += ch;
+  }
+  if (current.trim()) {
+    parts.push(current.trim());
+  }
+  return parts;
+}
+
+function normalizeParamName(param) {
+  return String(param || "").trim().replace(/=.*$/, "").replace(/^\.\.\./, "");
+}
+
+function isStructuredParam(param) {
+  const value = String(param || "").trim();
+  return value.startsWith("{") || value.startsWith("[");
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function setAttr(obj, attr, value) {

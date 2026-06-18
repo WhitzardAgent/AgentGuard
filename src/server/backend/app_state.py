@@ -17,6 +17,7 @@ def get_manager() -> RuntimeManager:
     if _manager is None:
         plugin_config = (
             os.getenv("AGENTGUARD_SERVER_PLUGIN_CONFIG")
+            or os.getenv("AGENTGUARD_SERVER_CHECKER_CONFIG")
             or os.getenv("AGENTGUARD_PLUGIN_CONFIG")
         )
         _manager = RuntimeManager(plugin_config=plugin_config)

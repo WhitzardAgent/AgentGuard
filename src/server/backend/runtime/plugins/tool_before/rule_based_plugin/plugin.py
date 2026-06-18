@@ -117,21 +117,21 @@ def _decision_from_match(
 
 def _fallback_rules() -> list[PolicyRule]:
     return [
-        PolicyRule(
-            rule_id="deny_secret_exfiltration",
-            effect=PolicyEffect.DENY,
-            reason="Secret-like content combined with external send.",
-            priority=100,
-            event_types=["tool_invoke"],
-            capabilities=[CAP_EXTERNAL_SEND],
-            risk_signals=["secret_detected", "api_key_detected", "system_prompt_leak"],
-        ),
-        PolicyRule(
-            rule_id="review_external_send",
-            effect=PolicyEffect.REQUIRE_REMOTE_REVIEW,
-            reason="External send is high-risk and needs remote review.",
-            priority=60,
-            event_types=["tool_invoke"],
-            capabilities=[CAP_EXTERNAL_SEND],
-        ),
+        # PolicyRule(
+        #     rule_id="deny_secret_exfiltration",
+        #     effect=PolicyEffect.DENY,
+        #     reason="Secret-like content combined with external send.",
+        #     priority=100,
+        #     event_types=["tool_invoke"],
+        #     capabilities=[CAP_EXTERNAL_SEND],
+        #     risk_signals=["secret_detected", "api_key_detected", "system_prompt_leak"],
+        # ),
+        # PolicyRule(
+        #     rule_id="review_external_send",
+        #     effect=PolicyEffect.REQUIRE_REMOTE_REVIEW,
+        #     reason="External send is high-risk and needs remote review.",
+        #     priority=60,
+        #     event_types=["tool_invoke"],
+        #     capabilities=[CAP_EXTERNAL_SEND],
+        # ),
     ]

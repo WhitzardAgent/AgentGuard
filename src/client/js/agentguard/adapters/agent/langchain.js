@@ -1,11 +1,14 @@
 "use strict";
 
 const ev = require("../../schemas/events");
+const { DecisionType } = require("../../schemas/decisions");
 const { BaseAgentAdapter } = require("./base");
 const {
+  bindArguments,
   isGuarded,
   makeGuardedTool,
   markGuarded,
+  registerToolMetadata,
   setAttr,
   toolName,
 } = require("./patching");
@@ -149,27 +152,222 @@ function patchToolObject(tool, guard, name) {
   if (!tool || isGuarded(tool)) {
     return 0;
   }
-  for (const spec of [
-    { attrs: ["invoke", "ainvoke"], bind: true },
-    { attrs: ["_run", "_arun"], bind: true },
-    { attrs: ["func", "coroutine"], bind: false },
-  ]) {
-    let patched = false;
-    for (const attr of spec.attrs) {
-      const fn = tool[attr];
-      if (typeof fn !== "function" || isGuarded(fn)) {
-        continue;
-      }
-      const target = spec.bind ? fn.bind(tool) : fn;
-      if (setAttr(tool, attr, makeGuardedTool(guard, target, { name, tool }))) {
-        patched = true;
-      }
-    }
-    if (patched) {
-      return 1;
-    }
+  // Prefer raw tool callables so AgentGuard sees business arguments such as
+  // `path`/`url` instead of LangChain's generic `input` wrapper.
+  if (patchToolAttrs(tool, guard, name, { attrs: ["func", "coroutine"], bind: false })) {
+    return 1;
+  }
+  if (patchToolAttrs(tool, guard, name, { attrs: ["_run", "_arun"], bind: true })) {
+    return 1;
+  }
+  if (patchToolAttrs(tool, guard, name, { attrs: ["invoke", "ainvoke"], bind: true })) {
+    return 1;
   }
   return 0;
+}
+
+function patchToolAttrs(tool, guard, name, { attrs, bind }) {
+  let patched = false;
+  for (const attr of attrs) {
+    const fn = tool[attr];
+    if (typeof fn !== "function" || isGuarded(fn)) {
+      continue;
+    }
+    const target = bind ? fn.bind(tool) : fn;
+    const wrapped = makeGuardedLangchainToolMethod(guard, target, { name, tool, attr });
+    if (setAttr(tool, attr, wrapped)) {
+      patched = true;
+    }
+  }
+  return patched;
+}
+
+function makeGuardedLangchainToolMethod(guard, fn, { name, tool = null, attr = "invoke" } = {}) {
+  const metadata = registerToolMetadata(guard, fn, { name, tool });
+  const wrapper = async (...args) => {
+    const toolCall = extractLangchainToolCall(args);
+    const eventMetadata = buildLangchainToolEventMetadata({ attr, toolCall });
+    try {
+      const arguments_ = buildLangchainToolArguments(fn, args, toolCall);
+      const invokeDecision = await guardToolBeforeWithMetadata(guard, metadata, arguments_, eventMetadata);
+      const blockedInvoke = blockedLangchainToolValue(invokeDecision, metadata.name, toolCall);
+      if (blockedInvoke) {
+        return blockedInvoke;
+      }
+      let value;
+      try {
+        value = await fn(...args);
+      } catch (error) {
+        await guardToolAfterWithMetadata(
+          guard,
+          metadata.name,
+          null,
+          eventMetadata,
+          { error: String(error?.message || error) }
+        );
+        throw error;
+      }
+      const resultDecision = await guardToolAfterWithMetadata(guard, metadata.name, value, eventMetadata);
+      return blockedLangchainResultValue(resultDecision, metadata.name, toolCall) || value;
+    } catch (error) {
+      await guard.runtime.sync_local_cache_now({ reason: "client_error" });
+      throw error;
+    } finally {
+      guard.runtime.sync_local_cache_async({ reason: "round_complete" });
+    }
+  };
+  return markGuarded(wrapper);
+}
+
+async function guardToolBeforeWithMetadata(guard, metadata, arguments_, eventMetadata) {
+  return (
+    await guard.runtime.guard(
+      ev.tool_invoke(guard.context, metadata.name, arguments_, {
+        capabilities: [...(metadata.capabilities || [])],
+        metadata: eventMetadata,
+      })
+    )
+  ).decision;
+}
+
+async function guardToolAfterWithMetadata(guard, toolName, result, eventMetadata, { error = null } = {}) {
+  return (
+    await guard.runtime.guard(
+      ev.tool_result(guard.context, toolName, result, {
+        error,
+        metadata: eventMetadata,
+      }),
+      { phase: "after" }
+    )
+  ).decision;
+}
+
+function buildLangchainToolArguments(fn, args, toolCall) {
+  if (toolCall && Object.prototype.hasOwnProperty.call(toolCall, "args")) {
+    return normalizeLangchainValue(toolCall.args);
+  }
+  return normalizeLangchainValue(bindArguments(fn, args));
+}
+
+function buildLangchainToolEventMetadata({ attr, toolCall }) {
+  const metadata = {
+    adapter: "langchain",
+    call_attr: attr,
+  };
+  if (toolCall) {
+    metadata.langchain_tool_call = normalizeLangchainValue({
+      id: toolCall.id || null,
+      name: toolCall.name || null,
+      type: toolCall.type || "tool_call",
+      args: toolCall.args,
+    });
+  }
+  return metadata;
+}
+
+function blockedLangchainToolValue(decision, toolName, toolCall) {
+  if (decision.decision_type === DecisionType.DENY) {
+    return makeLangchainBlockedValue({ agentguard: "blocked", tool: toolName, reason: decision.reason }, toolName, toolCall);
+  }
+  if (decision.requires_user || decision.requires_remote) {
+    return makeLangchainBlockedValue(
+      { agentguard: "pending", tool: toolName, reason: decision.reason, decision: decision.decision_type },
+      toolName,
+      toolCall
+    );
+  }
+  if (decision.decision_type === DecisionType.DEGRADE) {
+    return makeLangchainBlockedValue(
+      { agentguard: "degraded", tool: toolName, reason: decision.reason, decision: decision.decision_type },
+      toolName,
+      toolCall
+    );
+  }
+  return null;
+}
+
+function blockedLangchainResultValue(decision, toolName, toolCall) {
+  if (decision.decision_type === DecisionType.DENY) {
+    return makeLangchainBlockedValue(
+      { agentguard: "blocked", tool: toolName, reason: decision.reason, decision: decision.decision_type },
+      toolName,
+      toolCall
+    );
+  }
+  if (decision.decision_type === DecisionType.SANITIZE) {
+    return makeLangchainBlockedValue(
+      { agentguard: "sanitized", tool: toolName, reason: decision.reason, decision: decision.decision_type },
+      toolName,
+      toolCall
+    );
+  }
+  if (decision.requires_user || decision.requires_remote) {
+    return makeLangchainBlockedValue(
+      { agentguard: "pending", tool: toolName, reason: decision.reason, decision: decision.decision_type },
+      toolName,
+      toolCall
+    );
+  }
+  return null;
+}
+
+function makeLangchainBlockedValue(payload, toolName, toolCall) {
+  const ToolMessage = getLangchainToolMessageClass();
+  if (ToolMessage && toolCall && toolCall.id) {
+    try {
+      return new ToolMessage({
+        content: JSON.stringify(payload),
+        name: toolName,
+        tool_call_id: toolCall.id,
+      });
+    } catch (_) {}
+  }
+  return payload;
+}
+
+function extractLangchainToolCall(args) {
+  const stack = [...args];
+  while (stack.length) {
+    const value = stack.shift();
+    if (!value || typeof value !== "object") {
+      continue;
+    }
+    if (isLangchainToolCall(value)) {
+      return value;
+    }
+    if (isLangchainToolCall(value.toolCall)) {
+      return value.toolCall;
+    }
+    if (isLangchainToolCall(value.config && value.config.toolCall)) {
+      return value.config.toolCall;
+    }
+  }
+  return null;
+}
+
+function isLangchainToolCall(value) {
+  return Boolean(
+    value
+      && typeof value === "object"
+      && typeof value.name === "string"
+      && Object.prototype.hasOwnProperty.call(value, "args")
+  );
+}
+
+let _langchainToolMessageClass;
+let _langchainToolMessageLoaded = false;
+
+function getLangchainToolMessageClass() {
+  if (_langchainToolMessageLoaded) {
+    return _langchainToolMessageClass;
+  }
+  _langchainToolMessageLoaded = true;
+  try {
+    ({ ToolMessage: _langchainToolMessageClass } = require("@langchain/core/messages"));
+  } catch (_) {
+    _langchainToolMessageClass = null;
+  }
+  return _langchainToolMessageClass;
 }
 
 function patchLangchainLLM(agent, guard) {

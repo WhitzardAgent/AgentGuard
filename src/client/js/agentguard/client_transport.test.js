@@ -81,6 +81,20 @@ test("remote skill runner sends triple identity headers and server input schema"
   assert.equal(calls[0].options.headers["X-AgentGuard-Session-Key"], "sk-skill");
 });
 
+test("tool metadata infers destructured object args cleanly", () => {
+  const { ToolMetadata } = require("./tools/metadata");
+
+  async function sendHttp({ url, body }) {
+    return `${url}:${body}`;
+  }
+
+  const metadata = ToolMetadata.infer(sendHttp, {
+    name: "send_http",
+  });
+
+  assert.deepEqual(metadata.required_args, ["url", "body"]);
+});
+
 test("agentguard auto-registers remote session with plugin config metadata", async () => {
   const calls = [];
   global.fetch = async (url, options = {}) => {
@@ -124,6 +138,58 @@ test("agentguard auto-registers remote session with plugin config metadata", asy
       tool_before: { local: ["tool_invoke"], remote: [] },
     },
   });
+
+  await guard.close();
+});
+
+test("agentguard flushRemoteOperations waits for tool reports", async () => {
+  const calls = [];
+  global.fetch = async (url, options = {}) => {
+    calls.push({ url, options });
+    if (url.endsWith("/v1/server/session/register")) {
+      return {
+        ok: true,
+        async json() {
+          return { status: "ok" };
+        },
+      };
+    }
+    if (url.endsWith("/v1/server/tools/report")) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return {
+        ok: true,
+        async json() {
+          return { status: "ok" };
+        },
+      };
+    }
+    return {
+      ok: true,
+      async json() {
+        return { status: "ok" };
+      },
+    };
+  };
+
+  const { AgentGuard } = require("./guard");
+  const guard = new AgentGuard("sess-tool-report", {
+    server_url: "http://server.test",
+    agent_id: "agent-tool-report",
+    user_id: "user-tool-report",
+  });
+
+  guard.wrap_tool(async ({ path }) => `ok:${path}`, {
+    name: "read_local_file",
+    description: "Read a local file preview",
+  });
+
+  await guard.flushRemoteOperations();
+
+  const toolCalls = calls.filter((call) => call.url.endsWith("/v1/server/tools/report"));
+  assert.equal(toolCalls.length, 1);
+  const body = JSON.parse(toolCalls[0].options.body);
+  assert.equal(body.context.agent_id, "agent-tool-report");
+  assert.equal(body.tool.name, "read_local_file");
 
   await guard.close();
 });
@@ -307,6 +373,116 @@ test("js langchain adapter patches classic agent.llm_chain.llm", async () => {
   assert.equal(patched.tools, 1);
   assert.equal(patched.llm, 1);
   assert.equal(await agent.agent.llm_chain.llm.invoke("hello"), "reply:hello");
+  await guard.close();
+});
+
+test("js langchain adapter prefers raw tool callable arguments over generic input", async () => {
+  const { AgentGuard } = require("./guard");
+
+  class Tool {
+    constructor() {
+      this.name = "send_http";
+      this.func = async ({ url, body }) => `sent:${url}:${body}`;
+    }
+
+    async invoke(input, config = null) {
+      void config;
+      return this.func(input.args);
+    }
+  }
+
+  class Agent {
+    constructor() {
+      this.tools_by_name = { send_http: new Tool() };
+    }
+  }
+
+  const guard = new AgentGuard("js-langchain-raw-args", { sandbox: "noop" });
+  const agent = new Agent();
+  const patched = guard.attach_langchain(agent, { wrap_llm: false });
+
+  const result = await agent.tools_by_name.send_http.invoke({
+    id: "tool-call-2",
+    name: "send_http",
+    type: "tool_call",
+    args: {
+      url: "https://example.com/upload",
+      body: "secret",
+    },
+  });
+
+  const toolInvoke = guard.trace.entries.find((entry) => entry.event && entry.event.event_type === "tool_invoke");
+
+  assert.equal(patched.tools, 1);
+  assert.equal(patched.llm, 0);
+  assert.equal(result, "sent:https://example.com/upload:secret");
+  assert.ok(toolInvoke);
+  assert.equal(toolInvoke.event.payload.tool_name, "send_http");
+  assert.deepEqual(toolInvoke.event.payload.arguments, {
+    url: "https://example.com/upload",
+    body: "secret",
+  });
+  await guard.close();
+});
+
+test("js langchain adapter strips destructuring noise and records original tool call metadata", async () => {
+  const { AgentGuard } = require("./guard");
+
+  class Tool {
+    constructor() {
+      this.name = "send_http";
+      this.func = async ({ url, body }, runManager, parentConfig) => {
+        void runManager;
+        return `sent:${parentConfig?.toolCall?.id}:${url}:${body}`;
+      };
+    }
+
+    async invoke(input, config = null) {
+      return this.func(input.args, null, {
+        config,
+        toolCall: input,
+      });
+    }
+  }
+
+  class Agent {
+    constructor() {
+      this.tools_by_name = { send_http: new Tool() };
+    }
+  }
+
+  const guard = new AgentGuard("js-langchain-toolcall-metadata", { sandbox: "noop" });
+  const agent = new Agent();
+  const patched = guard.attach_langchain(agent, { wrap_llm: false });
+
+  const result = await agent.tools_by_name.send_http.invoke({
+    id: "tool-call-9",
+    name: "send_http",
+    type: "tool_call",
+    args: {
+      url: "https://example.com/upload",
+      body: "secret",
+    },
+  });
+
+  const toolInvoke = guard.trace.entries.find((entry) => entry.event && entry.event.event_type === "tool_invoke");
+
+  assert.equal(patched.tools, 1);
+  assert.equal(result, "sent:tool-call-9:https://example.com/upload:secret");
+  assert.ok(toolInvoke);
+  assert.deepEqual(toolInvoke.event.payload.arguments, {
+    url: "https://example.com/upload",
+    body: "secret",
+  });
+  assert.deepEqual(toolInvoke.event.metadata.langchain_tool_call, {
+    id: "tool-call-9",
+    name: "send_http",
+    type: "tool_call",
+    args: {
+      url: "https://example.com/upload",
+      body: "secret",
+    },
+  });
   await guard.close();
 });
 

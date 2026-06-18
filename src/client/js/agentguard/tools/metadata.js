@@ -4,11 +4,107 @@ function inferRequiredArgs(fn) {
   if (typeof fn !== "function") {
     return [];
   }
-  return [...fn.toString().matchAll(/(?:function[^(]*\(|=>\s*|^[^(]*\()([^)]*)\)/g)]
-    .slice(0, 1)
-    .flatMap((match) => (match[1] || "").split(","))
-    .map((part) => part.trim().replace(/=.*$/, ""))
-    .filter(Boolean);
+  const params = extractParams(fn);
+  return params.flatMap(expandParam);
+}
+
+function extractParams(fn) {
+  const source = typeof fn.toString === "function" ? fn.toString() : "";
+  const match = source.match(/^[^(]*\(([^)]*)\)/);
+  if (match) {
+    return splitTopLevel(match[1], ",");
+  }
+  const arrowMatch = source.match(/^\s*(?:async\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*=>/);
+  if (arrowMatch && arrowMatch[1]) {
+    return [arrowMatch[1]];
+  }
+  return [];
+}
+
+function expandParam(param) {
+  const normalized = stripDefaultValue(String(param || "").trim()).replace(/^\.\.\./, "").trim();
+  if (!normalized) {
+    return [];
+  }
+  if (normalized.startsWith("{") && normalized.endsWith("}")) {
+    return extractObjectKeys(normalized);
+  }
+  if (normalized.startsWith("[") && normalized.endsWith("]")) {
+    return [];
+  }
+  return [normalized];
+}
+
+function extractObjectKeys(param) {
+  const inner = param.slice(1, -1).trim();
+  if (!inner) {
+    return [];
+  }
+  return splitTopLevel(inner, ",")
+    .map((part) => String(part || "").trim())
+    .flatMap((part) => {
+      if (!part) {
+        return [];
+      }
+      if (part.startsWith("...")) {
+        return [];
+      }
+      const aliasMatch = part.match(/^(.+?)\s*:\s*(.+)$/);
+      const target = aliasMatch ? aliasMatch[2] : part;
+      const cleaned = stripDefaultValue(target).trim();
+      if (!cleaned || cleaned.startsWith("{") || cleaned.startsWith("[")) {
+        return [];
+      }
+      return [cleaned];
+    });
+}
+
+function stripDefaultValue(text) {
+  const [head] = splitTopLevel(text, "=");
+  return String(head || "").trim();
+}
+
+function splitTopLevel(text, delimiter) {
+  const parts = [];
+  let current = "";
+  let depth = 0;
+  let quote = null;
+  for (const ch of String(text || "")) {
+    if (quote) {
+      current += ch;
+      if (ch === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (ch === "\"" || ch === "'" || ch === "`") {
+      quote = ch;
+      current += ch;
+      continue;
+    }
+    if (ch === "{" || ch === "[" || ch === "(") {
+      depth += 1;
+      current += ch;
+      continue;
+    }
+    if ((ch === "}" || ch === "]" || ch === ")") && depth > 0) {
+      depth -= 1;
+      current += ch;
+      continue;
+    }
+    if (ch === delimiter && depth === 0) {
+      if (current.trim()) {
+        parts.push(current.trim());
+      }
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim()) {
+    parts.push(current.trim());
+  }
+  return parts;
 }
 
 class ToolMetadata {

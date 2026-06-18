@@ -3,20 +3,25 @@ from __future__ import annotations
 
 import functools
 import inspect
+import json
 from collections.abc import Sequence
 from typing import Any
 
 from agentguard.adapters.agent.base import BaseAgentAdapter
 from agentguard.adapters.agent.patching import (
+    bind_arguments,
+    guard_tool_after,
+    guard_tool_before,
     is_guarded,
     mark_guarded,
     make_guarded_tool,
+    register_tool_metadata,
     set_attr,
     tool_name,
 )
 from agentguard.schemas import events as ev
 from agentguard.schemas.context import RuntimeContext
-from agentguard.schemas.decisions import DecisionType
+from agentguard.schemas.decisions import DecisionType, GuardDecision
 from agentguard.utils.errors import AdapterError
 
 
@@ -425,15 +430,241 @@ def _patch_tool_object(tool: Any, guard: Any, *, name: str) -> int:
     if tool is None or is_guarded(tool):
         return 0
 
-    for attrs in (("invoke", "ainvoke"), ("_run", "_arun"), ("func", "coroutine")):
-        patched = False
-        for attr in attrs:
-            fn = getattr(tool, attr, None)
-            if not callable(fn) or is_guarded(fn):
-                continue
-            wrapped = make_guarded_tool(guard, fn, name=name, tool=tool)
-            if set_attr(tool, attr, wrapped):
-                patched = True
-        if patched:
-            return 1
+    # Prefer raw tool callables so AgentGuard sees business arguments such as
+    # ``path``/``url`` instead of LangChain's generic ``input`` envelope.
+    if _patch_tool_attrs(tool, guard, name=name, attrs=("func", "coroutine")):
+        return 1
+    if _patch_tool_attrs(tool, guard, name=name, attrs=("_run", "_arun")):
+        return 1
+    if _patch_tool_attrs(tool, guard, name=name, attrs=("invoke", "ainvoke")):
+        return 1
     return 0
+
+
+def _patch_tool_attrs(
+    tool: Any,
+    guard: Any,
+    *,
+    name: str,
+    attrs: tuple[str, ...],
+) -> bool:
+    patched = False
+    for attr in attrs:
+        fn = getattr(tool, attr, None)
+        if not callable(fn) or is_guarded(fn):
+            continue
+        if attr in {"invoke", "ainvoke"}:
+            wrapped = _make_guarded_langchain_tool_method(
+                guard,
+                fn,
+                name=name,
+                tool=tool,
+            )
+        else:
+            wrapped = make_guarded_tool(guard, fn, name=name, tool=tool)
+        if set_attr(tool, attr, wrapped):
+            patched = True
+    return patched
+
+
+def _make_guarded_langchain_tool_method(
+    guard: Any,
+    fn: Any,
+    *,
+    name: str,
+    tool: Any,
+) -> Any:
+    metadata = register_tool_metadata(guard, fn, name=name, tool=tool)
+
+    if inspect.iscoroutinefunction(fn):
+
+        @functools.wraps(fn)
+        async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+            try:
+                arguments = bind_arguments(fn, args, kwargs)
+                decision = guard_tool_before(guard, metadata, arguments)
+                blocked = _blocked_langchain_tool_value(decision, metadata.name, args, kwargs)
+                if blocked is not None:
+                    return blocked
+                try:
+                    value = await fn(*args, **kwargs)
+                except Exception as exc:
+                    guard_tool_after(guard, metadata.name, error=str(exc))
+                    raise
+                result_decision = guard_tool_after(guard, metadata.name, value)
+                result_blocked = _blocked_langchain_result_value(
+                    result_decision,
+                    metadata.name,
+                    args,
+                    kwargs,
+                )
+                return result_blocked if result_blocked is not None else value
+            except Exception:
+                _sync_local_cache_now(guard, reason="client_error")
+                raise
+            finally:
+                _sync_local_cache_async(guard, reason="round_complete")
+
+        return mark_guarded(async_wrapper)
+
+    @functools.wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        try:
+            arguments = bind_arguments(fn, args, kwargs)
+            decision = guard_tool_before(guard, metadata, arguments)
+            blocked = _blocked_langchain_tool_value(decision, metadata.name, args, kwargs)
+            if blocked is not None:
+                return blocked
+            try:
+                value = fn(*args, **kwargs)
+            except Exception as exc:
+                guard_tool_after(guard, metadata.name, error=str(exc))
+                raise
+            result_decision = guard_tool_after(guard, metadata.name, value)
+            result_blocked = _blocked_langchain_result_value(
+                result_decision,
+                metadata.name,
+                args,
+                kwargs,
+            )
+            return result_blocked if result_blocked is not None else value
+        except Exception:
+            _sync_local_cache_now(guard, reason="client_error")
+            raise
+        finally:
+            _sync_local_cache_async(guard, reason="round_complete")
+
+    return mark_guarded(wrapper)
+
+
+def _blocked_langchain_tool_value(
+    decision: GuardDecision,
+    tool_name: str,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> Any | None:
+    if decision.decision_type == DecisionType.DENY:
+        return _langchain_tool_message(
+            {
+                "agentguard": "blocked",
+                "tool": tool_name,
+                "reason": decision.reason,
+                "decision": decision.decision_type.value,
+            },
+            tool_name=tool_name,
+            args=args,
+            kwargs=kwargs,
+        )
+    if decision.requires_user or decision.requires_remote:
+        return _langchain_tool_message(
+            {
+                "agentguard": "pending",
+                "tool": tool_name,
+                "reason": decision.reason,
+                "decision": decision.decision_type.value,
+            },
+            tool_name=tool_name,
+            args=args,
+            kwargs=kwargs,
+        )
+    if decision.decision_type == DecisionType.DEGRADE:
+        return _langchain_tool_message(
+            {
+                "agentguard": "degraded",
+                "tool": tool_name,
+                "reason": decision.reason,
+                "decision": decision.decision_type.value,
+            },
+            tool_name=tool_name,
+            args=args,
+            kwargs=kwargs,
+        )
+    return None
+
+
+def _blocked_langchain_result_value(
+    decision: GuardDecision,
+    tool_name: str,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> Any | None:
+    if decision.decision_type == DecisionType.DENY:
+        return _langchain_tool_message(
+            {
+                "agentguard": "blocked",
+                "tool": tool_name,
+                "reason": decision.reason,
+                "decision": decision.decision_type.value,
+            },
+            tool_name=tool_name,
+            args=args,
+            kwargs=kwargs,
+        )
+    if decision.decision_type == DecisionType.SANITIZE:
+        return _langchain_tool_message(
+            {
+                "agentguard": "sanitized",
+                "tool": tool_name,
+                "reason": decision.reason,
+                "decision": decision.decision_type.value,
+            },
+            tool_name=tool_name,
+            args=args,
+            kwargs=kwargs,
+        )
+    if decision.requires_user or decision.requires_remote:
+        return _langchain_tool_message(
+            {
+                "agentguard": "pending",
+                "tool": tool_name,
+                "reason": decision.reason,
+                "decision": decision.decision_type.value,
+            },
+            tool_name=tool_name,
+            args=args,
+            kwargs=kwargs,
+        )
+    return None
+
+
+def _langchain_tool_message(
+    payload: dict[str, Any],
+    *,
+    tool_name: str,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> Any:
+    content = json.dumps(payload, ensure_ascii=True, sort_keys=True)
+    tool_call = _extract_langchain_tool_call(args, kwargs)
+    tool_call_id = tool_call.get("id") if isinstance(tool_call, dict) else None
+    tool_message_cls = _get_langchain_tool_message_class()
+    if tool_call_id and tool_message_cls is not None:
+        try:
+            return tool_message_cls(content=content, name=tool_name, tool_call_id=tool_call_id)
+        except Exception:
+            return content
+    return content
+
+
+def _extract_langchain_tool_call(
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> dict[str, Any] | None:
+    candidates = list(args)
+    if "input" in kwargs:
+        candidates.append(kwargs["input"])
+    for value in candidates:
+        if not isinstance(value, dict):
+            continue
+        if value.get("type") == "tool_call" and value.get("name"):
+            return value
+    return None
+
+
+@functools.lru_cache(maxsize=1)
+def _get_langchain_tool_message_class() -> Any:
+    try:
+        from langchain_core.messages import ToolMessage
+    except Exception:
+        return None
+    return ToolMessage

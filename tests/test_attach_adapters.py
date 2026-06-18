@@ -6,6 +6,7 @@ import pytest
 
 from agentguard import AgentGuard
 from agentguard.adapters.agent.base import BaseAgentAdapter
+from agentguard.adapters.agent import langchain as langchain_adapter
 
 
 def _event_types(guard: AgentGuard) -> list[str]:
@@ -373,6 +374,107 @@ async def test_attach_langchain_patches_internal_tool_methods_when_public_entryp
     assert calls == [("func", "ABC"), ("coroutine", "ABC")]
     assert _event_types(guard).count("tool_invoke") == 2
     assert _event_types(guard).count("tool_result") == 2
+
+
+def test_attach_langchain_tool_invoke_deny_returns_toolmessage_compatible_value(monkeypatch):
+    calls = []
+    checker_config = {
+        "phases": {
+            "tool_before": {
+                "local": ["tool_invoke"],
+                "remote": [],
+            }
+        }
+    }
+
+    class FakeToolMessage:
+        def __init__(self, *, content: str, name: str, tool_call_id: str) -> None:
+            self.content = content
+            self.name = name
+            self.tool_call_id = tool_call_id
+
+    class Tool:
+        name = "shell_exec"
+        capabilities = ["shell"]
+
+        def invoke(self, tool_call: dict, config=None) -> str:
+            calls.append((tool_call, config))
+            return "ran"
+
+    class Agent:
+        def __init__(self) -> None:
+            self.tools_by_name = {"shell_exec": Tool()}
+
+    monkeypatch.setattr(langchain_adapter, "_get_langchain_tool_message_class", lambda: FakeToolMessage)
+
+    guard = AgentGuard("attach-langchain-deny", sandbox="noop", plugin_config=checker_config)
+    agent = Agent()
+
+    patched = guard.attach_langchain(agent, wrap_llm=False)
+    result = agent.tools_by_name["shell_exec"].invoke(
+        {
+            "id": "tool-call-1",
+            "name": "shell_exec",
+            "type": "tool_call",
+            "args": {
+                "command": "rm -rf /tmp/demo",
+            },
+        }
+    )
+
+    assert patched["tools"] == 1
+    assert patched["llm"] == 0
+    assert calls == []
+    assert isinstance(result, FakeToolMessage)
+    assert result.name == "shell_exec"
+    assert result.tool_call_id == "tool-call-1"
+    payload = json.loads(result.content)
+    assert payload["agentguard"] == "blocked"
+    assert payload["decision"] == "deny"
+    assert "Destructive shell command blocked by local plugin." in payload["reason"]
+
+
+def test_attach_langchain_prefers_raw_tool_callable_arguments_over_generic_input():
+    class Tool:
+        name = "send_http"
+
+        def func(self, url: str, body: str) -> str:
+            return f"sent:{url}:{body}"
+
+        def invoke(self, input: dict[str, object], config=None) -> str:
+            args = input.get("args") if isinstance(input, dict) else None
+            assert isinstance(args, dict)
+            return self.func(**args)
+
+    class Agent:
+        def __init__(self) -> None:
+            self.tools_by_name = {"send_http": Tool()}
+
+    guard = AgentGuard("attach-langchain-raw-args", sandbox="noop")
+    agent = Agent()
+
+    patched = guard.attach_langchain(agent, wrap_llm=False)
+    result = agent.tools_by_name["send_http"].invoke(
+        {
+            "id": "tool-call-2",
+            "name": "send_http",
+            "type": "tool_call",
+            "args": {
+                "url": "https://example.com/upload",
+                "body": "secret",
+            },
+        }
+    )
+
+    assert patched["tools"] == 1
+    assert patched["llm"] == 0
+    assert result == "sent:https://example.com/upload:secret"
+    event = _first_event(guard, "tool_invoke")
+    assert event.payload["tool_name"] == "send_http"
+    assert event.payload["arguments"] == {
+        "url": "https://example.com/upload",
+        "body": "secret",
+    }
 
 
 @pytest.mark.asyncio

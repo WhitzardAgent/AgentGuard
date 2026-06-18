@@ -93,6 +93,7 @@ class AgentGuard {
     });
     this.remote_session_registration = null;
     this.remote_session_registered = false;
+    this.pending_remote_operations = new Set();
     this.registerRemoteSession();
   }
 
@@ -235,6 +236,7 @@ class AgentGuard {
   }
 
   async close() {
+    await this.flushRemoteOperations();
     await this.runtime.sync_local_cache_now({ reason: "session_close" });
     if (this.remote.enabled) {
       try {
@@ -249,6 +251,27 @@ class AgentGuard {
       }
     }
     await this.stop_config_api();
+  }
+
+  trackRemoteOperation(promise) {
+    if (!promise || typeof promise.then !== "function") {
+      return Promise.resolve(promise);
+    }
+    this.pending_remote_operations.add(promise);
+    return promise.finally(() => {
+      this.pending_remote_operations.delete(promise);
+    });
+  }
+
+  async flushRemoteOperations() {
+    if (this.remote_session_registration) {
+      await this.remote_session_registration.catch(() => false);
+    }
+    while (this.pending_remote_operations.size) {
+      const pending = [...this.pending_remote_operations];
+      await Promise.allSettled(pending);
+    }
+    return true;
   }
 
   ensureRemoteSessionRegistered() {
@@ -323,9 +346,9 @@ class AgentGuard {
         tags: [ ...(((metadata.metadata || {}).tags || metadata.capabilities || []).map((tag) => String(tag)).filter(Boolean)) ],
       },
     };
-    this.ensureRemoteSessionRegistered()
+    return this.trackRemoteOperation(this.ensureRemoteSessionRegistered()
       .then((registered) => (registered ? this.remote.report_tool(this.context, toolPayload) : null))
-      .catch(() => {});
+      .catch(() => {}));
   }
 }
 
