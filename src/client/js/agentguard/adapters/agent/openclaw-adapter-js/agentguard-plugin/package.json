@@ -1,0 +1,16 @@
+{
+  "name": "@agentguard/openclaw-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OpenClaw hook plugin that routes llm/tool phases through AgentGuard.",
+  "type": "module",
+  "main": "./index.js",
+  "openclaw": {
+    "extensions": [
+      "./index.js"
+    ]
+  },
+  "devDependencies": {
+    "@openclaw/plugin-sdk": "workspace:*"
+  }
+}

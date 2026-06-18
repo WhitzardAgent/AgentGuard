@@ -1,0 +1,36 @@
+{
+  "serverUrl": "http://127.0.0.1:38080",
+  "apiKeyEnvVar": "AGENTGUARD_API_KEY",
+  "policy": "builtin",
+  "auditPath": "./tmp/openclaw-agentguard-audit.jsonl",
+  "remoteUnavailableMode": "fail_closed",
+  "toolCapabilities": {
+    "exec": ["exec"],
+    "read_local_file": ["read_file"],
+    "write_file": ["write_file"],
+    "send_http": ["external_send"]
+  },
+  "identity": {
+    "agentIdFrom": "agentId",
+    "userIdFrom": "accountId",
+    "environment": "openclaw"
+  },
+  "phases": {
+    "llm_before": {
+      "local": [],
+      "remote": []
+    },
+    "llm_after": {
+      "local": [],
+      "remote": []
+    },
+    "tool_before": {
+      "local": ["tool_invoke"],
+      "remote": []
+    },
+    "tool_after": {
+      "local": [],
+      "remote": []
+    }
+  }
+}
