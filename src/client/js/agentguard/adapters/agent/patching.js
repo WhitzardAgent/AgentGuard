@@ -119,6 +119,27 @@ function setAttr(obj, attr, value) {
   }
 }
 
+function inferRequiredArgsFromSchema(schema) {
+  if (!schema || typeof schema !== "object") {
+    return [];
+  }
+  const shape = schema.shape;
+  if (shape && typeof shape === "object" && !Array.isArray(shape)) {
+    return Object.keys(shape);
+  }
+  return [];
+}
+
+function inferToolRequiredArgs(fn, tool = null) {
+  const directSchemaArgs = inferRequiredArgsFromSchema(tool && tool.schema);
+  const lcSchemaArgs = inferRequiredArgsFromSchema(tool && tool.lc_kwargs && tool.lc_kwargs.schema);
+  const schemaArgs = directSchemaArgs.length ? directSchemaArgs : lcSchemaArgs;
+  if (schemaArgs.length) {
+    return schemaArgs;
+  }
+  return ToolMetadata.infer(fn).required_args;
+}
+
 function registerToolMetadata(guard, fn, { name, tool = null, capabilities = null } = {}) {
   const description = (tool && tool.description) || "";
   const caps = capabilities || (tool && tool.capabilities) || [];
@@ -128,6 +149,7 @@ function registerToolMetadata(guard, fn, { name, tool = null, capabilities = nul
       name,
       description: String(description).trim().split("\n")[0],
       capabilities: [...caps],
+      required_args: inferToolRequiredArgs(fn, tool),
       is_async: fn && fn.constructor && fn.constructor.name === "AsyncFunction",
     })
   );

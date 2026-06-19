@@ -430,14 +430,14 @@ def _patch_tool_object(tool: Any, guard: Any, *, name: str) -> int:
     if tool is None or is_guarded(tool):
         return 0
 
-    # Prefer LangChain's public entrypoint when present to avoid double-counting
-    # tools whose invoke method delegates to func/_run internally.
-    if _patch_tool_attrs(tool, guard, name=name, attrs=("invoke", "ainvoke")):
-        return 1
-    # Fall back to raw tool callables when no public entrypoint exists.
+    # Prefer raw tool callables so guard events see the concrete tool signature
+    # instead of LangChain's generic invoke(input, config) wrapper.
     if _patch_tool_attrs(tool, guard, name=name, attrs=("func", "coroutine")):
         return 1
     if _patch_tool_attrs(tool, guard, name=name, attrs=("_run", "_arun")):
+        return 1
+    # Fall back to the public entrypoint for duck-typed invoke-only tools.
+    if _patch_tool_attrs(tool, guard, name=name, attrs=("invoke", "ainvoke")):
         return 1
     return 0
 

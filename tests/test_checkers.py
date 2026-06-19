@@ -18,7 +18,7 @@ from agentguard.plugins.manager import PluginManager, load_plugin_config
 from agentguard.plugins.registry import plugin_descriptions, register
 from agentguard.schemas import events as ev
 from agentguard.schemas.context import RuntimeContext
-from agentguard.schemas.decisions import GuardDecision
+from agentguard.schemas.decisions import DecisionType, GuardDecision
 from agentguard.schemas.events import EventType
 from agentguard.u_guard.enforcer import UGuardEnforcer
 
@@ -143,6 +143,38 @@ def test_registered_checker_can_be_loaded_by_name():
     assert plugin_descriptions()["test_registered_checker"] == (
         "test checker registered by decorator"
     )
+
+
+def test_demo_tripwire_blocks_secret_like_file_reads():
+    mgr = PluginManager(
+        config={
+            "phases": {
+                "tool_before": {
+                    "local": [
+                        {
+                            "name": "demo_tripwire",
+                            "env": {},
+                        }
+                    ],
+                    "remote": [],
+                }
+            }
+        }
+    )
+    event = ev.tool_invoke(
+        _ctx(),
+        "read_local_file",
+        {"path": "./secrets.txt"},
+        capabilities=["read_file"],
+    )
+
+    res = mgr.run(event, _ctx())
+
+    assert res.is_final is True
+    assert res.decision_candidate is not None
+    assert res.decision_candidate.decision_type == DecisionType.DENY
+    assert "demo_secret_file" in res.risk_signals
+    assert "demo_plugin_seen" in event.risk_signals
 
 
 def test_plugin_config_binds_top_level_params_and_env(monkeypatch):

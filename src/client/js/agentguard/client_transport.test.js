@@ -194,6 +194,71 @@ test("agentguard flushRemoteOperations waits for tool reports", async () => {
   await guard.close();
 });
 
+test("js langchain tool reports use schema keys for input_params", async () => {
+  const calls = [];
+  global.fetch = async (url, options = {}) => {
+    calls.push({ url, options });
+    return {
+      ok: true,
+      async json() {
+        return { status: "ok" };
+      },
+    };
+  };
+
+  const { AgentGuard } = require("./guard");
+  const { tool } = require("@langchain/core/tools");
+  const { z } = require("zod");
+
+  const readLocalFileTool = tool(async ({ path }) => `ok:${path}`, {
+    name: "read_local_file",
+    description: "Read a local file preview",
+    schema: z.object({
+      path: z.string(),
+    }),
+  });
+
+  const sendHttpTool = tool(async ({ url, body }) => `ok:${url}:${body}`, {
+    name: "send_http",
+    description: "Send content to a remote endpoint",
+    schema: z.object({
+      url: z.string(),
+      body: z.string(),
+    }),
+  });
+  sendHttpTool.capabilities = ["external_send", "network"];
+
+  const guard = new AgentGuard("sess-langchain-tool-report", {
+    server_url: "http://server.test",
+    agent_id: "agent-langchain-tool-report",
+    user_id: "user-langchain-tool-report",
+    sandbox: "noop",
+  });
+
+  const agent = {
+    tools_by_name: {
+      read_local_file: readLocalFileTool,
+      send_http: sendHttpTool,
+    },
+  };
+
+  const patched = guard.attach_langchain(agent, { wrap_llm: false });
+  await guard.flushRemoteOperations();
+
+  const toolCalls = calls.filter((call) => call.url.endsWith("/v1/server/tools/report"));
+  assert.equal(patched.tools, 2);
+  assert.equal(toolCalls.length, 2);
+
+  const bodies = toolCalls.map((call) => JSON.parse(call.options.body).tool);
+  const byName = Object.fromEntries(bodies.map((toolMeta) => [toolMeta.name, toolMeta]));
+
+  assert.deepEqual(byName.read_local_file.input_params, ["path"]);
+  assert.deepEqual(byName.send_http.input_params, ["url", "body"]);
+  assert.deepEqual(byName.send_http.capabilities, ["external_send", "network"]);
+
+  await guard.close();
+});
+
 test("plugin manager defaults to no client plugins when config is omitted", async () => {
   const { AgentGuard } = require("./guard");
   const { llm_input } = require("./schemas/events");

@@ -267,7 +267,7 @@ def test_attach_langchain_patches_toolnode_bound_tools_by_name():
     assert "tool_result" in _event_types(guard)
 
 
-def test_attach_langchain_prefers_public_tool_entrypoint():
+def test_attach_langchain_prefers_raw_tool_callable_over_public_entrypoint():
     calls = []
 
     class Tool:
@@ -304,7 +304,7 @@ def test_attach_langchain_prefers_public_tool_entrypoint():
 
 
 @pytest.mark.asyncio
-async def test_attach_langchain_falls_back_to_internal_tool_methods():
+async def test_attach_langchain_wraps_raw_sync_and_async_tool_callables_before_invoke():
     calls = []
 
     class Tool:
@@ -338,8 +338,8 @@ async def test_attach_langchain_falls_back_to_internal_tool_methods():
     assert tool.func(value="ABC") == "ABC"
     assert await tool.coroutine(value="ABC") == "abc"
     assert calls == [("invoke", "ABC"), ("func", "ABC"), ("coroutine", "ABC")]
-    assert _event_types(guard).count("tool_invoke") == 1
-    assert _event_types(guard).count("tool_result") == 1
+    assert _event_types(guard).count("tool_invoke") == 2
+    assert _event_types(guard).count("tool_result") == 2
 
 
 @pytest.mark.asyncio
