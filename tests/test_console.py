@@ -4,6 +4,7 @@ from __future__ import annotations
 from backend.console.dsl import parse_source, policy_rule_to_source
 from backend.console.state import ConsoleState
 from backend.runtime.manager import RuntimeManager
+from shared.schemas.policy import PolicyEffect, PolicyRule, RuleCondition
 
 _DENY_RULE = (
     "RULE: block_shell\n"
@@ -23,6 +24,32 @@ def _console() -> ConsoleState:
                 }
             }
         )
+    )
+
+
+def _seed_runtime_rules(con: ConsoleState) -> None:
+    con.manager.policy.store.set_rules(
+        [
+            PolicyRule(
+                rule_id="deny_secret_exfiltration",
+                effect=PolicyEffect.DENY,
+                reason="Secret exfiltration detected via external send.",
+                priority=100,
+                event_types=["tool_invoke"],
+                capabilities=["external_send"],
+                conditions=[
+                    RuleCondition(field="trace.contains_signal", op="eq", value="secret_detected")
+                ],
+            ),
+            PolicyRule(
+                rule_id="approve_payment",
+                effect=PolicyEffect.REQUIRE_APPROVAL,
+                reason="Payment actions require approval.",
+                priority=80,
+                event_types=["tool_invoke"],
+                capabilities=["payment"],
+            ),
+        ]
     )
 
 
@@ -65,6 +92,7 @@ def test_publish_list_delete_rule():
 
 def test_observer_records_traffic_audit_and_tickets():
     con = _console()
+    _seed_runtime_rules(con)
     mgr = con.manager
     # deny via exfiltration
     mgr.decide({
@@ -103,6 +131,7 @@ def test_observer_records_traffic_audit_and_tickets():
 
 def test_health_reports_rule_counts():
     con = _console()
+    _seed_runtime_rules(con)
     health = con.health()
     assert health["ok"] is True
     assert health["rules"] >= 1

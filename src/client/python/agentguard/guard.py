@@ -126,7 +126,13 @@ class AgentGuard:
     def _load_snapshot(policy: str | None) -> PolicySnapshot:
         rules = None
         if policy:
-            for cand in (policy, f"rules/examples/{policy}.json", f"rules/{policy}.json"):
+            for cand in (
+                policy,
+                f"rules/examples/{policy}.json",
+                f"rules/examples/{policy}.rules",
+                f"rules/{policy}.json",
+                f"rules/{policy}.rules",
+            ):
                 if cand and Path(cand).exists():
                     rules = load_policy(cand)
                     break

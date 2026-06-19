@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from shared.rules.builtin import builtin_rules
+from shared.rules.dsl_compat import parse_legacy_rules
 from shared.schemas.policy import PolicyRule
 from shared.utils.errors import PolicyError
 
@@ -28,6 +29,14 @@ def load_rules_file(path: str | Path) -> list[PolicyRule]:
     p = Path(path)
     if not p.exists():
         raise PolicyError(f"rule file not found: {p}")
+    if p.suffix.lower() == ".rules":
+        try:
+            parsed, report = parse_legacy_rules(p.read_text(encoding="utf-8"))
+        except OSError as exc:
+            raise PolicyError(f"cannot read rule file {p}: {exc}") from exc
+        if not report.ok:
+            raise PolicyError(f"cannot parse rule file {p}: {report.errors[0]['message']}")
+        return parsed
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -40,7 +49,7 @@ def load_rules_dir(path: str | Path) -> list[PolicyRule]:
     if not p.is_dir():
         raise PolicyError(f"rule directory not found: {p}")
     rules: list[PolicyRule] = []
-    for fp in sorted(p.glob("*.json")):
+    for fp in sorted([*p.glob("*.json"), *p.glob("*.rules")]):
         rules.extend(load_rules_file(fp))
     return rules
 

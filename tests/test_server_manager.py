@@ -11,6 +11,7 @@ from backend.runtime.plugins.tool_before.rule_based_plugin import RuleBasedPlugi
 from backend.runtime.manager import RuntimeManager
 from shared.schemas.context import RuntimeContext
 from shared.schemas.events import EventType, RuntimeEvent
+from shared.schemas.policy import PolicyEffect, PolicyRule, RuleCondition
 
 
 def _exfil_request():
@@ -37,6 +38,28 @@ def _exfil_request():
     }
 
 
+def _runtime_rules():
+    return [
+        PolicyRule(
+            rule_id="deny_secret_exfiltration",
+            effect=PolicyEffect.DENY,
+            reason="Secret exfiltration detected via external send.",
+            priority=100,
+            event_types=["tool_invoke"],
+            capabilities=["external_send"],
+            conditions=[RuleCondition(field="trace.contains_signal", op="eq", value="secret_detected")],
+        ),
+        PolicyRule(
+            rule_id="review_external_send",
+            effect=PolicyEffect.REQUIRE_REMOTE_REVIEW,
+            reason="External send requires remote review.",
+            priority=60,
+            event_types=["tool_invoke"],
+            capabilities=["external_send"],
+        ),
+    ]
+
+
 def test_manager_denies_exfiltration():
     m = RuntimeManager(
         plugin_config={
@@ -45,6 +68,7 @@ def test_manager_denies_exfiltration():
             }
         }
     )
+    m.policy.store.set_rules(_runtime_rules())
     res = m.decide(_exfil_request())
     assert res["decision"]["decision_type"] == "deny"
     assert "exfiltration_detected" in res["risk_signals"]
@@ -480,7 +504,20 @@ def test_rule_based_plugin_is_a_checker():
             "risk_signals": ["secret_detected"],
         }
     )
-    check = RuleBasedPlugin().check(event, RuntimeContext(session_id="s8"), [])
+    plugin = RuleBasedPlugin(rules_provider=_runtime_rules)
+    check = plugin.check(
+        event,
+        RuntimeContext(session_id="s8"),
+        [
+            RuntimeEvent.from_dict(
+                {
+                    "event_type": "tool_result",
+                    "payload": {"tool_name": "read_file", "result": "secret"},
+                    "risk_signals": ["secret_detected"],
+                }
+            )
+        ],
+    )
 
     assert check.is_final is True
     assert check.decision_candidate is not None

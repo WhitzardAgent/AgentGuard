@@ -11,6 +11,29 @@ from agentguard import AgentGuard
 from agentguard.schemas import events as ev
 from backend.api.dev_server import start_dev_server
 from backend.runtime.manager import RuntimeManager
+from shared.schemas.policy import PolicyEffect, PolicyRule, RuleCondition
+
+
+def _runtime_rules():
+    return [
+        PolicyRule(
+            rule_id="deny_secret_exfiltration",
+            effect=PolicyEffect.DENY,
+            reason="Secret exfiltration detected via external send.",
+            priority=100,
+            event_types=["tool_invoke"],
+            capabilities=["external_send"],
+            conditions=[RuleCondition(field="trace.contains_signal", op="eq", value="secret_detected")],
+        ),
+        PolicyRule(
+            rule_id="review_external_send",
+            effect=PolicyEffect.REQUIRE_REMOTE_REVIEW,
+            reason="External send requires remote review.",
+            priority=60,
+            event_types=["tool_invoke"],
+            capabilities=["external_send"],
+        ),
+    ]
 
 
 @pytest.fixture()
@@ -22,6 +45,7 @@ def server():
             }
         }
     )
+    manager.policy.store.set_rules(_runtime_rules())
     base_url, srv, _ = start_dev_server(manager=manager)
     try:
         yield base_url
@@ -80,11 +104,12 @@ def test_e2e_skill_run_over_http(server):
 
 def test_agentguard_close_unregisters_server_session():
     manager = RuntimeManager()
+    manager.policy.store.set_rules(_runtime_rules())
     base_url, srv, _ = start_dev_server(manager=manager)
     guard = AgentGuard(session_id="close-session", server_url=base_url)
     try:
         snap = guard._remote.fetch_snapshot()
-        assert snap.get("rules")
+        assert isinstance(snap.get("rules"), list)
         assert manager.session_pool.get("close-session") is not None
 
         guard.close()

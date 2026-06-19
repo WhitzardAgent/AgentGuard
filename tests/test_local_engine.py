@@ -3,6 +3,7 @@ from __future__ import annotations
 from agentguard.schemas import events as ev
 from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.decisions import DecisionType
+from agentguard.schemas.policy import PolicyEffect, PolicyRule, RuleCondition
 from agentguard.u_guard.local_engine import LocalGuardEngine
 from agentguard.u_guard.policy_snapshot import PolicySnapshot
 
@@ -27,10 +28,34 @@ def test_default_allow_uncertain_with_signals():
 
 
 def test_external_send_escalates():
+    snapshot = PolicySnapshot(
+        version="test",
+        rules=[
+            PolicyRule(
+                rule_id="review_external_send",
+                effect=PolicyEffect.REQUIRE_REMOTE_REVIEW,
+                reason="External send requires remote review.",
+                priority=60,
+                event_types=["tool_invoke"],
+                capabilities=["external_send"],
+            ),
+            PolicyRule(
+                rule_id="deny_secret_exfiltration",
+                effect=PolicyEffect.DENY,
+                reason="Secret-like content combined with external send.",
+                priority=100,
+                event_types=["tool_invoke"],
+                capabilities=["external_send"],
+                conditions=[
+                    RuleCondition(field="trace.contains_signal", op="eq", value="secret_detected")
+                ],
+            ),
+        ],
+    )
     e = ev.tool_invoke(
         RuntimeContext(session_id="s"), "send_email", {"to": "x@y.com"}, capabilities=["external_send"]
     )
-    result = _engine().evaluate(e)
+    result = LocalGuardEngine(snapshot).evaluate(e)
     assert result.decision.decision_type in (
         DecisionType.REQUIRE_REMOTE_REVIEW,
         DecisionType.DENY,
