@@ -1,7 +1,7 @@
 # 🛡️ AgentGuard
 
 <p align="center">
-  <a href="https://whitzardagent.github.io/AgentGuard/">
+  <a href="https://whitzard.tech/AgentGuard/en/">
     <img src="https://img.shields.io/badge/Document-Docs-0ea5e9?style=for-the-badge&logo=gitbook&logoColor=white" alt="Document" />
   </a>
   <a href="https://github.com/WhitzardAgent/AgentGuard/releases">
@@ -56,7 +56,7 @@ Today, AgentGuard covers several key technical areas highlighted in Anthropic's 
 
 ![AgentGuard Positioning](./docs/figs/positioning.png)
 
-AgentGuard can be integrated into existing agent frameworks without modifying the underlying execution logic. Currently, it supports LangChain, AutoGen, OpenAI Agents SDK, and Openclaw, and we are continuously expanding support for additional agent ecosystems and frameworks. See the documentation chapter on `Openclaw` for the JavaScript-side integration details.
+AgentGuard can be integrated into existing agent frameworks without modifying the underlying execution logic. Currently, it supports LangChain, AutoGen, OpenAI Agents SDK, and [OpenClaw](https://github.com/openclaw/openclaw), and we are continuously expanding support for additional agent ecosystems and frameworks. See the documentation chapter on `OpenClaw` for the JavaScript-side integration details.
 
 ## ✨ Features
 
@@ -76,21 +76,25 @@ AgentGuard can evaluate both individual tool calls and cross-step attack chains.
 
 ### 2. Seamless Integration with Agent Frameworks
 
-AgentGuard sits between the LLM-based planning engine and tools, and does not interfere with agent planning, reasoning, or task orchestration. Adapters are provided for several mainstream agent frameworks, allowing users to integrate AgentGuard with minimal code and without modifying framework internals or heavily refactoring existing agents. For frameworks not yet supported, AgentGuard offers a straightforward development interface for building custom adapters.
+AgentGuard sits between the LLM-based planning engine and tools, and does not interfere with agent planning, reasoning, or task orchestration. Adapters are provided for several mainstream agent frameworks, allowing users to integrate AgentGuard with minimal code and without modifying framework internals or heavily refactoring existing agents. For frameworks not yet supported, AgentGuard offers a straightforward development interface for building custom adapters. See the [client plugin guide](https://whitzard.tech/AgentGuard/en/plugins/custom_client_plugin.html) and the [server plugin guide](https://whitzard.tech/AgentGuard/en/plugins/custom_server_plugin.html).
 
 Currently, we support the following agent frameworks:
 - [LangChain](https://github.com/langchain-ai/langchain)
 - [AutoGen](https://github.com/microsoft/autogen)
 - [OpenAI Agents SDK](https://github.com/openai/openai-agents-python)
-- Openclaw
+- [OpenClaw](https://github.com/openclaw/openclaw)
 
-The integration guides for these frameworks live under `docs/en/how-to-plugin/`, including the dedicated `Openclaw` chapter.
+The integration guides for these frameworks live under `docs/en/how-to-plugin/`, including the dedicated `OpenClaw` chapter.
 
 ### 3. Visual Policy Configuration & Audit
 
 AgentGuard ships with a web console for managing agents. The visual interface lets users configure policies interactively without hand-writing DSL code. The policy editor relies heavily on dropdowns and other selection-based controls to reduce the policy configuration burden.
 
 The runtime dashboard displays agent health, recent traffic, pending approval requests, and audit records. For any tool call that triggers a policy, users can inspect the matched rules, risk scores, final decisions, and the raw event/decision JSON, making it easy to understand why a particular call was denied or escalated for review.
+
+### Custom Auditor Extensibility
+
+The backend also supports pluggable custom auditors for post-hoc trace review. Shared auditor abstractions live under `src/server/backend/audit/`, while concrete auditors live under `src/server/backend/audit/auditors/`. See the documentation chapter on [custom auditors](https://whitzard.tech/AgentGuard/en/auditors.html).
 
 ### 4. Cluster Management
 
@@ -167,7 +171,7 @@ EOF
 
 This policy involves two agent tools: `retrieve_doc` and `send_email_to`, which retrieve a document by its id and send document content to a specified email address, respectively. The policy states that agents with a trust level below 2 may only send the confidential document (id=0) to `admin@example.com`; sending it to any other recipient is denied.
 
-> AgentGuard also supports visual policy configuration with dynamic hot-reloading. See [here](https://whitzardagent.github.io/AgentGuard/en/policies/quick_config.html) for details.
+> AgentGuard also supports visual policy configuration with dynamic hot-reloading. See [here](https://whitzard.tech/AgentGuard/en/policies/quick_config.html) for details.
 
 Next, configure the environment variables for the control server:
 
@@ -341,7 +345,7 @@ You can inspect the agent's runtime status and policy enforcement audit logs thr
 
 The UI also supports visual policy configuration and dynamic hot-reloading.
 
-For additional deployment details, refer to the [Documentation](https://whitzardagent.github.io/AgentGuard/).
+For additional deployment details, refer to the [Documentation](https://whitzard.tech/AgentGuard/en/).
 
 ## 🎬 Demo Video
 
@@ -437,3 +441,10 @@ If you use AgentGuard in your research, please cite:
 ## 📜 License
 
 This project is licensed under the [GNU General Public License v3.0 (GPLv3)](./LICENSE).
+
+## 📝 Version Log
+
+### v2.0
+
+- Built a modular zero-trust framework for agent security.
+- Added compatibility for [OpenClaw](https://github.com/openclaw/openclaw) and JS client integrations.
