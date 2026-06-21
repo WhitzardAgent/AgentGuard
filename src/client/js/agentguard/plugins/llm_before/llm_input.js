@@ -1,0 +1,21 @@
+"use strict";
+
+const { BasePlugin, CheckResult } = require("../base");
+const { EventType } = require("../../schemas/events");
+const { matchSignals } = require("../common/patterns");
+
+class LLMInputPlugin extends BasePlugin {
+  constructor() {
+    super();
+    this.event_types = [EventType.LLM_INPUT];
+  }
+
+  check(event) {
+    const text = JSON.stringify(event.payload || {});
+    return new CheckResult({ risk_signals: matchSignals(text) });
+  }
+}
+
+module.exports = {
+  LLMInputPlugin,
+};

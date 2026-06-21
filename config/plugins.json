@@ -1,0 +1,25 @@
+{
+  "phases": {
+    "llm_before": {
+      "client": [],
+      "server": []
+    },
+    "llm_after": {
+      "client": [],
+      "server": []
+    },
+    "tool_before": {
+      "client": [],
+      "server": [
+        {
+          "name": "rule_based_plugin",
+          "env": {}
+        }
+      ]
+    },
+    "tool_after": {
+      "client": [],
+      "server": []
+    }
+  }
+}

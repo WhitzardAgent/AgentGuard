@@ -1,116 +1,172 @@
 # Core Concepts
 
-This page covers the most common concepts you'll encounter when using AgentGuard. The focus is not on internals, but on helping you understand how to integrate the system, configure it, and what objects your policies ultimately target.
+This page explains the concepts you will see across AgentGuard docs and configuration. AgentGuard is a zero-trust security foundation for AI agents: it integrates into an existing agent runtime, observes LLM and tool events, evaluates configured safeguards, and returns decisions or audit records without replacing the agent's own planning logic.
 
 ## Agent
 
-An "agent" here refers to an agent application or runtime unit you're already using — built with frameworks like LangChain, AutoGen, Dify, OpenAI Agents SDK, or your own custom tool-calling pipeline.
+An agent is the application or runtime unit that receives a task, plans steps, calls an LLM, and may invoke tools. It can be built with LangChain, AutoGen, OpenAI Agents SDK, Openclaw, or a custom framework.
 
-AgentGuard does not replace the agent's task execution logic. The agent is still responsible for understanding the task, planning steps, and initiating tool calls. AgentGuard is responsible for runtime inspection of those calls.
+AgentGuard does not replace the agent. The agent still owns task understanding, reasoning, orchestration, and tool selection. AgentGuard adds a security layer around the runtime events produced by that agent.
+
+## Runtime Phases
+
+AgentGuard can inspect multiple phases of an agent run:
+
+- `llm_before`: before a request is sent to the LLM
+- `llm_after`: after the LLM returns output
+- `tool_before`: before a tool invocation is executed
+- `tool_after`: after a tool returns a result
+
+This means AgentGuard is not limited to tool-call access control. Even if an agent does not call tools, AgentGuard can still inspect and intercept risks in LLM inputs and outputs.
 
 ## AgentGuard Client
 
-The AgentGuard client lives on the agent side and connects tool calls to the control service. In practice, users interact directly with `Guard`.
+The AgentGuard client runs inside or alongside the agent process. In most integrations, users interact with it through `Guard`.
 
-Its responsibilities include:
+The client is responsible for:
 
-* Communicating with the control server, forwarding the agent's current runtime state as `RuntimeEvent`
-* Intercepting the agent's tool call requests
-* Submitting the current operation to the control server for a decision via HTTP
-* Determining the tool's execution policy based on the decision
+- attaching to an agent framework or custom runtime
+- normalizing LLM and tool activity into `RuntimeEvent` objects
+- running client-side plugins when configured
+- sending remote decision requests to the control server when needed
+- enforcing the returned decision in the agent process
 
-You can think of it as AgentGuard's probe on the agent side.
-
-## Principal
-
-A principal describes "what attributes the agent performing this operation has." In policy evaluation, principal information is typically used to differentiate permission scopes and trust levels across agents.
-
-Common principal attributes include:
-
-* Agent ID
-* Session ID
-* Role
-* Trust level
-
-The value of these attributes is that they let policies express differentiated constraints — for example, blocking low-trust agents from certain operations, or restricting high-risk tools to specific roles only.
-
-## Session
-
-A session represents the context scope of the agent's current task round.
-
-A complete task often involves multiple tool calls, and many security judgments can't be made from a single operation alone. For instance, if the agent read sensitive data earlier and is now about to send content externally, that typically requires evaluating the entire task round.
-
-So sessions serve to:
-
-* Correlate multiple tool calls within the same task round
-* Preserve necessary context information
-* Provide a basis for cross-step rule decisions
-
-## Tool
-
-A tool is the capability unit that an agent uses to perform real operations — sending email, making HTTP requests, running commands, reading/writing files, or querying databases.
-
-In AgentGuard, tools are the primary governance target. The reason is straightforward: the actual security impact comes not from model-generated text, but from the real actions triggered by tools.
-
-You should pay special attention to access control for these tool categories:
-
-* Outbound tools
-* System operation tools
-* Data write tools
-* Sensitive data read tools
-
-## Policy
-
-A policy is a control rule defined by the user. It specifies under what conditions a type of tool call should be allowed, denied, or sent to human review.
-
-From a usage perspective, policies typically revolve around two types of intent:
-
-### Deny
-
-Handles operations that must never happen, for example:
-
-* Dangerous command execution
-* Sensitive data exfiltration
-* Unauthorized modifications to critical resources
-
-### Approve
-
-Handles operations that are high-risk but shouldn't be flatly denied, for example:
-
-* Sending content to external contacts
-* Accessing destinations not pre-approved
-* Running operations with wide impact
-
-For most projects, we recommend starting with deny rules, then gradually introducing more granular approval policies.
+You can think of it as AgentGuard's runtime probe and enforcement point on the agent side.
 
 ## Control Server
 
-The control server is AgentGuard's server-side component. It centralizes rule evaluation and management operations.
+The control server is AgentGuard's centralized management and decision component.
 
-The control server typically handles:
+It typically handles:
 
-* Receiving decision requests from agents
-* Policy definition and evaluation
-* Coordinating human approval workflows
-* Providing audit and management interfaces
+- receiving runtime events from AgentGuard clients
+- evaluating configured server-side plugins and access-control policies
+- returning allow, deny, or review decisions
+- storing traces for runtime monitoring and audit
+- supporting web-console workflows such as policy configuration and approval review
 
-## Audit
+This centralized control-plane architecture lets organizations manage many distributed agents through one policy and audit surface.
 
-Audit records the key operations an agent has performed and how they were handled.
+## Principal
 
-Audit information is primarily used for:
+A principal describes the identity and trust attributes of the agent or caller behind a runtime event.
 
-* Tracing an agent's actual behavior
-* Analyzing why an operation was denied or constrained
-* Verifying that rules work as expected
-* Providing evidence for incident investigation and compliance records
+Common principal attributes include:
 
-Audit is not just a post-hoc tracking tool — it's also an important reference during policy tuning.
+- agent ID
+- session ID
+- user ID
+- role
+- trust level
 
-## Provenance
+Policies use principal attributes to express differentiated constraints. For example, a low-trust agent may be blocked from sending documents externally, while a privileged role may be allowed or routed to review.
 
-In practice, users often need to determine whether an outbound operation involves sensitive data that was read earlier in the session.
+## Session
 
-This is where the "provenance" concept matters. For AgentGuard, only when the system can identify which data is sensitive can relevant policies take effect during subsequent outbound, sharing, or processing operations.
+A session is the context scope for one agent task or run. It links related LLM events, tool calls, tool results, decisions, and trace entries.
 
-If you want the system to restrict sensitive data exfiltration, you need to explicitly mark which data is sensitive during the integration process, so that targeted access control policies can be written.
+Sessions matter because many risks are cross-step rather than single-step. For example, "read a sensitive file, then upload it to an external endpoint" requires the server to connect multiple events in the same run.
+
+## RuntimeEvent
+
+`RuntimeEvent` is the normalized event object used by client and server plugins. It represents one LLM or tool event in a consistent shape.
+
+Common event types are:
+
+- `LLM_INPUT`
+- `LLM_OUTPUT`
+- `TOOL_INVOKE`
+- `TOOL_RESULT`
+
+The event payload is typed by event phase:
+
+- `LLMInput(messages=[{"role": "...", "content": "..."}])`
+- `LLMOutput(output="...")`
+- `ToolInvoke(tool_name="...", arguments={...}, capabilities=[...])`
+- `ToolResult(tool_name="...", result="...")`
+
+Plugins and policies inspect these fields to identify risk and produce decisions.
+
+## RuntimeContext
+
+`RuntimeContext` is the session-level context propagated across events. It includes identifiers such as `session_id`, `agent_id`, `user_id`, task metadata, policy metadata, and arbitrary integration-specific metadata.
+
+Plugins and policies use runtime context to understand who is acting, which task the event belongs to, which environment is involved, and which client or server configuration applies.
+
+## Tool
+
+A tool is an operational capability the agent can invoke, such as sending email, making HTTP requests, running shell commands, reading files, writing files, or querying databases.
+
+Tools are high-impact governance targets because they affect real systems and data. AgentGuard is especially useful for:
+
+- outbound tools such as email, HTTP, or messaging
+- shell and system-command tools
+- filesystem read or write tools
+- database read or write tools
+- workflows where untrusted input may influence later actions
+
+## Plugin
+
+Plugins are AgentGuard's modular runtime inspection units. They can run on the client side or on the server side.
+
+Client plugins:
+
+- run inside the agent process
+- receive the current `RuntimeEvent` and `RuntimeContext`
+- are useful for low-latency local checks and lightweight filtering
+
+Server plugins:
+
+- run on the control server
+- receive the current event and context
+- can also use `trajectory_window` to inspect recent events from the same session
+- are useful for cross-step detection, centralized policy evaluation, and audit-oriented analysis
+
+Plugin configuration is phase-based. Each phase can define `client` plugins for the client runtime and `server` plugins for the control server. Each plugin entry is a spec object such as `{"name": "rule_based_plugin", "env": {}}`. In the current implementation, `client` plugin specs can pass `env` and constructor settings into client plugins, while `server` plugin specs are resolved by `name` or `class`. Implementation-level details live in [AgentGuard Plugins](plugins.md).
+
+## Policy
+
+A policy is a user-defined control rule. In the built-in flow, these DSL policies are consumed by the `rule_based_plugin` server plugin to specify when a runtime action should be allowed, denied, or sent to review.
+
+AgentGuard includes a built-in access-control strategy set and supports policy definitions through DSL rules. Policies commonly express constraints such as:
+
+- low-trust principals cannot send sensitive documents externally
+- shell commands matching dangerous patterns must be denied
+- access to unknown destinations requires human review
+- a cross-step sequence such as database read followed by external email should be blocked or reviewed
+
+Policies work together with plugins: `rule_based_plugin` evaluates explicit access-control rules, while other plugins can attach risk signals or produce additional decision candidates.
+
+## Decision
+
+A decision is the result of AgentGuard's runtime evaluation. Typical outcomes include:
+
+- allow the event to proceed
+- deny and block execution
+- route the operation to human or model-based review
+- record risk signals and metadata for audit
+
+For tool invocations, the decision determines whether the tool actually runs. For LLM input and output events, the decision can be used to block or constrain unsafe content before it continues through the agent workflow.
+
+## Audit and Custom Auditor
+
+Audit records capture runtime events, decisions, plugin results, and related metadata so users can understand what happened and why.
+
+Custom auditors are post-hoc analysis units that run over stored traces after events have already been recorded. They are useful for:
+
+- compliance review
+- incident triage
+- retrospective risk analysis
+- generating summarized severity labels for the frontend
+
+See [Custom Auditors](auditors.md) for implementation-level details.
+
+## Provenance and Cross-step Risk
+
+Many agent risks depend on where information came from and how it later flows through the session. AgentGuard uses stored runtime context and trace windows to support cross-step reasoning, such as:
+
+- sensitive data was read earlier and later sent externally
+- untrusted LLM output later influenced a shell command
+- an agent repeatedly tried different destinations after being denied
+
+When integrating AgentGuard, it is useful to label tool boundaries, data sensitivity, and trust attributes clearly. Those labels make policy rules and plugin checks more precise.

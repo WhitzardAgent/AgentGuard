@@ -70,7 +70,7 @@ set -a
 set +a
 
 AGENTGUARD_PORT="${AGENTGUARD_PORT:-38080}"
-FRONTEND_PORT="${FRONTEND_PORT:-8080}"
+AGENTGUARD_FRONTEND_PORT="${AGENTGUARD_FRONTEND_PORT:-38008}"
 
 # ── Start services ────────────────────────────────────────────────────────────
 info "Starting AgentGuard stack (this may take a moment on first run)…"
@@ -87,7 +87,7 @@ if [ -n "$DETACH_FLAG" ]; then
     echo ""
     echo -e "${_bold}AgentGuard is running:${_reset}"
     echo -e "  Runtime API  →  ${_green}http://localhost:${AGENTGUARD_PORT}${_reset}"
-    echo -e "  Web UI       →  ${_green}http://localhost:${FRONTEND_PORT}${_reset}"
+    echo -e "  Web UI       →  ${_green}http://localhost:${AGENTGUARD_FRONTEND_PORT}${_reset}"
     echo ""
     echo "  Logs:   ./scripts/logs.sh"
     echo "  Stop:   ./scripts/stop.sh"

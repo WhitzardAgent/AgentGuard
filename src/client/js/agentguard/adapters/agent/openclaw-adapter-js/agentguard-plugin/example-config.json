@@ -1,0 +1,7 @@
+{
+  "serverUrl": "http://127.0.0.1:38080",
+  "apiKeyEnvVar": "AGENTGUARD_API_KEY",
+  "policy": "builtin",
+  "auditPath": "./tmp/openclaw-agentguard-audit.jsonl",
+  "remoteUnavailableMode": "fail_closed"
+}

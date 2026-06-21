@@ -1,83 +1,58 @@
 services:
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-    volumes:
-      - redis-data:/data
-
-  postgres:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-agentguard}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agentguard}
-      POSTGRES_DB: ${POSTGRES_DB:-agentguard}
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agentguard}"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-
-  agentguard:
+  server:
     build:
       context: .
       dockerfile: Dockerfile
     image: agentguard:latest
+    command: ["serve"]
     restart: unless-stopped
-    depends_on:
-      redis:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
     ports:
       - "${AGENTGUARD_PORT:-38080}:38080"
     environment:
       AGENTGUARD_HOST: 0.0.0.0
-      AGENTGUARD_PORT: ${AGENTGUARD_PORT:-38080}
-      AGENTGUARD_MODE: ${AGENTGUARD_MODE:-enforce}
-      AGENTGUARD_RUNTIME_MODE: ${AGENTGUARD_RUNTIME_MODE:-sync}
-      AGENTGUARD_LOG_LEVEL: ${AGENTGUARD_LOG_LEVEL:-info}
-      AGENTGUARD_API_KEY: ${AGENTGUARD_API_KEY:-}
-      # Always use the in-container mounted paths for policy & rule packs.
-      AGENTGUARD_POLICY: /opt/agentguard/rules
-      AGENTGUARD_RULE_PACK_CONFIG: /opt/agentguard/rule_packs.yaml
-      AGENTGUARD_LLM_BACKEND: ${AGENTGUARD_LLM_BACKEND:-}
-      AGENTGUARD_LLM_MODEL: ${AGENTGUARD_LLM_MODEL:-}
-      AGENTGUARD_LLM_BASE_URL: ${AGENTGUARD_LLM_BASE_URL:-}
-      AGENTGUARD_LLM_API_KEY: ${AGENTGUARD_LLM_API_KEY:-}
-      AGENTGUARD_LLM_TRACE_MAX_STEPS: ${AGENTGUARD_LLM_TRACE_MAX_STEPS:-5}
-      AGENTGUARD_STATE_CACHE: redis://redis:6379/0
-      AGENTGUARD_POSTGRES_URL: postgresql://${POSTGRES_USER:-agentguard}:${POSTGRES_PASSWORD:-agentguard}@postgres:5432/${POSTGRES_DB:-agentguard}
-      AGENTGUARD_WATCH: ${AGENTGUARD_WATCH:-0}
-    volumes:
-      - ./rules:/opt/agentguard/rules:ro
-      - ./rule_packs.yaml:/opt/agentguard/rule_packs.yaml:ro
+      AGENTGUARD_PORT: 38080
+      AGENTGUARD_API_KEY: "${AGENTGUARD_API_KEY:-sk-agentguard-backend-X9m42Vq7Tz8nL3pA6cR0yH5uJ1sWfKdE}"
+      # Optional: point at a served AgentDoG / LLM endpoint to use the real models.
+      AGENTDOG_API_BASE: "${AGENTDOG_API_BASE:-}"
+      AGENTDOG_MODEL: "${AGENTDOG_MODEL:-agentdog}"
+      AGENTDOG_API_KEY: "${AGENTDOG_API_KEY:-}"
+      AGENTGUARD_LLM_BASE_URL: "${AGENTGUARD_LLM_BASE_URL:-}"
+      AGENTGUARD_LLM_MODEL: "${AGENTGUARD_LLM_MODEL:-}"
+      AGENTGUARD_LLM_API_KEY: "${AGENTGUARD_LLM_API_KEY:-}"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -H \"X-Api-Key: $$AGENTGUARD_API_KEY\" http://127.0.0.1:38080/v1/backend/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
 
   frontend:
     build:
       context: .
       dockerfile: Dockerfile
     image: agentguard:latest
-    restart: unless-stopped
     command: ["frontend"]
-    depends_on:
-      agentguard:
-        condition: service_started
+    restart: unless-stopped
     ports:
-      - "${FRONTEND_PORT:-8080}:8080"
+      - "${AGENTGUARD_FRONTEND_PORT:-38008}:38008"
     environment:
       FRONTEND_HOST: 0.0.0.0
-      FRONTEND_PORT: ${FRONTEND_PORT:-8080}
-      AGENTGUARD_API_BASE: http://agentguard:${AGENTGUARD_PORT:-38080}
-      AGENTGUARD_API_KEY: ${AGENTGUARD_API_KEY:-}
+      FRONTEND_PORT: 38008
+      AGENTGUARD_API_BASE: http://server:38080
+      AGENTGUARD_API_KEY: "${AGENTGUARD_API_KEY:-sk-agentguard-backend-X9m42Vq7Tz8nL3pA6cR0yH5uJ1sWfKdE}"
+    depends_on:
+      server:
+        condition: service_healthy
 
-volumes:
-  redis-data:
-  postgres-data:
+  # E2E verifier. Enable with: docker compose --profile e2e up --abort-on-container-exit
+  client:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: agentguard:latest
+    command: ["client"]
+    profiles: ["e2e"]
+    depends_on:
+      server:
+        condition: service_healthy
+    environment:
+      AGENTGUARD_SERVER_URL: http://server:38080

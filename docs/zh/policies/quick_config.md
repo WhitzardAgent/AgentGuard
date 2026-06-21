@@ -1,6 +1,24 @@
-# 快速配置
+# rule_based_plugin 可视化策略配置
 
-对于普通用户来说，最方便快捷的办法是使用我们提供的 UI 界面，通过交互式的方式来配置策略。UI 界面大量采用下拉框选择的方式，减少了用户的策略配置负担。
+本文介绍如何通过 Web UI 为内置的 `rule_based_plugin` server plugin 配置策略。`rule_based_plugin` 用于执行访问控制规则，通常运行在 `tool_before` 阶段，让 AgentGuard 可以在工具真正执行前识别并拦截工具调用中的安全风险。
+
+要让这些策略在运行时生效，需要先在 `config/plugins.json` 中启用该 plugin：
+
+```json
+{
+  "phases": {
+    "llm_before": {"client": [], "server": []},
+    "llm_after": {"client": [], "server": []},
+    "tool_before": {
+      "client": [],
+      "server": [{"name": "rule_based_plugin", "env": {}}]
+    },
+    "tool_after": {"client": [], "server": []}
+  }
+}
+```
+
+对于普通用户来说，最方便快捷的办法是使用我们提供的 UI 界面，通过交互式的方式来配置 `rule_based_plugin` 策略。UI 界面大量采用下拉框选择的方式，减少了用户的策略配置负担。
 
 打开 UI 界面，选择 `Agents` 选项卡，可以看到当前所有连接到中控服务的智能体。
 

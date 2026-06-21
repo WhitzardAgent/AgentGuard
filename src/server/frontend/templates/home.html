@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgentGuard Frontend Preview</title>
+  <link rel="stylesheet" href="/static/common/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+{{ shared:sidebar }}
+
+    <main class="app-main home-main">
+      <section class="page-intro-card home-hero">
+        <div class="home-hero-copy">
+          <p class="page-kicker">AgentGuard Home</p>
+          <h1><span class="home-hero-name">AgentGuard</span> keeps your agent workflow in control.</h1>
+          <p class="subtle">
+            Start with agent selection, configure plugins when needed, and optionally add
+            rule-based controls for labels, rules, and runtime review.
+          </p>
+        </div>
+      </section>
+
+      <section class="grid home-link-grid">
+        <div class="card home-link-card">
+          <p class="page-kicker">01</p>
+          <h3>Agents</h3>
+          <p class="subtle">
+            Choose which registered agent you want to inspect and use that selection to scope the rest of the frontend.
+          </p>
+        </div>
+
+        <div class="card home-link-card">
+          <p class="page-kicker">02</p>
+          <h3>Plugins</h3>
+          <p class="subtle">
+            Enable remote or local plugins for the selected agent, including optional built-in policy and safety flows.
+          </p>
+        </div>
+
+        <div class="card home-link-card">
+          <p class="page-kicker">03</p>
+          <h3>DashBoard</h3>
+          <p class="subtle">
+            Watch runtime activity for the selected agent. Rule-based plugins can add more policy-specific signals, but dashboard visibility is always available.
+          </p>
+        </div>
+      </section>
+
+      <section class="home-footer-link">
+        <a class="home-agent-link" href="/agents.html">
+          <span class="home-agent-link-label">Start WITH Agent Selection</span>
+          <span class="home-agent-link-arrow" aria-hidden="true">-></span>
+        </a>
+      </section>
+
+    </main>
+
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <script src="/static/common/messages.js"></script>
+  <script src="/static/common/page-shell.js"></script>
+  <script>
+    window.AgentGuardShell?.setPageContext({
+      title: "Home",
+      description: "Start with agent selection, then configure plugins and optional rule-based workflows.",
+    });
+  </script>
+</body>
+</html>

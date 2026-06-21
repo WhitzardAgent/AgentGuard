@@ -1,0 +1,15 @@
+{
+  "version": "builtin-tool-result",
+  "rules": [
+    {
+      "rule_id": "review_tool_result_injection",
+      "effect": "require_remote_review",
+      "reason": "Tool result contains injection content.",
+      "priority": 70,
+      "event_types": ["tool_result"],
+      "risk_signals": ["tool_result_injection", "prompt_injection"],
+      "conditions": [],
+      "metadata": {}
+    }
+  ]
+}

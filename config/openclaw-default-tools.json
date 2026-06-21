@@ -1,0 +1,209 @@
+{
+  "version": 1,
+  "tools": [
+    {
+      "name": "read",
+      "description": "Read files from the local workspace.",
+      "input_params": ["path", "offset", "limit"]
+    },
+    {
+      "name": "edit",
+      "description": "Edit an existing local file.",
+      "input_params": ["path", "edits"]
+    },
+    {
+      "name": "write",
+      "description": "Write a local file.",
+      "input_params": ["path", "content"]
+    },
+    {
+      "name": "apply_patch",
+      "description": "Apply a structured patch to local files.",
+      "input_params": ["input"]
+    },
+    {
+      "name": "exec",
+      "description": "Run a shell command.",
+      "input_params": [
+        "command",
+        "workdir",
+        "env",
+        "yieldMs",
+        "background",
+        "timeout",
+        "pty",
+        "elevated",
+        "host",
+        "security",
+        "ask",
+        "node"
+      ]
+    },
+    {
+      "name": "process",
+      "description": "Inspect or wait on a running process.",
+      "input_params": [
+        "action",
+        "sessionId",
+        "data",
+        "keys",
+        "hex",
+        "literal",
+        "text",
+        "bracketed",
+        "eof",
+        "offset",
+        "limit",
+        "timeout"
+      ]
+    },
+    {
+      "name": "cron",
+      "description": "Schedule or inspect recurring tasks.",
+      "input_params": [
+        "action",
+        "includeDisabled",
+        "job",
+        "jobId",
+        "id",
+        "patch",
+        "text",
+        "mode",
+        "runMode",
+        "contextMessages",
+        "agentId"
+      ]
+    },
+    {
+      "name": "get_goal",
+      "description": "Read the current goal state.",
+      "input_params": []
+    },
+    {
+      "name": "create_goal",
+      "description": "Create a new goal.",
+      "input_params": ["objective", "token_budget"]
+    },
+    {
+      "name": "update_goal",
+      "description": "Update the current goal status.",
+      "input_params": ["status", "note"]
+    },
+    {
+      "name": "skill_workshop",
+      "description": "Inspect or manage local skills.",
+      "input_params": [
+        "action",
+        "proposal_id",
+        "name",
+        "query",
+        "status",
+        "limit",
+        "description",
+        "skill_name",
+        "proposal_content",
+        "support_files",
+        "goal",
+        "evidence",
+        "reason"
+      ]
+    },
+    {
+      "name": "update_plan",
+      "description": "Update the current execution plan.",
+      "input_params": ["explanation", "plan"]
+    },
+    {
+      "name": "sessions_list",
+      "description": "List available sessions.",
+      "input_params": [
+        "kinds",
+        "limit",
+        "activeMinutes",
+        "messageLimit",
+        "label",
+        "agentId",
+        "search",
+        "includeDerivedTitles",
+        "includeLastMessage"
+      ]
+    },
+    {
+      "name": "sessions_history",
+      "description": "Read session history.",
+      "input_params": ["sessionKey", "limit", "includeTools"]
+    },
+    {
+      "name": "sessions_send",
+      "description": "Send a message to a session.",
+      "input_params": ["sessionKey", "label", "agentId", "message", "timeoutSeconds"]
+    },
+    {
+      "name": "sessions_spawn",
+      "description": "Spawn a sub-session or child agent.",
+      "input_params": [
+        "task",
+        "taskName",
+        "label",
+        "runtime",
+        "agentId",
+        "model",
+        "thinking",
+        "cwd",
+        "thread",
+        "mode",
+        "cleanup",
+        "sandbox",
+        "context",
+        "lightContext",
+        "attachments",
+        "attachAs",
+        "resumeSessionId",
+        "streamTo"
+      ]
+    },
+    {
+      "name": "sessions_yield",
+      "description": "Yield control back to a parent session.",
+      "input_params": ["message"]
+    },
+    {
+      "name": "subagents",
+      "description": "Manage subagents.",
+      "input_params": ["action", "recentMinutes"]
+    },
+    {
+      "name": "session_status",
+      "description": "Inspect current session status.",
+      "input_params": ["sessionKey", "model"]
+    },
+    {
+      "name": "web_search",
+      "description": "Search the web.",
+      "input_params": [
+        "query",
+        "count",
+        "country",
+        "language",
+        "freshness",
+        "date_after",
+        "date_before",
+        "search_lang",
+        "ui_lang",
+        "domain_filter",
+        "max_tokens",
+        "max_tokens_per_page"
+      ]
+    },
+    {
+      "name": "web_fetch",
+      "description": "Fetch content from a web page.",
+      "input_params": ["url", "extractMode", "maxChars"]
+    },
+    {
+      "name": "image",
+      "description": "Inspect or generate image content.",
+      "input_params": ["prompt", "image", "images", "model", "maxBytesMb", "maxImages"]
+    }
+  ]
+}

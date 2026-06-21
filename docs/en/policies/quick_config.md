@@ -1,6 +1,24 @@
-# Quick Configuration
+# Visual Policy Configuration
 
-The easiest way to configure policies is through the web UI, which provides an interactive, step-by-step interface with dropdowns and form fields to reduce the manual effort of policy writing.
+This page explains how to configure policies for the built-in `rule_based_plugin` server plugin through the web UI. `rule_based_plugin` evaluates access-control rules, usually in the `tool_before` phase, so AgentGuard can identify and intercept tool-call security risks before the tool executes.
+
+To use these policies, enable the plugin in `config/plugins.json`:
+
+```json
+{
+  "phases": {
+    "llm_before": {"client": [], "server": []},
+    "llm_after": {"client": [], "server": []},
+    "tool_before": {
+      "client": [],
+      "server": [{"name": "rule_based_plugin", "env": {}}]
+    },
+    "tool_after": {"client": [], "server": []}
+  }
+}
+```
+
+The easiest way to configure `rule_based_plugin` policies is through the web UI, which provides an interactive, step-by-step interface with dropdowns and form fields to reduce the manual effort of policy writing.
 
 Open the UI and select the `Agents` tab to see all agents currently connected to the control server.
 

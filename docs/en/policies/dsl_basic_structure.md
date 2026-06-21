@@ -1,6 +1,24 @@
-# DSL Basic Structure
+# Policy DSL Structure
 
-This page is for advanced users who need to manually write AgentGuard access control policies using the DSL. It covers the DSL syntax structure, common fields, condition expressions, call-chain rules, and action semantics.
+This page is for advanced users who need to manually write policies for the built-in `rule_based_plugin` server plugin. `rule_based_plugin` consumes AgentGuard's access-control DSL, evaluates the current runtime event plus recent session context, and uses configured rules to identify and intercept security risks in tool calls.
+
+Enable the plugin in `config/plugins.json` before relying on these rules at runtime:
+
+```json
+{
+  "phases": {
+    "llm_before": {"client": [], "server": []},
+    "llm_after": {"client": [], "server": []},
+    "tool_before": {
+      "client": [],
+      "server": [{"name": "rule_based_plugin", "env": {}}]
+    },
+    "tool_after": {"client": [], "server": []}
+  }
+}
+```
+
+This page covers the DSL syntax structure, common fields, condition expressions, call-chain rules, and action semantics.
 
 AgentGuard policy files typically use the `.rules` suffix. A single file can contain multiple rules, each describing what conditions should cause a tool call to be allowed, denied, or sent for review.
 

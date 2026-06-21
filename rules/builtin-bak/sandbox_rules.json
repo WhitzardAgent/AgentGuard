@@ -1,0 +1,16 @@
+{
+  "version": "builtin-sandbox",
+  "rules": [
+    {
+      "rule_id": "review_sandbox_shell",
+      "effect": "require_remote_review",
+      "reason": "Sandbox execution with shell capability.",
+      "priority": 65,
+      "event_types": ["sandbox_execution"],
+      "capabilities": ["shell"],
+      "risk_signals": [],
+      "conditions": [],
+      "metadata": {}
+    }
+  ]
+}

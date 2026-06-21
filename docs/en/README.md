@@ -18,7 +18,7 @@ pip install langchain==1.2.18
 pip install langchain-openai==1.2.1
 ```
 
-> This guide uses LangChain 1.2.18. You can also build agents with other frameworks.
+> This guide uses LangChain 1.2.18. AgentGuard currently supports LangChain, AutoGen, OpenAI Agents SDK, and Openclaw; here we use LangChain only as the quickest walkthrough example.
 
 #### 2. Write the agent code
 
@@ -81,7 +81,7 @@ if __name__ == "__main__":
     run(agent, "Please retrieve document id=0 and send it to alice@example.com.")
 ```
 
-### Step 2: Import the AgentGuard client
+### Step 2: AgentGuard Client Importing
 
 On top of the agent code from Step 1, you next need to import the AgentGuard client SDK. The client communicates with the control server, forwards the agent's runtime state, and receives access-control decisions.
 
@@ -184,13 +184,20 @@ if __name__ == "__main__":
         guard.close()
 ```
 
-* `Guard()`: configures the control server address. This must match the server's configuration — see [Deploy the AgentGuard Control Server](#2-deploy-the-agentguard-control-server).
+* `Guard()`: configures the control server address. This must match the server's configuration — see the control-server deployment section below.
 * `Principal()`: defines the agent's identity, including agent ID, session ID, role, and trust level. These attributes are used to build constraints in access control policies.
 * `guard.start()`: opens an access-control session, linking the agent's identity and task goal, and starts communicating with the control server. Call this before the agent begins its task.
 * `guard.attach_langchain()`: attaches the client to a LangChain agent instance. Different frameworks use different adapters; see later sections for details.
 * `guard.close()`: closes the session and releases resources. Call this after the agent has finished all tasks.
 
-### Step 3: Write a policy and deploy the control server
+### Step 3: AgentGuard Plugins and Custom Auditors
+
+See the standalone extension chapters:
+
+- [AgentGuard Plugins](plugins.md)
+- [Custom Auditors](auditors.md)
+
+### Step 4: Write a policy and deploy the control server
 
 AgentGuard uses a client-server architecture. All management operations — agent monitoring, policy configuration, policy enforcement, and decision dispatch — happen on the control server. This is especially useful when an organization has multiple agent deployments that need centralized governance.
 
@@ -203,7 +210,45 @@ git clone https://github.com/WhitzardAgent/AgentGuard.git
 cd AgentGuard
 ```
 
-#### 1. Write an access control policy
+#### 1. Write a plugin config file
+
+Before writing any access-control policy, first define which server-side plugin is active in this quick start:
+
+```bash
+mkdir -p config
+
+cat <<EOF > config/plugins.json
+{
+  "phases": {
+    "llm_before": {
+      "client": [],
+      "server": []
+    },
+    "llm_after": {
+      "client": [],
+      "server": []
+    },
+    "tool_before": {
+      "client": [],
+      "server": [
+        {
+          "name": "rule_based_plugin",
+          "env": {}
+        }
+      ]
+    },
+    "tool_after": {
+      "client": [],
+      "server": []
+    }
+  }
+}
+EOF
+```
+
+This config means: only the `tool_before` phase runs a server plugin, and that plugin is the built-in `rule_based_plugin`. All other phases are empty. In other words, the server will evaluate your policy rules only right before a tool call runs. That keeps the quick start focused on access-control decisions around tool execution, without introducing additional LLM-phase or tool-result plugins yet.
+
+#### 2. Create an access control policy
 
 Our agent has two tools: `retrieve_doc` and `send_email_to` — one retrieves a document by ID, the other sends it to an email address. Suppose we want agents with trust level below 2 to only send the confidential document (id 0) to `admin@example.com`, and block all other recipients. We can create a policy file:
 
@@ -225,9 +270,9 @@ Reason: "Low-trust principal cannot send document 0 to non-admin recipients"
 EOF
 ```
 
-AgentGuard provides a dedicated DSL for writing policies, which we'll cover in detail in [DSL Basic Structure](./policies/dsl_basic_structure.md).
+AgentGuard provides a dedicated DSL for writing policies consumed by the built-in `rule_based_plugin` plugin, which we'll cover in detail in [Policy DSL Structure](./policies/dsl_basic_structure.md).
 
-#### 2. Deploy the AgentGuard control server
+#### 3. Deploy the AgentGuard control server
 
 We offer two deployment methods: Docker and source code.
 
@@ -235,7 +280,15 @@ We offer two deployment methods: Docker and source code.
 
 > You need Docker installed first.
 
-Docker deployment is straightforward — just run this command from the project root:
+Docker deployment is straightforward. First set the plugin config path in `.env`:
+
+```bash
+cp .env.example .env
+# then set:
+# AGENTGUARD_SERVER_PLUGIN_CONFIG=./config/plugins.json
+```
+
+Then run this command from the project root:
 
 ```bash
 ./scripts/start.sh -d
@@ -243,13 +296,13 @@ Docker deployment is straightforward — just run this command from the project 
 
 The control server listens on port `38080` by default.
 
-We also provide a web UI that lets you monitor agent runtime status, audit policy enforcement records, and configure policies interactively. For new users, we recommend using the UI to manage access control. Visit `http://localhost:8080` in your browser to access it.
+We also provide a web UI that lets you monitor agent runtime status, audit policy enforcement records, and configure policies interactively. For new users, we recommend using the UI to manage access control. Visit `http://localhost:38008` in your browser to access it.
 
 Below is a screenshot of the interactive policy configuration UI:
 
 ![UI policy configuration](../figs/ui_configure_policy.png)
 
-We'll cover interactive policy configuration in detail in [Quick Configuration](./policies/quick_config.md).
+We'll cover interactive `rule_based_plugin` policy configuration in detail in [Visual Policy Configuration](./policies/quick_config.md).
 
 ##### Source-code deployment
 
@@ -262,6 +315,7 @@ pip install -e ".[server]"
 Then start the control server:
 
 ```bash
+AGENTGUARD_SERVER_PLUGIN_CONFIG=./config/plugins.json \
 python -m agentguard serve \
     --host 0.0.0.0 \
     --port 38080 \
@@ -274,12 +328,12 @@ python -m agentguard serve \
 You can also start the UI:
 
 ```bash
-python frontend/app.py
+./scripts/run-frontend.sh
 ```
 
 Visit `http://localhost:8008` to access the UI.
 
-### Step 4: Run the agent
+### Step 5: Run the agent
 
 On the agent host, run the agent code:
 

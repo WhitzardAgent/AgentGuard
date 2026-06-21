@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgentGuard Frontend Preview</title>
+  <script>
+    (function () {
+      try {
+        const agentId = String(window.localStorage.getItem("agentguard.selectedAgentId") || "").trim();
+        const pluginName = String(window.localStorage.getItem("agentguard.selectedPluginName") || "").trim();
+        if (!agentId) {
+          window.location.replace("/agents.html");
+          return;
+        }
+        if (pluginName !== "rule_based_plugin") {
+          window.location.replace("/plugins.html");
+        }
+      } catch {
+        window.location.replace("/agents.html");
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/common/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+{{ shared:sidebar }}
+
+    <main class="app-main">
+      <section class="page-intro-card">
+        <div>
+          <p class="page-kicker">Labels Studio</p>
+          <h1>Tool Labels</h1>
+          <p class="subtle">
+            Review the current tool catalog, inspect default metadata, and adjust label values.
+          </p>
+        </div>
+      </section>
+
+      <section>
+        <div class="grid two equal">
+          <div class="card">
+            <div class="heading-row">
+              <h3>Tool Label Editor</h3>
+              <div class="hint-wrap">
+                <span class="hint-dot">i</span>
+                <div class="hint-bubble">
+                  This page loads `/api/tools`, caches the result locally, and lets you refine
+                  labels on top of the current tool definitions.
+                </div>
+              </div>
+              <div class="heading-actions">
+                <button class="icon-label" id="refresh-tools" type="button" aria-label="Refresh tool catalog" title="Refresh tool catalog">
+                  <img class="btn-icon-image" src="/assets/refresh.png" alt="">
+                </button>
+              </div>
+            </div>
+            <p class="subtle" id="tool-sync-status">Preparing tool catalog...</p>
+
+            <div class="field">
+              <select id="tool-select">
+                <option value="" selected disabled hidden>Select a tool</option>
+              </select>
+            </div>
+
+            <div class="config-block">
+              <div class="config-header">
+                <strong>Selected Label Rows</strong>
+                <button class="btn icon primary" id="add-label-row" type="button">+</button>
+              </div>
+              <div id="label-config-list" class="label-config-list"></div>
+            </div>
+
+            <div class="list-item" style="margin-top:14px;">
+              <strong id="pending-label-title">Labels to write</strong>
+              <div class="pill-row" id="pending-label-preview"></div>
+            </div>
+
+            <div class="toolbar" style="margin-top:14px;">
+              <button class="btn primary" id="save-tool-label" type="button">Save Tool Labels</button>
+              <button class="btn" id="reset-tool-label" type="button">Reset Selection</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="heading-row">
+              <h3>Configured Tool Labels</h3>
+              <div class="hint-wrap">
+                <span class="hint-dot">i</span>
+                <div class="hint-bubble">
+                  This table shows the catalog values currently available to the labels, rules,
+                  and runtime pages.
+                </div>
+              </div>
+            </div>
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Agent</th>
+                  <th>Tool</th>
+                  <th>Boundary</th>
+                  <th>Sensitivity</th>
+                  <th>Integrity</th>
+                </tr>
+              </thead>
+              <tbody id="configured-tool-labels-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <script src="/static/common/messages.js"></script>
+  <script src="/static/common/page-shell.js"></script>
+  <script src="/static/common/app.js"></script>
+  <script src="/static/pages/labels/labels.js"></script>
+</body>
+</html>

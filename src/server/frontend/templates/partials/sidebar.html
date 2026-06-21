@@ -1,0 +1,51 @@
+    <aside class="app-sidebar" id="app-sidebar">
+      <div class="sidebar-top">
+        <a class="sidebar-logo" href="/">AgentGuard</a>
+
+        <nav class="sidebar-nav sidebar-primary-nav" aria-label="AgentGuard sections">
+          <a class="sidebar-nav-item{{ home_active }}" href="/">Home</a>
+          <div class="sidebar-agent-stack">
+            <a class="sidebar-nav-item{{ agents_active }}" href="/agents.html">Agents</a>
+
+            <div class="sidebar-agent-panel" id="sidebar-agent-panel" hidden>
+              <section class="sidebar-agent-context" aria-label="Current agent context" id="sidebar-selected-agent-wrap" hidden>
+                <div class="sidebar-agent-chip">
+                  <div class="sidebar-agent-name" id="sidebar-selected-agent"></div>
+                  <button class="sidebar-agent-clear" id="sidebar-clear-agent" type="button" hidden aria-label="Clear selected agent" title="Clear selected agent">
+                    <img class="sidebar-agent-clear-icon" src="/assets/close.png" alt="">
+                  </button>
+                </div>
+              </section>
+
+              <nav class="sidebar-agent-group" aria-label="Agent scoped sections">
+                <a class="sidebar-nav-item sidebar-nav-item-child{{ plugins_active }}" href="/plugins.html" data-agent-required="true" hidden>Plugins</a>
+                <a class="sidebar-nav-item sidebar-nav-item-child{{ labels_active }}" href="/labels.html" data-rule-based-required="true" hidden>Labels</a>
+                <a class="sidebar-nav-item sidebar-nav-item-child{{ rules_active }}" href="/rules.html" data-rule-based-required="true" hidden>Rules</a>
+                <a class="sidebar-nav-item sidebar-nav-item-child{{ runtime_active }}" href="/runtime.html" data-agent-required="true" hidden>DashBoard</a>
+              </nav>
+            </div>
+          </div>
+
+          <div class="sidebar-user-stack">
+            <a class="sidebar-nav-item{{ user_active }}" href="/user.html">User</a>
+
+            <section class="sidebar-agent-context sidebar-user-context" aria-label="Current user context" id="sidebar-current-user-wrap">
+              <div class="sidebar-agent-chip sidebar-user-chip">
+                <div class="sidebar-agent-name" id="sidebar-current-user"></div>
+              </div>
+            </section>
+          </div>
+        </nav>
+      </div>
+
+      <div class="sidebar-footer">
+        <a class="sidebar-nav-item sidebar-nav-item-external" href="https://whitzardagent.github.io/AgentGuard/" target="_blank" rel="noreferrer">
+          <img class="sidebar-nav-icon" src="/assets/doc.png" alt="">
+          <span>Doc</span>
+        </a>
+        <a class="sidebar-nav-item sidebar-nav-item-external" href="https://github.com/WhitzardAgent/AgentGuard/" target="_blank" rel="noreferrer">
+          <img class="sidebar-nav-icon" src="/assets/github.png" alt="">
+          <span>GitHub</span>
+        </a>
+      </div>
+    </aside>

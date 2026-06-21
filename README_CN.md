@@ -5,7 +5,7 @@
     <img src="https://img.shields.io/badge/%E6%96%87%E6%A1%A3-Docs-0ea5e9?style=for-the-badge&logo=gitbook&logoColor=white" alt="文档" />
   </a>
   <a href="https://github.com/WhitzardAgent/AgentGuard/releases">
-    <img src="https://img.shields.io/badge/%E5%8F%91%E5%B8%83-v1.0-111827?style=for-the-badge&logo=github&logoColor=white" alt="发布 v1.0" />
+    <img src="https://img.shields.io/badge/%E5%8F%91%E5%B8%83-v2.0-111827?style=for-the-badge&logo=github&logoColor=white" alt="发布 v2.0" />
   </a>
   <a href="./LICENSE">
     <img src="https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF%E8%AF%81-GPL%20v3-16a34a?style=for-the-badge&logo=open-source-initiative&logoColor=white" alt="许可证" />
@@ -18,26 +18,30 @@
 </p>
 
 <p align="center">
-  <strong>AgentGuard: 面向基于 LLM 的工具使用智能体的基于属性的访问控制框架</strong>
+  <strong>AgentGuard：面向 AI Agents 的零信任安全防护基座</strong>
 </p>
 
 <p align="center">
-  通过声明式策略、可追溯决策与人工审核，为高风险工具调用提供安全控制。
+  无缝集成现有智能体框架，且通过模块化部署方式兼容已有基于规则/基于模型的安全防护方案。
 </p>
 
 <table align="center" width="100%" cellspacing="0" cellpadding="0">
   <tr>
-    <td align="center" width="30%" style="padding: 20px 18px; border: 1px solid #e5e7eb; border-radius: 18px; background: #ffffff;">
+    <td align="center" width="25%" style="padding: 20px 18px; border: 1px solid #e5e7eb; border-radius: 18px; background: #ffffff;">
       <div style="font-size: 28px; line-height: 1; margin-bottom: 10px;">🧩</div>
-      <small><strong>无&#8288;缝&#8288;集&#8288;成</strong></small>
+      <small><strong>无缝集成</strong></small>
     </td>
-    <td align="center" width="30%" style="padding: 20px 18px; border: 1px solid #e5e7eb; border-radius: 18px; background: #ffffff;">
+    <td align="center" width="25%" style="padding: 20px 18px; border: 1px solid #e5e7eb; border-radius: 18px; background: #ffffff;">
+      <div style="font-size: 28px; line-height: 1; margin-bottom: 10px;">🧱</div>
+      <small><strong>模块化安全防护策略</strong></small>
+    </td>
+    <td align="center" width="25%" style="padding: 20px 18px; border: 1px solid #e5e7eb; border-radius: 18px; background: #ffffff;">
       <div style="font-size: 28px; line-height: 1; margin-bottom: 10px;">🛡️</div>
-      <small><strong>多&#8288;风&#8288;险&#8288;覆&#8288;盖</strong></small>
+      <small><strong>多风险覆盖</strong></small>
     </td>
-    <td align="center" width="40%" style="padding: 20px 18px; border: 1px solid #e5e7eb; border-radius: 18px; background: #ffffff;">
+    <td align="center" width="25%" style="padding: 20px 18px; border: 1px solid #e5e7eb; border-radius: 18px; background: #ffffff;">
       <div style="font-size: 28px; line-height: 1; margin-bottom: 10px;">👁️</div>
-      <small><strong>可&#8288;视&#8288;化&#8288;规&#8288;则&#8288;配&#8288;置&#8288;与&#8288;审&#8288;计</strong></small>
+      <small><strong>可视化审计</strong></small>
     </td>
   </tr>
 </table>
@@ -46,39 +50,29 @@
 > [!IMPORTANT]
 > 本项目仍处于活跃开发阶段，可能包含尚未发现的缺陷。欢迎通过 Issue 和 PR 提交反馈与贡献。
 
-AgentGuard 是一个面向智能体工具调用的基于属性的访问控制框架，它作用于大模型规划引擎与工具之间。在每一次工具调用真正执行之前，以及工具执行结束之后，AgentGuard 会依据声明式策略评估智能体行为风险，判断当前智能体的行为是否需要强制阻断、人工审核等。
+AgentGuard 是一套面向 AI Agents 的零信任安全防护基座，兼容已有安全防护策略。它会在每次调用大模型前、大模型输出后、工具调用前、执行完成后，根据安全配置识别与拦截安全风险，同时也支持通过可插拔 custom auditor 对已存储的运行轨迹进行事后审计。
 
 目前，AgentGuard 已覆盖 Anthropic 的 [Zero Trust for AI Agents](https://claude.com/blog/zero-trust-for-ai-agents) 中强调的多个关键技术点，包括访问控制与权限管理、可观测性与审计，以及行为监控与响应。
 
 ![AgentGuard 设计定位](./docs/figs/positioning.png)
 
-AgentGuard 可以集成到现有的智能体框架中，无需修改底层的执行逻辑。目前，它支持 LangChain、AutoGen 和 OpenAI Agents SDK 的集成，并且我们正在持续扩大对更多智能体生态系统和框架的支持。
+AgentGuard 可以集成到现有的智能体框架中，无需修改底层的执行逻辑。目前，它支持 LangChain、AutoGen、OpenAI Agents SDK 和 Openclaw 的集成，并且我们正在持续扩大对更多智能体生态系统和框架的支持。关于 Openclaw 的 JavaScript 侧接入方式，可参见文档中的 `Openclaw` 章节。
 
 ## ✨ 功能特点
 
-### 1. 丰富的策略表达能力
+### 1. 多维度安全防护
 
-AgentGuard 的策略不是把风险判断写死在业务代码中，而是通过独立的 DSL 描述“什么条件下允许、拒绝或转入审核”。策略可以同时引用智能体身份、工具元数据、工具参数、目标地址、会话历史和调用链上下文，适合表达智能体工具调用中常见的安全边界。
+#### 多阶段介入
 
-#### 算术与逻辑表达式语法
+在每次调用大模型前、大模型输出后、工具调用前、执行完成后，AgentGuard 都可以根据配置的安全策略进行识别与拦截，在智能体运行全流程中持续介入安全防护。此外，它还支持通过可插拔 custom auditor 对已存储的运行轨迹进行事后审计。
 
-策略条件支持数值比较、集合判断、正则匹配、字符串包含以及 `AND` / `OR` / `NOT` 组合。例如，可以用 `principal.trust_level < 2` 区分低信任智能体，用 `tool.recipient_domain NOT IN allowlist.email` 限制外发目标，也可以通过 `tool.cmd MATCHES ...` 识别危险命令，而上述表达式都可以通过 `AND` / `OR` / `NOT` 层层组合。
+#### 无缝衔接已有安全防护策略
 
-#### 跨工具调用的策略表达
+AgentGuard 提供统一接口，无缝适配已有安全防护策略。通过模块化 plugin 架构，用户可以根据实际需求动态接入和组合基于规则或基于模型的安全能力。目前 AgentGuard 已内置一套访问控制策略，并支持通过编写 DSL 的方式构建更多安全防护策略。
 
-AgentGuard 既可以判断单次工具调用，也可以判断跨步骤风险。通过 `TRACE` 和会话历史函数，策略能够表达“读取数据库后发送邮件”、“读取敏感文件后上传到外部 HTTP 端点”、“外部输入最终流入 Shell 执行”等链式行为，而不只依赖当前工具参数。
+#### 单工具与跨工具防护
 
-#### 工具执行的多阶段介入
-
-策略可以作用在工具执行前的 `requested` 阶段，也可以作用在工具完成后的 `completed` 阶段或失败时的 `failed` 阶段。执行前适合做阻断和审批；执行后则可用于记录结果、基于 `tool.result` 触发后续审计或规则判断。
-
-#### 多样化的策略决策
-
-规则命中后可以返回 `ALLOW`、`DENY`、`HUMAN_CHECK` 或 `LLM_CHECK`。这使策略不必只有“放行/拒绝”两种结果：明确危险的操作可以直接拒绝，风险不确定的操作可以交给人工或 LLM 审查。
-
-#### 主体与客体标签
-
-策略可以基于智能体（主体）和工具（客体）属性做差异化控制。智能体侧可声明 `agent_id`、`session_id`、`role`、`trust_level`、`scope` 等身份信息；工具侧可声明 `boundary`、`sensitivity`、`integrity`、`tags` 等静态标签。这样可以直接写出“低信任智能体不能调用特权边界工具”、“高敏感工具结果不能流向外部边界”这类策略。同时用户也可以根据自己需要定义新的标签。
+AgentGuard 既可以判断单次工具调用，也可以判断跨步骤攻击链。通过高效存储上下文信息，它能够有效检测“从数据库读取数据，然后发送电子邮件”“读取敏感文件，然后将其上传到外部 HTTP 端点”或“外部输入最终流入 Shell 命令”等行为。
 
 ### 2. 无缝集成现有智能体框架
 
@@ -88,6 +82,9 @@ AgentGuard 位于大模型规划引擎与工具之间，不介入智能体的规
 - [LangChain](https://github.com/langchain-ai/langchain)
 - [AutoGen](https://github.com/microsoft/autogen)
 - [OpenAI Agents SDK](https://github.com/openai/openai-agents-python)
+- Openclaw
+
+这些框架的接入说明都放在 `docs/zh/how-to-plugin/` 目录下，其中也包含单独的 `Openclaw` 章节。
 
 ### 3. 可视化策略配置与行为审计
 
@@ -101,7 +98,7 @@ AgentGuard 采用集中式中控架构，实现对分布式智能体进程的统
 
 ## 🚀 快速开始
 
-### 1. 编写访问控制策略并安装中控服务
+### 1. 先编写 Plugin 配置，再编写访问控制策略并启动中控服务
 
 > 你需要先安装 Docker
 
@@ -112,7 +109,43 @@ git clone https://github.com/WhitzardAgent/AgentGuard.git
 cd AgentGuard
 ```
 
-编写一套访问控制策略：
+首先，先为中控服务编写一份 plugin 配置：
+
+```bash
+mkdir -p config
+
+cat <<EOF > config/plugins.json
+{
+  "phases": {
+    "llm_before": {
+      "client": [],
+      "server": []
+    },
+    "llm_after": {
+      "client": [],
+      "server": []
+    },
+    "tool_before": {
+      "client": [],
+      "server": [
+        {
+          "name": "rule_based_plugin",
+          "env": {}
+        }
+      ]
+    },
+    "tool_after": {
+      "client": [],
+      "server": []
+    }
+  }
+}
+EOF
+```
+
+这份配置用于告诉 AgentGuard：在不同运行阶段分别启用哪些 plugin。这个 quick start 里，只有 `tool_before` 阶段启用了一个 server plugin：`rule_based_plugin`。这意味着 server 只会在工具真正执行之前，基于内置的规则型 plugin 去匹配访问控制策略；其他阶段都先保持为空。这样可以让第一个示例尽量简单：client 将工具调用前的判定请求发给 server，server 再用 `rule_based_plugin` 根据你写的策略返回 allow / deny 决策。
+
+然后，再编写一套访问控制策略：
 ```bash
 mkdir -p rules
 
@@ -144,15 +177,21 @@ cp .env.example .env
 vi .env
 ```
 
+在 `.env` 中补充 server plugin 配置文件路径：
+
+```bash
+AGENTGUARD_SERVER_PLUGIN_CONFIG=./config/plugins.json
+```
+
 启动中控服务：
 ```bash
 ./scripts/start.sh -d
 ```
 
 中控服务监听在：`38080` 端口
-UI 界面监听在：`8080` 端口
+UI 界面监听在：`38008` 端口
 
-你可以通过访问 `http://localhost:8080` 来查看 UI 界面。
+你可以通过访问 `http://localhost:38008` 来查看 UI 界面。
 
 ### 2. 智能体端的设置
 
@@ -309,7 +348,7 @@ https://github.com/user-attachments/assets/75a17e37-7f51-4c59-96fa-ea449eb79859
 
 现阶段，面向智能体的安全防护策略大致可分为两类：**模型恶意意图识别与拦截**，以及 **工具调用行为拦截**。前者通过模型微调增强底层 LLM 的鲁棒性，或基于模型的推理/思考过程识别潜在恶意意图；后者则在工具调用阶段，根据调用轨迹、参数与上下文执行预定义安全策略，对高风险操作进行识别、拦截或升级审批。
 
-考虑到模型微调通常具有较高的训练与部署成本，且部分模型并不开放完整的思考过程，AgentGuard 从工具调用行为层面对 Agent 进行防护。这种方式不依赖修改底层模型，而是直接围绕智能体“实际做了什么”建立安全控制点，因此更容易集成到现有 Agent 系统中，也更适合生产环境落地。
+考虑到模型微调通常具有较高的训练与部署成本，且部分模型并不开放完整的思考过程，AgentGuard 将安全控制点部署在更实用的运行时阶段，包括 LLM 交互过程与工具执行过程。这种方式不依赖修改底层模型，而是直接围绕智能体“向模型输入了什么、模型输出了什么、实际执行了什么”建立安全防护，因此更容易集成到现有 Agent 系统中，也更适合生产环境落地。
 
 如下图所示，现有基于工具调用行为的防护方案虽然能够覆盖部分安全需求，但大多仍停留在单点能力层面，例如仅做高危命令过滤、仅做特定风险拦截，或仅提供局部审计能力。相比之下，AgentGuard 提供了一套统一框架，更系统地覆盖访问控制、运行时行为监控与执行审计等核心能力，也更契合 Anthropic 在 [Zero Trust for AI Agents](https://claude.com/blog/zero-trust-for-ai-agents) 中强调的企业级 Agent 安全目标，例如最小权限、受约束的工具使用、可观测执行过程与可审计的策略执行。
 
@@ -323,8 +362,10 @@ https://github.com/user-attachments/assets/75a17e37-7f51-4c59-96fa-ea449eb79859
   <img src="./docs/figs/overview.png" alt="AgentGuard 设计架构图" width="50%" />
 </p>
 
-- **客户端**：通过极少量代码修改，客户端可集成进智能体框架中。客户端会监控每一次工具调用，将相关上下文信息转发至服务器，并执行服务器的策略决策。
-- **服务器**：服务器接收来自客户端的信息，对智能体动作进行策略评估，产生策略决策，下发给客户端；同时服务器能对智能体做状态监控，方便管理员审计。
+- **客户端**：通过极少量代码修改，客户端可集成进智能体框架中，并能够在 LLM 调用前后、工具调用前后进行拦截。客户端可以先在本地执行轻量级过滤，再将事件发送到服务端，由服务端根据配置的 plugin 进一步检测。
+- **服务器**：服务器接收来自客户端的信息，并根据配置的 plugin 对智能体动作进行策略评估，生成策略决策并返回给客户端；同时服务器持续监控智能体状态，供管理员进行审计。
+- **Plugin 扩展**：客户端与服务器都支持可插拔 plugin。若需添加自定义 plugin，可参考[客户端 plugin 指南](https://whitzardagent.github.io/AgentGuard/zh/plugins/custom_client_plugin.html)和[服务端 plugin 指南](https://whitzardagent.github.io/AgentGuard/zh/plugins/custom_server_plugin.html)。
+- **Custom Auditor 扩展**：后端也支持面向事后轨迹审计的可插拔 custom auditor。公共抽象位于 `src/server/backend/audit/`，具体 auditor 实现位于 `src/server/backend/audit/auditors/`。详见[自定义 auditor 文档](https://whitzardagent.github.io/AgentGuard/zh/auditors.html)。
 
 ## 👥 贡献者
 
@@ -335,7 +376,7 @@ https://github.com/user-attachments/assets/75a17e37-7f51-4c59-96fa-ea449eb79859
   </tr>
   <tr>
     <td><a href="https://djrrr.github.io/" target="_blank" rel="noreferrer">戴嘉润</a></td>
-    <td>复旦大学副研究员</td>
+    <td>复旦大学助理教授</td>
   </tr>
   <tr>
     <td>罗嘉骐</td>
@@ -351,15 +392,15 @@ https://github.com/user-attachments/assets/75a17e37-7f51-4c59-96fa-ea449eb79859
   </tr>
   <tr>
     <td><a href="https://zhxshen.github.io/" target="_blank" rel="noreferrer">申卓祥</a></td>
-    <td>复旦大学博士生</td>
+    <td>复旦大学工程博士生</td>
   </tr>
   <tr>
     <td><a href="https://ravensanstete.github.io/" target="_blank" rel="noreferrer">潘旭东</a></td>
-    <td>复旦大学副研究员</td>
+    <td>复旦大学助理教授</td>
   </tr>
   <tr>
     <td><a href="https://ghong.site/" target="_blank" rel="noreferrer">洪赓</a></td>
-    <td>复旦大学助理研究员</td>
+    <td>复旦大学助理教授</td>
   </tr>
 </table>
 
@@ -370,7 +411,7 @@ https://github.com/user-attachments/assets/75a17e37-7f51-4c59-96fa-ea449eb79859
 - 支持更多主流的智能体框架
 - 支持更多编程语言的智能体系统
 - 启用多智能体场景的保护
-- 添加对 LLM 输入输出的监控
+- 扩展对 LLM 输入输出的监控与 plugin 覆盖范围
 - 添加更丰富的策略执行动作
 - 提供策略自动推荐的能力
 
