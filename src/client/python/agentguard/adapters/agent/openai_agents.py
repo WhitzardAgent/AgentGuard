@@ -6,13 +6,11 @@ import inspect
 import json
 from typing import Any
 
-from agentguard.adapters.agent.base import BaseAgentAdapter
+from agentguard.adapters.agent.base import BaseAgentAdapter, ToolBinding
 from agentguard.adapters.agent.patching import (
     guard_tool_after,
     guard_tool_before,
     is_guarded,
-    make_guarded_tool,
-    patch_llm_methods,
     set_attr,
     tool_name,
 )
@@ -38,48 +36,94 @@ class OpenAIAgentsAdapter(BaseAgentAdapter):
                 raise AdapterError(f"openai agents run failed: {exc}") from exc
         raise AdapterError("openai agent exposes no run/invoke")
 
-    def patchtool(self, agent: Any, guard: Any) -> int:
-        patched = 0
+    def gettools(self, agent: Any) -> list[ToolBinding]:
+        bindings: list[ToolBinding] = []
         tools = getattr(agent, "tools", None) or getattr(agent, "_tools", None)
         if isinstance(tools, dict):
             for name, tool in list(tools.items()):
                 if _looks_like_function_tool(tool):
-                    patched += _patch_openai_tool(tool, guard, name=str(name))
+                    original = getattr(tool, "on_invoke_tool", None)
+                    if callable(original) and not is_guarded(original):
+                        bindings.append(
+                            self.build_tool_binding(
+                                name=str(name),
+                                fn=original,
+                                owner=tool,
+                                attr="on_invoke_tool",
+                                tool=tool,
+                                installer=_install_openai_tool_binding,
+                            )
+                        )
                 elif callable(tool):
-                    tools[name] = make_guarded_tool(guard, tool, name=str(name), tool=tool)
-                    patched += 1
+                    bindings.append(
+                        self.build_tool_binding(
+                            name=str(name),
+                            fn=tool,
+                            container=tools,
+                            key=name,
+                            tool=tool,
+                        )
+                    )
         elif isinstance(tools, list):
             for idx, tool in enumerate(list(tools)):
                 if _looks_like_function_tool(tool):
-                    patched += _patch_openai_tool(tool, guard, name=tool_name(tool, fallback=f"tool_{idx}"))
+                    original = getattr(tool, "on_invoke_tool", None)
+                    if callable(original) and not is_guarded(original):
+                        bindings.append(
+                            self.build_tool_binding(
+                                name=tool_name(tool, fallback=f"tool_{idx}"),
+                                fn=original,
+                                owner=tool,
+                                attr="on_invoke_tool",
+                                tool=tool,
+                                installer=_install_openai_tool_binding,
+                            )
+                        )
                 elif callable(tool):
-                    name = tool_name(tool, fallback=f"tool_{idx}")
-                    tools[idx] = make_guarded_tool(guard, tool, name=name, tool=tool)
-                    patched += 1
-        return patched
+                    bindings.append(
+                        self.build_tool_binding(
+                            name=tool_name(tool, fallback=f"tool_{idx}"),
+                            fn=tool,
+                            container=tools,
+                            key=idx,
+                            tool=tool,
+                        )
+                    )
+        return bindings
 
-    def patchLLM(self, agent: Any, guard: Any) -> int:
-        patched = 0
+    def getllm(self, agent: Any):
+        bindings = []
         seen: set[int] = set()
         for candidate in _iter_openai_llm_candidates(agent):
             if id(candidate) in seen:
                 continue
             seen.add(id(candidate))
-            patched += patch_llm_methods(
-                guard,
-                candidate,
-                methods=("create", "complete", "completion", "generate", "invoke", "ainvoke"),
+            bindings.extend(
+                self.collect_llm_methods(
+                    candidate,
+                    methods=("create", "complete", "completion", "generate", "invoke", "ainvoke"),
+                )
             )
             chat = getattr(candidate, "chat", None)
             completions = getattr(chat, "completions", None) if chat is not None else None
             if completions is not None and id(completions) not in seen:
                 seen.add(id(completions))
-                patched += patch_llm_methods(guard, completions, methods=("create",))
+                bindings.extend(
+                    self.collect_llm_methods(
+                        completions,
+                        methods=("create",),
+                    )
+                )
             responses = getattr(candidate, "responses", None)
             if responses is not None and id(responses) not in seen:
                 seen.add(id(responses))
-                patched += patch_llm_methods(guard, responses, methods=("create",))
-        return patched
+                bindings.extend(
+                    self.collect_llm_methods(
+                        responses,
+                        methods=("create",),
+                    )
+                )
+        return bindings
 
 
 def _looks_like_function_tool(tool: Any) -> bool:
@@ -93,8 +137,14 @@ def _iter_openai_llm_candidates(agent: Any):
             yield candidate
 
 
-def _patch_openai_tool(tool: Any, guard: Any, *, name: str) -> int:
-    original = getattr(tool, "on_invoke_tool", None)
+def _install_openai_tool_binding(
+    guard: Any,
+    binding: ToolBinding,
+    adapter: BaseAgentAdapter,
+) -> int:
+    tool = binding.tool or binding.owner
+    name = binding.name
+    original = binding.callable
     if not callable(original) or is_guarded(original):
         return 0
     metadata = guard.register_tool(original, name=name)
@@ -109,7 +159,14 @@ def _patch_openai_tool(tool: Any, guard: Any, *, name: str) -> int:
     async def guarded_invoke(*args: Any, **kwargs: Any) -> Any:
         try:
             tool_args = _extract_json_args(args, kwargs)
-            decision = guard_tool_before(guard, metadata, tool_args)
+            decision = guard_tool_before(
+                guard,
+                metadata,
+                tool_args,
+                normalizer=adapter,
+                fn=original,
+                owner=tool,
+            )
             if decision.decision_type == DecisionType.DENY:
                 return json.dumps({"agentguard": "blocked", "reason": decision.reason})
             if decision.requires_user or decision.requires_remote:
@@ -122,10 +179,24 @@ def _patch_openai_tool(tool: Any, guard: Any, *, name: str) -> int:
             try:
                 value = await _call_original(*args, **kwargs)
             except Exception as exc:
-                guard_tool_after(guard, name, error=str(exc))
+                guard_tool_after(
+                    guard,
+                    name,
+                    error=str(exc),
+                    normalizer=adapter,
+                    fn=original,
+                    owner=tool,
+                )
                 raise
 
-            result_decision = guard_tool_after(guard, name, value)
+            result_decision = guard_tool_after(
+                guard,
+                name,
+                value,
+                normalizer=adapter,
+                fn=original,
+                owner=tool,
+            )
             if result_decision.decision_type == DecisionType.DENY:
                 return json.dumps({"agentguard": "blocked", "reason": result_decision.reason})
             if result_decision.decision_type == DecisionType.SANITIZE:

@@ -14,6 +14,14 @@ class CrewAIAgentAdapter(BaseAgentAdapter):
     def can_wrap(self, agent: Any) -> bool:
         return "crewai" in (type(agent).__module__ or "")
 
+    def gettools(self, agent: Any):
+        _ = agent
+        return []
+
+    def getllm(self, agent: Any):
+        _ = agent
+        return []
+
     def generate(self, agent: Any, messages: list[dict[str, Any]], context: RuntimeContext) -> Any:
         prompt = messages[-1].get("content", "") if messages else ""
         for method in ("kickoff", "execute_task", "run"):

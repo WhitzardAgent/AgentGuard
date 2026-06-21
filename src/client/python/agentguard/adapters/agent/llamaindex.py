@@ -15,6 +15,14 @@ class LlamaIndexAgentAdapter(BaseAgentAdapter):
         mod = type(agent).__module__ or ""
         return "llama_index" in mod or "llamaindex" in mod
 
+    def gettools(self, agent: Any):
+        _ = agent
+        return []
+
+    def getllm(self, agent: Any):
+        _ = agent
+        return []
+
     def generate(self, agent: Any, messages: list[dict[str, Any]], context: RuntimeContext) -> Any:
         prompt = messages[-1].get("content", "") if messages else ""
         for method in ("chat", "query", "run"):

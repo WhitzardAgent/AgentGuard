@@ -5,6 +5,10 @@ import functools
 import inspect
 from typing import Any, Callable
 
+from agentguard.adapters.agent.normalization import (
+    DEFAULT_AGENT_EVENT_NORMALIZER,
+    AgentEventNormalizer,
+)
 from agentguard.schemas import events as ev
 from agentguard.schemas.decisions import DecisionType, GuardDecision
 from agentguard.tools.metadata import ToolMetadata
@@ -88,32 +92,78 @@ def register_tool_metadata(
     )
 
 
+def _resolve_normalizer(normalizer: AgentEventNormalizer | None) -> AgentEventNormalizer:
+    return normalizer or DEFAULT_AGENT_EVENT_NORMALIZER
+
+
 def guard_llm_before(
     guard: Any,
     *,
     label: str,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
+    normalizer: AgentEventNormalizer | None = None,
+    fn: Callable[..., Any] | None = None,
+    owner: Any = None,
 ) -> GuardDecision:
-    request = {"label": label, "args": list(args), "kwargs": dict(kwargs)}
-    return guard.runtime.guard(ev.llm_input(guard.context, request)).decision
+    normalized = _resolve_normalizer(normalizer).normalize_llm_input(
+        label=label,
+        args=args,
+        kwargs=kwargs,
+        fn=fn,
+        owner=owner,
+    )
+    return guard.runtime.guard(
+        ev.llm_input(guard.context, normalized.payload, **dict(normalized.metadata))
+    ).decision
 
 
-def guard_llm_after(guard: Any, output: Any) -> GuardDecision:
-    return guard.runtime.guard(ev.llm_output(guard.context, output), phase="after").decision
+def guard_llm_after(
+    guard: Any,
+    output: Any,
+    *,
+    label: str = "llm",
+    normalizer: AgentEventNormalizer | None = None,
+    fn: Callable[..., Any] | None = None,
+    owner: Any = None,
+) -> GuardDecision:
+    normalized = _resolve_normalizer(normalizer).normalize_llm_output(
+        label=label,
+        output=output,
+        fn=fn,
+        owner=owner,
+    )
+    return guard.runtime.guard(
+        ev.llm_output(guard.context, normalized.payload, **dict(normalized.metadata)),
+        phase="after",
+    ).decision
 
 
 def guard_tool_before(
     guard: Any,
     metadata: ToolMetadata,
     arguments: dict[str, Any],
+    *,
+    normalizer: AgentEventNormalizer | None = None,
+    fn: Callable[..., Any] | None = None,
+    owner: Any = None,
 ) -> GuardDecision:
+    normalized = _resolve_normalizer(normalizer).normalize_tool_invoke(
+        tool_metadata=metadata,
+        arguments=arguments,
+        fn=fn,
+        owner=owner,
+    )
+    capabilities = normalized.capabilities
+    if capabilities is None:
+        capabilities = list(metadata.capabilities)
     return guard.runtime.guard(
         ev.tool_invoke(
             guard.context,
             metadata.name,
-            arguments,
-            capabilities=list(metadata.capabilities),
+            dict(normalized.arguments),
+            capabilities=list(capabilities),
+            **dict(normalized.metadata),
         )
     ).decision
 
@@ -124,9 +174,25 @@ def guard_tool_after(
     result: Any = None,
     *,
     error: str | None = None,
+    normalizer: AgentEventNormalizer | None = None,
+    fn: Callable[..., Any] | None = None,
+    owner: Any = None,
 ) -> GuardDecision:
+    normalized = _resolve_normalizer(normalizer).normalize_tool_result(
+        tool_name=tool_name,
+        result=result,
+        error=error,
+        fn=fn,
+        owner=owner,
+    )
     return guard.runtime.guard(
-        ev.tool_result(guard.context, tool_name, result, error=error),
+        ev.tool_result(
+            guard.context,
+            tool_name,
+            normalized.result,
+            error=normalized.error,
+            **dict(normalized.metadata),
+        ),
         phase="after",
     ).decision
 
@@ -138,6 +204,8 @@ def make_guarded_tool(
     name: str,
     tool: Any = None,
     capabilities: list[str] | None = None,
+    normalizer: AgentEventNormalizer | None = None,
+    owner: Any = None,
 ) -> Callable[..., Any]:
     """Return a guarded callable compatible with sync and async framework tools."""
     if is_guarded(fn):
@@ -153,16 +221,37 @@ def make_guarded_tool(
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
             try:
                 arguments = bind_arguments(fn, args, kwargs)
-                decision = guard_tool_before(guard, metadata, arguments)
+                decision = guard_tool_before(
+                    guard,
+                    metadata,
+                    arguments,
+                    normalizer=normalizer,
+                    fn=fn,
+                    owner=owner if owner is not None else tool,
+                )
                 blocked = _blocked_tool_value(decision, metadata.name)
                 if blocked is not None:
                     return blocked
                 try:
                     value = await fn(*args, **kwargs)
                 except Exception as exc:
-                    guard_tool_after(guard, metadata.name, error=str(exc))
+                    guard_tool_after(
+                        guard,
+                        metadata.name,
+                        error=str(exc),
+                        normalizer=normalizer,
+                        fn=fn,
+                        owner=owner if owner is not None else tool,
+                    )
                     raise
-                result_decision = guard_tool_after(guard, metadata.name, value)
+                result_decision = guard_tool_after(
+                    guard,
+                    metadata.name,
+                    value,
+                    normalizer=normalizer,
+                    fn=fn,
+                    owner=owner if owner is not None else tool,
+                )
                 result_blocked = _blocked_result_value(result_decision, metadata.name)
                 return result_blocked if result_blocked is not None else value
             except Exception:
@@ -187,6 +276,8 @@ def make_guarded_llm_callable(
     fn: Callable[..., Any],
     *,
     label: str,
+    normalizer: AgentEventNormalizer | None = None,
+    owner: Any = None,
 ) -> Callable[..., Any]:
     """Wrap a concrete LLM call method without replacing the provider object."""
     if is_guarded(fn):
@@ -197,12 +288,27 @@ def make_guarded_llm_callable(
         @functools.wraps(fn)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
             try:
-                before_decision = guard_llm_before(guard, label=label, args=args, kwargs=kwargs)
+                before_decision = guard_llm_before(
+                    guard,
+                    label=label,
+                    args=args,
+                    kwargs=kwargs,
+                    normalizer=normalizer,
+                    fn=fn,
+                    owner=owner,
+                )
                 before_blocked = _blocked_llm_value(before_decision)
                 if before_blocked is not None:
                     return before_blocked
                 raw = await fn(*args, **kwargs)
-                decision = guard_llm_after(guard, raw)
+                decision = guard_llm_after(
+                    guard,
+                    raw,
+                    label=label,
+                    normalizer=normalizer,
+                    fn=fn,
+                    owner=owner,
+                )
                 blocked = _blocked_llm_value(decision)
                 return blocked if blocked is not None else raw
             except Exception:
@@ -216,12 +322,27 @@ def make_guarded_llm_callable(
     @functools.wraps(fn)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         try:
-            before_decision = guard_llm_before(guard, label=label, args=args, kwargs=kwargs)
+            before_decision = guard_llm_before(
+                guard,
+                label=label,
+                args=args,
+                kwargs=kwargs,
+                normalizer=normalizer,
+                fn=fn,
+                owner=owner,
+            )
             before_blocked = _blocked_llm_value(before_decision)
             if before_blocked is not None:
                 return before_blocked
             raw = fn(*args, **kwargs)
-            decision = guard_llm_after(guard, raw)
+            decision = guard_llm_after(
+                guard,
+                raw,
+                label=label,
+                normalizer=normalizer,
+                fn=fn,
+                owner=owner,
+            )
             blocked = _blocked_llm_value(decision)
             return blocked if blocked is not None else raw
         except Exception:
@@ -247,24 +368,41 @@ def patch_llm_methods(
         "predict",
         "chat",
     ),
+    normalizer: AgentEventNormalizer | None = None,
+    owner: Any = None,
 ) -> int:
     patched = 0
     for name in methods:
-        if '.' in name:
-            parts = name.split('.')
-            fn = obj
-            for part in parts[:-1]:
-                fn = getattr(fn, part, None)
-                if fn is None:
-                    break
-            fn = getattr(fn, parts[-1], None)
-        else:
-            fn = getattr(obj, name, None)
+        target, leaf, fn = _resolve_attr_path(obj, name)
         if not callable(fn) or is_guarded(fn):
             continue
-        if set_attr(obj, name, make_guarded_llm_callable(guard, fn, label=name)):
+        if set_attr(
+            target,
+            leaf,
+            make_guarded_llm_callable(
+                guard,
+                fn,
+                label=name,
+                normalizer=normalizer,
+                owner=owner if owner is not None else target,
+            ),
+        ):
             patched += 1
     return patched
+
+
+def _resolve_attr_path(obj: Any, path: str) -> tuple[Any, str, Any]:
+    if "." not in path:
+        return obj, path, getattr(obj, path, None)
+
+    parts = path.split(".")
+    target = obj
+    for part in parts[:-1]:
+        target = getattr(target, part, None)
+        if target is None:
+            return obj, parts[-1], None
+    leaf = parts[-1]
+    return target, leaf, getattr(target, leaf, None)
 
 
 def _blocked_tool_value(decision: GuardDecision, tool: str) -> Any | None:

@@ -9,6 +9,7 @@
   * [LangChain](how-to-plugin/langchain.md)
   * [AutoGen](how-to-plugin/autogen.md)
   * [OpenAI Agents SDK](how-to-plugin/openai_agents_sdk.md)
+  * [Custom Adapter](how-to-plugin/custom.md)
 * [AgentGuard Plugins](plugins.md)
   * [Builtin Plugins](plugins/builtin_plugins.md)
     * [rule_based_plugin](plugins/rule_based_plugin.md)

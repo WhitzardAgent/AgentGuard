@@ -7,13 +7,20 @@ import json
 from collections.abc import Sequence
 from typing import Any
 
-from agentguard.adapters.agent.base import BaseAgentAdapter
+from agentguard.adapters.agent.base import BaseAgentAdapter, ToolBinding
+from agentguard.adapters.agent.normalization import (
+    LLMInputNormalization,
+    LLMOutputNormalization,
+    ToolInvokeNormalization,
+    ToolResultNormalization,
+)
 from agentguard.adapters.agent.patching import (
     bind_arguments,
     guard_tool_after,
     guard_tool_before,
     is_guarded,
     mark_guarded,
+    make_guarded_llm_callable,
     make_guarded_tool,
     register_tool_metadata,
     set_attr,
@@ -22,6 +29,7 @@ from agentguard.adapters.agent.patching import (
 from agentguard.schemas import events as ev
 from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.decisions import DecisionType, GuardDecision
+from agentguard.tools.metadata import ToolMetadata
 from agentguard.utils.errors import AdapterError
 
 
@@ -31,6 +39,15 @@ def _module_name(obj: Any) -> str:
 
 class LangChainAgentAdapter(BaseAgentAdapter):
     name = "langchain"
+
+    def _langchain_meta(self, *, label: str | None = None, owner: Any = None) -> dict[str, Any]:
+        meta: dict[str, Any] = {"adapter": self.name}
+        if label:
+            meta["label"] = label
+        if owner is not None:
+            meta["owner_type"] = type(owner).__name__
+            meta["owner_module"] = type(owner).__module__
+        return meta
 
     def can_wrap(self, agent: Any) -> bool:
         module_name = _module_name(agent)
@@ -47,11 +64,11 @@ class LangChainAgentAdapter(BaseAgentAdapter):
                     raise AdapterError(f"langchain agent invoke failed: {exc}") from exc
         raise AdapterError("langchain agent exposes no invoke/run/predict")
 
-    def patchtool(self, agent: Any, guard: Any) -> int:
-        patched = 0
-        patched += _patch_container_tools(agent, guard)
+    def gettools(self, agent: Any) -> list[ToolBinding]:
+        bindings: list[ToolBinding] = []
+        bindings.extend(_collect_container_tools(agent, self))
         for _, tool_node in _iter_tool_nodes(agent):
-            patched += _patch_tool_node(tool_node, guard)
+            bindings.extend(_collect_tool_node(tool_node, self))
 
         nodes = getattr(agent, "nodes", None) or getattr(agent, "_nodes", None)
         if isinstance(nodes, dict):
@@ -62,14 +79,77 @@ class LangChainAgentAdapter(BaseAgentAdapter):
             iterable = []
 
         for node in iterable:
-            patched += _patch_container_tools(node, guard)
+            bindings.extend(_collect_container_tools(node, self))
             runnable = getattr(node, "runnable", None)
             if runnable is not None:
-                patched += _patch_container_tools(runnable, guard)
-        return patched
+                bindings.extend(_collect_container_tools(runnable, self))
+        return bindings
 
-    def patchLLM(self, agent: Any, guard: Any) -> int:
-        return _patch_langchain_llm(agent, guard)
+    def getllm(self, agent: Any):
+        return _collect_langchain_llm(agent, self)
+
+    def normalize_llm_input(
+        self,
+        *,
+        label: str,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        fn: Any = None,
+        owner: Any = None,
+    ) -> LLMInputNormalization:
+        _ = fn
+        return LLMInputNormalization(
+            payload=_normalize_langchain_request(args, kwargs),
+            metadata=self._langchain_meta(label=label, owner=owner),
+        )
+
+    def normalize_llm_output(
+        self,
+        *,
+        label: str,
+        output: Any,
+        fn: Any = None,
+        owner: Any = None,
+    ) -> LLMOutputNormalization:
+        _ = fn
+        return LLMOutputNormalization(
+            payload=_normalize_langchain_value(output),
+            metadata=self._langchain_meta(label=label, owner=owner),
+        )
+
+    def normalize_tool_invoke(
+        self,
+        *,
+        tool_metadata: ToolMetadata,
+        arguments: dict[str, Any],
+        fn: Any = None,
+        owner: Any = None,
+    ) -> ToolInvokeNormalization:
+        _ = fn
+        normalized = _normalize_langchain_value(arguments)
+        if not isinstance(normalized, dict):
+            normalized = {"args": normalized}
+        return ToolInvokeNormalization(
+            arguments=normalized,
+            capabilities=list(tool_metadata.capabilities),
+            metadata=self._langchain_meta(owner=owner),
+        )
+
+    def normalize_tool_result(
+        self,
+        *,
+        tool_name: str,
+        result: Any = None,
+        error: str | None = None,
+        fn: Any = None,
+        owner: Any = None,
+    ) -> ToolResultNormalization:
+        _ = (tool_name, fn)
+        return ToolResultNormalization(
+            result=_normalize_langchain_value(result),
+            error=error,
+            metadata=self._langchain_meta(owner=owner),
+        )
 
 
 def _iter_tool_nodes(agent: Any) -> list[tuple[str, Any]]:
@@ -103,61 +183,85 @@ def _iter_tool_nodes(agent: Any) -> list[tuple[str, Any]]:
     return tool_nodes
 
 
-def _patch_container_tools(container: Any, guard: Any) -> int:
-    patched = 0
+def _collect_container_tools(container: Any, adapter: LangChainAgentAdapter) -> list[ToolBinding]:
+    bindings: list[ToolBinding] = []
     for attr in ("tools_by_name", "_tools_by_name"):
         tools = getattr(container, attr, None)
         if isinstance(tools, dict):
             for name, tool in list(tools.items()):
                 if callable(tool) and not hasattr(tool, "invoke"):
-                    tools[name] = make_guarded_tool(guard, tool, name=str(name), tool=tool)
-                    patched += 1
+                    bindings.append(
+                        adapter.build_tool_binding(
+                            name=str(name),
+                            fn=tool,
+                            container=tools,
+                            key=name,
+                            tool=tool,
+                        )
+                    )
                 else:
-                    patched += _patch_tool_object(tool, guard, name=str(name))
+                    bindings.extend(_collect_tool_object(tool, adapter, name=str(name)))
 
     for attr in ("tools", "_tools"):
         tools = getattr(container, attr, None)
         if isinstance(tools, dict):
             for name, tool in list(tools.items()):
                 if callable(tool) and not hasattr(tool, "invoke"):
-                    tools[name] = make_guarded_tool(guard, tool, name=str(name), tool=tool)
-                    patched += 1
+                    bindings.append(
+                        adapter.build_tool_binding(
+                            name=str(name),
+                            fn=tool,
+                            container=tools,
+                            key=name,
+                            tool=tool,
+                        )
+                    )
                 else:
-                    patched += _patch_tool_object(tool, guard, name=str(name))
+                    bindings.extend(_collect_tool_object(tool, adapter, name=str(name)))
         elif isinstance(tools, list):
             for idx, tool in enumerate(list(tools)):
                 if callable(tool) and not hasattr(tool, "invoke"):
-                    name = tool_name(tool, fallback=f"tool_{idx}")
-                    tools[idx] = make_guarded_tool(guard, tool, name=name, tool=tool)
-                    patched += 1
-                else:
-                    patched += _patch_tool_object(
-                        tool, guard, name=tool_name(tool, fallback=f"tool_{idx}")
+                    bindings.append(
+                        adapter.build_tool_binding(
+                            name=tool_name(tool, fallback=f"tool_{idx}"),
+                            fn=tool,
+                            container=tools,
+                            key=idx,
+                            tool=tool,
+                        )
                     )
-    return patched
+                else:
+                    bindings.extend(
+                        _collect_tool_object(
+                            tool,
+                            adapter,
+                            name=tool_name(tool, fallback=f"tool_{idx}"),
+                        )
+                    )
+    return bindings
 
 
-def _patch_tool_node(tool_node: Any, guard: Any) -> int:
+def _collect_tool_node(tool_node: Any, adapter: LangChainAgentAdapter) -> list[ToolBinding]:
     tools_by_name = getattr(tool_node, "tools_by_name", None)
     if not isinstance(tools_by_name, dict):
-        return 0
+        return []
 
-    patched = 0
+    bindings: list[ToolBinding] = []
     for name, tool in list(tools_by_name.items()):
-        patched += _patch_tool_object(tool, guard, name=str(name))
-    return patched
+        bindings.extend(_collect_tool_object(tool, adapter, name=str(name)))
+    return bindings
 
 
-def _patch_langchain_llm(agent: Any, guard: Any) -> int:
+def _collect_langchain_llm(agent: Any, adapter: LangChainAgentAdapter):
     base_model = _get_langchain_base_model(agent)
     if base_model is None:
-        return 0
+        return []
 
     target = _unwrap_langchain_llm_target(base_model)
     if target is None:
-        return 0
+        return []
 
-    return _patch_langchain_concrete_llm(target, guard)
+    return _collect_langchain_concrete_llm(target, adapter)
 
 
 def _get_langchain_model_runnable(agent: Any) -> Any | None:
@@ -219,20 +323,11 @@ def _extract_langchain_closure_model(fn: Any) -> Any | None:
     return None
 
 
-def _patch_langchain_concrete_llm(model: Any, guard: Any) -> int:
+def _collect_langchain_concrete_llm(model: Any, adapter: LangChainAgentAdapter):
     target = _unwrap_langchain_llm_target(model)
     if target is None:
-        return 0
-
-    patched = 0
-    for attr in ("invoke", "ainvoke"):
-        fn = getattr(target, attr, None)
-        if not callable(fn) or is_guarded(fn):
-            continue
-        wrapped = _make_guarded_langchain_llm_method(guard, fn, owner=target, label=attr)
-        if set_attr(target, attr, wrapped):
-            patched += 1
-    return patched
+        return []
+    return adapter.collect_llm_methods(target, methods=("invoke", "ainvoke"))
 
 
 def _unwrap_langchain_llm_target(model: Any) -> Any | None:
@@ -247,90 +342,6 @@ def _unwrap_langchain_llm_target(model: Any) -> Any | None:
     return current
 
 
-def _make_guarded_langchain_llm_method(
-    guard: Any,
-    fn: Any,
-    *,
-    owner: Any,
-    label: str,
-) -> Any:
-    if inspect.iscoroutinefunction(fn):
-
-        @functools.wraps(fn)
-        async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-            try:
-                _guard_langchain_input(
-                    guard,
-                    owner=owner,
-                    label=label,
-                    args=args,
-                    kwargs=kwargs,
-                )
-                raw = await fn(*args, **kwargs)
-                return _guard_langchain_output(guard, owner=owner, label=label, raw=raw)
-            except Exception:
-                _sync_local_cache_now(guard, reason="client_error")
-                raise
-            finally:
-                _sync_local_cache_async(guard, reason="round_complete")
-
-        return mark_guarded(async_wrapper)
-
-    @functools.wraps(fn)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
-        try:
-            _guard_langchain_input(
-                guard,
-                owner=owner,
-                label=label,
-                args=args,
-                kwargs=kwargs,
-            )
-            raw = fn(*args, **kwargs)
-            return _guard_langchain_output(guard, owner=owner, label=label, raw=raw)
-        except Exception:
-            _sync_local_cache_now(guard, reason="client_error")
-            raise
-        finally:
-            _sync_local_cache_async(guard, reason="round_complete")
-
-    return mark_guarded(wrapper)
-
-
-def _guard_langchain_input(
-    guard: Any,
-    *,
-    owner: Any,
-    label: str,
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-) -> None:
-    payload = _normalize_langchain_request(args, kwargs)
-    meta = {
-        "adapter": "langchain",
-        "label": label,
-        "owner_type": type(owner).__name__,
-        "owner_module": type(owner).__module__,
-    }
-    guard.runtime.guard(ev.llm_input(guard.context, payload, **meta))
-
-
-def _guard_langchain_output(guard: Any, *, owner: Any, label: str, raw: Any) -> Any:
-    meta = {
-        "adapter": "langchain",
-        "label": label,
-        "owner_type": type(owner).__name__,
-        "owner_module": type(owner).__module__,
-    }
-    decision = guard.runtime.guard(
-        ev.llm_output(guard.context, _normalize_langchain_value(raw), **meta),
-        phase="after",
-    ).decision
-    if decision.decision_type == DecisionType.DENY:
-        return {"agentguard": "blocked", "reason": decision.reason}
-    if decision.decision_type == DecisionType.SANITIZE:
-        return {"agentguard": "sanitized", "reason": decision.reason}
-    return raw
 
 
 def _normalize_langchain_request(
@@ -426,55 +437,71 @@ def _sync_local_cache_async(guard: Any, *, reason: str) -> None:
         sync(reason=reason)
 
 
-def _patch_tool_object(tool: Any, guard: Any, *, name: str) -> int:
+def _collect_tool_object(
+    tool: Any,
+    adapter: LangChainAgentAdapter,
+    *,
+    name: str,
+) -> list[ToolBinding]:
     if tool is None or is_guarded(tool):
-        return 0
+        return []
 
     # Prefer raw tool callables so guard events see the concrete tool signature
     # instead of LangChain's generic invoke(input, config) wrapper.
-    if _patch_tool_attrs(tool, guard, name=name, attrs=("func", "coroutine")):
-        return 1
-    if _patch_tool_attrs(tool, guard, name=name, attrs=("_run", "_arun")):
-        return 1
+    bindings = _collect_tool_attr_bindings(tool, adapter, name=name, attrs=("func", "coroutine"))
+    if bindings:
+        return bindings
+    bindings = _collect_tool_attr_bindings(tool, adapter, name=name, attrs=("_run", "_arun"))
+    if bindings:
+        return bindings
     # Fall back to the public entrypoint for duck-typed invoke-only tools.
-    if _patch_tool_attrs(tool, guard, name=name, attrs=("invoke", "ainvoke")):
-        return 1
-    return 0
+    return _collect_tool_attr_bindings(tool, adapter, name=name, attrs=("invoke", "ainvoke"))
 
 
-def _patch_tool_attrs(
+def _collect_tool_attr_bindings(
     tool: Any,
-    guard: Any,
+    adapter: LangChainAgentAdapter,
     *,
     name: str,
     attrs: tuple[str, ...],
-) -> bool:
-    patched = False
+) -> list[ToolBinding]:
+    bindings: list[ToolBinding] = []
     for attr in attrs:
         fn = getattr(tool, attr, None)
         if not callable(fn) or is_guarded(fn):
             continue
         if attr in {"invoke", "ainvoke"}:
-            wrapped = _make_guarded_langchain_tool_method(
-                guard,
-                fn,
-                name=name,
-                tool=tool,
+            bindings.append(
+                adapter.build_tool_binding(
+                    name=name,
+                    fn=fn,
+                    owner=tool,
+                    attr=attr,
+                    tool=tool,
+                    installer=_install_langchain_tool_binding,
+                )
             )
         else:
-            wrapped = make_guarded_tool(guard, fn, name=name, tool=tool)
-        if set_attr(tool, attr, wrapped):
-            patched = True
-    return patched
+            bindings.append(
+                adapter.build_tool_binding(
+                    name=name,
+                    fn=fn,
+                    owner=tool,
+                    attr=attr,
+                    tool=tool,
+                )
+            )
+    return bindings
 
 
-def _make_guarded_langchain_tool_method(
+def _install_langchain_tool_binding(
     guard: Any,
-    fn: Any,
-    *,
-    name: str,
-    tool: Any,
-) -> Any:
+    binding: ToolBinding,
+    adapter: LangChainAgentAdapter,
+) -> int:
+    fn = binding.callable
+    name = binding.name
+    tool = binding.tool or binding.owner
     metadata = register_tool_metadata(guard, fn, name=name, tool=tool)
 
     if inspect.iscoroutinefunction(fn):
@@ -483,16 +510,37 @@ def _make_guarded_langchain_tool_method(
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
             try:
                 arguments = _build_langchain_tool_arguments(fn, args, kwargs)
-                decision = guard_tool_before(guard, metadata, arguments)
+                decision = guard_tool_before(
+                    guard,
+                    metadata,
+                    arguments,
+                    normalizer=adapter,
+                    fn=fn,
+                    owner=tool,
+                )
                 blocked = _blocked_langchain_tool_value(decision, metadata.name, args, kwargs)
                 if blocked is not None:
                     return blocked
                 try:
                     value = await fn(*args, **kwargs)
                 except Exception as exc:
-                    guard_tool_after(guard, metadata.name, error=str(exc))
+                    guard_tool_after(
+                        guard,
+                        metadata.name,
+                        error=str(exc),
+                        normalizer=adapter,
+                        fn=fn,
+                        owner=tool,
+                    )
                     raise
-                result_decision = guard_tool_after(guard, metadata.name, value)
+                result_decision = guard_tool_after(
+                    guard,
+                    metadata.name,
+                    value,
+                    normalizer=adapter,
+                    fn=fn,
+                    owner=tool,
+                )
                 result_blocked = _blocked_langchain_result_value(
                     result_decision,
                     metadata.name,
@@ -506,22 +554,43 @@ def _make_guarded_langchain_tool_method(
             finally:
                 _sync_local_cache_async(guard, reason="round_complete")
 
-        return mark_guarded(async_wrapper)
+        return 1 if set_attr(tool, binding.attr or "invoke", mark_guarded(async_wrapper)) else 0
 
     @functools.wraps(fn)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         try:
             arguments = _build_langchain_tool_arguments(fn, args, kwargs)
-            decision = guard_tool_before(guard, metadata, arguments)
+            decision = guard_tool_before(
+                guard,
+                metadata,
+                arguments,
+                normalizer=adapter,
+                fn=fn,
+                owner=tool,
+            )
             blocked = _blocked_langchain_tool_value(decision, metadata.name, args, kwargs)
             if blocked is not None:
                 return blocked
             try:
                 value = fn(*args, **kwargs)
             except Exception as exc:
-                guard_tool_after(guard, metadata.name, error=str(exc))
+                guard_tool_after(
+                    guard,
+                    metadata.name,
+                    error=str(exc),
+                    normalizer=adapter,
+                    fn=fn,
+                    owner=tool,
+                )
                 raise
-            result_decision = guard_tool_after(guard, metadata.name, value)
+            result_decision = guard_tool_after(
+                guard,
+                metadata.name,
+                value,
+                normalizer=adapter,
+                fn=fn,
+                owner=tool,
+            )
             result_blocked = _blocked_langchain_result_value(
                 result_decision,
                 metadata.name,
@@ -535,7 +604,7 @@ def _make_guarded_langchain_tool_method(
         finally:
             _sync_local_cache_async(guard, reason="round_complete")
 
-    return mark_guarded(wrapper)
+    return 1 if set_attr(tool, binding.attr or "invoke", mark_guarded(wrapper)) else 0
 
 
 def _build_langchain_tool_arguments(
