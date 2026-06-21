@@ -4,7 +4,7 @@
 
 ## 智能体
 
-智能体是接收任务、规划步骤、调用 LLM、并可能调用工具的应用或运行单元。它可以基于 LangChain、AutoGen、OpenAI Agents SDK 构建，也可以是自定义框架。
+智能体是接收任务、规划步骤、调用 LLM、并可能调用工具的应用或运行单元。它可以基于 LangChain、AutoGen、OpenAI Agents SDK、Openclaw 构建，也可以是自定义框架。
 
 AgentGuard 不替代智能体本身。智能体仍负责理解任务、推理、编排和选择工具；AgentGuard 则围绕该智能体产生的运行时事件增加安全防护层。
 

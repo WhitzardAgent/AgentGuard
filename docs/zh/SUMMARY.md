@@ -9,6 +9,7 @@
   * [LangChain](how-to-plugin/langchain.md)
   * [AutoGen](how-to-plugin/autogen.md)
   * [OpenAI Agents SDK](how-to-plugin/openai_agents_sdk.md)
+  * [Openclaw](how-to-plugin/openclaw_adapter.md)
   * [Custom Adapter](how-to-plugin/custom.md)
 * [AgentGuard插件](plugins.md)
   * [内置插件](plugins/builtin_plugins.md)

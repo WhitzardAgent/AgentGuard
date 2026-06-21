@@ -56,7 +56,7 @@ Today, AgentGuard covers several key technical areas highlighted in Anthropic's 
 
 ![AgentGuard Positioning](./docs/figs/positioning.png)
 
-AgentGuard can be integrated into existing agent frameworks without modifying the underlying execution logic. Currently, it supports LangChain, AutoGen, OpenAI Agents SDK, and OpenClaw, and we are continuously expanding support for additional agent ecosystems and frameworks.
+AgentGuard can be integrated into existing agent frameworks without modifying the underlying execution logic. Currently, it supports LangChain, AutoGen, OpenAI Agents SDK, and Openclaw, and we are continuously expanding support for additional agent ecosystems and frameworks. See the documentation chapter on `Openclaw` for the JavaScript-side integration details.
 
 ## ✨ Features
 
@@ -82,7 +82,9 @@ Currently, we support the following agent frameworks:
 - [LangChain](https://github.com/langchain-ai/langchain)
 - [AutoGen](https://github.com/microsoft/autogen)
 - [OpenAI Agents SDK](https://github.com/openai/openai-agents-python)
-- OpenClaw
+- Openclaw
+
+The integration guides for these frameworks live under `docs/en/how-to-plugin/`, including the dedicated `Openclaw` chapter.
 
 ### 3. Visual Policy Configuration & Audit
 

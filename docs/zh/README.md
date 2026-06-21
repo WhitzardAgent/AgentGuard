@@ -15,7 +15,7 @@
 pip install langchain==1.2.18
 pip install langchain-openai==1.2.1
 ```
-> 本指南以 LangChain 1.2.18 版本为例，你也可以使用其他方式构建智能体。
+> 本指南以 LangChain 1.2.18 版本为例。AgentGuard 目前已兼容 LangChain、AutoGen、OpenAI Agents SDK 和 Openclaw；这里选择 LangChain 只是因为它更适合作为快速上手示例。
 
 #### 2. 编写智能体代码
 ```python

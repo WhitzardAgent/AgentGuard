@@ -35,6 +35,7 @@ AgentGuard 位于大模型规划引擎与工具之间，不替代智能体的规
 - [LangChain](https://github.com/langchain-ai/langchain)
 - [AutoGen](https://github.com/microsoft/autogen)
 - [OpenAI Agents SDK](https://github.com/openai/openai-agents-python)
+- Openclaw
 
 ### 可视化策略配置与审计
 

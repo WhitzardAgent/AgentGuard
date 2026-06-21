@@ -18,7 +18,7 @@ pip install langchain==1.2.18
 pip install langchain-openai==1.2.1
 ```
 
-> This guide uses LangChain 1.2.18. You can also build agents with other frameworks.
+> This guide uses LangChain 1.2.18. AgentGuard currently supports LangChain, AutoGen, OpenAI Agents SDK, and Openclaw; here we use LangChain only as the quickest walkthrough example.
 
 #### 2. Write the agent code
 

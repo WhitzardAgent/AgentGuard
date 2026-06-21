@@ -4,7 +4,7 @@ This page explains the concepts you will see across AgentGuard docs and configur
 
 ## Agent
 
-An agent is the application or runtime unit that receives a task, plans steps, calls an LLM, and may invoke tools. It can be built with LangChain, AutoGen, OpenAI Agents SDK, or a custom framework.
+An agent is the application or runtime unit that receives a task, plans steps, calls an LLM, and may invoke tools. It can be built with LangChain, AutoGen, OpenAI Agents SDK, Openclaw, or a custom framework.
 
 AgentGuard does not replace the agent. The agent still owns task understanding, reasoning, orchestration, and tool selection. AgentGuard adds a security layer around the runtime events produced by that agent.
 

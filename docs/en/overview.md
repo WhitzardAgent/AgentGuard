@@ -35,6 +35,7 @@ Currently supported frameworks include:
 - [LangChain](https://github.com/langchain-ai/langchain)
 - [AutoGen](https://github.com/microsoft/autogen)
 - [OpenAI Agents SDK](https://github.com/openai/openai-agents-python)
+- Openclaw
 
 ### Visual policy configuration and audit
 
