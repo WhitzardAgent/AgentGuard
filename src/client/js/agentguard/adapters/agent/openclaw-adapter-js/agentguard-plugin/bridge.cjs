@@ -24,35 +24,15 @@ const DEFAULT_REMOTE_UNAVAILABLE_MODE = "fail_closed";
 const DEFAULT_BLOCK_MESSAGE = "Request blocked by AgentGuard policy.";
 const DEFAULT_SANITIZED_MESSAGE = "Response removed by AgentGuard.";
 const DEFAULT_PHASE_CONFIG_PATH = path.resolve(__dirname, "../../../../../../../../config/plugins.json");
-const DEFAULT_OPENCLAW_TOOLS = [
-  { name: "read", description: "Read files from the local workspace." },
-  { name: "edit", description: "Edit an existing local file." },
-  { name: "write", description: "Write a local file." },
-  { name: "apply_patch", description: "Apply a structured patch to local files." },
-  { name: "exec", description: "Run a shell command." },
-  { name: "process", description: "Inspect or wait on a running process." },
-  { name: "cron", description: "Schedule or inspect recurring tasks." },
-  { name: "get_goal", description: "Read the current goal state." },
-  { name: "create_goal", description: "Create a new goal." },
-  { name: "update_goal", description: "Update the current goal status." },
-  { name: "skill_workshop", description: "Inspect or manage local skills." },
-  { name: "update_plan", description: "Update the current execution plan." },
-  { name: "sessions_list", description: "List available sessions." },
-  { name: "sessions_history", description: "Read session history." },
-  { name: "sessions_send", description: "Send a message to a session." },
-  { name: "sessions_spawn", description: "Spawn a sub-session or child agent." },
-  { name: "sessions_yield", description: "Yield control back to a parent session." },
-  { name: "subagents", description: "Manage subagents." },
-  { name: "session_status", description: "Inspect current session status." },
-  { name: "web_search", description: "Search the web." },
-  { name: "web_fetch", description: "Fetch content from a web page." },
-  { name: "image", description: "Inspect or generate image content." },
-];
+const DEFAULT_TOOL_CATALOG_PATH = path.resolve(
+  __dirname,
+  "../../../../../../../../config/openclaw-default-tools.json",
+);
 
 const PRE_GUARD_PHASES = new Set(["tool_before", "llm_before"]);
 
 function normalizePluginConfig(raw = {}) {
-  const config = loadPluginConfigSource(raw);
+  const { config, configDir } = loadPluginConfigSource(raw);
   const serverUrl = asNonEmptyString(config.serverUrl);
   return {
     serverUrl,
@@ -62,6 +42,7 @@ function normalizePluginConfig(raw = {}) {
     phases: resolvePhaseConfig(config),
     toolCapabilities: normalizeToolCapabilities(config.toolCapabilities),
     identity: normalizeIdentity(config.identity),
+    defaultTools: resolveDefaultTools(config, configDir),
     remoteUnavailableMode:
       asNonEmptyString(config.remoteUnavailableMode) || DEFAULT_REMOTE_UNAVAILABLE_MODE,
     windowSize: asPositiveInteger(config.windowSize, DEFAULT_WINDOW_SIZE),
@@ -75,15 +56,18 @@ function loadPluginConfigSource(raw = {}) {
   if (configPath) {
     return loadConfigFile(configPath);
   }
-  return config;
+  return { config, configDir: undefined };
 }
 
 function loadConfigFile(configPath) {
   const resolvedPath = path.resolve(configPath);
-  return loadJsonObject({
-    filePath: resolvedPath,
-    label: "AgentGuard config",
-  });
+  return {
+    config: loadJsonObject({
+      filePath: resolvedPath,
+      label: "AgentGuard config",
+    }),
+    configDir: path.dirname(resolvedPath),
+  };
 }
 
 function loadPhaseConfigFile(configPath = DEFAULT_PHASE_CONFIG_PATH) {
@@ -136,6 +120,63 @@ function normalizeToolCapabilities(value) {
         : [],
     ]),
   );
+}
+
+function resolveConfigRelativePath(filePath, baseDir) {
+  const normalizedPath = asNonEmptyString(filePath);
+  if (!normalizedPath) {
+    return undefined;
+  }
+  if (path.isAbsolute(normalizedPath)) {
+    return normalizedPath;
+  }
+  return path.resolve(baseDir || process.cwd(), normalizedPath);
+}
+
+function normalizeToolCatalogEntry(entry, index) {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    throw new TypeError(`OpenClaw default tool catalog entry ${index} must be an object.`);
+  }
+  const metadata =
+    entry.metadata && typeof entry.metadata === "object" && !Array.isArray(entry.metadata)
+      ? { ...entry.metadata }
+      : {};
+  const name = asNonEmptyString(entry.name);
+  if (!name) {
+    throw new TypeError(`OpenClaw default tool catalog entry ${index} is missing tool.name.`);
+  }
+  return {
+    name,
+    description: asNonEmptyString(entry.description) || "",
+    input_params: Array.isArray(entry.input_params)
+      ? entry.input_params.filter((item) => typeof item === "string" && item.trim())
+      : [],
+    capabilities: Array.isArray(entry.capabilities)
+      ? entry.capabilities.filter((item) => typeof item === "string" && item.trim())
+      : [],
+    metadata,
+  };
+}
+
+function normalizeToolCatalog(value) {
+  if (!Array.isArray(value)) {
+    throw new TypeError("OpenClaw default tool catalog must define a tools array.");
+  }
+  const tools = value.map((entry, index) => normalizeToolCatalogEntry(entry, index));
+  if (tools.length === 0) {
+    throw new TypeError("OpenClaw default tool catalog must contain at least one tool.");
+  }
+  return tools;
+}
+
+function resolveDefaultTools(config, configDir) {
+  const catalogPath =
+    resolveConfigRelativePath(config.defaultToolCatalogPath, configDir) || DEFAULT_TOOL_CATALOG_PATH;
+  const catalog = loadJsonObject({
+    filePath: catalogPath,
+    label: "OpenClaw default tool catalog",
+  });
+  return normalizeToolCatalog(catalog.tools);
 }
 
 function normalizeIdentity(value) {
@@ -419,6 +460,20 @@ function buildToolReportPayload(tool) {
   };
 }
 
+function mergeDefaultToolCapabilities(tool, capabilityMap) {
+  const configuredCapabilities = capabilityMap?.[tool.name];
+  if (Array.isArray(tool.capabilities) && tool.capabilities.length) {
+    return tool;
+  }
+  if (!Array.isArray(configuredCapabilities) || configuredCapabilities.length === 0) {
+    return tool;
+  }
+  return {
+    ...tool,
+    capabilities: configuredCapabilities,
+  };
+}
+
 class AgentGuardOpenClawBridge {
   constructor(options = {}) {
     this.pluginId = options.pluginId || "agentguard";
@@ -609,8 +664,13 @@ class AgentGuardOpenClawBridge {
           return false;
         }
         return Promise.all(
-          DEFAULT_OPENCLAW_TOOLS.map((tool) =>
-            remote.report_tool(state.context, buildToolReportPayload(tool)),
+          this.config.defaultTools.map((tool) =>
+            remote.report_tool(
+              state.context,
+              buildToolReportPayload(
+                mergeDefaultToolCapabilities(tool, this.config.toolCapabilities),
+              ),
+            ),
           ),
         ).then(() => true);
       })

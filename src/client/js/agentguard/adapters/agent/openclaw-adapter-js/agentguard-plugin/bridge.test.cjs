@@ -51,13 +51,27 @@ function buildAgentContext(overrides = {}) {
 test("configPath loads AgentGuard config from an external JSON file", async () => {
   const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-openclaw-"));
   const configPath = path.join(configDir, "agentguard-config.json");
+  const toolCatalogPath = path.join(configDir, "openclaw-tools.json");
   const sharedPhaseConfig = JSON.parse(
     fs.readFileSync(path.resolve(__dirname, "../../../../../../../../config/plugins.json"), "utf8"),
+  );
+  fs.writeFileSync(
+    toolCatalogPath,
+    JSON.stringify({
+      tools: [
+        {
+          name: "custom_tool",
+          description: "Custom tool catalog entry.",
+          input_params: ["subject", "body"],
+        },
+      ],
+    }),
   );
   fs.writeFileSync(
     configPath,
     JSON.stringify({
       auditPath: "./tmp/agentguard-openclaw-audit-test.jsonl",
+      defaultToolCatalogPath: "./openclaw-tools.json",
     }),
   );
 
@@ -76,6 +90,15 @@ test("configPath loads AgentGuard config from an external JSON file", async () =
   assert.equal(result, undefined);
   assert.equal(bridge.config.auditPath, "./tmp/agentguard-openclaw-audit-test.jsonl");
   assert.deepEqual(bridge.config.phases, sharedPhaseConfig.phases);
+  assert.deepEqual(bridge.config.defaultTools, [
+    {
+      name: "custom_tool",
+      description: "Custom tool catalog entry.",
+      input_params: ["subject", "body"],
+      capabilities: [],
+      metadata: {},
+    },
+  ]);
 });
 
 test("remote-enabled sessions auto-register and report default OpenClaw tools", async () => {
@@ -120,9 +143,36 @@ test("remote-enabled sessions auto-register and report default OpenClaw tools", 
       phases: buildPhases(),
     });
     assert.equal(toolCalls.length >= 10, true);
-    assert.equal(toolCalls.some((call) => call.body.tool.name === "read"), true);
-    assert.equal(toolCalls.some((call) => call.body.tool.name === "exec"), true);
-    assert.equal(toolCalls.some((call) => call.body.tool.name === "web_search"), true);
+    const byName = Object.fromEntries(toolCalls.map((call) => [call.body.tool.name, call.body.tool]));
+    assert.deepEqual(byName.read.input_params, ["path", "offset", "limit"]);
+    assert.deepEqual(byName.exec.input_params, [
+      "command",
+      "workdir",
+      "env",
+      "yieldMs",
+      "background",
+      "timeout",
+      "pty",
+      "elevated",
+      "host",
+      "security",
+      "ask",
+      "node",
+    ]);
+    assert.deepEqual(byName.web_search.input_params, [
+      "query",
+      "count",
+      "country",
+      "language",
+      "freshness",
+      "date_after",
+      "date_before",
+      "search_lang",
+      "ui_lang",
+      "domain_filter",
+      "max_tokens",
+      "max_tokens_per_page",
+    ]);
   } finally {
     bridge?.clearAll();
     globalThis.fetch = originalFetch;

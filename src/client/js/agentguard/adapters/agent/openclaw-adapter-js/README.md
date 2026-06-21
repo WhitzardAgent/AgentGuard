@@ -39,6 +39,7 @@ Example AgentGuard config:
   "serverUrl": "http://127.0.0.1:38080",
   "apiKeyEnvVar": "AGENTGUARD_API_KEY",
   "policy": "builtin",
+  "defaultToolCatalogPath": "./openclaw-default-tools.json",
   "auditPath": "./tmp/openclaw-agentguard-audit.jsonl",
   "remoteUnavailableMode": "fail_closed"
 }
@@ -72,8 +73,10 @@ Then merge the plugin wiring below into `~/.openclaw/openclaw.json`:
 ```
 
 The OpenClaw adapter reads phase wiring from the shared repository config at
-`config/plugins.json`, so the AgentGuard JSON file only needs runtime settings
-such as `serverUrl`, `apiKeyEnvVar`, `policy`, and `auditPath`.
+`config/plugins.json`, and the baseline tool inventory from
+`config/openclaw-default-tools.json`. The AgentGuard JSON file can override the
+tool catalog via `defaultToolCatalogPath`, which is resolved relative to the
+AgentGuard config file when you use `configPath`.
 
 `toolCapabilities` remains optional. It should only be used when you have a
 deliberate tool-name-to-capability mapping to supply, not as a partial list of
@@ -82,7 +85,8 @@ OpenClaw defaults.
 When a remote AgentGuard server is configured, the adapter also auto-registers
 each new session and reports a baseline set of built-in OpenClaw tools so older
 OpenClaw versions without wrapped tool metadata still expose a useful tool
-inventory to AgentGuard.
+inventory to AgentGuard, including top-level `input_params` for each catalog
+entry.
 
 ## Test
 
