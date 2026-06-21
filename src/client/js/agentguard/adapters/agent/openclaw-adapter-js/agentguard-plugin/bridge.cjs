@@ -1,8 +1,12 @@
 "use strict";
 
+const fs = require("node:fs");
+const path = require("node:path");
+
 const {
   AuditLogger,
   AuditRecorder,
+  ClientConfigAPIServer,
   ClientSyncBuffer,
   DecisionType,
   EventType,
@@ -19,18 +23,43 @@ const DEFAULT_POLICY = "builtin";
 const DEFAULT_REMOTE_UNAVAILABLE_MODE = "fail_closed";
 const DEFAULT_BLOCK_MESSAGE = "Request blocked by AgentGuard policy.";
 const DEFAULT_SANITIZED_MESSAGE = "Response removed by AgentGuard.";
+const DEFAULT_PHASE_CONFIG_PATH = path.resolve(__dirname, "../../../../../../../../config/plugins.json");
+const DEFAULT_OPENCLAW_TOOLS = [
+  { name: "read", description: "Read files from the local workspace." },
+  { name: "edit", description: "Edit an existing local file." },
+  { name: "write", description: "Write a local file." },
+  { name: "apply_patch", description: "Apply a structured patch to local files." },
+  { name: "exec", description: "Run a shell command." },
+  { name: "process", description: "Inspect or wait on a running process." },
+  { name: "cron", description: "Schedule or inspect recurring tasks." },
+  { name: "get_goal", description: "Read the current goal state." },
+  { name: "create_goal", description: "Create a new goal." },
+  { name: "update_goal", description: "Update the current goal status." },
+  { name: "skill_workshop", description: "Inspect or manage local skills." },
+  { name: "update_plan", description: "Update the current execution plan." },
+  { name: "sessions_list", description: "List available sessions." },
+  { name: "sessions_history", description: "Read session history." },
+  { name: "sessions_send", description: "Send a message to a session." },
+  { name: "sessions_spawn", description: "Spawn a sub-session or child agent." },
+  { name: "sessions_yield", description: "Yield control back to a parent session." },
+  { name: "subagents", description: "Manage subagents." },
+  { name: "session_status", description: "Inspect current session status." },
+  { name: "web_search", description: "Search the web." },
+  { name: "web_fetch", description: "Fetch content from a web page." },
+  { name: "image", description: "Inspect or generate image content." },
+];
 
 const PRE_GUARD_PHASES = new Set(["tool_before", "llm_before"]);
 
 function normalizePluginConfig(raw = {}) {
-  const config = raw && typeof raw === "object" ? { ...raw } : {};
+  const config = loadPluginConfigSource(raw);
   const serverUrl = asNonEmptyString(config.serverUrl);
   return {
     serverUrl,
     apiKey: resolveApiKey(config),
     policy: asNonEmptyString(config.policy) || DEFAULT_POLICY,
     auditPath: asNonEmptyString(config.auditPath),
-    phases: normalizePhaseConfig(config.phases),
+    phases: resolvePhaseConfig(config),
     toolCapabilities: normalizeToolCapabilities(config.toolCapabilities),
     identity: normalizeIdentity(config.identity),
     remoteUnavailableMode:
@@ -38,6 +67,54 @@ function normalizePluginConfig(raw = {}) {
     windowSize: asPositiveInteger(config.windowSize, DEFAULT_WINDOW_SIZE),
     hasRemoteConfigured: Boolean(serverUrl),
   };
+}
+
+function loadPluginConfigSource(raw = {}) {
+  const config = raw && typeof raw === "object" ? { ...raw } : {};
+  const configPath = asNonEmptyString(config.configPath);
+  if (configPath) {
+    return loadConfigFile(configPath);
+  }
+  return config;
+}
+
+function loadConfigFile(configPath) {
+  const resolvedPath = path.resolve(configPath);
+  return loadJsonObject({
+    filePath: resolvedPath,
+    label: "AgentGuard config",
+  });
+}
+
+function loadPhaseConfigFile(configPath = DEFAULT_PHASE_CONFIG_PATH) {
+  const resolvedPath = path.resolve(configPath);
+  const parsed = loadJsonObject({
+    filePath: resolvedPath,
+    label: "AgentGuard phase config",
+  });
+  return normalizePhaseConfig(parsed.phases);
+}
+
+function loadJsonObject({ filePath, label }) {
+  const source = fs.readFileSync(filePath, "utf8");
+  let parsed;
+  try {
+    parsed = JSON.parse(source);
+  } catch (error) {
+    error.message = `Failed to parse ${label} at ${filePath}: ${error.message}`;
+    throw error;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new TypeError(`${label} at ${filePath} must be a JSON object.`);
+  }
+  return parsed;
+}
+
+function resolvePhaseConfig(config) {
+  if (config.phases && typeof config.phases === "object" && !Array.isArray(config.phases)) {
+    return normalizePhaseConfig(config.phases);
+  }
+  return loadPhaseConfigFile();
 }
 
 function normalizePhaseConfig(phases) {
@@ -307,6 +384,41 @@ function buildLlmOutputText(event = {}) {
   return "";
 }
 
+function buildPluginConfigPayload(config) {
+  return { phases: normalizePhaseConfig(config && config.phases) };
+}
+
+function buildToolReportPayload(tool) {
+  const metadata =
+    tool && typeof tool.metadata === "object" && tool.metadata && !Array.isArray(tool.metadata)
+      ? tool.metadata
+      : {};
+  const capabilities = Array.isArray(tool.capabilities)
+    ? tool.capabilities.filter((item) => typeof item === "string" && item.trim())
+    : [];
+  return {
+    name: asNonEmptyString(tool.name) || "tool",
+    description: asNonEmptyString(tool.description) || "",
+    input_params: Array.isArray(tool.input_params)
+      ? tool.input_params.filter((item) => typeof item === "string" && item.trim())
+      : [],
+    capabilities,
+    labels: {
+      boundary: asNonEmptyString(metadata.boundary) || "internal",
+      sensitivity: asNonEmptyString(metadata.sensitivity) || "low",
+      integrity: asNonEmptyString(metadata.integrity) || "trusted",
+      tags: [
+        ...new Set(
+          [metadata.tags, capabilities]
+            .flat()
+            .filter((item) => typeof item === "string" && item.trim())
+            .map((item) => item.trim()),
+        ),
+      ],
+    },
+  };
+}
+
 class AgentGuardOpenClawBridge {
   constructor(options = {}) {
     this.pluginId = options.pluginId || "agentguard";
@@ -321,6 +433,7 @@ class AgentGuardOpenClawBridge {
     let state = this.sessions.get(sessionKey);
     if (state) {
       state.context = context;
+      this.syncContextMetadata(state);
       state.enforcer.remote.session_id = context.session_id;
       state.enforcer.remote.agent_id = context.agent_id;
       state.enforcer.remote.user_id = context.user_id;
@@ -354,19 +467,158 @@ class AgentGuardOpenClawBridge {
       context,
       enforcer,
       audit,
+      clientPluginConfig: buildPluginConfigPayload(this.config),
+      remotePluginConfig: buildPluginConfigPayload(this.config),
+      clientConfigApi: null,
+      clientConfigApiStartup: null,
+      remoteSessionRegistration: null,
+      defaultToolReporting: null,
     };
+    this.syncContextMetadata(state);
     this.sessions.set(sessionKey, state);
+    this.ensureDefaultToolReports(state);
     return state;
   }
 
   clearSession(sessionKey) {
     if (sessionKey) {
+      const state = this.sessions.get(sessionKey);
       this.sessions.delete(sessionKey);
+      this.stopClientConfigApi(state);
     }
   }
 
   clearAll() {
+    for (const state of this.sessions.values()) {
+      this.stopClientConfigApi(state);
+    }
     this.sessions.clear();
+  }
+
+  syncContextMetadata(state) {
+    state.context.metadata = {
+      ...(state.context.metadata || {}),
+      client_plugin_config: state.clientPluginConfig,
+      remote_plugin_config: state.remotePluginConfig,
+    };
+    if (state.clientConfigApi) {
+      state.context.metadata.client_config_url = state.clientConfigApi.plugin_config_url;
+      state.context.metadata.client_plugin_list_url = state.clientConfigApi.plugin_list_url;
+      state.context.metadata.client_health_url = state.clientConfigApi.health_url;
+    }
+  }
+
+  async updatePluginConfig(state, pluginConfig, { syncRemote = true, syncRemoteSession = syncRemote } = {}) {
+    const nextConfig = pluginConfig && typeof pluginConfig === "object" ? { ...pluginConfig } : {};
+    state.clientPluginConfig = buildPluginConfigPayload({ phases: nextConfig.phases });
+    state.enforcer.update_plugin_config(state.clientPluginConfig);
+    this.syncContextMetadata(state);
+    if (syncRemoteSession) {
+      state.remoteSessionRegistration = null;
+      return this.ensureRemoteSessionRegistered(state);
+    }
+    return Promise.resolve(false);
+  }
+
+  async ensureClientConfigApi(state) {
+    const remote = state.enforcer.remote;
+    if (!remote || !remote.enabled) {
+      return null;
+    }
+    if (state.clientConfigApiStartup) {
+      await state.clientConfigApiStartup;
+      return state.clientConfigApi;
+    }
+    if (!state.clientConfigApi) {
+      const bridge = this;
+      state.clientConfigApi = new ClientConfigAPIServer(
+        {
+          get context() {
+            return state.context;
+          },
+          get session_key() {
+            return state.context.metadata.client_session_key;
+          },
+          update_plugin_config(pluginConfig, options) {
+            return bridge.updatePluginConfig(state, pluginConfig, options);
+          },
+        },
+        { host: "127.0.0.1", port: 0 },
+      );
+    }
+    this.syncContextMetadata(state);
+    state.clientConfigApiStartup = state.clientConfigApi.start()
+      .then(() => {
+        this.syncContextMetadata(state);
+        return state.clientConfigApi;
+      })
+      .catch((error) => {
+        this.logger.warn?.("AgentGuard OpenClaw plugin failed to start client config API.", error);
+        this.syncContextMetadata(state);
+        return state.clientConfigApi;
+      })
+      .finally(() => {
+        state.clientConfigApiStartup = null;
+      });
+    await state.clientConfigApiStartup;
+    return state.clientConfigApi;
+  }
+
+  stopClientConfigApi(state) {
+    if (!state || !state.clientConfigApi) {
+      return;
+    }
+    const server = state.clientConfigApi;
+    state.clientConfigApi = null;
+    state.clientConfigApiStartup = null;
+    Promise.resolve(server.stop()).catch(() => {});
+  }
+
+  ensureRemoteSessionRegistered(state) {
+    const remote = state.enforcer.remote;
+    if (!remote || !remote.enabled) {
+      return Promise.resolve(false);
+    }
+    if (state.remoteSessionRegistration) {
+      return state.remoteSessionRegistration;
+    }
+    state.remoteSessionRegistration = this.ensureClientConfigApi(state)
+      .then(() => {
+        this.syncContextMetadata(state);
+        return remote.register_session(state.context);
+      })
+      .then(() => true)
+      .catch((error) => {
+        this.logger.warn?.("AgentGuard OpenClaw plugin failed to register remote session.", error);
+        return false;
+      });
+    return state.remoteSessionRegistration;
+  }
+
+  ensureDefaultToolReports(state) {
+    const remote = state.enforcer.remote;
+    if (!remote || !remote.enabled) {
+      return Promise.resolve(false);
+    }
+    if (state.defaultToolReporting) {
+      return state.defaultToolReporting;
+    }
+    state.defaultToolReporting = this.ensureRemoteSessionRegistered(state)
+      .then((registered) => {
+        if (!registered) {
+          return false;
+        }
+        return Promise.all(
+          DEFAULT_OPENCLAW_TOOLS.map((tool) =>
+            remote.report_tool(state.context, buildToolReportPayload(tool)),
+          ),
+        ).then(() => true);
+      })
+      .catch((error) => {
+        this.logger.warn?.("AgentGuard OpenClaw plugin failed to report default tools.", error);
+        return false;
+      });
+    return state.defaultToolReporting;
   }
 
   async flushAsync(state, reason = "round_complete") {
@@ -639,6 +891,8 @@ module.exports = {
     buildLlmOutputText,
     buildUserBlockMessage,
     isRemoteUnavailableDecision,
+    loadConfigFile,
+    loadPluginConfigSource,
     normalizePluginConfig,
     shouldFailClosed,
   },

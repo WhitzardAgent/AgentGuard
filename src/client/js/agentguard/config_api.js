@@ -4,6 +4,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const { pluginDescriptions } = require("./plugins/registry");
+const { builtinPluginEntries } = require("./plugins/manager");
 
 const PLUGIN_CONFIG_PATH = "/v1/client/plugins/config";
 const PLUGIN_LIST_PATH = "/v1/client/plugins/list";
@@ -131,17 +132,28 @@ function listRegisteredPlugins() {
   const { registeredPlugins } = require("./plugins/registry");
   const descriptions = pluginDescriptions();
   const deprecated = new Set(["memory", "llm_thought", "final_response"]);
-  return Object.entries(registeredPlugins())
-    .filter(([name]) => !deprecated.has(name))
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([name, PluginClass]) => {
-      const instance = new PluginClass();
-      return {
-        name,
-        description: descriptions[name] || instance.description || "",
-        event_types: [...(instance.event_types || [])],
-      };
+  const plugins = new Map();
+
+  for (const plugin of builtinPluginEntries()) {
+    plugins.set(plugin.name, {
+      name: plugin.name,
+      description: plugin.description || "",
+      event_types: [...(plugin.event_types || [])],
     });
+  }
+
+  for (const [name, PluginClass] of Object.entries(registeredPlugins())) {
+    const instance = new PluginClass();
+    plugins.set(name, {
+      name,
+      description: descriptions[name] || instance.description || "",
+      event_types: [...(instance.event_types || [])].map((eventType) => String(eventType || "")).filter(Boolean),
+    });
+  }
+
+  return [...plugins.values()]
+    .filter((plugin) => !deprecated.has(plugin.name))
+    .sort((left, right) => left.name.localeCompare(right.name));
 }
 
 function readJson(req) {
@@ -168,4 +180,5 @@ module.exports = {
   PLUGIN_CONFIG_PATH,
   PLUGIN_LIST_PATH,
   CLIENT_HEALTH_PATH,
+  listRegisteredPlugins,
 };

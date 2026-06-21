@@ -2,6 +2,7 @@
 
 const { AuditLogger } = require("../../../../audit/logger");
 const { AuditRecorder } = require("../../../../audit/recorder");
+const { ClientConfigAPIServer } = require("../../../../config_api");
 const { BasePlugin, CheckResult } = require("../../../../plugins/base");
 const { PluginManager } = require("../../../../plugins/manager");
 const { RuntimeContext } = require("../../../../schemas/context");
@@ -17,6 +18,7 @@ module.exports = {
   AuditRecorder,
   BasePlugin,
   CheckResult,
+  ClientConfigAPIServer,
   ClientSyncBuffer,
   DecisionType,
   EventType,

@@ -4,71 +4,12 @@ import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 const require = createRequire(import.meta.url);
 const { AgentGuardOpenClawBridge } = require("./bridge.cjs");
 
-const PHASE_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  required: ["client", "server"],
-  properties: {
-    client: {
-      type: "array",
-      items: {
-        anyOf: [{ type: "string" }, { type: "object" }],
-      },
-    },
-    server: {
-      type: "array",
-      items: {
-        anyOf: [{ type: "string" }, { type: "object" }],
-      },
-    },
-  },
-};
-
 const CONFIG_SCHEMA = {
   type: "object",
   additionalProperties: false,
+  required: ["configPath"],
   properties: {
-    serverUrl: { type: "string" },
-    apiKey: { type: "string" },
-    apiKeyEnvVar: { type: "string" },
-    policy: { type: "string" },
-    auditPath: { type: "string" },
-    remoteUnavailableMode: {
-      type: "string",
-      enum: ["allow", "fail_closed"],
-    },
-    windowSize: {
-      type: "integer",
-      minimum: 1,
-    },
-    phases: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        llm_before: PHASE_SCHEMA,
-        llm_after: PHASE_SCHEMA,
-        tool_before: PHASE_SCHEMA,
-        tool_after: PHASE_SCHEMA,
-      },
-    },
-    toolCapabilities: {
-      type: "object",
-      additionalProperties: {
-        type: "array",
-        items: { type: "string" },
-      },
-    },
-    identity: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        userId: { type: "string" },
-        userIdFrom: { type: "string" },
-        agentId: { type: "string" },
-        agentIdFrom: { type: "string" },
-        environment: { type: "string" },
-      },
-    },
+    configPath: { type: "string" },
   },
 };
 

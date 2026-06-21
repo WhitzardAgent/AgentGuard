@@ -4,159 +4,18 @@
     "onStartup": true
   },
   "uiHints": {
-    "serverUrl": {
-      "label": "AgentGuard Server URL",
-      "help": "Optional remote AgentGuard server used for authoritative review decisions."
-    },
-    "apiKey": {
-      "label": "AgentGuard API Key",
-      "help": "Optional bearer token for the AgentGuard server.",
-      "sensitive": true,
-      "placeholder": "sk-agentguard-..."
-    },
-    "auditPath": {
-      "label": "AgentGuard Audit Path",
-      "help": "Optional JSONL path for local hook audit output."
+    "configPath": {
+      "label": "AgentGuard Config Path",
+      "help": "Path to the AgentGuard JSON config file used by this OpenClaw plugin."
     }
   },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
+    "required": ["configPath"],
     "properties": {
-      "serverUrl": {
+      "configPath": {
         "type": "string"
-      },
-      "apiKey": {
-        "type": "string"
-      },
-      "apiKeyEnvVar": {
-        "type": "string"
-      },
-      "policy": {
-        "type": "string"
-      },
-      "auditPath": {
-        "type": "string"
-      },
-      "remoteUnavailableMode": {
-        "type": "string",
-        "enum": ["allow", "fail_closed"]
-      },
-      "windowSize": {
-        "type": "integer",
-        "minimum": 1
-      },
-      "phases": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "llm_before": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["client", "server"],
-            "properties": {
-              "client": {
-                "type": "array",
-                "items": {
-                  "anyOf": [{ "type": "string" }, { "type": "object" }]
-                }
-              },
-              "server": {
-                "type": "array",
-                "items": {
-                  "anyOf": [{ "type": "string" }, { "type": "object" }]
-                }
-              }
-            }
-          },
-          "llm_after": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["client", "server"],
-            "properties": {
-              "client": {
-                "type": "array",
-                "items": {
-                  "anyOf": [{ "type": "string" }, { "type": "object" }]
-                }
-              },
-              "server": {
-                "type": "array",
-                "items": {
-                  "anyOf": [{ "type": "string" }, { "type": "object" }]
-                }
-              }
-            }
-          },
-          "tool_before": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["client", "server"],
-            "properties": {
-              "client": {
-                "type": "array",
-                "items": {
-                  "anyOf": [{ "type": "string" }, { "type": "object" }]
-                }
-              },
-              "server": {
-                "type": "array",
-                "items": {
-                  "anyOf": [{ "type": "string" }, { "type": "object" }]
-                }
-              }
-            }
-          },
-          "tool_after": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["client", "server"],
-            "properties": {
-              "client": {
-                "type": "array",
-                "items": {
-                  "anyOf": [{ "type": "string" }, { "type": "object" }]
-                }
-              },
-              "server": {
-                "type": "array",
-                "items": {
-                  "anyOf": [{ "type": "string" }, { "type": "object" }]
-                }
-              }
-            }
-          }
-        }
-      },
-      "toolCapabilities": {
-        "type": "object",
-        "additionalProperties": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        }
-      },
-      "identity": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "userId": {
-            "type": "string"
-          },
-          "userIdFrom": {
-            "type": "string"
-          },
-          "agentId": {
-            "type": "string"
-          },
-          "agentIdFrom": {
-            "type": "string"
-          },
-          "environment": {
-            "type": "string"
-          }
-        }
       }
     }
   }

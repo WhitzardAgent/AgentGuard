@@ -22,6 +22,17 @@ const BUILTIN_PLUGINS = {
   tool_result: ToolResultPlugin,
 };
 
+function builtinPluginEntries() {
+  return Object.entries(BUILTIN_PLUGINS).map(([name, PluginClass]) => {
+    const plugin = buildPlugin(PluginClass);
+    return {
+      name,
+      description: typeof plugin.description === "string" ? plugin.description : "",
+      event_types: [...(plugin.event_types || [])].map((eventType) => String(eventType || "")).filter(Boolean),
+    };
+  });
+}
+
 function defaultPlugins() {
   return [];
 }
@@ -229,6 +240,7 @@ function inferPhase(plugin) {
 module.exports = {
   PHASE_ORDER,
   PluginManager,
+  builtinPluginEntries,
   defaultPlugins,
   loadPluginConfig,
   load_plugin_config: loadPluginConfig,

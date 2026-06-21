@@ -1,6 +1,9 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const test = require("node:test");
 
 const { AgentGuardOpenClawBridge } = require("./bridge.cjs");
@@ -44,6 +47,87 @@ function buildAgentContext(overrides = {}) {
     ...overrides,
   };
 }
+
+test("configPath loads AgentGuard config from an external JSON file", async () => {
+  const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-openclaw-"));
+  const configPath = path.join(configDir, "agentguard-config.json");
+  const sharedPhaseConfig = JSON.parse(
+    fs.readFileSync(path.resolve(__dirname, "../../../../../../../../config/plugins.json"), "utf8"),
+  );
+  fs.writeFileSync(
+    configPath,
+    JSON.stringify({
+      auditPath: "./tmp/agentguard-openclaw-audit-test.jsonl",
+    }),
+  );
+
+  const bridge = new AgentGuardOpenClawBridge({
+    pluginConfig: { configPath },
+  });
+
+  const result = await bridge.runBeforeToolCall({
+    ctx: buildToolContext(),
+    event: {
+      toolName: "exec",
+      params: { command: "echo ok" },
+    },
+  });
+
+  assert.equal(result, undefined);
+  assert.equal(bridge.config.auditPath, "./tmp/agentguard-openclaw-audit-test.jsonl");
+  assert.deepEqual(bridge.config.phases, sharedPhaseConfig.phases);
+});
+
+test("remote-enabled sessions auto-register and report default OpenClaw tools", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  let bridge = null;
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push({
+      url: String(url),
+      body: options.body ? JSON.parse(options.body) : null,
+    });
+    return {
+      ok: true,
+      async json() {
+        return {};
+      },
+    };
+  };
+
+  try {
+    bridge = new AgentGuardOpenClawBridge({
+      pluginConfig: {
+        serverUrl: "http://server.test",
+        phases: buildPhases(),
+      },
+    });
+
+    const state = bridge.getState(buildToolContext());
+    await bridge.ensureDefaultToolReports(state);
+
+    const registerCalls = calls.filter((call) => call.url.endsWith("/v1/server/session/register"));
+    const toolCalls = calls.filter((call) => call.url.endsWith("/v1/server/tools/report"));
+
+    assert.equal(registerCalls.length, 1);
+    assert.ok(String(registerCalls[0].body.context.metadata.client_config_url || "").endsWith("/v1/client/plugins/config"));
+    assert.ok(String(registerCalls[0].body.context.metadata.client_plugin_list_url || "").endsWith("/v1/client/plugins/list"));
+    assert.ok(String(registerCalls[0].body.context.metadata.client_health_url || "").endsWith("/v1/client/health"));
+    assert.deepEqual(registerCalls[0].body.context.metadata.client_plugin_config, {
+      phases: buildPhases(),
+    });
+    assert.deepEqual(registerCalls[0].body.context.metadata.remote_plugin_config, {
+      phases: buildPhases(),
+    });
+    assert.equal(toolCalls.length >= 10, true);
+    assert.equal(toolCalls.some((call) => call.body.tool.name === "read"), true);
+    assert.equal(toolCalls.some((call) => call.body.tool.name === "exec"), true);
+    assert.equal(toolCalls.some((call) => call.body.tool.name === "web_search"), true);
+  } finally {
+    bridge?.clearAll();
+    globalThis.fetch = originalFetch;
+  }
+});
 
 test("before_tool_call blocks when remote review is unavailable and fail_closed is enabled", async () => {
   const originalFetch = globalThis.fetch;
