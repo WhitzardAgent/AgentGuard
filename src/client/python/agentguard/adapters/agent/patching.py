@@ -197,7 +197,10 @@ def make_guarded_llm_callable(
         @functools.wraps(fn)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
             try:
-                guard_llm_before(guard, label=label, args=args, kwargs=kwargs)
+                before_decision = guard_llm_before(guard, label=label, args=args, kwargs=kwargs)
+                before_blocked = _blocked_llm_value(before_decision)
+                if before_blocked is not None:
+                    return before_blocked
                 raw = await fn(*args, **kwargs)
                 decision = guard_llm_after(guard, raw)
                 blocked = _blocked_llm_value(decision)
@@ -213,7 +216,10 @@ def make_guarded_llm_callable(
     @functools.wraps(fn)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         try:
-            guard_llm_before(guard, label=label, args=args, kwargs=kwargs)
+            before_decision = guard_llm_before(guard, label=label, args=args, kwargs=kwargs)
+            before_blocked = _blocked_llm_value(before_decision)
+            if before_blocked is not None:
+                return before_blocked
             raw = fn(*args, **kwargs)
             decision = guard_llm_after(guard, raw)
             blocked = _blocked_llm_value(decision)
@@ -296,6 +302,18 @@ def _blocked_llm_value(decision: GuardDecision) -> Any | None:
         return {"agentguard": "blocked", "reason": decision.reason}
     if decision.decision_type == DecisionType.SANITIZE:
         return {"agentguard": "sanitized", "reason": decision.reason}
+    if decision.requires_user or decision.requires_remote:
+        return {
+            "agentguard": "pending",
+            "reason": decision.reason,
+            "decision": decision.decision_type.value,
+        }
+    if decision.decision_type == DecisionType.DEGRADE:
+        return {
+            "agentguard": "degraded",
+            "reason": decision.reason,
+            "decision": decision.decision_type.value,
+        }
     return None
 
 
