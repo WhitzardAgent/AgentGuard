@@ -55,10 +55,11 @@ class AgentGuard:
         plugin_payload = _plugin_config_payload(plugin_config)
         snapshot = self._load_snapshot(policy)
         self.session_key = session_key or _generate_session_key()
+        resolved_agent_id = agent_id or session_id
         self.context = RuntimeContext(
             session_id=session_id,
             user_id=user_id,
-            agent_id=agent_id,
+            agent_id=resolved_agent_id,
             policy=policy,
             policy_version=snapshot.version,
             environment=environment,
@@ -289,7 +290,12 @@ class AgentGuard:
             pass
         self.stop_config_api()
 
-    def _report_tool_metadata(self, metadata: ToolMetadata) -> None:
+    def _report_tool_metadata(
+        self,
+        metadata: ToolMetadata,
+        *,
+        retry_on_sync: bool = True,
+    ) -> None:
         if not self._remote.enabled:
             return
         tool_payload = {
@@ -311,7 +317,10 @@ class AgentGuard:
         try:
             self._remote.report_tool(self.context, tool_payload)
         except Exception:
-            pass
+            if retry_on_sync:
+                self._sync_remote_session(report_tools=False)
+                self._report_tool_metadata(metadata, retry_on_sync=False)
+            return
 
     def _register_remote_session(self) -> None:
         if not self._remote.enabled:
@@ -322,13 +331,22 @@ class AgentGuard:
             pass
         self._sync_remote_session()
 
-    def _sync_remote_session(self) -> None:
+    def _sync_remote_session(self, *, report_tools: bool = True) -> None:
         if not self._remote.enabled:
             return
         try:
             self._remote.register_session(self.context)
         except Exception:
-            pass
+            return
+        if report_tools:
+            self._report_registered_tools()
+
+    def _report_registered_tools(self) -> None:
+        for name in self._registry.names():
+            metadata = self._registry.metadata(name)
+            if metadata is None:
+                continue
+            self._report_tool_metadata(metadata, retry_on_sync=False)
 
 
 def _generate_session_key() -> str:
