@@ -7,6 +7,7 @@ import pytest
 from agentguard import AgentGuard
 from agentguard.adapters.agent.base import BaseAgentAdapter
 from agentguard.adapters.agent import langchain as langchain_adapter
+from agentguard.adapters.agent import langgraph as langgraph_adapter
 
 
 def _event_types(guard: AgentGuard) -> list[str]:
@@ -475,6 +476,221 @@ def test_attach_langchain_prefers_raw_tool_callable_arguments_over_generic_input
         "url": "https://example.com/upload",
         "body": "secret",
     }
+
+
+def test_agentguard_exposes_attach_langgraph():
+    guard = AgentGuard("attach-langgraph-api", sandbox="noop")
+
+    assert hasattr(guard, "attach_langgraph")
+
+
+def test_attach_langgraph_patches_compiled_graph_toolnode_and_static_model():
+    class Tool:
+        name = "lookup"
+
+        def func(self, value: str) -> str:
+            return value.upper()
+
+    class ToolNode:
+        __module__ = "langgraph.prebuilt.tool_node"
+
+        def __init__(self) -> None:
+            self.tools_by_name = {"lookup": Tool()}
+
+    class Model:
+        def invoke(self, state, config=None):
+            return {"messages": [f"reply:{state}"]}
+
+    class RunnableCallable:
+        __module__ = "langgraph._internal._runnable"
+
+        def __init__(self) -> None:
+            static_model = Model()
+
+            def call_model(state, config=None):
+                return static_model.invoke(state, config)
+
+            self.func = call_model
+
+    class PregelNode:
+        __module__ = "langgraph.pregel._read"
+
+        def __init__(self, bound) -> None:
+            self.bound = bound
+
+    class CompiledGraph:
+        __module__ = "langgraph.graph.state"
+
+        def __init__(self) -> None:
+            self.nodes = {
+                "tools": PregelNode(ToolNode()),
+                "agent": PregelNode(RunnableCallable()),
+            }
+
+        def invoke(self, state):
+            return self.nodes["agent"].bound.func(state)
+
+    guard = AgentGuard("attach-langgraph-compiled", sandbox="noop")
+    graph = CompiledGraph()
+
+    patched = guard.attach_langgraph(graph)
+    tool_result = graph.nodes["tools"].bound.tools_by_name["lookup"].func(value="abc")
+    llm_result = graph.invoke({"messages": [{"role": "user", "content": "hi"}]})
+
+    assert patched == {"tools": 1, "llm": 1}
+    assert tool_result == "ABC"
+    assert llm_result == {"messages": ["reply:{'messages': [{'role': 'user', 'content': 'hi'}]}"]}
+    assert "tool_invoke" in _event_types(guard)
+    assert "tool_result" in _event_types(guard)
+    assert "llm_input" in _event_types(guard)
+    assert "llm_output" in _event_types(guard)
+    assert _first_event(guard, "tool_invoke").metadata["adapter"] == "langgraph"
+    assert _first_event(guard, "llm_input").metadata["adapter"] == "langgraph"
+
+
+def test_attach_langgraph_patches_builder_toolnode():
+    class Tool:
+        name = "lookup"
+
+        def func(self, value: str) -> str:
+            return value.upper()
+
+    class ToolNode:
+        __module__ = "langgraph.prebuilt.tool_node"
+
+        def __init__(self) -> None:
+            self.tools_by_name = {"lookup": Tool()}
+
+    class StateNodeSpec:
+        __module__ = "langgraph.graph.state"
+
+        def __init__(self, runnable) -> None:
+            self.runnable = runnable
+
+    class Builder:
+        __module__ = "langgraph.graph.state"
+
+        def __init__(self) -> None:
+            self.nodes = {"tools": StateNodeSpec(ToolNode())}
+
+    class Graph:
+        __module__ = "langgraph.graph.state"
+
+        def __init__(self) -> None:
+            self.builder = Builder()
+
+        def invoke(self, state):
+            return state
+
+    guard = AgentGuard("attach-langgraph-builder", sandbox="noop")
+    graph = Graph()
+
+    patched = guard.attach_langgraph(graph, wrap_llm=False)
+    result = graph.builder.nodes["tools"].runnable.tools_by_name["lookup"].func(value="abc")
+
+    assert patched == {"tools": 1, "llm": 0}
+    assert result == "ABC"
+    assert "tool_invoke" in _event_types(guard)
+    assert "tool_result" in _event_types(guard)
+
+
+def test_attach_langgraph_tool_invoke_deny_returns_toolmessage_compatible_value(monkeypatch):
+    calls = []
+    plugin_config = {
+        "phases": {
+            "tool_before": {
+                "client": ["tool_invoke"],
+                "server": [],
+            }
+        }
+    }
+
+    class FakeToolMessage:
+        def __init__(self, *, content: str, name: str, tool_call_id: str) -> None:
+            self.content = content
+            self.name = name
+            self.tool_call_id = tool_call_id
+
+    class Tool:
+        name = "shell_exec"
+        capabilities = ["shell"]
+
+        def invoke(self, tool_call: dict, config=None) -> str:
+            calls.append((tool_call, config))
+            return "ran"
+
+    class ToolNode:
+        __module__ = "langgraph.prebuilt.tool_node"
+
+        def __init__(self) -> None:
+            self.tools_by_name = {"shell_exec": Tool()}
+
+    class PregelNode:
+        __module__ = "langgraph.pregel._read"
+
+        def __init__(self, bound) -> None:
+            self.bound = bound
+
+    class Graph:
+        __module__ = "langgraph.graph.state"
+
+        def __init__(self) -> None:
+            self.nodes = {"tools": PregelNode(ToolNode())}
+
+        def invoke(self, state):
+            return state
+
+    monkeypatch.setattr(langchain_adapter, "_get_langchain_tool_message_class", lambda: FakeToolMessage)
+
+    guard = AgentGuard("attach-langgraph-deny", sandbox="noop", plugin_config=plugin_config)
+    graph = Graph()
+
+    patched = guard.attach_langgraph(graph, wrap_llm=False)
+    result = graph.nodes["tools"].bound.tools_by_name["shell_exec"].invoke(
+        {
+            "id": "tool-call-lg-1",
+            "name": "shell_exec",
+            "type": "tool_call",
+            "args": {
+                "command": "rm -rf /tmp/demo",
+            },
+        }
+    )
+
+    assert patched == {"tools": 1, "llm": 0}
+    assert calls == []
+    assert isinstance(result, FakeToolMessage)
+    assert result.name == "shell_exec"
+    assert result.tool_call_id == "tool-call-lg-1"
+    payload = json.loads(result.content)
+    assert payload["agentguard"] == "blocked"
+    assert payload["decision"] == "deny"
+    assert "Destructive shell command blocked by local plugin." in payload["reason"]
+
+
+def test_langgraph_and_langchain_adapter_boundaries():
+    class PureLangGraph:
+        __module__ = "langgraph.graph.state"
+
+        def __init__(self) -> None:
+            self.nodes = {}
+
+        def invoke(self, state):
+            return state
+
+    class LangChainAgent:
+        __module__ = "langchain.agents.factory"
+
+        def invoke(self, prompt):
+            return prompt
+
+    langgraph = langgraph_adapter.LangGraphAgentAdapter()
+    langchain = langchain_adapter.LangChainAgentAdapter()
+
+    assert langgraph.can_wrap(PureLangGraph()) is True
+    assert langchain.can_wrap(PureLangGraph()) is False
+    assert langgraph.can_wrap(LangChainAgent()) is False
+    assert langchain.can_wrap(LangChainAgent()) is True
 
 
 @pytest.mark.asyncio
