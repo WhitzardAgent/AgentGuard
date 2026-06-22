@@ -166,20 +166,64 @@ def _instantiate_plugin(spec: Any) -> BasePlugin:
     if isinstance(spec, BasePlugin):
         return spec
     if isinstance(spec, type) and issubclass(spec, BasePlugin):
-        return spec()
+        return _build_plugin(spec)
     if isinstance(spec, str):
         cls = get_plugin_class(spec) or _load_plugin_class(spec)
-        return cls()
+        return _build_plugin(cls)
     if isinstance(spec, dict):
         target = spec.get("class") or spec.get("plugin") or spec.get("name")
+        kwargs = _plugin_kwargs(spec)
+        env = _plugin_env(spec)
         if isinstance(target, str):
             cls = get_plugin_class(target) or _load_plugin_class(target)
         elif isinstance(target, type) and issubclass(target, BasePlugin):
             cls = target
         else:
             raise ValueError(f"invalid plugin config entry: {spec!r}")
-        return cls()
+        return _build_plugin(cls, kwargs=kwargs, env=env)
     raise ValueError(f"invalid plugin config entry: {spec!r}")
+
+
+def _plugin_kwargs(spec: dict[str, Any]) -> dict[str, Any]:
+    reserved = {"class", "plugin", "name", "kwargs", "env"}
+    kwargs = {key: value for key, value in spec.items() if key not in reserved}
+    explicit_kwargs = spec.get("kwargs") or {}
+    if not isinstance(explicit_kwargs, dict):
+        raise ValueError(f"plugin kwargs config must be an object: {spec!r}")
+    kwargs.update(explicit_kwargs)
+    return kwargs
+
+
+def _plugin_env(spec: dict[str, Any]) -> dict[str, Any]:
+    env = spec.get("env") or {}
+    if not isinstance(env, dict):
+        raise ValueError(f"plugin env config must be an object: {spec!r}")
+    return dict(env)
+
+
+def _build_plugin(
+    cls: type[BasePlugin],
+    *,
+    kwargs: dict[str, Any] | None = None,
+    env: dict[str, Any] | None = None,
+) -> BasePlugin:
+    plugin_kwargs = dict(kwargs or {})
+    plugin_env = dict(env or {})
+    if _accepts_env_kwarg(cls):
+        return cls(env=plugin_env, **plugin_kwargs)
+    plugin = cls(**plugin_kwargs)
+    plugin.bind_config(env=plugin_env, **plugin_kwargs)
+    return plugin
+
+
+def _accepts_env_kwarg(cls: type[BasePlugin]) -> bool:
+    try:
+        params = inspect.signature(cls.__init__).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(param.kind == inspect.Parameter.VAR_KEYWORD for param in params) or any(
+        param.name == "env" for param in params
+    )
 
 
 def _call_plugin(

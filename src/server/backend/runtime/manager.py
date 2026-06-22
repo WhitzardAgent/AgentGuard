@@ -36,9 +36,10 @@ class RuntimeManager:
         session_health_max_age_s: float = 0.0,
         enable_session_health_monitor: bool = True,
     ) -> None:
-        self.policy = policy or PolicyEngine()
         self.plugins = server_plugin_manager(plugin_config)
         self.plugin_config = plugin_config
+        self._policy_is_config_managed = policy is None
+        self.policy = policy or self._policy_for_plugin_manager(self.plugins) or PolicyEngine()
         self._agent_plugin_configs: dict[str, dict[str, dict[str, Any] | None]] = {}
         self._bind_rule_based_plugins()
         self.degrade = DegradePlanner()
@@ -68,6 +69,8 @@ class RuntimeManager:
         """Replace server-side plugin configuration for subsequent decisions."""
         self.plugins.update_config(plugin_config)
         self.plugin_config = plugin_config
+        if self._policy_is_config_managed:
+            self.policy = self._policy_for_plugin_manager(self.plugins) or PolicyEngine()
         self._bind_rule_based_plugins()
         return [plugin.name for plugin in getattr(self.plugins, "plugins", [])]
 
@@ -415,11 +418,13 @@ class RuntimeManager:
         if agent_plugin_config and agent_plugin_config.get("remote_plugin_config") is not None:
             effective_plugin_config = agent_plugin_config.get("remote_plugin_config")
         effective_plugins = self.plugins
+        effective_policy = self.policy
         if effective_plugin_config is not None:
             effective_plugins = server_plugin_manager(effective_plugin_config)
-            self._bind_rule_based_plugins_for(effective_plugins)
+            effective_policy = self._policy_for_plugin_manager(effective_plugins) or self.policy
+            self._bind_rule_based_plugins_for(effective_plugins, policy=effective_policy)
         else:
-            self._bind_rule_based_plugins_for(effective_plugins)
+            self._bind_rule_based_plugins_for(effective_plugins, policy=effective_policy)
 
         for sig in request.get("local_signals") or []:
             event.add_signal(sig)
@@ -567,16 +572,30 @@ class RuntimeManager:
         return status != "unchanged"
 
     def _bind_rule_based_plugins(self) -> None:
-        self._bind_rule_based_plugins_for(self.plugins)
+        self._bind_rule_based_plugins_for(self.plugins, policy=self.policy)
 
-    def _bind_rule_based_plugins_for(self, plugin_manager: Any) -> None:
+    def _bind_rule_based_plugins_for(self, plugin_manager: Any, *, policy: Any | None = None) -> None:
         try:
             from backend.runtime.plugins.tool_before.rule_based_plugin import RuleBasedPlugin
         except Exception:
             return
+        bound_policy = policy or self.policy
         for plugin in getattr(plugin_manager, "plugins", []):
             if isinstance(plugin, RuleBasedPlugin):
-                plugin.attach_policy(self.policy)
+                plugin.attach_policy(bound_policy)
+
+    def _policy_for_plugin_manager(self, plugin_manager: Any) -> PolicyEngine | None:
+        try:
+            from backend.runtime.plugins.tool_before.rule_based_plugin import RuleBasedPlugin
+        except Exception:
+            return None
+        for plugin in getattr(plugin_manager, "plugins", []):
+            if not isinstance(plugin, RuleBasedPlugin):
+                continue
+            configured_policy_store = plugin.configured_policy_store()
+            if configured_policy_store is not None:
+                return PolicyEngine(store=configured_policy_store)
+        return None
 
 
 def _plugin_result_dict(check: CheckResult) -> dict[str, Any]:

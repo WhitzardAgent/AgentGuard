@@ -1,6 +1,8 @@
 """Base plugin interface and result type for server-side checks."""
 from __future__ import annotations
 
+import os
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -28,6 +30,18 @@ class BasePlugin:
     description: str = ""
     event_types: list[EventType] = []
 
+    def __init__(self, *, env: dict[str, Any] | None = None, **kwargs: Any) -> None:
+        self.bind_config(env=env, **kwargs)
+
+    def bind_config(self, *, env: dict[str, Any] | None = None, **kwargs: Any) -> None:
+        self.config = dict(kwargs)
+        self.env_spec = dict(env or {})
+        self.env = _resolve_env_mapping(self.env_spec)
+        for key, value in self.config.items():
+            setattr(self, key, value)
+        for key, value in self.env.items():
+            setattr(self, key, value)
+
     def applies(self, event: RuntimeEvent) -> bool:
         return not self.event_types or event.event_type in self.event_types
 
@@ -38,3 +52,36 @@ class BasePlugin:
         trajectory_window: list[RuntimeEvent] | None = None,
     ) -> CheckResult:
         raise NotImplementedError
+
+
+_ENV_TOKEN_RE = re.compile(
+    r"^\$(?:\{(?P<braced>[A-Za-z_][A-Za-z0-9_]*)\}|(?P<plain>[A-Za-z_][A-Za-z0-9_]*))$"
+)
+_ENV_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+
+
+def _resolve_env_mapping(values: dict[str, Any]) -> dict[str, Any]:
+    return {key: _resolve_env_value(value) for key, value in values.items()}
+
+
+def _resolve_env_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _resolve_env_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_resolve_env_value(item) for item in value]
+    if not isinstance(value, str):
+        return value
+
+    env_name = _env_name_of(value)
+    if env_name is None:
+        return value
+    return os.environ.get(env_name)
+
+
+def _env_name_of(value: str) -> str | None:
+    match = _ENV_TOKEN_RE.fullmatch(value)
+    if match is not None:
+        return match.group("braced") or match.group("plain")
+    if _ENV_NAME_RE.fullmatch(value) and value in os.environ:
+        return value
+    return None

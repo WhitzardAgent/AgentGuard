@@ -66,13 +66,36 @@ class OpenAICompatibleProvider:
 
 def get_provider(**kwargs: Any) -> Any:
     """Return the real model provider when configured, else the heuristic one."""
-    base_url = os.environ.get("AGENTGUARD_LLM_BASE_URL") or os.environ.get("OPENAI_BASE_URL")
+    config = dict(kwargs.get("config") or {})
+    base_url = _config_value(config, "base_url", "llm_base_url")
+    if not base_url:
+        base_url = os.environ.get("AGENTGUARD_LLM_BASE_URL") or os.environ.get("OPENAI_BASE_URL")
+    backend = str(_config_value(config, "backend", "llm_backend") or "").strip().lower()
+    if backend in {"heuristic", "offline"}:
+        return HeuristicProvider()
     if base_url:
         return OpenAICompatibleProvider(
             base_url=base_url,
-            model=os.environ.get("AGENTGUARD_LLM_MODEL", "gpt-4o-mini"),
-            api_key=os.environ.get("AGENTGUARD_LLM_API_KEY")
-            or os.environ.get("OPENAI_API_KEY", ""),
-            timeout_s=float(os.environ.get("AGENTGUARD_LLM_TIMEOUT_S", "30")),
+            model=str(
+                _config_value(config, "model", "llm_model")
+                or os.environ.get("AGENTGUARD_LLM_MODEL", "gpt-4o-mini")
+            ),
+            api_key=str(
+                _config_value(config, "api_key", "llm_api_key")
+                or os.environ.get("AGENTGUARD_LLM_API_KEY")
+                or os.environ.get("OPENAI_API_KEY", "")
+            ),
+            timeout_s=float(
+                _config_value(config, "timeout_s", "llm_timeout_s")
+                or os.environ.get("AGENTGUARD_LLM_TIMEOUT_S", "30")
+            ),
         )
     return HeuristicProvider()
+
+
+def _config_value(config: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = config.get(key)
+        if value not in (None, ""):
+            return value
+    return None

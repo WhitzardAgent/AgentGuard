@@ -13,6 +13,20 @@ _DENY_RULE = (
     "POLICY: DENY\n"
     'Reason: "no shell"'
 )
+_LLM_RULE = (
+    "RULE: review_sql\n"
+    "ON: tool_call.requested(database_query)\n"
+    'CONDITION: tool.sql MATCHES ".*password.*"\n'
+    "POLICY: LLM_CHECK\n"
+    'Prompt: "Decide allow or deny based on sensitivity."\n'
+    'Reason: "review SQL"'
+)
+_NO_CONDITION_RULE = (
+    "RULE: allow_safe_read\n"
+    "ON: tool_call.requested(read_file)\n"
+    "POLICY: ALLOW\n"
+    'Reason: "safe read allowed"'
+)
 
 
 def _console() -> ConsoleState:
@@ -65,9 +79,30 @@ def test_dsl_parse_and_roundtrip():
 
 
 def test_check_reports_missing_lines():
-    result = _console().check("RULE: x\nPOLICY: DENY")
+    result = _console().check("RULE: x\nCONDITION: tool.name == \"read_file\"")
     assert result["ok"] is False
-    assert any("CONDITION" in e["message"] for e in result["errors"])
+    assert any("POLICY" in e["message"] for e in result["errors"])
+
+
+def test_dsl_parse_allows_rule_without_condition():
+    parsed, report = parse_source(_NO_CONDITION_RULE)
+
+    assert report.ok and len(parsed) == 1
+    rule = parsed[0].rule
+    assert rule.conditions == []
+    source = policy_rule_to_source(rule)
+    assert "CONDITION:" not in source
+
+
+def test_dsl_parse_and_roundtrip_preserves_llm_prompt():
+    parsed, report = parse_source(_LLM_RULE)
+
+    assert report.ok and len(parsed) == 1
+    rule = parsed[0].rule
+    assert rule.metadata["review_kind"] == "llm_check"
+    assert rule.metadata["llm_prompt"] == "Decide allow or deny based on sensitivity."
+    source = policy_rule_to_source(rule)
+    assert 'Prompt: "Decide allow or deny based on sensitivity."' in source
 
 
 def test_publish_list_delete_rule():

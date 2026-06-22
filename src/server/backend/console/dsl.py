@@ -170,11 +170,77 @@ def _parse_conditions(cond_text: str) -> tuple[list[RuleCondition], list[dict[st
         if not expr:
             continue
         raw.append({"expr": expr})
-        m = re.match(r'\S*\.name\s*(==|CONTAINS)\s*"([^"]+)"', expr)
-        if m:
-            op = "contains" if m.group(1).upper() == "CONTAINS" else "eq"
-            enforce.append(RuleCondition(field="payload.tool_name", op=op, value=m.group(2)))
+        compiled = _compile_condition(expr)
+        if compiled is not None:
+            enforce.append(compiled)
     return enforce, raw
+
+
+def _compile_condition(expr: str) -> RuleCondition | None:
+    parsed = re.match(
+        r'^(?P<path>[A-Za-z_][A-Za-z0-9_.]*)\s+'
+        r'(?P<op>NOT IN|MATCHES|CONTAINS|==|!=|>=|<=|>|<|IN)\s+'
+        r'(?P<value>.+)$',
+        expr.strip(),
+        flags=re.IGNORECASE,
+    )
+    if not parsed:
+        return None
+    field = _condition_field(parsed.group("path"))
+    if field is None:
+        return None
+    op = _condition_op(parsed.group("op"))
+    value = _condition_value(parsed.group("value"))
+    return RuleCondition(field=field, op=op, value=value)
+
+
+def _condition_field(path: str) -> str | None:
+    normalized = str(path or "").strip()
+    if not normalized:
+        return None
+    if normalized.startswith("principal."):
+        return normalized
+    if normalized == "tool.name":
+        return "tool.name"
+    if normalized.startswith("tool."):
+        return normalized
+    if normalized.startswith("target."):
+        return normalized
+    if normalized.startswith("payload."):
+        return normalized
+    return None
+
+
+def _condition_op(token: str) -> str:
+    normalized = str(token or "").strip().upper()
+    return {
+        "==": "eq",
+        "!=": "ne",
+        ">": "gt",
+        "<": "lt",
+        ">=": "gte",
+        "<=": "lte",
+        "IN": "in",
+        "NOT IN": "not_in",
+        "CONTAINS": "contains",
+        "MATCHES": "regex",
+    }.get(normalized, "eq")
+
+
+def _condition_value(raw_value: str) -> Any:
+    value = str(raw_value or "").strip()
+    if value.startswith("{") and value.endswith("}"):
+        inner = value[1:-1].strip()
+        if not inner:
+            return []
+        return [_unquote(item.strip()) for item in inner.split(",") if item.strip()]
+    if re.fullmatch(r"-?\d+", value):
+        return int(value)
+    if re.fullmatch(r"-?\d+\.\d+", value):
+        return float(value)
+    if value.lower() in {"true", "false"}:
+        return value.lower() == "true"
+    return _unquote(value)
 
 
 # ---- public API --------------------------------------------------------
@@ -197,7 +263,7 @@ def parse_source(source: str) -> tuple[list[ParsedRule], CheckReport]:
 
         missing = [
             p.rstrip(":")
-            for p in ("RULE:", "CONDITION:", "POLICY:")
+            for p in ("RULE:", "POLICY:")
             if not any(ln.startswith(p) for ln in lines)
         ]
         if missing:
@@ -228,10 +294,24 @@ def parse_source(source: str) -> tuple[list[ParsedRule], CheckReport]:
         severity = _named(normalized, "Severity")
         category = _named(normalized, "Category")
         reason = _unquote(_named(normalized, "Reason"))
+        prompt = _unquote(_named(normalized, "Prompt"))
         degrade_target = _degrade_target(policy_line)
         conditions, raw_conditions = _parse_conditions(_named(normalized, "CONDITION"))
 
         tool_names = [] if tool_pattern in ("", "*") else [tool_pattern]
+        metadata = {
+            "source": "console",
+            "tool_pattern": tool_pattern,
+            "severity": severity,
+            "category": category,
+            "degrade_profile": degrade_target,
+            "dsl_conditions": raw_conditions,
+        }
+        if action == "LLM_CHECK":
+            metadata["review_kind"] = "llm_check"
+            metadata["llm_prompt"] = prompt
+        elif action == "HUMAN_CHECK":
+            metadata["review_kind"] = "human_check"
         rule = PolicyRule(
             rule_id=name,
             effect=ACTION_TO_EFFECT[action],
@@ -240,14 +320,7 @@ def parse_source(source: str) -> tuple[list[ParsedRule], CheckReport]:
             event_types=_on_event_types(normalized),
             tool_names=tool_names,
             conditions=conditions,
-            metadata={
-                "source": "console",
-                "tool_pattern": tool_pattern,
-                "severity": severity,
-                "category": category,
-                "degrade_profile": degrade_target,
-                "dsl_conditions": raw_conditions,
-            },
+            metadata=metadata,
         )
         report.hints.append({"message": f"Validated rule block {index} ('{name}')."})
         parsed.append(
@@ -274,12 +347,15 @@ def policy_rule_to_source(rule: PolicyRule) -> str:
 
     lines = [f"RULE: {rule.rule_id}", f"ON: tool_call.{subtype}({tool_pattern})"]
     cond = _condition_source(rule, tool_pattern)
-    lines.append(f"CONDITION: {cond}")
+    if cond:
+        lines.append(f"CONDITION: {cond}")
     if action == "DEGRADE":
         target = meta.get("degrade_profile") or "safe_default"
         lines.append(f'POLICY: DEGRADE TO "{target}"')
     else:
         lines.append(f"POLICY: {action}")
+    if action == "LLM_CHECK" and meta.get("llm_prompt"):
+        lines.append(f'Prompt: "{meta["llm_prompt"]}"')
     if meta.get("severity"):
         lines.append(f"Severity: {meta['severity']}")
     if meta.get("category"):
@@ -290,17 +366,20 @@ def policy_rule_to_source(rule: PolicyRule) -> str:
 
 
 def _condition_source(rule: PolicyRule, tool_pattern: str) -> str:
-    raw = (rule.metadata or {}).get("dsl_conditions") or []
+    metadata = rule.metadata or {}
+    raw = metadata.get("dsl_conditions") or []
     exprs = [c.get("expr") for c in raw if c.get("expr")]
     if exprs:
         return " AND ".join(exprs)
+    if "dsl_conditions" in metadata:
+        return ""
     if tool_pattern and tool_pattern != "*":
         return f'A.name == "{tool_pattern}"'
     if rule.capabilities:
         return f'A.capability CONTAINS "{rule.capabilities[0]}"'
     if rule.risk_signals:
         return f'A.signal CONTAINS "{rule.risk_signals[0]}"'
-    return 'A.name CONTAINS ""'
+    return ""
 
 
 def rule_to_console_dict(
@@ -320,6 +399,7 @@ def rule_to_console_dict(
         "severity": meta.get("severity") or _severity_for(action),
         "category": meta.get("category") or "policy",
         "reason": rule.reason or "",
+        "prompt": meta.get("llm_prompt") or "",
         "description": "",
         "pack_id": meta.get("pack_id") or ("console" if user_managed else "__default__"),
         "user_managed": user_managed,

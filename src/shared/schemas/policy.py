@@ -70,6 +70,16 @@ def _apply_op(op: str, actual: Any, expected: Any) -> bool:
         return actual == expected
     if op == "ne":
         return actual != expected
+    if op == "gte":
+        try:
+            return float(actual) >= float(expected)
+        except (TypeError, ValueError):
+            return False
+    if op == "lte":
+        try:
+            return float(actual) <= float(expected)
+        except (TypeError, ValueError):
+            return False
     if op == "in":
         return actual in (expected or [])
     if op == "not_in":
@@ -165,15 +175,96 @@ class PolicyRule:
                 return False
 
         event_dict = event.to_dict()
+        principal = _principal_view(event)
+        tool = _tool_view(event)
+        target = _target_view(tool)
+        match_root = {
+            **event_dict,
+            "principal": principal,
+            "tool": tool,
+            "target": target,
+        }
         for cond in self.conditions:
             if cond.field.startswith("trace."):
                 if not _match_trace(cond, trace_window or []):
                     return False
                 continue
-            actual = _resolve(cond.field, event_dict)
+            actual = _resolve(cond.field, match_root)
             if not _apply_op(cond.op, actual, cond.value):
                 return False
         return True
+
+
+def _principal_view(event: RuntimeEvent) -> dict[str, Any]:
+    context = event.context
+    metadata_principal = {}
+    if isinstance(event.metadata, dict):
+        metadata_principal = dict(event.metadata.get("principal") or {})
+    context_principal = {}
+    if isinstance(context.metadata, dict):
+        context_principal = dict(context.metadata.get("principal") or {})
+    principal = {
+        **context_principal,
+        **metadata_principal,
+        "agent_id": context.agent_id,
+        "user_id": context.user_id,
+        "session_id": context.session_id,
+    }
+    if "role" not in principal and isinstance(context.metadata, dict):
+        principal["role"] = context.metadata.get("role")
+    if "trust_level" not in principal and isinstance(context.metadata, dict):
+        principal["trust_level"] = context.metadata.get("trust_level")
+    return principal
+
+
+def _tool_view(event: RuntimeEvent) -> dict[str, Any]:
+    payload = event.payload.to_dict()
+    tool: dict[str, Any] = {}
+    tool_name = payload.get("tool_name")
+    if tool_name is not None:
+        tool["name"] = tool_name
+    arguments = payload.get("arguments")
+    if isinstance(arguments, dict):
+        tool.update(arguments)
+    result = payload.get("result")
+    if result is not None:
+        tool["result"] = result
+    capabilities = payload.get("capabilities")
+    if isinstance(capabilities, list):
+        tool["capabilities"] = list(capabilities)
+    labels = {}
+    if isinstance(event.metadata, dict):
+        labels = dict(event.metadata.get("labels") or event.metadata.get("tool_labels") or {})
+    for key in ("boundary", "sensitivity", "integrity"):
+        if key in labels and labels.get(key) not in (None, ""):
+            tool[key] = labels.get(key)
+    return tool
+
+
+def _target_view(tool: dict[str, Any]) -> dict[str, Any]:
+    url = tool.get("url") or tool.get("uri") or tool.get("endpoint")
+    recipient = tool.get("to") or tool.get("addr") or tool.get("email")
+    raw = url or recipient
+    domain = _extract_domain(str(raw)) if raw not in (None, "") else None
+    return {
+        "url": url,
+        "domain": domain,
+        "raw": raw,
+    }
+
+
+def _extract_domain(raw: str) -> str | None:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    if "@" in text and "://" not in text:
+        return text.rsplit("@", 1)[-1].lower()
+    match = re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://([^/:?#]+)", text)
+    if match:
+        return match.group(1).lower()
+    if re.match(r"^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$", text):
+        return text.lower()
+    return None
 
 
 def _wildcard_match(value: Any, patterns: list[str]) -> bool:
