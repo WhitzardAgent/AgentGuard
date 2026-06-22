@@ -1,0 +1,34 @@
+{
+  "version": "block_email_send",
+  "rules": [
+    {
+      "rule_id": "deny_doc0_send_to_non_admin_for_low_trust",
+      "effect": "deny",
+      "reason": "Low-trust principal cannot send document 0 to non-admin recipients",
+      "priority": 100,
+      "event_types": ["tool_invoke"],
+      "tool_names": ["send_email_to"],
+      "conditions": [
+        {
+          "field": "payload.arguments.doc",
+          "op": "contains",
+          "value": "DOC#0:"
+        },
+        {
+          "field": "payload.arguments.addr",
+          "op": "ne",
+          "value": "admin@example.com"
+        },
+        {
+          "field": "context.metadata.principal.trust_level",
+          "op": "lt",
+          "value": 2
+        }
+      ],
+      "metadata": {
+        "severity": "high",
+        "category": "data_exfiltration"
+      }
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+RULE: block_untrusted_email_send
+TRACE: Retriever -> ...? -> Mailer
+CONDITION: Retriever.name == "retrieve_doc"
+           AND Mailer.name == "send_email_to"
+           AND Retriever.id == 0
+           AND Mailer.addr != "admin@example.com"
+           AND principal.trust_level < 2
+POLICY: DENY
+Severity: high
+Category: data_exfiltration
+Reason: "Low-trust principal cannot send document 0 to non-admin recipients"

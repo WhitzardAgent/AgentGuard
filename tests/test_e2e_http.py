@@ -110,11 +110,11 @@ def test_agentguard_close_unregisters_server_session():
     try:
         snap = guard._remote.fetch_snapshot()
         assert isinstance(snap.get("rules"), list)
-        assert manager.session_pool.get("close-session") is not None
+        assert manager.session_pool.get("close-session", agent_id="close-session") is not None
 
         guard.close()
 
-        assert manager.session_pool.get("close-session") is None
+        assert manager.session_pool.get("close-session", agent_id="close-session") is None
     finally:
         guard.close()
         srv.shutdown()

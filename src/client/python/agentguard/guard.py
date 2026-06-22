@@ -232,6 +232,20 @@ class AgentGuard:
             agent, self, wrap_tools=wrap_tools, wrap_llm=wrap_llm
         )
 
+    def attach_llamaindex(
+        self,
+        agent: Any,
+        *,
+        wrap_tools: bool = True,
+        wrap_llm: bool = True,
+    ) -> dict[str, Any]:
+        """Patch a LlamaIndex workflow agent in-place while preserving its native loop."""
+        from agentguard.adapters.agent.llamaindex import LlamaIndexAgentAdapter  # noqa: PLC0415
+
+        return LlamaIndexAgentAdapter().attach(
+            agent, self, wrap_tools=wrap_tools, wrap_llm=wrap_llm
+        )
+
     def attach_openai_agents(
         self,
         agent: Any,

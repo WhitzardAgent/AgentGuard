@@ -5,6 +5,7 @@ import os
 
 from backend.console.state import ConsoleState
 from backend.runtime.manager import RuntimeManager
+from shared.rules.loader import load_policy
 from backend.skill_service.router import SkillServiceRouter
 
 _manager: RuntimeManager | None = None
@@ -21,6 +22,9 @@ def get_manager() -> RuntimeManager:
             or os.getenv("AGENTGUARD_PLUGIN_CONFIG")
         )
         _manager = RuntimeManager(plugin_config=plugin_config)
+        policy_path = os.getenv("AGENTGUARD_POLICY")
+        if policy_path:
+            _manager.policy.store.set_rules(load_policy(policy_path), version=policy_path)
     return _manager
 
 

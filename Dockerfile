@@ -24,6 +24,7 @@ RUN pip install "pydantic>=2.5,<3.0" "fastapi>=0.110" "uvicorn>=0.27"
 COPY src/server ./src/server
 COPY src/shared ./src/shared
 COPY rules ./rules
+COPY config ./config
 COPY plugins ./plugins
 COPY scripts ./scripts
 
