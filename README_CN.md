@@ -373,56 +373,62 @@ https://github.com/user-attachments/assets/75a17e37-7f51-4c59-96fa-ea449eb79859
 
 ## 👥 贡献者
 
-<div>
-  <a href="https://djrrr.github.io/" target="_blank" rel="noreferrer" style="display: inline-block; width: 132px; margin: 0 14px 18px 0; text-decoration: none; color: inherit; vertical-align: top; line-height: 1.35;">
-    <img src="./docs/figs/avatar-placeholder.svg" width="56" height="56" alt="戴嘉润" /><br />
-    <sub><strong>戴嘉润</strong></sub><br />
-    <sub>助理教授</sub><br />
-    <sub>复旦大学</sub>
-  </a>
-  <span style="display: inline-block; width: 132px; margin: 0 14px 18px 0; vertical-align: top; line-height: 1.35;">
-    <img src="./docs/figs/avatar-placeholder.svg" width="56" height="56" alt="罗嘉骐" /><br />
-    <sub><strong>罗嘉骐</strong></sub><br />
-    <sub>博士生</sub><br />
-    <sub>复旦大学</sub>
-  </span>
-  <span style="display: inline-block; width: 132px; margin: 0 14px 18px 0; vertical-align: top; line-height: 1.35;">
-    <img src="./docs/figs/avatar-placeholder.svg" width="56" height="56" alt="彭松洋" /><br />
-    <sub><strong>彭松洋</strong></sub><br />
-    <sub>硕士生</sub><br />
-    <sub>复旦大学</sub>
-  </span>
-  <span style="display: inline-block; width: 132px; margin: 0 14px 18px 0; vertical-align: top; line-height: 1.35;">
-    <img src="./docs/figs/avatar-placeholder.svg" width="56" height="56" alt="陈知乐" /><br />
-    <sub><strong>陈知乐</strong></sub><br />
-    <sub>硕士生</sub><br />
-    <sub>复旦大学</sub>
-  </span>
-  <span style="display: inline-block; width: 132px; margin: 0 14px 18px 0; vertical-align: top; line-height: 1.35;">
-    <img src="./docs/figs/avatar-placeholder.svg" width="56" height="56" alt="黄景任" /><br />
-    <sub><strong>黄景任</strong></sub><br />
-    <sub>硕士生</sub><br />
-    <sub>复旦大学</sub>
-  </span>
-  <a href="https://zhxshen.github.io/" target="_blank" rel="noreferrer" style="display: inline-block; width: 132px; margin: 0 14px 18px 0; text-decoration: none; color: inherit; vertical-align: top; line-height: 1.35;">
-    <img src="./docs/figs/avatar-placeholder.svg" width="56" height="56" alt="申卓祥" /><br />
-    <sub><strong>申卓祥</strong></sub><br />
-    <sub>工程博士生</sub><br />
-    <sub>复旦大学</sub>
-  </a>
-  <a href="https://ravensanstete.github.io/" target="_blank" rel="noreferrer" style="display: inline-block; width: 132px; margin: 0 14px 18px 0; text-decoration: none; color: inherit; vertical-align: top; line-height: 1.35;">
-    <img src="./docs/figs/avatar-placeholder.svg" width="56" height="56" alt="潘旭东" /><br />
-    <sub><strong>潘旭东</strong></sub><br />
-    <sub>助理教授</sub><br />
-    <sub>复旦大学</sub>
-  </a>
-  <a href="https://ghong.site/" target="_blank" rel="noreferrer" style="display: inline-block; width: 132px; margin: 0 14px 18px 0; text-decoration: none; color: inherit; vertical-align: top; line-height: 1.35;">
-    <img src="./docs/figs/avatar-placeholder.svg" width="56" height="56" alt="洪赓" /><br />
-    <sub><strong>洪赓</strong></sub><br />
-    <sub>助理教授</sub><br />
-    <sub>复旦大学</sub>
-  </a>
-</div>
+<table width="100%">
+  <tr>
+    <td width="20%" valign="top">
+      <a href="https://djrrr.github.io/" target="_blank" rel="noreferrer"><img src="./docs/figs/avatar-placeholder.svg" width="56" height="56" alt="戴嘉润" /></a><br />
+      <a href="https://djrrr.github.io/" target="_blank" rel="noreferrer"><sub><strong>戴嘉润</strong></sub></a><br />
+      <sub>助理教授</sub><br />
+      <sub>复旦大学</sub>
+    </td>
+    <td width="20%" valign="top">
+      <img src="./docs/figs/avatar-placeholder.svg" width="56" height="56" alt="罗嘉骐" /><br />
+      <sub><strong>罗嘉骐</strong></sub><br />
+      <sub>博士生</sub><br />
+      <sub>复旦大学</sub>
+    </td>
+    <td width="20%" valign="top">
+      <img src="./docs/figs/avatar-placeholder.svg" width="56" height="56" alt="彭松洋" /><br />
+      <sub><strong>彭松洋</strong></sub><br />
+      <sub>硕士生</sub><br />
+      <sub>复旦大学</sub>
+    </td>
+    <td width="20%" valign="top">
+      <img src="./docs/figs/avatar-placeholder.svg" width="56" height="56" alt="陈知乐" /><br />
+      <sub><strong>陈知乐</strong></sub><br />
+      <sub>硕士生</sub><br />
+      <sub>复旦大学</sub>
+    </td>
+    <td width="20%" valign="top">
+      <img src="./docs/figs/avatar-placeholder.svg" width="56" height="56" alt="黄景任" /><br />
+      <sub><strong>黄景任</strong></sub><br />
+      <sub>硕士生</sub><br />
+      <sub>复旦大学</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="20%" valign="top">
+      <a href="https://zhxshen.github.io/" target="_blank" rel="noreferrer"><img src="./docs/figs/avatar-placeholder.svg" width="56" height="56" alt="申卓祥" /></a><br />
+      <a href="https://zhxshen.github.io/" target="_blank" rel="noreferrer"><sub><strong>申卓祥</strong></sub></a><br />
+      <sub>工程博士生</sub><br />
+      <sub>复旦大学</sub>
+    </td>
+    <td width="20%" valign="top">
+      <a href="https://ravensanstete.github.io/" target="_blank" rel="noreferrer"><img src="./docs/figs/avatar-placeholder.svg" width="56" height="56" alt="潘旭东" /></a><br />
+      <a href="https://ravensanstete.github.io/" target="_blank" rel="noreferrer"><sub><strong>潘旭东</strong></sub></a><br />
+      <sub>助理教授</sub><br />
+      <sub>复旦大学</sub>
+    </td>
+    <td width="20%" valign="top">
+      <a href="https://ghong.site/" target="_blank" rel="noreferrer"><img src="./docs/figs/avatar-placeholder.svg" width="56" height="56" alt="洪赓" /></a><br />
+      <a href="https://ghong.site/" target="_blank" rel="noreferrer"><sub><strong>洪赓</strong></sub></a><br />
+      <sub>助理教授</sub><br />
+      <sub>复旦大学</sub>
+    </td>
+    <td width="20%" valign="top">&nbsp;</td>
+    <td width="20%" valign="top">&nbsp;</td>
+  </tr>
+</table>
 
 排名不分先后，感谢所有为 AgentGuard 贡献过想法、代码和反馈的朋友。
 
