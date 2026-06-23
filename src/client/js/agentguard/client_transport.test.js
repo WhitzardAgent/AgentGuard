@@ -346,7 +346,19 @@ test("adapters aggregate export skips missing optional agent adapters", () => {
   assert.ok(adapters.agent);
   assert.ok(adapters.llm);
   assert.equal(typeof adapters.agent.LangChainAgentAdapter, "function");
-  assert.equal(typeof adapters.agent.OpenAIAgentsAdapter, "function");
+  assert.equal(adapters.agent.AutogenAgentAdapter, undefined);
+  assert.equal(adapters.agent.OpenAIAgentsAdapter, undefined);
+});
+
+test("js guard keeps optional adapter entrypoints as explicit unsupported errors", async () => {
+  const { AgentGuard } = require("./guard");
+
+  const guard = new AgentGuard("js-missing-optional-agent-adapters", { sandbox: "noop" });
+
+  assert.throws(() => guard.attach_autogen({}), /attach_autogen\(\) is not available in the JS client/);
+  assert.throws(() => guard.attach_openai_agents({}), /attach_openai_agents\(\) is not available in the JS client/);
+
+  await guard.close();
 });
 
 test("js base agent adapter attach delegates to patch hooks", () => {
@@ -548,40 +560,5 @@ test("js langchain adapter strips destructuring noise and records original tool 
       body: "secret",
     },
   });
-  await guard.close();
-});
-
-test("js autogen adapter patches handoffs and create_stream", async () => {
-  const { AgentGuard } = require("./guard");
-
-  class Handoff {
-    constructor() {
-      this.name = "delegate";
-      this._func = async ({ task }) => `handoff:${task}`;
-    }
-  }
-
-  class ModelClient {
-    async create_stream(prompt) {
-      return { content: `stream:${prompt}` };
-    }
-  }
-
-  class Agent {
-    constructor() {
-      this._tools = [];
-      this._handoffs = [new Handoff()];
-      this._model_client = new ModelClient();
-    }
-  }
-
-  const guard = new AgentGuard("js-autogen-handoffs", { sandbox: "noop" });
-  const agent = new Agent();
-  const patched = guard.attach_autogen(agent);
-
-  assert.equal(patched.tools, 1);
-  assert.equal(patched.llm, 1);
-  assert.equal(await agent._handoffs[0]._func({ task: "review" }), "handoff:review");
-  assert.deepEqual(await agent._model_client.create_stream("hello"), { content: "stream:hello" });
   await guard.close();
 });

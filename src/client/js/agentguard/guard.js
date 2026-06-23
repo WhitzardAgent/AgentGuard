@@ -23,9 +23,8 @@ const { ToolWrapper } = require("./tools/wrapper");
 const { UGuardEnforcer } = require("./u_guard/enforcer");
 const { PolicySnapshot } = require("./u_guard/policy_snapshot");
 const { RemoteGuardClient } = require("./u_guard/remote_client");
+const { AdapterError } = require("./utils/errors");
 const { LangChainAgentAdapter } = require("./adapters/agent/langchain");
-const { AutogenAgentAdapter } = require("./adapters/agent/autogen");
-const { OpenAIAgentsAdapter } = require("./adapters/agent/openai_agents");
 
 class AgentGuard {
   constructor(session_id, options = {}) {
@@ -189,7 +188,9 @@ class AgentGuard {
   }
 
   attach_autogen(agent, options = {}) {
-    return new AutogenAgentAdapter().attach(agent, this, options);
+    void agent;
+    void options;
+    throw new AdapterError("attach_autogen() is not available in the JS client");
   }
 
   attach_langchain(agent, options = {}) {
@@ -197,7 +198,9 @@ class AgentGuard {
   }
 
   attach_openai_agents(agent, options = {}) {
-    return new OpenAIAgentsAdapter().attach(agent, this, options);
+    void agent;
+    void options;
+    throw new AdapterError("attach_openai_agents() is not available in the JS client");
   }
 
   register_skill(skill) {
