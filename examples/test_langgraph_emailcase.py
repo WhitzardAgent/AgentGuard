@@ -10,11 +10,13 @@ from agentguard import Guard, Principal
 
 def retrieve_doc(id: int) -> str:
     """Retrieve a document by integer id."""
+    print(f"Retrieving document id={id}: This is a mocked document body.")
     return f"DOC#{id}: This is a mocked document body."
 
 
 def send_email_to(doc: str, addr: str) -> str:
     """Send a document to an email address."""
+    print(f"Email has sent to {addr}: {doc}")
     return f"Email has sent to {addr}: {doc}"
 
 
@@ -82,14 +84,14 @@ if __name__ == "__main__":
 
     # 🚩 Create a principal for the agent
     principal = Principal(
-        agent_id="llamaindex-remote-demo",
-        session_id="llamaindex-remote-session",
+        agent_id="langgraph-remote-demo",
+        session_id="langgraph-remote-session",
         role="default",
         trust_level=1,
     )
 
     # 🚩 Start a session with the principal
-    guard.start(principal=principal, goal="llamaindex remote runnable host demo")
+    guard.start(principal=principal, goal="langgraph remote runnable host demo")
 
     # 🚩 Attach the guard to the LangChain agent
     guard.attach_langgraph(agent)

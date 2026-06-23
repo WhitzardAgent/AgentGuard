@@ -10,6 +10,7 @@ from agentguard import Guard, Principal
 
 def retrieve_doc(id: int) -> str:
     """Retrieve a document by integer id."""
+    print(f"Retrieving document id={id}: This is a mocked document body.")
     return f"DOC#{id}: This is a mocked document body."
 
 def get_control_server_url() -> str:
@@ -22,6 +23,7 @@ def get_control_server_url() -> str:
     return url
 def send_email_to(doc: str, addr: str) -> str:
     """Send a document to an email address."""
+    print(f"Email has sent to {addr}: {doc}")
     return f"Email has sent to {addr}: {doc}"
 
 
