@@ -8,6 +8,9 @@
     "docs:serve": "NODE_PATH=./node_modules npx -y honkit@6.0.3 serve docs --port 4000"
   },
   "dependencies": {
-    "honkit-plugin-doc-lang-switcher": "file:./docs/honkit-plugin-doc-lang-switcher"
+    "@langchain/openai": "^1.5.0",
+    "honkit-plugin-doc-lang-switcher": "file:./docs/honkit-plugin-doc-lang-switcher",
+    "langchain": "^1.4.6",
+    "readline-sync": "^1.4.10"
   }
 }

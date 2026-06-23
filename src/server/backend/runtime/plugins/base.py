@@ -15,7 +15,7 @@ from shared.schemas.events import EventType, RuntimeEvent
 class CheckResult:
     decision_candidate: GuardDecision | None = None
     risk_signals: list[str] = field(default_factory=list)
-    is_final: bool = False
+    is_final: bool = True
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @staticmethod

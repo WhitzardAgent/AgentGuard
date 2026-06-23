@@ -23,6 +23,7 @@ RUN pip install "pydantic>=2.5,<3.0" "fastapi>=0.110" "uvicorn>=0.27"
 # Server source + shared source (PYTHONPATH layout, no editable install needed).
 COPY src/server ./src/server
 COPY src/shared ./src/shared
+COPY config ./config
 COPY rules ./rules
 COPY config ./config
 COPY plugins ./plugins
