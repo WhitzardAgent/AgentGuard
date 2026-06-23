@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import types
 
 import pytest
 
@@ -697,6 +698,12 @@ def test_langgraph_and_langchain_adapter_boundaries():
 async def test_attach_openai_agents_patches_async_on_invoke_tool():
     class FunctionTool:
         name = "send"
+        description = "Send a message."
+        params_json_schema = {
+            "type": "object",
+            "properties": {"message": {"type": "string"}},
+            "required": ["message"],
+        }
 
         async def on_invoke_tool(self, run_context, json_input: str) -> str:
             args = json.loads(json_input)
@@ -730,6 +737,7 @@ async def test_attach_openai_agents_patches_async_on_invoke_tool():
     assert patched["llm"] == 1
     assert result == "sent:hello"
     assert response["choices"][0]["message"]["content"] == "hi"
+    assert guard._registry.metadata("send").required_args == ["message"]
     assert "tool_invoke" in _event_types(guard)
     assert "tool_result" in _event_types(guard)
     assert "llm_input" in _event_types(guard)
@@ -981,3 +989,177 @@ async def test_attach_llamaindex_streaming_llm_emits_after_output():
     assert _event_types(guard).count("llm_input") == 1
     assert _event_types(guard).count("llm_output") == 1
     assert _first_event(guard, "llm_output").metadata["label"] == "astream_chat"
+    assert _first_event(guard, "tool_invoke").payload.arguments == {"message": "hello"}
+
+
+@pytest.mark.asyncio
+async def test_attach_openai_agents_uses_get_all_tools_when_tools_are_deferred():
+    class FunctionTool:
+        name = "send"
+
+        async def on_invoke_tool(self, run_context, json_input: str) -> str:
+            args = json.loads(json_input)
+            return f"sent:{args['message']}"
+
+    class Agent:
+        def __init__(self) -> None:
+            self.tools = []
+            self._resolved_tool = FunctionTool()
+
+        async def get_all_tools(self, run_context):
+            _ = run_context
+            return [self._resolved_tool]
+
+    guard = AgentGuard("attach-openai-get-all-tools", sandbox="noop")
+    agent = Agent()
+
+    patched = guard.attach_openai_agents(agent)
+    result = await agent._resolved_tool.on_invoke_tool(None, '{"message": "hello"}')
+
+    assert patched["tools"] == 1
+    assert patched["llm"] == 0
+    assert result == "sent:hello"
+    assert "tool_invoke" in _event_types(guard)
+    assert "tool_result" in _event_types(guard)
+
+
+@pytest.mark.asyncio
+async def test_attach_openai_agents_extracts_nested_input_payload_and_real_tool_args():
+    class FunctionTool:
+        name = "send"
+
+        def __init__(self) -> None:
+            self.input_schema = {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string"},
+                    "body": {"type": "string"},
+                },
+                "required": ["url", "body"],
+            }
+
+        async def on_invoke_tool(self, ctx, input: dict[str, object]) -> str:
+            payload = input.get("input") if isinstance(input, dict) else None
+            assert isinstance(payload, str)
+            args = json.loads(payload)
+            return f"sent:{args['url']}:{args['body']}"
+
+    class Agent:
+        def __init__(self) -> None:
+            self.tools = [FunctionTool()]
+
+    guard = AgentGuard("attach-openai-nested-input", sandbox="noop")
+    agent = Agent()
+
+    patched = guard.attach_openai_agents(agent, wrap_llm=False)
+    result = await agent.tools[0].on_invoke_tool(
+        None,
+        {
+            "ctx": "ignored",
+            "input": '{"url": "https://example.com", "body": "secret"}',
+        },
+    )
+
+    assert patched["tools"] == 1
+    assert patched["llm"] == 0
+    assert result == "sent:https://example.com:secret"
+    assert guard._registry.metadata("send").required_args == ["url", "body"]
+    assert _first_event(guard, "tool_invoke").payload.arguments == {
+        "url": "https://example.com",
+        "body": "secret",
+    }
+
+
+@pytest.mark.asyncio
+async def test_attach_openai_agents_patches_model_get_response_without_double_wrapping_client():
+    class Responses:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def create(self, **kwargs):
+            self.calls += 1
+            return {"content": kwargs["input"]}
+
+    class Client:
+        def __init__(self) -> None:
+            self.responses = Responses()
+
+    class Model:
+        def __init__(self) -> None:
+            self._client = Client()
+
+        async def get_response(self, prompt: str) -> dict[str, str]:
+            return await self._client.responses.create(input=prompt)
+
+    class Agent:
+        def __init__(self) -> None:
+            self.model = Model()
+            self.tools = []
+
+    guard = AgentGuard("attach-openai-model-get-response", sandbox="noop")
+    agent = Agent()
+
+    patched = guard.attach_openai_agents(agent, wrap_tools=False)
+    result = await agent.model.get_response("hello")
+
+    assert patched["tools"] == 0
+    assert patched["llm"] == 1
+    assert result == {"content": "hello"}
+    assert agent.model._client.responses.calls == 1
+    assert _event_types(guard).count("llm_input") == 1
+    assert _event_types(guard).count("llm_output") == 1
+
+
+@pytest.mark.asyncio
+async def test_attach_openai_agents_patches_string_model_via_runner(monkeypatch):
+    class FakeModel:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def get_response(self, prompt: str) -> dict[str, str]:
+            self.calls += 1
+            return {"content": prompt}
+
+    class FakeProvider:
+        def __init__(self) -> None:
+            self.models: list[FakeModel] = []
+
+        def get_model(self, model_name: str) -> FakeModel:
+            _ = model_name
+            model = FakeModel()
+            self.models.append(model)
+            return model
+
+    class RunConfig:
+        def __init__(self, model_provider=None) -> None:
+            self.model_provider = model_provider or FakeProvider()
+
+    class Runner:
+        @classmethod
+        async def run(cls, starting_agent, prompt: str, run_config=None):
+            _ = cls
+            cfg = run_config or RunConfig()
+            model = cfg.model_provider.get_model(starting_agent.model)
+            return await model.get_response(prompt)
+
+    fake_agents = types.ModuleType("agents")
+    fake_agents.RunConfig = RunConfig
+    fake_agents.Runner = Runner
+    monkeypatch.setitem(__import__("sys").modules, "agents", fake_agents)
+
+    class Agent:
+        def __init__(self) -> None:
+            self.model = "gpt-4o-mini"
+            self.tools = []
+
+    guard = AgentGuard("attach-openai-string-model", sandbox="noop")
+    agent = Agent()
+
+    patched = guard.attach_openai_agents(agent, wrap_tools=False)
+    result = await Runner.run(agent, "hello")
+
+    assert patched["tools"] == 0
+    assert patched["llm"] == 1
+    assert result == {"content": "hello"}
+    assert _event_types(guard).count("llm_input") == 1
+    assert _event_types(guard).count("llm_output") == 1

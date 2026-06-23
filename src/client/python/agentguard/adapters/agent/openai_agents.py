@@ -1,16 +1,22 @@
 """OpenAI Agents SDK adapter (best-effort, optional dependency)."""
 from __future__ import annotations
 
+import asyncio
+import copy
+import dataclasses
 import functools
 import inspect
 import json
+import sys
+import threading
 from typing import Any
 
-from agentguard.adapters.agent.base import BaseAgentAdapter, ToolBinding
+from agentguard.adapters.agent.base import BaseAgentAdapter, LLMBinding, ToolBinding
 from agentguard.adapters.agent.patching import (
     guard_tool_after,
     guard_tool_before,
     is_guarded,
+    patch_llm_methods,
     set_attr,
     tool_name,
 )
@@ -37,59 +43,69 @@ class OpenAIAgentsAdapter(BaseAgentAdapter):
         raise AdapterError("openai agent exposes no run/invoke")
 
     def gettools(self, agent: Any) -> list[ToolBinding]:
-        bindings: list[ToolBinding] = []
+        resolved_tools = _resolve_openai_agent_tools(agent)
+        if resolved_tools is not _UNRESOLVED:
+            bindings, needs_fallback = self._collect_openai_tool_bindings(
+                resolved_tools,
+                source="get_all_tools",
+            )
+            if not needs_fallback:
+                return bindings
+
         tools = getattr(agent, "tools", None) or getattr(agent, "_tools", None)
-        if isinstance(tools, dict):
-            for name, tool in list(tools.items()):
-                if _looks_like_function_tool(tool):
-                    original = getattr(tool, "on_invoke_tool", None)
-                    if callable(original) and not is_guarded(original):
-                        bindings.append(
-                            self.build_tool_binding(
-                                name=str(name),
-                                fn=original,
-                                owner=tool,
-                                attr="on_invoke_tool",
-                                tool=tool,
-                                installer=_install_openai_tool_binding,
-                            )
-                        )
-                elif callable(tool):
+        fallback_bindings, _ = self._collect_openai_tool_bindings(
+            tools,
+            source="agent.tools",
+            use_container_patch=True,
+        )
+        if resolved_tools is not _UNRESOLVED:
+            return bindings + fallback_bindings
+        return fallback_bindings
+
+    def _collect_openai_tool_bindings(
+        self,
+        tools: Any,
+        *,
+        source: str,
+        use_container_patch: bool = False,
+    ) -> tuple[list[ToolBinding], bool]:
+        bindings: list[ToolBinding] = []
+        needs_fallback = False
+        for name, tool, container, key in _iter_openai_tool_entries(tools, use_container_patch=use_container_patch):
+            metadata = {"source": source}
+            if hasattr(tool, "on_invoke_tool") and hasattr(tool, "name"):
+                original = getattr(tool, "on_invoke_tool", None)
+                if callable(original) and not is_guarded(original):
                     bindings.append(
                         self.build_tool_binding(
-                            name=str(name),
-                            fn=tool,
-                            container=tools,
-                            key=name,
+                            name=name,
+                            fn=original,
+                            owner=tool,
+                            attr="on_invoke_tool",
                             tool=tool,
+                            installer=_install_openai_tool_binding,
+                            metadata=metadata,
                         )
                     )
-        elif isinstance(tools, list):
-            for idx, tool in enumerate(list(tools)):
-                if _looks_like_function_tool(tool):
-                    original = getattr(tool, "on_invoke_tool", None)
-                    if callable(original) and not is_guarded(original):
-                        bindings.append(
-                            self.build_tool_binding(
-                                name=tool_name(tool, fallback=f"tool_{idx}"),
-                                fn=original,
-                                owner=tool,
-                                attr="on_invoke_tool",
-                                tool=tool,
-                                installer=_install_openai_tool_binding,
-                            )
-                        )
-                elif callable(tool):
-                    bindings.append(
-                        self.build_tool_binding(
-                            name=tool_name(tool, fallback=f"tool_{idx}"),
-                            fn=tool,
-                            container=tools,
-                            key=idx,
-                            tool=tool,
-                        )
+                continue
+
+            if callable(tool) and container is not None:
+                bindings.append(
+                    self.build_tool_binding(
+                        name=name,
+                        fn=tool,
+                        container=container,
+                        key=key,
+                        tool=tool,
+                        metadata=metadata,
                     )
-        return bindings
+                )
+                continue
+
+            if callable(tool):
+                needs_fallback = True
+
+        return bindings, needs_fallback
 
     def getllm(self, agent: Any):
         bindings = []
@@ -98,36 +114,139 @@ class OpenAIAgentsAdapter(BaseAgentAdapter):
             if id(candidate) in seen:
                 continue
             seen.add(id(candidate))
+            model_bindings = self.collect_llm_methods(
+                candidate,
+                methods=("get_response", "stream_response"),
+            )
+            if model_bindings:
+                bindings.extend(model_bindings)
+                continue
+
             bindings.extend(
                 self.collect_llm_methods(
                     candidate,
                     methods=("create", "complete", "completion", "generate", "invoke", "ainvoke"),
                 )
             )
-            chat = getattr(candidate, "chat", None)
-            completions = getattr(chat, "completions", None) if chat is not None else None
-            if completions is not None and id(completions) not in seen:
-                seen.add(id(completions))
-                bindings.extend(
-                    self.collect_llm_methods(
-                        completions,
-                        methods=("create",),
-                    )
-                )
-            responses = getattr(candidate, "responses", None)
-            if responses is not None and id(responses) not in seen:
-                seen.add(id(responses))
-                bindings.extend(
-                    self.collect_llm_methods(
-                        responses,
-                        methods=("create",),
-                    )
-                )
+            for resource, methods in _iter_openai_llm_resources(candidate):
+                if resource is None or id(resource) in seen:
+                    continue
+                seen.add(id(resource))
+                bindings.extend(self.collect_llm_methods(resource, methods=methods))
+            for target, methods in _iter_openai_nested_llm_targets(candidate):
+                if id(target) in seen:
+                    continue
+                seen.add(id(target))
+                bindings.extend(self.collect_llm_methods(target, methods=methods))
+        if _needs_openai_runner_patch(agent, bindings):
+            runner_binding = _build_openai_runner_binding(agent)
+            if runner_binding is not None:
+                bindings.append(runner_binding)
         return bindings
 
+_UNRESOLVED = object()
 
-def _looks_like_function_tool(tool: Any) -> bool:
-    return hasattr(tool, "on_invoke_tool") and hasattr(tool, "name")
+
+def _resolve_openai_agent_tools(agent: Any) -> Any:
+    resolver = getattr(agent, "get_all_tools", None)
+    if not callable(resolver):
+        return _UNRESOLVED
+
+    try:
+        result = _call_with_optional_none(resolver)
+    except Exception:
+        return _UNRESOLVED
+
+    try:
+        return _resolve_maybe_awaitable(result)
+    except Exception:
+        return _UNRESOLVED
+
+
+def _call_with_optional_none(fn: Any) -> Any:
+    try:
+        signature = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return fn()
+
+    args: list[Any] = []
+    kwargs: dict[str, Any] = {}
+    for param in signature.parameters.values():
+        if param.kind == inspect.Parameter.VAR_POSITIONAL:
+            continue
+        if param.kind == inspect.Parameter.VAR_KEYWORD:
+            continue
+        if param.default is not inspect.Parameter.empty:
+            continue
+        if param.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD):
+            args.append(None)
+        elif param.kind == inspect.Parameter.KEYWORD_ONLY:
+            kwargs[param.name] = None
+    return fn(*args, **kwargs)
+
+
+def _resolve_maybe_awaitable(value: Any) -> Any:
+    if not inspect.isawaitable(value):
+        return value
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(value)
+    return _run_awaitable_in_thread(value)
+
+
+def _run_awaitable_in_thread(awaitable: Any) -> Any:
+    outcome: dict[str, Any] = {}
+
+    def runner() -> None:
+        try:
+            outcome["value"] = asyncio.run(awaitable)
+        except BaseException as exc:  # pragma: no cover - forwarded below
+            outcome["error"] = exc
+
+    thread = threading.Thread(target=runner, daemon=True)
+    thread.start()
+    thread.join()
+
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome.get("value")
+
+
+def _iter_openai_tool_entries(
+    tools: Any,
+    *,
+    use_container_patch: bool,
+) -> list[tuple[str, Any, Any, Any]]:
+    entries: list[tuple[str, Any, Any, Any]] = []
+    if isinstance(tools, dict):
+        for name, tool in list(tools.items()):
+            entries.append((str(name), tool, tools if use_container_patch else None, name))
+        return entries
+
+    if isinstance(tools, list):
+        for idx, tool in enumerate(list(tools)):
+            entries.append(
+                (
+                    tool_name(tool, fallback=f"tool_{idx}"),
+                    tool,
+                    tools if use_container_patch else None,
+                    idx,
+                )
+            )
+        return entries
+
+    if tools is None:
+        return entries
+
+    try:
+        items = list(tools)
+    except TypeError:
+        return entries
+
+    for idx, tool in enumerate(items):
+        entries.append((tool_name(tool, fallback=f"tool_{idx}"), tool, None, idx))
+    return entries
 
 
 def _iter_openai_llm_candidates(agent: Any):
@@ -135,6 +254,307 @@ def _iter_openai_llm_candidates(agent: Any):
         candidate = getattr(agent, slot, None)
         if candidate is not None:
             yield candidate
+
+
+def _iter_openai_llm_resources(candidate: Any):
+    chat = getattr(candidate, "chat", None)
+    completions = getattr(chat, "completions", None) if chat is not None else None
+    if completions is not None:
+        yield completions, ("create",)
+
+    responses = getattr(candidate, "responses", None)
+    if responses is not None:
+        yield responses, ("create",)
+
+    beta = getattr(candidate, "beta", None)
+    threads = getattr(beta, "threads", None) if beta is not None else None
+    if threads is not None:
+        yield threads, ("create_and_run", "create_and_run_poll", "create_and_run_stream")
+        runs = getattr(threads, "runs", None)
+        if runs is not None:
+            yield runs, (
+                "create",
+                "create_and_poll",
+                "create_and_stream",
+                "submit_tool_outputs",
+                "submit_tool_outputs_and_poll",
+                "submit_tool_outputs_stream",
+            )
+
+
+def _iter_openai_nested_llm_candidates(candidate: Any):
+    for slot in ("client", "_client", "openai_client", "_openai_client"):
+        nested = getattr(candidate, slot, None)
+        if nested is not None:
+            yield nested
+
+
+def _iter_openai_nested_llm_targets(candidate: Any):
+    for nested in _iter_openai_nested_llm_candidates(candidate):
+        yield nested, ("create", "complete", "completion", "generate", "invoke", "ainvoke")
+        yield from _iter_openai_llm_resources(nested)
+
+
+def _needs_openai_runner_patch(agent: Any, bindings: list[Any]) -> bool:
+    if isinstance(getattr(agent, "model", None), str):
+        return True
+    return not bindings and isinstance(getattr(agent, "_model", None), str)
+
+
+def _build_openai_runner_binding(agent: Any) -> LLMBinding | None:
+    try:
+        runner_cls = _resolve_agents_export("Runner")
+    except Exception:
+        return None
+
+    runner_run = getattr(runner_cls, "run", None)
+    if not callable(runner_run):
+        return None
+
+    return LLMBinding(
+        label="runner_model_provider",
+        callable=runner_run,
+        owner=runner_cls,
+        attr="run",
+        installer=_install_openai_runner_binding,
+        metadata={"attached_agent": agent},
+    )
+
+
+def _install_openai_runner_binding(
+    guard: Any,
+    binding: LLMBinding,
+    adapter: BaseAgentAdapter,
+) -> int:
+    runner_cls = binding.owner
+    attached_agent = binding.metadata.get("attached_agent")
+    if runner_cls is None or attached_agent is None:
+        return 0
+
+    registry = getattr(runner_cls, "__agentguard_openai_runner_registry__", None)
+    if not isinstance(registry, dict):
+        registry = {}
+        set_attr(runner_cls, "__agentguard_openai_runner_registry__", registry)
+    registry[id(attached_agent)] = {
+        "agent": attached_agent,
+        "guard": guard,
+        "adapter": adapter,
+    }
+
+    if getattr(runner_cls, "__agentguard_openai_runner_patched__", False):
+        return 1
+
+    patched = 0
+    for method_name in ("run", "run_sync", "run_streamed"):
+        descriptor = runner_cls.__dict__.get(method_name)
+        if descriptor is None:
+            continue
+        original = descriptor.__func__ if isinstance(descriptor, classmethod) else descriptor
+        if not callable(original) or is_guarded(original):
+            continue
+
+        wrapped = _make_openai_runner_wrapper(
+            runner_cls,
+            original,
+        )
+        if isinstance(descriptor, classmethod):
+            wrapped = classmethod(wrapped)
+        if set_attr(runner_cls, method_name, wrapped):
+            patched += 1
+
+    if patched:
+        set_attr(runner_cls, "__agentguard_openai_runner_patched__", True)
+        return 1
+    return 0
+
+
+def _make_openai_runner_wrapper(
+    runner_cls: Any,
+    original: Any,
+) -> Any:
+    try:
+        signature = inspect.signature(original)
+    except (TypeError, ValueError):
+        signature = None
+
+    def _prepare_call(cls: Any, args: tuple[Any, ...], kwargs: dict[str, Any]):
+        registry = getattr(runner_cls, "__agentguard_openai_runner_registry__", {})
+        if not isinstance(registry, dict):
+            registry = {}
+
+        bound = None
+        if signature is not None:
+            try:
+                bound = signature.bind_partial(cls, *args, **kwargs)
+            except TypeError:
+                bound = None
+
+        starting_agent = _extract_runner_argument(bound, args, kwargs, names=("starting_agent", "agent"))
+        if starting_agent is None:
+            return None, None
+
+        entry = registry.get(id(starting_agent))
+        if not entry or entry.get("agent") is not starting_agent:
+            return None, None
+
+        if bound is None:
+            return entry, None
+
+        run_config = bound.arguments.get("run_config")
+        wrapped_config = _wrap_openai_runner_config(
+            run_config,
+            guard=entry["guard"],
+            adapter=entry["adapter"],
+        )
+        if wrapped_config is not run_config:
+            bound.arguments["run_config"] = wrapped_config
+        return entry, bound
+
+    if inspect.iscoroutinefunction(original):
+
+        @functools.wraps(original)
+        async def async_wrapper(cls: Any, *args: Any, **kwargs: Any) -> Any:
+            _entry, bound = _prepare_call(cls, args, kwargs)
+            if bound is not None:
+                return await original(*bound.args, **bound.kwargs)
+            return await original(cls, *args, **kwargs)
+
+        set_attr(async_wrapper, "__agentguard_wrapped__", True)
+        return async_wrapper
+
+    @functools.wraps(original)
+    def wrapper(cls: Any, *args: Any, **kwargs: Any) -> Any:
+        _entry, bound = _prepare_call(cls, args, kwargs)
+        if bound is not None:
+            return original(*bound.args, **bound.kwargs)
+        return original(cls, *args, **kwargs)
+
+    set_attr(wrapper, "__agentguard_wrapped__", True)
+    return wrapper
+
+
+def _extract_runner_argument(
+    bound: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    *,
+    names: tuple[str, ...],
+) -> Any:
+    if bound is not None:
+        for name in names:
+            if name in bound.arguments:
+                return bound.arguments[name]
+    for name in names:
+        if name in kwargs:
+            return kwargs[name]
+    if args:
+        return args[0]
+    return None
+
+
+def _wrap_openai_runner_config(
+    run_config: Any,
+    *,
+    guard: Any,
+    adapter: BaseAgentAdapter,
+) -> Any:
+    config = run_config
+    if config is None:
+        try:
+            run_config_cls = _resolve_agents_export("RunConfig")
+        except Exception:
+            return run_config
+        try:
+            config = run_config_cls()
+        except Exception:
+            return run_config
+
+    provider = getattr(config, "model_provider", None)
+    if provider is None:
+        return config
+
+    wrapped_provider = _AgentGuardOpenAIModelProvider(provider, guard, adapter)
+    if dataclasses.is_dataclass(config):
+        try:
+            return dataclasses.replace(config, model_provider=wrapped_provider)
+        except Exception:
+            pass
+
+    try:
+        cloned = copy.copy(config)
+    except Exception:
+        cloned = config
+
+    if set_attr(cloned, "model_provider", wrapped_provider):
+        return cloned
+    return config
+
+
+class _AgentGuardOpenAIModelProvider:
+    def __init__(self, provider: Any, guard: Any, adapter: BaseAgentAdapter) -> None:
+        self._provider = provider
+        self._guard = guard
+        self._adapter = adapter
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._provider, name)
+
+    def get_model(self, *args: Any, **kwargs: Any) -> Any:
+        model = self._provider.get_model(*args, **kwargs)
+        return _wrap_runtime_openai_model(model, guard=self._guard, adapter=self._adapter)
+
+
+def _wrap_runtime_openai_model(model: Any, *, guard: Any, adapter: BaseAgentAdapter) -> Any:
+    if model is None:
+        return model
+    if inspect.isawaitable(model):
+        return _wrap_runtime_openai_model_awaitable(model, guard=guard, adapter=adapter)
+    _patch_runtime_openai_llm_object(model, guard=guard, adapter=adapter)
+    return model
+
+
+async def _wrap_runtime_openai_model_awaitable(model: Any, *, guard: Any, adapter: BaseAgentAdapter) -> Any:
+    resolved = await model
+    _patch_runtime_openai_llm_object(resolved, guard=guard, adapter=adapter)
+    return resolved
+
+
+def _patch_runtime_openai_llm_object(model: Any, *, guard: Any, adapter: BaseAgentAdapter) -> None:
+    if model is None:
+        return
+
+    patched = patch_llm_methods(
+        guard,
+        model,
+        methods=("get_response", "stream_response"),
+        normalizer=adapter,
+        owner=model,
+    )
+    if patched:
+        return
+
+    patch_llm_methods(
+        guard,
+        model,
+        methods=("create", "complete", "completion", "generate", "invoke", "ainvoke"),
+        normalizer=adapter,
+        owner=model,
+    )
+    for target, methods in _iter_openai_nested_llm_targets(model):
+        patch_llm_methods(
+            guard,
+            target,
+            methods=methods,
+            normalizer=adapter,
+            owner=target,
+        )
+
+
+def _resolve_agents_export(name: str) -> Any:
+    module = sys.modules.get("agents")
+    if module is None:
+        module = __import__("agents", fromlist=[name])
+    return getattr(module, name)
 
 
 def _install_openai_tool_binding(
@@ -147,7 +567,13 @@ def _install_openai_tool_binding(
     original = binding.callable
     if not callable(original) or is_guarded(original):
         return 0
-    metadata = guard.register_tool(original, name=name)
+    metadata = guard.register_tool(
+        original,
+        name=name,
+        description=_openai_tool_description(tool, original),
+        required_args=_openai_tool_required_args(tool, original),
+        schema=_openai_tool_schema(tool),
+    )
 
     async def _call_original(*args: Any, **kwargs: Any) -> Any:
         out = original(*args, **kwargs)
@@ -215,20 +641,143 @@ def _install_openai_tool_binding(
 
 
 def _extract_json_args(args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[str, Any]:
-    raw = None
     if len(args) >= 2:
         raw = args[1]
-    elif "json_input" in kwargs:
-        raw = kwargs["json_input"]
-    elif "input" in kwargs:
-        raw = kwargs["input"]
+    else:
+        raw = kwargs.get("json_input")
+        if raw is None:
+            raw = kwargs.get("input")
 
+    parsed = _coerce_openai_tool_input(raw)
+    if parsed is not None:
+        return parsed
+
+    for key in ("json_input", "input", "arguments", "args"):
+        candidate = kwargs.get(key)
+        parsed = _coerce_openai_tool_input(candidate)
+        if parsed is not None:
+            return parsed
+
+    return {
+        str(key): value
+        for key, value in kwargs.items()
+        if key not in {"ctx", "context", "run_context"}
+    }
+
+
+def _openai_tool_description(tool: Any, original: Any) -> str:
+    for candidate in (
+        getattr(tool, "description", None),
+        inspect.getdoc(getattr(tool, "func", None)),
+        inspect.getdoc(getattr(tool, "_func", None)),
+        inspect.getdoc(getattr(tool, "__wrapped__", None)),
+        inspect.getdoc(original),
+    ):
+        if candidate:
+            return str(candidate).strip().split("\n")[0]
+    return ""
+
+
+def _openai_tool_required_args(tool: Any, original: Any) -> list[str]:
+    schema = _openai_tool_schema(tool)
+    from_schema = _schema_input_params(schema)
+    if from_schema:
+        return from_schema
+
+    for attr in ("func", "_func", "__wrapped__"):
+        candidate = getattr(tool, attr, None)
+        if callable(candidate):
+            required = _required_args_from_signature(candidate)
+            if required:
+                return required
+
+    return _required_args_from_signature(original, skip={"ctx", "context", "run_context", "input", "json_input"})
+
+
+def _openai_tool_schema(tool: Any) -> dict[str, Any]:
+    for attr in ("params_json_schema", "input_schema", "json_schema", "schema"):
+        if not hasattr(tool, attr):
+            continue
+        schema = _coerce_schema_dict(getattr(tool, attr))
+        if schema:
+            return schema
+    return {}
+
+
+def _coerce_schema_dict(value: Any) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+
+    if callable(value):
+        try:
+            resolved = value()
+        except Exception:
+            return {}
+        return _coerce_schema_dict(resolved)
+
+    for attr in ("model_json_schema", "json_schema", "schema", "model_dump", "to_dict", "dict"):
+        method = getattr(value, attr, None)
+        if not callable(method):
+            continue
+        try:
+            resolved = method()
+        except Exception:
+            continue
+        if isinstance(resolved, dict):
+            return resolved
+    return {}
+
+
+def _schema_input_params(schema: dict[str, Any]) -> list[str]:
+    if not isinstance(schema, dict):
+        return []
+
+    required = schema.get("required")
+    if isinstance(required, list) and required:
+        return [str(item) for item in required if str(item).strip()]
+
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        return [str(name) for name in properties if str(name).strip()]
+    return []
+
+
+def _required_args_from_signature(fn: Any, *, skip: set[str] | None = None) -> list[str]:
+    try:
+        signature = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return []
+
+    skipped = skip or set()
+    return [
+        param.name
+        for param in signature.parameters.values()
+        if param.default is inspect.Parameter.empty
+        and param.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+        and param.name not in skipped
+    ]
+
+
+def _coerce_openai_tool_input(raw: Any) -> dict[str, Any] | None:
+    if raw is None:
+        return None
     if isinstance(raw, str):
         try:
             parsed = json.loads(raw)
-            return parsed if isinstance(parsed, dict) else {"_raw": parsed}
         except json.JSONDecodeError:
             return {"_raw": raw, "_unparsed": True}
+        return _coerce_openai_tool_input(parsed)
     if isinstance(raw, dict):
-        return raw
-    return dict(kwargs)
+        for key in ("input", "json_input", "arguments", "args"):
+            nested = raw.get(key)
+            parsed = _coerce_openai_tool_input(nested)
+            if parsed is not None:
+                return parsed
+        return {
+            str(key): value
+            for key, value in raw.items()
+            if key not in {"ctx", "context", "run_context"}
+        }
+    return {"_raw": raw}
