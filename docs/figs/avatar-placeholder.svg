@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-labelledby="title desc">
+  <title id="title">Contributor avatar placeholder</title>
+  <desc id="desc">A generic avatar silhouette for contributor listings.</desc>
+  <circle cx="48" cy="48" r="48" fill="#f3f4f6"/>
+  <circle cx="48" cy="35" r="17" fill="#9ca3af"/>
+  <path d="M20 79c4-15 16-24 28-24s24 9 28 24" fill="#9ca3af"/>
+</svg>

@@ -5,7 +5,7 @@
     <img src="https://img.shields.io/badge/Document-Docs-0ea5e9?style=for-the-badge&logo=gitbook&logoColor=white" alt="Document" />
   </a>
   <a href="https://github.com/WhitzardAgent/AgentGuard/releases">
-    <img src="https://img.shields.io/badge/Release-v2.0-111827?style=for-the-badge&logo=github&logoColor=white" alt="Release v2.0" />
+    <img src="https://img.shields.io/badge/Release-v2.1-111827?style=for-the-badge&logo=github&logoColor=white" alt="Release v2.1" />
   </a>
   <a href="./LICENSE">
     <img src="https://img.shields.io/badge/License-GPL%20v3-16a34a?style=for-the-badge&logo=open-source-initiative&logoColor=white" alt="License" />
@@ -56,7 +56,7 @@ Today, AgentGuard covers several key technical areas highlighted in Anthropic's 
 
 ![AgentGuard Positioning](./docs/figs/positioning.png)
 
-AgentGuard can be integrated into existing agent frameworks without modifying the underlying execution logic. Currently, it supports LangChain, AutoGen, OpenAI Agents SDK, and [OpenClaw](https://github.com/openclaw/openclaw), and we are continuously expanding support for additional agent ecosystems and frameworks. See the documentation chapter on `OpenClaw` for the JavaScript-side integration details.
+AgentGuard can be integrated into existing agent frameworks without modifying the underlying execution logic. Currently, it supports LangChain, AutoGen, OpenAI Agents SDK, and [OpenClaw](https://github.com/openclaw/openclaw), and we are continuously expanding support for additional agent ecosystems and frameworks. For JavaScript-side integration details, refer to the [OpenClaw adapter document](https://whitzard.tech/AgentGuard/en/how-to-plugin/openclaw_adapter.html).
 
 ## ✨ Features
 
@@ -84,7 +84,7 @@ Currently, we support the following agent frameworks:
 - [OpenAI Agents SDK](https://github.com/openai/openai-agents-python)
 - [OpenClaw](https://github.com/openclaw/openclaw)
 
-The integration guides for these frameworks live under `docs/en/how-to-plugin/`, including the dedicated `OpenClaw` chapter.
+Refer to the [OpenClaw adapter document](https://whitzard.tech/AgentGuard/en/how-to-plugin/openclaw_adapter.html).
 
 ### 3. Visual Policy Configuration & Audit
 
@@ -171,7 +171,7 @@ EOF
 
 This policy involves two agent tools: `retrieve_doc` and `send_email_to`, which retrieve a document by its id and send document content to a specified email address, respectively. The policy states that agents with a trust level below 2 may only send the confidential document (id=0) to `admin@example.com`; sending it to any other recipient is denied.
 
-> AgentGuard also supports visual policy configuration with dynamic hot-reloading. See [here](https://whitzard.tech/AgentGuard/en/policies/quick_config.html) for details.
+> AgentGuard also supports visual policy configuration with dynamic hot-reloading. See the [visual policy configuration document](https://whitzard.tech/AgentGuard/en/policies/quick_config.html) for details.
 
 Next, configure the environment variables for the control server:
 
@@ -371,45 +371,61 @@ The high-level architecture of AgentGuard is shown below.
 
 - **Client**: With minimal code modifications, the AgentGuard client integrates into agent frameworks and can intercept before and after LLM calls, as well as before and after tool invocations. It can perform lightweight local filtering on the client side and forward events to the server for deeper inspection by configured plugins.
 - **Server**: The server receives information from clients, uses configured plugins to evaluate agent actions against policies, produces policy decisions, and sends them back to clients. It also monitors agent status for administrative auditing.
-- **Plugin Extensibility**: Both client and server support pluggable plugins. To add custom plugins, see the [client plugin guide](https://whitzardagent.github.io/AgentGuard/plugins/custom_client_plugin.html) and the [server plugin guide](https://whitzardagent.github.io/AgentGuard/plugins/custom_server_plugin.html).
-- **Custom Auditor Extensibility**: The backend also supports pluggable custom auditors for post-hoc trace review. Shared auditor abstractions live under `src/server/backend/audit/`, while concrete auditors live under `src/server/backend/audit/auditors/`. See the documentation chapter on [custom auditors](https://whitzardagent.github.io/AgentGuard/auditors.html).
+- **Plugin Extensibility**: Both client and server support pluggable plugins. To add custom plugins, see the [client plugin guide](https://whitzard.tech/AgentGuard/en/plugins/custom_client_plugin.html) and the [server plugin guide](https://whitzard.tech/AgentGuard/en/plugins/custom_server_plugin.html).
+- **Custom Auditor Extensibility**: The backend also supports pluggable custom auditors for post-hoc trace review. Shared auditor abstractions live under `src/server/backend/audit/`, while concrete auditors live under `src/server/backend/audit/auditors/`. See the documentation chapter on [custom auditors](https://whitzard.tech/AgentGuard/en/auditors.html).
 
 ## 👥 Contributors
 
-<table>
-  <tr>
-    <th align="left">Contributor</th>
-    <th align="left">Role</th>
-  </tr>
-  <tr>
-    <td><a href="https://djrrr.github.io/" target="_blank" rel="noreferrer">Jiarun Dai</a></td>
-    <td>Asst. Prof., Fudan University</td>
-  </tr>
-  <tr>
-    <td>Jiaqi Luo</td>
-    <td>PhD Student, Fudan University</td>
-  </tr>
-  <tr>
-    <td>Songyang Peng</td>
-    <td>Master Student, Fudan University</td>
-  </tr>
-  <tr>
-    <td>Zhile Chen</td>
-    <td>Master Student, Fudan University</td>
-  </tr>
-  <tr>
-    <td><a href="https://zhxshen.github.io/" target="_blank" rel="noreferrer">Zhuoxiang Shen</a></td>
-    <td>Eng.D Student, Fudan University</td>
-  </tr>
-  <tr>
-    <td><a href="https://ravensanstete.github.io/" target="_blank" rel="noreferrer">Xudong Pan</a></td>
-    <td>Asst. Prof., Fudan University</td>
-  </tr>
-  <tr>
-    <td><a href="https://ghong.site/" target="_blank" rel="noreferrer">Geng Hong</a></td>
-    <td>Asst. Prof., Fudan University</td>
-  </tr>
-</table>
+<div>
+  <a href="https://djrrr.github.io/" target="_blank" rel="noreferrer" style="display: inline-block; width: 132px; margin: 0 14px 18px 0; text-decoration: none; color: inherit; vertical-align: top; line-height: 1.35;">
+    <img src="./docs/figs/avatar-placeholder.svg" width="56" height="56" alt="Jiarun Dai" /><br />
+    <sub><strong>Jiarun Dai</strong></sub><br />
+    <sub>Asst. Prof.</sub><br />
+    <sub>Fudan University</sub>
+  </a>
+  <span style="display: inline-block; width: 132px; margin: 0 14px 18px 0; vertical-align: top; line-height: 1.35;">
+    <img src="./docs/figs/avatar-placeholder.svg" width="56" height="56" alt="Jiaqi Luo" /><br />
+    <sub><strong>Jiaqi Luo</strong></sub><br />
+    <sub>PhD Student</sub><br />
+    <sub>Fudan University</sub>
+  </span>
+  <span style="display: inline-block; width: 132px; margin: 0 14px 18px 0; vertical-align: top; line-height: 1.35;">
+    <img src="./docs/figs/avatar-placeholder.svg" width="56" height="56" alt="Songyang Peng" /><br />
+    <sub><strong>Songyang Peng</strong></sub><br />
+    <sub>Master Student</sub><br />
+    <sub>Fudan University</sub>
+  </span>
+  <span style="display: inline-block; width: 132px; margin: 0 14px 18px 0; vertical-align: top; line-height: 1.35;">
+    <img src="./docs/figs/avatar-placeholder.svg" width="56" height="56" alt="Zhile Chen" /><br />
+    <sub><strong>Zhile Chen</strong></sub><br />
+    <sub>Master Student</sub><br />
+    <sub>Fudan University</sub>
+  </span>
+  <span style="display: inline-block; width: 132px; margin: 0 14px 18px 0; vertical-align: top; line-height: 1.35;">
+    <img src="./docs/figs/avatar-placeholder.svg" width="56" height="56" alt="Jingren Huang" /><br />
+    <sub><strong>Jingren Huang</strong></sub><br />
+    <sub>Master Student</sub><br />
+    <sub>Fudan University</sub>
+  </span>
+  <a href="https://zhxshen.github.io/" target="_blank" rel="noreferrer" style="display: inline-block; width: 132px; margin: 0 14px 18px 0; text-decoration: none; color: inherit; vertical-align: top; line-height: 1.35;">
+    <img src="./docs/figs/avatar-placeholder.svg" width="56" height="56" alt="Zhuoxiang Shen" /><br />
+    <sub><strong>Zhuoxiang Shen</strong></sub><br />
+    <sub>Eng.D Student</sub><br />
+    <sub>Fudan University</sub>
+  </a>
+  <a href="https://ravensanstete.github.io/" target="_blank" rel="noreferrer" style="display: inline-block; width: 132px; margin: 0 14px 18px 0; text-decoration: none; color: inherit; vertical-align: top; line-height: 1.35;">
+    <img src="./docs/figs/avatar-placeholder.svg" width="56" height="56" alt="Xudong Pan" /><br />
+    <sub><strong>Xudong Pan</strong></sub><br />
+    <sub>Asst. Prof.</sub><br />
+    <sub>Fudan University</sub>
+  </a>
+  <a href="https://ghong.site/" target="_blank" rel="noreferrer" style="display: inline-block; width: 132px; margin: 0 14px 18px 0; text-decoration: none; color: inherit; vertical-align: top; line-height: 1.35;">
+    <img src="./docs/figs/avatar-placeholder.svg" width="56" height="56" alt="Geng Hong" /><br />
+    <sub><strong>Geng Hong</strong></sub><br />
+    <sub>Asst. Prof.</sub><br />
+    <sub>Fudan University</sub>
+  </a>
+</div>
 
 Listed in no particular order. Thanks to everyone who helped shape AgentGuard.
 
@@ -443,6 +459,12 @@ If you use AgentGuard in your research, please cite:
 This project is licensed under the [GNU General Public License v3.0 (GPLv3)](./LICENSE).
 
 ## 📝 Version Log
+
+### v2.1
+
+- Added compatibility with LlamaIndex and Langflow.
+- Added compatibility with the AgentDoG plugin.
+- Added support for LLM-based rule generation.
 
 ### v2.0
 
