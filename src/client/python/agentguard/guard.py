@@ -225,10 +225,24 @@ class AgentGuard:
         wrap_tools: bool = True,
         wrap_llm: bool = True,
     ) -> dict[str, Any]:
-        """Patch a LangChain/LangGraph agent in-place while preserving its native loop."""
+        """Patch a LangChain agent in-place while preserving its native loop."""
         from agentguard.adapters.agent.langchain import LangChainAgentAdapter  # noqa: PLC0415
 
         return LangChainAgentAdapter().attach(
+            agent, self, wrap_tools=wrap_tools, wrap_llm=wrap_llm
+        )
+
+    def attach_langgraph(
+        self,
+        agent: Any,
+        *,
+        wrap_tools: bool = True,
+        wrap_llm: bool = True,
+    ) -> dict[str, Any]:
+        """Patch a LangGraph agent in-place while preserving its native graph loop."""
+        from agentguard.adapters.agent.langgraph import LangGraphAgentAdapter  # noqa: PLC0415
+
+        return LangGraphAgentAdapter().attach(
             agent, self, wrap_tools=wrap_tools, wrap_llm=wrap_llm
         )
 

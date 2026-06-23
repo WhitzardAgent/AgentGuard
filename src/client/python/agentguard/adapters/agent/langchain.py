@@ -51,7 +51,7 @@ class LangChainAgentAdapter(BaseAgentAdapter):
 
     def can_wrap(self, agent: Any) -> bool:
         module_name = _module_name(agent)
-        return "langchain" in module_name or "langgraph" in module_name
+        return "langchain" in module_name
 
     def generate(self, agent: Any, messages: list[dict[str, Any]], context: RuntimeContext) -> Any:
         prompt = messages[-1].get("content", "") if messages else ""
