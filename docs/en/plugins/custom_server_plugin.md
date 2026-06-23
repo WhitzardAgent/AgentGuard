@@ -146,13 +146,13 @@ Server plugin specs are read from the `server` list in `config/plugins.json` or 
 class CheckResult:
     decision_candidate: GuardDecision | None = None
     risk_signals: list[str] = field(default_factory=list)
-    is_final: bool = False
+    is_final: bool = True
     metadata: dict[str, Any] = field(default_factory=dict)
 ```
 
-- `decision_candidate`: optional `GuardDecision` recommendation. Use it when the plugin wants to propose `ALLOW`, `DENY`, `SANITIZE`, `HUMAN_CHECK`, `LLM_CHECK`, or another supported decision.
+- `decision_candidate`: optional `GuardDecision` recommendation. Use it when the plugin wants to propose `ALLOW`, `DENY`, `SANITIZE`, `HUMAN_CHECK`, or another supported decision.
 - `risk_signals`: risk labels detected by this plugin. The manager deduplicates them and writes them back to `event.risk_signals`.
-- `is_final`: whether `decision_candidate` should be treated as the authoritative server-side decision. If `True`, the runtime can use this decision directly.
+- `is_final`: whether `decision_candidate` should be treated as the authoritative server-side decision. It defaults to `True`. If `True`, the runtime can use this decision directly.
 - `metadata`: structured debug or detection details. The manager merges plugin metadata into the final plugin result.
 
 Return `CheckResult.empty()` when the plugin has no finding.

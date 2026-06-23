@@ -1,27 +1,51 @@
 "use strict";
 
-const ev = require("../../schemas/events");
-const { DecisionType } = require("../../schemas/decisions");
+const {
+  LLMInputNormalization,
+  LLMOutputNormalization,
+  ToolInvokeNormalization,
+  ToolResultNormalization,
+} = require("./normalization");
 const { BaseAgentAdapter } = require("./base");
 const {
   bindArguments,
+  guardToolAfter,
+  guardToolBefore,
   isGuarded,
-  makeGuardedTool,
   markGuarded,
   registerToolMetadata,
   setAttr,
   toolName,
 } = require("./patching");
+const { DecisionType } = require("../../schemas/decisions");
 const { AdapterError } = require("../../utils/errors");
 
 function moduleName(obj) {
-  return (obj && obj.constructor && obj.constructor.name ? obj.constructor.name : "").toLowerCase();
+  const parts = [];
+  if (obj && obj.constructor && obj.constructor.name) {
+    parts.push(obj.constructor.name);
+  }
+  if (Array.isArray(obj && obj.lc_namespace)) {
+    parts.push(...obj.lc_namespace);
+  }
+  return parts.join(".").toLowerCase();
 }
 
 class LangChainAgentAdapter extends BaseAgentAdapter {
   constructor() {
     super();
     this.name = "langchain";
+  }
+
+  _langchainMeta({ label = null, owner = null } = {}) {
+    const meta = { adapter: this.name };
+    if (label) {
+      meta.label = String(label);
+    }
+    if (owner != null) {
+      meta.owner_type = owner && owner.constructor && owner.constructor.name ? owner.constructor.name : typeof owner;
+    }
+    return meta;
   }
 
   can_wrap(agent) {
@@ -32,44 +56,91 @@ class LangChainAgentAdapter extends BaseAgentAdapter {
   async generate(agent, messages) {
     const prompt = messages.length ? messages[messages.length - 1].content || "" : "";
     for (const method of ["invoke", "run", "predict"]) {
-      if (typeof agent[method] === "function") {
-        try {
-          return await agent[method](prompt);
-        } catch (error) {
-          throw new AdapterError(`langchain agent invoke failed: ${String(error.message || error)}`);
-        }
+      const fn = agent && agent[method];
+      if (typeof fn !== "function") {
+        continue;
+      }
+      try {
+        return await fn.call(agent, prompt);
+      } catch (error) {
+        throw new AdapterError(`langchain agent invoke failed: ${String(error && error.message ? error.message : error)}`);
       }
     }
     throw new AdapterError("langchain agent exposes no invoke/run/predict");
   }
 
-  patchtool(agent, guard) {
-    let patched = 0;
-    patched += patchContainerTools(agent, guard);
+  gettools(agent) {
+    const bindings = [];
+    bindings.push(...collectContainerTools(agent, this));
     for (const [, toolNode] of iterToolNodes(agent)) {
-      patched += patchToolNode(toolNode, guard);
+      bindings.push(...collectToolNode(toolNode, this));
     }
-    const nodes = agent?.nodes || agent?._nodes;
-    const iterable = nodes && typeof nodes === "object"
-      ? (Array.isArray(nodes) ? nodes : Object.values(nodes))
-      : [];
+
+    const nodes = (agent && (agent.nodes || agent._nodes)) || null;
+    const iterable = Array.isArray(nodes)
+      ? nodes
+      : nodes && typeof nodes === "object"
+        ? Object.values(nodes)
+        : [];
+
     for (const node of iterable) {
-      patched += patchContainerTools(node, guard);
-      if (node && node.runnable) {
-        patched += patchContainerTools(node.runnable, guard);
+      bindings.push(...collectContainerTools(node, this));
+      const runnable = node && node.runnable;
+      if (runnable != null) {
+        bindings.push(...collectContainerTools(runnable, this));
       }
     }
-    return patched;
+    return bindings;
   }
 
-  patchLLM(agent, guard) {
-    return patchLangchainLLM(agent, guard);
+  getllm(agent) {
+    return collectLangchainLLM(agent, this);
+  }
+
+  normalize_llm_input({ label, args = [], kwargs = {}, fn = null, owner = null } = {}) {
+    void fn;
+    return new LLMInputNormalization({
+      payload: normalizeLangchainRequest(args, kwargs),
+      metadata: this._langchainMeta({ label, owner }),
+    });
+  }
+
+  normalize_llm_output({ label, output, fn = null, owner = null } = {}) {
+    void fn;
+    return new LLMOutputNormalization({
+      payload: normalizeLangchainValue(output),
+      metadata: this._langchainMeta({ label, owner }),
+    });
+  }
+
+  normalize_tool_invoke({ tool_metadata, arguments: arguments_ = {}, fn = null, owner = null } = {}) {
+    void fn;
+    let normalized = normalizeLangchainValue(arguments_);
+    if (!normalized || typeof normalized !== "object" || Array.isArray(normalized)) {
+      normalized = { args: normalized };
+    }
+    return new ToolInvokeNormalization({
+      arguments: normalized,
+      capabilities: [...((tool_metadata && tool_metadata.capabilities) || [])],
+      metadata: this._langchainMeta({ owner }),
+    });
+  }
+
+  normalize_tool_result({ tool_name, result = null, error = null, fn = null, owner = null } = {}) {
+    void tool_name;
+    void fn;
+    return new ToolResultNormalization({
+      result: normalizeLangchainValue(result),
+      error,
+      metadata: this._langchainMeta({ owner }),
+    });
   }
 }
 
 function iterToolNodes(agent) {
   const toolNodes = [];
   const seen = new Set();
+
   const compiledNodes = agent && agent.nodes;
   if (compiledNodes && typeof compiledNodes === "object" && !Array.isArray(compiledNodes)) {
     for (const [name, node] of Object.entries(compiledNodes)) {
@@ -84,6 +155,7 @@ function iterToolNodes(agent) {
       toolNodes.push([String(name), toolNode]);
     }
   }
+
   const builderNodes = agent && agent.builder && agent.builder.nodes;
   if (builderNodes && typeof builderNodes === "object" && !Array.isArray(builderNodes)) {
     for (const [name, node] of Object.entries(builderNodes)) {
@@ -98,161 +170,475 @@ function iterToolNodes(agent) {
       toolNodes.push([String(name), toolNode]);
     }
   }
+
   return toolNodes;
 }
 
-function patchContainerTools(container, guard) {
-  if (!container) {
-    return 0;
-  }
-  let patched = 0;
-  for (const attr of ["tools_by_name", "_tools_by_name", "tools", "_tools"]) {
-    const tools = container[attr];
-    if (Array.isArray(tools)) {
-      tools.forEach((tool, index) => {
-        if (typeof tool === "function" && typeof tool.invoke !== "function") {
-          tools[index] = makeGuardedTool(guard, tool, { name: toolName(tool, null, `tool_${index}`), tool });
-          patched += 1;
-        } else {
-          patched += patchToolObject(tool, guard, toolName(tool, null, `tool_${index}`));
-        }
-      });
+function collectContainerTools(container, adapter) {
+  const bindings = [];
+
+  for (const attr of ["tools_by_name", "_tools_by_name"]) {
+    const tools = container && container[attr];
+    if (!tools || typeof tools !== "object" || Array.isArray(tools)) {
       continue;
     }
-    if (tools && typeof tools === "object") {
-      for (const [name, tool] of Object.entries(tools)) {
-        if (typeof tool === "function" && typeof tool.invoke !== "function") {
-          tools[name] = makeGuardedTool(guard, tool, { name, tool });
-          patched += 1;
-        } else {
-          patched += patchToolObject(tool, guard, String(name));
-        }
+    for (const [name, tool] of Object.entries(tools)) {
+      if (typeof tool === "function" && typeof tool.invoke !== "function") {
+        bindings.push(
+          adapter.buildToolBinding({
+            name: String(name),
+            fn: tool,
+            container: tools,
+            key: name,
+            tool,
+          })
+        );
+        continue;
       }
+      bindings.push(...collectToolObject(tool, adapter, { name: String(name) }));
     }
   }
-  if (container.options && container.options !== container) {
-    patched += patchContainerTools(container.options, guard);
+
+  for (const attr of ["tools", "_tools"]) {
+    const tools = container && container[attr];
+    if (tools && typeof tools === "object" && !Array.isArray(tools)) {
+      for (const [name, tool] of Object.entries(tools)) {
+        if (typeof tool === "function" && typeof tool.invoke !== "function") {
+          bindings.push(
+            adapter.buildToolBinding({
+              name: String(name),
+              fn: tool,
+              container: tools,
+              key: name,
+              tool,
+            })
+          );
+          continue;
+        }
+        bindings.push(...collectToolObject(tool, adapter, { name: String(name) }));
+      }
+      continue;
+    }
+
+    if (!Array.isArray(tools)) {
+      continue;
+    }
+    tools.forEach((tool, index) => {
+      if (typeof tool === "function" && typeof tool.invoke !== "function") {
+        bindings.push(
+          adapter.buildToolBinding({
+            name: toolName(tool, null, `tool_${index}`),
+            fn: tool,
+            container: tools,
+            key: index,
+            tool,
+          })
+        );
+        return;
+      }
+      bindings.push(...collectToolObject(tool, adapter, { name: toolName(tool, null, `tool_${index}`) }));
+    });
   }
-  return patched;
+
+  return bindings;
 }
 
-function patchToolNode(toolNode, guard) {
+function collectToolNode(toolNode, adapter) {
   const toolsByName = toolNode && toolNode.tools_by_name;
   if (!toolsByName || typeof toolsByName !== "object") {
-    return 0;
+    return [];
   }
-  let patched = 0;
+
+  const bindings = [];
   for (const [name, tool] of Object.entries(toolsByName)) {
-    patched += patchToolObject(tool, guard, String(name));
+    bindings.push(...collectToolObject(tool, adapter, { name: String(name) }));
   }
-  return patched;
+  return bindings;
 }
 
-function patchToolObject(tool, guard, name) {
-  if (!tool || isGuarded(tool)) {
-    return 0;
+function collectLangchainLLM(agent, adapter) {
+  const baseModel = getLangchainBaseModel(agent);
+  if (baseModel == null) {
+    return [];
   }
-  // Prefer raw tool callables so AgentGuard sees business arguments such as
-  // `path`/`url` instead of LangChain's generic `input` wrapper.
-  if (patchToolAttrs(tool, guard, name, { attrs: ["func", "coroutine"], bind: false })) {
-    return 1;
+
+  const target = unwrapLangchainLLMTarget(baseModel);
+  if (target == null) {
+    return [];
   }
-  if (patchToolAttrs(tool, guard, name, { attrs: ["_run", "_arun"], bind: true })) {
-    return 1;
-  }
-  if (patchToolAttrs(tool, guard, name, { attrs: ["invoke", "ainvoke"], bind: true })) {
-    return 1;
-  }
-  return 0;
+  return collectLangchainConcreteLLM(target, adapter);
 }
 
-function patchToolAttrs(tool, guard, name, { attrs, bind }) {
-  let patched = false;
+function getLangchainModelRunnable(agent) {
+  for (const owner of [agent, agent && agent.builder]) {
+    const nodes = owner && owner.nodes;
+    if (!nodes || typeof nodes !== "object" || Array.isArray(nodes)) {
+      continue;
+    }
+    const modelNode = nodes.model;
+    if (!modelNode || modelNode.runnable == null) {
+      continue;
+    }
+    return modelNode.runnable;
+  }
+  return null;
+}
+
+function getLangchainBaseModel(agent) {
+  const directModel = agent && agent.model;
+  if (directModel != null) {
+    return directModel;
+  }
+
+  const chainModel = agent && agent.agent && agent.agent.llm_chain && agent.agent.llm_chain.llm;
+  if (chainModel != null) {
+    return chainModel;
+  }
+
+  const runnable = getLangchainModelRunnable(agent);
+  if (runnable == null) {
+    return null;
+  }
+
+  for (const attr of ["func", "afunc"]) {
+    const model = extractLangchainClosureModel(runnable[attr]);
+    if (model != null) {
+      return model;
+    }
+  }
+  return null;
+}
+
+function extractLangchainClosureModel(fn) {
+  if (typeof fn !== "function") {
+    return null;
+  }
+  for (const attr of ["model", "llm", "bound"]) {
+    const candidate = fn[attr];
+    if (candidate && typeof candidate === "object") {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function collectLangchainConcreteLLM(model, adapter) {
+  const target = unwrapLangchainLLMTarget(model);
+  if (target == null) {
+    return [];
+  }
+  return adapter.collectLLMMethods(target, { methods: ["invoke", "ainvoke"] });
+}
+
+function unwrapLangchainLLMTarget(model) {
+  const seen = new Set();
+  let current = model;
+  while (current != null && !seen.has(current)) {
+    seen.add(current);
+    const inner = current.bound;
+    if (inner == null || inner === current) {
+      return current;
+    }
+    current = inner;
+  }
+  return current;
+}
+
+function normalizeLangchainRequest(args, kwargs = {}) {
+  let modelInput = Object.prototype.hasOwnProperty.call(kwargs, "input") ? kwargs.input : null;
+  if (modelInput == null && args.length) {
+    modelInput = args[0];
+  }
+
+  const payload = {
+    input: normalizeLangchainValue(modelInput),
+  };
+  if (Object.prototype.hasOwnProperty.call(kwargs, "config")) {
+    payload.config = normalizeLangchainValue(kwargs.config);
+  }
+  if (Object.prototype.hasOwnProperty.call(kwargs, "stop")) {
+    payload.stop = normalizeLangchainValue(kwargs.stop);
+  }
+
+  const extra = Object.fromEntries(
+    Object.entries(kwargs).filter(([key]) => !["input", "config", "stop"].includes(key))
+  );
+  if (Object.keys(extra).length) {
+    payload.kwargs = normalizeLangchainValue(extra);
+  }
+  return payload;
+}
+
+function normalizeLangchainValue(value) {
+  if (value == null || ["boolean", "number", "string"].includes(typeof value)) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeLangchainValue(item));
+  }
+  if (value && typeof value === "object") {
+    const serializer = getLangchainMessageSerializer();
+    if (serializer) {
+      try {
+        return serializer(value);
+      } catch (_) {}
+    }
+
+    for (const attr of ["model_dump", "to_dict", "toDict"]) {
+      const dumper = value[attr];
+      if (typeof dumper !== "function") {
+        continue;
+      }
+      try {
+        return dumper.call(value);
+      } catch (_) {
+        continue;
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(value, "content")) {
+      const out = {
+        type: value && value.constructor && value.constructor.name ? value.constructor.name : "Object",
+        content: normalizeLangchainValue(value.content),
+      };
+      for (const attr of ["name", "id", "tool_calls", "invalid_tool_calls", "response_metadata"]) {
+        if (value[attr]) {
+          out[attr] = normalizeLangchainValue(value[attr]);
+        }
+      }
+      return out;
+    }
+
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [String(key), normalizeLangchainValue(item)])
+    );
+  }
+  return String(value);
+}
+
+let _langchainMessageSerializer;
+let _langchainMessageSerializerLoaded = false;
+
+function getLangchainMessageSerializer() {
+  if (_langchainMessageSerializerLoaded) {
+    return _langchainMessageSerializer;
+  }
+  _langchainMessageSerializerLoaded = true;
+  try {
+    ({ messageToDict: _langchainMessageSerializer } = require("@langchain/core/messages"));
+  } catch (_) {
+    _langchainMessageSerializer = null;
+  }
+  return _langchainMessageSerializer;
+}
+
+function collectToolObject(tool, adapter, { name }) {
+  if (tool == null || isGuarded(tool)) {
+    return [];
+  }
+
+  let bindings = collectToolAttrBindings(tool, adapter, { name, attrs: ["func", "coroutine"] });
+  if (bindings.length) {
+    return bindings;
+  }
+
+  bindings = collectToolAttrBindings(tool, adapter, { name, attrs: ["_run", "_arun"] });
+  if (bindings.length) {
+    return bindings;
+  }
+
+  return collectToolAttrBindings(tool, adapter, { name, attrs: ["invoke", "ainvoke"] });
+}
+
+function collectToolAttrBindings(tool, adapter, { name, attrs }) {
+  const bindings = [];
   for (const attr of attrs) {
-    const fn = tool[attr];
+    const fn = tool && tool[attr];
     if (typeof fn !== "function" || isGuarded(fn)) {
       continue;
     }
-    const target = bind ? fn.bind(tool) : fn;
-    const wrapped = makeGuardedLangchainToolMethod(guard, target, { name, tool, attr });
-    if (setAttr(tool, attr, wrapped)) {
-      patched = true;
-    }
+    bindings.push(
+      adapter.buildToolBinding({
+        name,
+        fn,
+        owner: tool,
+        attr,
+        tool,
+        installer: installLangchainToolBinding,
+      })
+    );
   }
-  return patched;
+  return bindings;
 }
 
-function makeGuardedLangchainToolMethod(guard, fn, { name, tool = null, attr = "invoke" } = {}) {
+function installLangchainToolBinding(guard, binding, adapter) {
+  const fn = binding.callable;
+  const name = binding.name;
+  const tool = binding.tool || binding.owner;
   const metadata = registerToolMetadata(guard, fn, { name, tool });
+  const attr = binding.attr || "invoke";
+
   const wrapper = async (...args) => {
-    const toolCall = extractLangchainToolCall(args);
-    const eventMetadata = buildLangchainToolEventMetadata({ attr, toolCall });
     try {
-      const arguments_ = buildLangchainToolArguments(fn, args, toolCall);
-      const invokeDecision = await guardToolBeforeWithMetadata(guard, metadata, arguments_, eventMetadata);
-      const blockedInvoke = blockedLangchainToolValue(invokeDecision, metadata.name, toolCall);
-      if (blockedInvoke) {
-        return blockedInvoke;
+      const eventMetadata = buildLangchainToolEventMetadata(args, {});
+      const arguments_ = buildLangchainToolArguments(fn, args, {});
+      const decision = await guardToolBefore(guard, metadata, arguments_, {
+        normalizer: adapter,
+        fn,
+        owner: tool,
+        extraMetadata: eventMetadata,
+      });
+      const blocked = blockedLangchainToolValue(decision, metadata.name, args, {});
+      if (blocked !== null) {
+        return blocked;
       }
+
       let value;
       try {
-        value = await fn(...args);
+        value = await fn.apply(tool, args);
       } catch (error) {
-        await guardToolAfterWithMetadata(
-          guard,
-          metadata.name,
-          null,
-          eventMetadata,
-          { error: String(error?.message || error) }
-        );
+        await guardToolAfter(guard, metadata.name, null, {
+          error: String(error && error.message ? error.message : error),
+          normalizer: adapter,
+          fn,
+          owner: tool,
+          extraMetadata: eventMetadata,
+        });
         throw error;
       }
-      const resultDecision = await guardToolAfterWithMetadata(guard, metadata.name, value, eventMetadata);
-      return blockedLangchainResultValue(resultDecision, metadata.name, toolCall) || value;
+
+      const resultDecision = await guardToolAfter(guard, metadata.name, value, {
+        normalizer: adapter,
+        fn,
+        owner: tool,
+        extraMetadata: eventMetadata,
+      });
+      const resultBlocked = blockedLangchainResultValue(resultDecision, metadata.name, args, {});
+      return resultBlocked !== null ? resultBlocked : value;
     } catch (error) {
-      await guard.runtime.sync_local_cache_now({ reason: "client_error" });
+      if (guard && guard.runtime && typeof guard.runtime.sync_local_cache_now === "function") {
+        await guard.runtime.sync_local_cache_now({ reason: "client_error" });
+      }
       throw error;
     } finally {
-      guard.runtime.sync_local_cache_async({ reason: "round_complete" });
+      if (guard && guard.runtime && typeof guard.runtime.sync_local_cache_async === "function") {
+        guard.runtime.sync_local_cache_async({ reason: "round_complete" });
+      }
     }
   };
-  return markGuarded(wrapper);
+
+  return setAttr(tool, attr, markGuarded(wrapper)) ? 1 : 0;
 }
 
-async function guardToolBeforeWithMetadata(guard, metadata, arguments_, eventMetadata) {
-  return (
-    await guard.runtime.guard(
-      ev.tool_invoke(guard.context, metadata.name, arguments_, {
-        capabilities: [...(metadata.capabilities || [])],
-        metadata: eventMetadata,
-      })
-    )
-  ).decision;
-}
-
-async function guardToolAfterWithMetadata(guard, toolName, result, eventMetadata, { error = null } = {}) {
-  return (
-    await guard.runtime.guard(
-      ev.tool_result(guard.context, toolName, result, {
-        error,
-        metadata: eventMetadata,
-      }),
-      { phase: "after" }
-    )
-  ).decision;
-}
-
-function buildLangchainToolArguments(fn, args, toolCall) {
+function buildLangchainToolArguments(fn, args, kwargs = {}) {
+  const toolCall = extractLangchainToolCall(args, kwargs);
   if (toolCall && Object.prototype.hasOwnProperty.call(toolCall, "args")) {
-    return normalizeLangchainValue(toolCall.args);
+    const toolArgs = normalizeLangchainValue(toolCall.args);
+    if (toolArgs && typeof toolArgs === "object" && !Array.isArray(toolArgs)) {
+      return toolArgs;
+    }
+    return { args: toolArgs };
   }
-  return normalizeLangchainValue(bindArguments(fn, args));
+  return bindArguments(fn, args, kwargs);
 }
 
-function buildLangchainToolEventMetadata({ attr, toolCall }) {
+function blockedLangchainToolValue(decision, toolNameValue, args, kwargs = {}) {
+  if (decision.decision_type === DecisionType.DENY) {
+    return langchainToolMessage(
+      {
+        agentguard: "blocked",
+        tool: toolNameValue,
+        reason: decision.reason,
+        decision: decision.decision_type,
+      },
+      { toolName: toolNameValue, args, kwargs }
+    );
+  }
+  if (decision.requires_user || decision.requires_remote) {
+    return langchainToolMessage(
+      {
+        agentguard: "pending",
+        tool: toolNameValue,
+        reason: decision.reason,
+        decision: decision.decision_type,
+      },
+      { toolName: toolNameValue, args, kwargs }
+    );
+  }
+  if (decision.decision_type === DecisionType.DEGRADE) {
+    return langchainToolMessage(
+      {
+        agentguard: "degraded",
+        tool: toolNameValue,
+        reason: decision.reason,
+        decision: decision.decision_type,
+      },
+      { toolName: toolNameValue, args, kwargs }
+    );
+  }
+  return null;
+}
+
+function blockedLangchainResultValue(decision, toolNameValue, args, kwargs = {}) {
+  if (decision.decision_type === DecisionType.DENY) {
+    return langchainToolMessage(
+      {
+        agentguard: "blocked",
+        tool: toolNameValue,
+        reason: decision.reason,
+        decision: decision.decision_type,
+      },
+      { toolName: toolNameValue, args, kwargs }
+    );
+  }
+  if (decision.decision_type === DecisionType.SANITIZE) {
+    return langchainToolMessage(
+      {
+        agentguard: "sanitized",
+        tool: toolNameValue,
+        reason: decision.reason,
+        decision: decision.decision_type,
+      },
+      { toolName: toolNameValue, args, kwargs }
+    );
+  }
+  if (decision.requires_user || decision.requires_remote) {
+    return langchainToolMessage(
+      {
+        agentguard: "pending",
+        tool: toolNameValue,
+        reason: decision.reason,
+        decision: decision.decision_type,
+      },
+      { toolName: toolNameValue, args, kwargs }
+    );
+  }
+  return null;
+}
+
+function langchainToolMessage(payload, { toolName: toolNameValue, args, kwargs = {} } = {}) {
+  const content = JSON.stringify(payload);
+  const toolCall = extractLangchainToolCall(args, kwargs);
+  const toolCallId = toolCall && toolCall.id;
+  const ToolMessage = getLangchainToolMessageClass();
+  if (ToolMessage && toolCallId) {
+    try {
+      return new ToolMessage({
+        content,
+        name: toolNameValue,
+        tool_call_id: toolCallId,
+      });
+    } catch (_) {
+      return content;
+    }
+  }
+  return content;
+}
+
+function buildLangchainToolEventMetadata(args, kwargs = {}) {
+  const toolCall = extractLangchainToolCall(args, kwargs);
   const metadata = {
     adapter: "langchain",
-    call_attr: attr,
   };
   if (toolCall) {
     metadata.langchain_tool_call = normalizeLangchainValue({
@@ -265,68 +651,22 @@ function buildLangchainToolEventMetadata({ attr, toolCall }) {
   return metadata;
 }
 
-function blockedLangchainToolValue(decision, toolName, toolCall) {
-  if (decision.decision_type === DecisionType.DENY) {
-    return makeLangchainBlockedValue({ agentguard: "blocked", tool: toolName, reason: decision.reason }, toolName, toolCall);
+function extractLangchainToolCall(args, kwargs = {}) {
+  const candidates = [...args];
+  if (Object.prototype.hasOwnProperty.call(kwargs, "input")) {
+    candidates.push(kwargs.input);
   }
-  if (decision.requires_user || decision.requires_remote) {
-    return makeLangchainBlockedValue(
-      { agentguard: "pending", tool: toolName, reason: decision.reason, decision: decision.decision_type },
-      toolName,
-      toolCall
-    );
+  if (Object.prototype.hasOwnProperty.call(kwargs, "tool_call")) {
+    candidates.push(kwargs.tool_call);
   }
-  if (decision.decision_type === DecisionType.DEGRADE) {
-    return makeLangchainBlockedValue(
-      { agentguard: "degraded", tool: toolName, reason: decision.reason, decision: decision.decision_type },
-      toolName,
-      toolCall
-    );
+  if (Object.prototype.hasOwnProperty.call(kwargs, "toolCall")) {
+    candidates.push(kwargs.toolCall);
   }
-  return null;
-}
+  if (Object.prototype.hasOwnProperty.call(kwargs, "config")) {
+    candidates.push(kwargs.config);
+  }
 
-function blockedLangchainResultValue(decision, toolName, toolCall) {
-  if (decision.decision_type === DecisionType.DENY) {
-    return makeLangchainBlockedValue(
-      { agentguard: "blocked", tool: toolName, reason: decision.reason, decision: decision.decision_type },
-      toolName,
-      toolCall
-    );
-  }
-  if (decision.decision_type === DecisionType.SANITIZE) {
-    return makeLangchainBlockedValue(
-      { agentguard: "sanitized", tool: toolName, reason: decision.reason, decision: decision.decision_type },
-      toolName,
-      toolCall
-    );
-  }
-  if (decision.requires_user || decision.requires_remote) {
-    return makeLangchainBlockedValue(
-      { agentguard: "pending", tool: toolName, reason: decision.reason, decision: decision.decision_type },
-      toolName,
-      toolCall
-    );
-  }
-  return null;
-}
-
-function makeLangchainBlockedValue(payload, toolName, toolCall) {
-  const ToolMessage = getLangchainToolMessageClass();
-  if (ToolMessage && toolCall && toolCall.id) {
-    try {
-      return new ToolMessage({
-        content: JSON.stringify(payload),
-        name: toolName,
-        tool_call_id: toolCall.id,
-      });
-    } catch (_) {}
-  }
-  return payload;
-}
-
-function extractLangchainToolCall(args) {
-  const stack = [...args];
+  const stack = [...candidates];
   while (stack.length) {
     const value = stack.shift();
     if (!value || typeof value !== "object") {
@@ -338,8 +678,16 @@ function extractLangchainToolCall(args) {
     if (isLangchainToolCall(value.toolCall)) {
       return value.toolCall;
     }
-    if (isLangchainToolCall(value.config && value.config.toolCall)) {
-      return value.config.toolCall;
+    if (isLangchainToolCall(value.tool_call)) {
+      return value.tool_call;
+    }
+    if (value.config && typeof value.config === "object") {
+      if (isLangchainToolCall(value.config.toolCall)) {
+        return value.config.toolCall;
+      }
+      if (isLangchainToolCall(value.config.tool_call)) {
+        return value.config.tool_call;
+      }
     }
   }
   return null;
@@ -368,233 +716,6 @@ function getLangchainToolMessageClass() {
     _langchainToolMessageClass = null;
   }
   return _langchainToolMessageClass;
-}
-
-function patchLangchainLLM(agent, guard) {
-  const baseModel = getLangchainBaseModel(agent);
-  if (!baseModel) {
-    return 0;
-  }
-  let patched = patchLangchainBindTools(baseModel, guard);
-  if (patched > 0) {
-    return patched;
-  }
-  const target = unwrapLangchainLLMTarget(baseModel);
-  if (!target) {
-    return 0;
-  }
-  return patchLangchainConcreteLLM(target, guard);
-}
-
-function getLangchainModelRunnable(agent) {
-  const directRunnable = agent?.builder?.nodes?.model_request?.runnable
-    || agent?.nodes?.model_request?.runnable
-    || agent?.builder?.nodes?.model?.runnable
-    || agent?.nodes?.model?.runnable;
-  if (directRunnable) {
-    return directRunnable;
-  }
-  for (const owner of [agent, agent && agent.builder]) {
-    const nodes = owner && owner.nodes;
-    if (!nodes || typeof nodes !== "object" || Array.isArray(nodes)) {
-      continue;
-    }
-    const modelNode = nodes.model || nodes.model_request;
-    if (modelNode && modelNode.runnable) {
-      return modelNode.runnable;
-    }
-  }
-  return null;
-}
-
-function getLangchainBaseModel(agent) {
-  const directAgentModel = agent?.model;
-  if (directAgentModel && typeof directAgentModel === "object") {
-    return directAgentModel;
-  }
-
-  const directOptionsModel = agent?.options?.model;
-  if (directOptionsModel && typeof directOptionsModel === "object") {
-    return directOptionsModel;
-  }
-
-  const chainModel = agent?.agent?.llm_chain?.llm;
-  if (chainModel && typeof chainModel === "object") {
-    return chainModel;
-  }
-
-  const runnable = getLangchainModelRunnable(agent);
-  if (!runnable) {
-    return null;
-  }
-  for (const attr of ["func", "afunc"]) {
-    const fn = runnable[attr];
-    const model = extractLangchainClosureModel(fn);
-    if (model) {
-      return model;
-    }
-  }
-  return null;
-}
-
-function extractLangchainClosureModel(fn) {
-  if (typeof fn !== "function") {
-    return null;
-  }
-  try {
-    return fn();
-  } catch (_) {
-    return null;
-  }
-}
-
-function unwrapLangchainLLMTarget(model) {
-  const seen = new Set();
-  let current = model;
-  while (current && !seen.has(current)) {
-    seen.add(current);
-    const inner = current.bound;
-    if (!inner || inner === current) {
-      return current;
-    }
-    current = inner;
-  }
-  return current;
-}
-
-function patchLangchainBindTools(model, guard) {
-  const seen = new Set();
-  let patched = 0;
-  let current = model;
-  while (current && !seen.has(current)) {
-    seen.add(current);
-    patched += patchBindToolsMethod(current, guard);
-    const inner = current.bound;
-    if (!inner || inner === current) {
-      break;
-    }
-    current = inner;
-  }
-  return patched;
-}
-
-function patchBindToolsMethod(model, guard) {
-  const bindTools = model && model.bindTools;
-  if (typeof bindTools !== "function" || isGuarded(bindTools)) {
-    return 0;
-  }
-  const wrapped = async (...args) => {
-    const bound = await bindTools.apply(model, args);
-    patchLangchainConcreteLLM(bound, guard);
-    return bound;
-  };
-  return setAttr(model, "bindTools", markGuarded(wrapped)) ? 1 : 0;
-}
-
-function patchLangchainConcreteLLM(model, guard) {
-  const target = unwrapLangchainLLMTarget(model);
-  if (!target) {
-    return 0;
-  }
-  let patched = 0;
-  for (const attr of ["invoke", "ainvoke"]) {
-    const fn = target && target[attr];
-    if (typeof fn !== "function" || isGuarded(fn)) {
-      continue;
-    }
-    if (setAttr(target, attr, makeGuardedLangchainLLMMethod(guard, fn.bind(target), { owner: target, label: attr }))) {
-      patched += 1;
-    }
-  }
-  return patched;
-}
-
-function makeGuardedLangchainLLMMethod(guard, fn, { owner, label }) {
-  const wrapper = async (...args) => {
-    try {
-      const payload = normalizeLangchainRequest(args, {});
-      await guard.runtime.guard(ev.llm_input(guard.context, payload, {
-        adapter: "langchain",
-        label,
-        owner_type: owner?.constructor?.name,
-      }));
-      const raw = await fn(...args);
-      const decision = (await guard.runtime.guard(
-        ev.llm_output(guard.context, normalizeLangchainValue(raw), {
-          adapter: "langchain",
-          label,
-          owner_type: owner?.constructor?.name,
-        }),
-        { phase: "after" }
-      )).decision;
-      if (decision.decision_type === "deny") {
-        return { agentguard: "blocked", reason: decision.reason };
-      }
-      if (decision.decision_type === "sanitize") {
-        return { agentguard: "sanitized", reason: decision.reason };
-      }
-      return raw;
-    } catch (error) {
-      await guard.runtime.sync_local_cache_now({ reason: "client_error" });
-      throw error;
-    } finally {
-      guard.runtime.sync_local_cache_async({ reason: "round_complete" });
-    }
-  };
-  return markGuarded(wrapper);
-}
-
-function normalizeLangchainRequest(args, kwargs) {
-  const modelInput = Object.prototype.hasOwnProperty.call(kwargs, "input") ? kwargs.input : args[0];
-  const payload = {
-    input: normalizeLangchainValue(modelInput),
-  };
-  if (Object.prototype.hasOwnProperty.call(kwargs, "config")) {
-    payload.config = normalizeLangchainValue(kwargs.config);
-  }
-  if (Object.prototype.hasOwnProperty.call(kwargs, "stop")) {
-    payload.stop = normalizeLangchainValue(kwargs.stop);
-  }
-  const extra = Object.fromEntries(Object.entries(kwargs).filter(([key]) => !["input", "config", "stop"].includes(key)));
-  if (Object.keys(extra).length) {
-    payload.kwargs = normalizeLangchainValue(extra);
-  }
-  return payload;
-}
-
-function normalizeLangchainValue(value) {
-  if (value == null || ["boolean", "number", "string"].includes(typeof value)) {
-    return value;
-  }
-  if (Array.isArray(value)) {
-    return value.map(normalizeLangchainValue);
-  }
-  if (typeof value === "object") {
-    if (typeof value.model_dump === "function") {
-      try {
-        return value.model_dump();
-      } catch (_) {}
-    }
-    if (typeof value.to_dict === "function") {
-      try {
-        return value.to_dict();
-      } catch (_) {}
-    }
-    if (Object.prototype.hasOwnProperty.call(value, "content")) {
-      const out = {
-        type: value.constructor?.name || "Object",
-        content: normalizeLangchainValue(value.content),
-      };
-      for (const attr of ["name", "id", "tool_calls", "invalid_tool_calls", "response_metadata"]) {
-        if (value[attr]) {
-          out[attr] = normalizeLangchainValue(value[attr]);
-        }
-      }
-      return out;
-    }
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [String(key), normalizeLangchainValue(item)]));
-  }
-  return String(value);
 }
 
 module.exports = {

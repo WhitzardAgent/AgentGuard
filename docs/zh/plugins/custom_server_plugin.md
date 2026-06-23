@@ -146,13 +146,13 @@ Server plugin spec 从 `config/plugins.json` 或运行时 plugin config 的 `ser
 class CheckResult:
     decision_candidate: GuardDecision | None = None
     risk_signals: list[str] = field(default_factory=list)
-    is_final: bool = False
+    is_final: bool = True
     metadata: dict[str, Any] = field(default_factory=dict)
 ```
 
-- `decision_candidate`：可选的 `GuardDecision` 建议。当 plugin 想返回 `ALLOW`、`DENY`、`SANITIZE`、`HUMAN_CHECK`、`LLM_CHECK` 等决策时使用。
+- `decision_candidate`：可选的 `GuardDecision` 建议。当 plugin 想返回 `ALLOW`、`DENY`、`SANITIZE`、`HUMAN_CHECK` 等决策时使用。
 - `risk_signals`：当前 plugin 检测到的风险标签。manager 会去重并写回 `event.risk_signals`。
-- `is_final`：表示 `decision_candidate` 是否是权威 server 侧决策。如果为 `True`，runtime 可以直接使用这个决策。
+- `is_final`：表示 `decision_candidate` 是否是权威 server 侧决策，默认值为 `True`。如果为 `True`，runtime 可以直接使用这个决策。
 - `metadata`：结构化调试信息或检测细节。manager 会把多个 plugin 的 metadata 合并到最终 plugin result 中。
 
 没有发现风险时返回 `CheckResult.empty()`。

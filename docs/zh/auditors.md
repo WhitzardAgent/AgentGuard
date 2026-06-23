@@ -41,6 +41,59 @@ class MyTraceAuditor(BaseAuditor):
 
 `AuditResult` 当前统一使用四个等级：`critical`、`high`、`warning` 和 `ok`。每个结果还包含面向人的 `reason`，以及可选的 `metadata`。
 
+当前类型定义在 `src/server/backend/audit/base.py`：
+
+```python
+@dataclass
+class AuditResult:
+    level: AuditLevel = "ok"
+    reason: str = "No issue detected in trace."
+    metadata: dict[str, Any] = field(default_factory=dict)
+```
+
+### AuditResult 字段说明
+
+| 字段 | 类型 | 含义 | 什么时候填写 |
+| --- | --- | --- | --- |
+| `level` | `"critical" \| "high" \| "warning" \| "ok"` | auditor 输出的最终风险等级。前端或调用方通常先看这个字段决定该条审计结果严重程度。 | 当你要表达“这次 trace 最终风险有多高”时填写。一般 `ok` 表示未发现问题，`warning` 表示有可疑信号但未必需要立即处置，`high` 表示存在明显风险，`critical` 表示需要优先关注或立即阻断/升级。 |
+| `reason` | `str` | 给人看的结论摘要，说明为什么给出这个等级。 | 基本都应该填写，建议写成一句完整的话，方便直接展示在 UI、日志或接口响应中。 |
+| `metadata` | `dict[str, Any]` | 结构化补充信息，用来放前端、运维或二次处理程序还需要的上下文。 | 当你希望除了结论之外，再返回可机器读取的细节时填写，例如命中的事件 ID、风险标签、计数、工具名列表、用户列表等。 |
+
+### AuditResult 常见写法
+
+- 只需要返回结论时：
+
+  ```python
+  return AuditResult(level="high", reason="该轨迹中包含被拒绝的高风险操作。")
+  ```
+
+- 需要把审计细节返回给调用方时：
+
+  ```python
+  return AuditResult(
+      level="warning",
+      reason="发现可疑外发行为。",
+      metadata={
+          "event_ids": suspicious_event_ids,
+          "risk_signals": sorted(risky_signals),
+          "tool_names": sorted(tool_names),
+      },
+  )
+  ```
+
+- 没有发现问题时，可以直接返回：
+
+  ```python
+  return AuditResult.ok()
+  ```
+
+### AuditResult 辅助方法
+
+| 成员 | 作用 | 什么时候使用 |
+| --- | --- | --- |
+| `AuditResult.ok(reason="No issue detected in trace.")` | 快速构造一个 `level="ok"` 的结果。 | 当 auditor 没有发现风险，想用最简洁的方式返回成功结果时使用。 |
+| `result.to_dict()` | 把 `AuditResult` 转成可序列化字典，包含 `level`、`reason` 和 `metadata`。 | 当你要把结果返回给接口层、写测试快照、记录日志，或做额外 JSON 序列化时使用。 |
+
 ## AuditTraceEntry
 
 `AuditTraceEntry` 是传入 `BaseAuditor.audit()` 的规范化记录类型。一条 entry 通常表示一个已存储的运行时事件，以及该事件对应的决策和检测元数据。

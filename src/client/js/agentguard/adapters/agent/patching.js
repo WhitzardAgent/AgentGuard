@@ -3,6 +3,7 @@
 const ev = require("../../schemas/events");
 const { DecisionType } = require("../../schemas/decisions");
 const { ToolMetadata } = require("../../tools/metadata");
+const { DEFAULT_AGENT_EVENT_NORMALIZER } = require("./normalization");
 
 const PATCHED_ATTR = "__agentguard_patched__";
 const WRAPPED_ATTR = "__agentguard_wrapped__";
@@ -155,25 +156,119 @@ function registerToolMetadata(guard, fn, { name, tool = null, capabilities = nul
   );
 }
 
-async function guardLLMBefore(guard, { label, args = [], kwargs = {} } = {}) {
-  const request = { label, args: [...args], kwargs: { ...kwargs } };
-  return (await guard.runtime.guard(ev.llm_input(guard.context, request))).decision;
+function resolveNormalizer(normalizer) {
+  return normalizer || DEFAULT_AGENT_EVENT_NORMALIZER;
 }
 
-async function guardLLMAfter(guard, output) {
-  return (await guard.runtime.guard(ev.llm_output(guard.context, output), { phase: "after" })).decision;
+function safeJSONStringify(value) {
+  try {
+    return JSON.stringify(value);
+  } catch (_) {
+    return String(value);
+  }
 }
 
-async function guardToolBefore(guard, metadata, arguments_) {
-  return (await guard.runtime.guard(ev.tool_invoke(guard.context, metadata.name, arguments_, {
-    capabilities: [...(metadata.capabilities || [])],
-  }))).decision;
+function buildLLMInputMessages(payload) {
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+  if (payload && typeof payload === "object" && Array.isArray(payload.messages)) {
+    return payload.messages;
+  }
+  if (payload == null) {
+    return [];
+  }
+  if (payload && typeof payload === "object" && typeof payload.role === "string") {
+    return [payload];
+  }
+  return [{ role: "user", content: typeof payload === "string" ? payload : safeJSONStringify(payload) }];
 }
 
-async function guardToolAfter(guard, tool_name, result = null, { error = null } = {}) {
-  return (await guard.runtime.guard(ev.tool_result(guard.context, tool_name, result, { error }), {
-    phase: "after",
-  })).decision;
+function buildLLMOutputPayload(payload) {
+  if (payload == null || typeof payload === "string") {
+    return payload;
+  }
+  return safeJSONStringify(payload);
+}
+
+async function guardLLMBefore(
+  guard,
+  { label, args = [], kwargs = {}, normalizer = null, fn = null, owner = null, extraMetadata = null } = {}
+) {
+  const normalized = resolveNormalizer(normalizer).normalize_llm_input({
+    label,
+    args: [...args],
+    kwargs: { ...(kwargs || {}) },
+    fn,
+    owner,
+  });
+  const metadata = { ...(normalized.metadata || {}), ...(extraMetadata || {}) };
+  return (await guard.runtime.guard(ev.llm_input(guard.context, buildLLMInputMessages(normalized.payload), metadata))).decision;
+}
+
+async function guardLLMAfter(
+  guard,
+  output,
+  { label, normalizer = null, fn = null, owner = null, extraMetadata = null } = {}
+) {
+  const normalized = resolveNormalizer(normalizer).normalize_llm_output({
+    label,
+    output,
+    fn,
+    owner,
+  });
+  const metadata = { ...(normalized.metadata || {}), ...(extraMetadata || {}) };
+  return (
+    await guard.runtime.guard(ev.llm_output(guard.context, buildLLMOutputPayload(normalized.payload), metadata), {
+      phase: "after",
+    })
+  ).decision;
+}
+
+async function guardToolBefore(
+  guard,
+  metadata,
+  arguments_,
+  { normalizer = null, fn = null, owner = null, extraMetadata = null } = {}
+) {
+  const normalized = resolveNormalizer(normalizer).normalize_tool_invoke({
+    tool_metadata: metadata,
+    arguments: arguments_,
+    fn,
+    owner,
+  });
+  return (
+    await guard.runtime.guard(
+      ev.tool_invoke(guard.context, metadata.name, normalized.arguments, {
+        capabilities: [...(normalized.capabilities || metadata.capabilities || [])],
+        metadata: { ...(normalized.metadata || {}), ...(extraMetadata || {}) },
+      })
+    )
+  ).decision;
+}
+
+async function guardToolAfter(
+  guard,
+  tool,
+  result = null,
+  { error = null, normalizer = null, fn = null, owner = null, extraMetadata = null } = {}
+) {
+  const normalized = resolveNormalizer(normalizer).normalize_tool_result({
+    tool_name: tool,
+    result,
+    error,
+    fn,
+    owner,
+  });
+  return (
+    await guard.runtime.guard(
+      ev.tool_result(guard.context, tool, normalized.result, {
+        error: normalized.error,
+        metadata: { ...(normalized.metadata || {}), ...(extraMetadata || {}) },
+      }),
+      { phase: "after" }
+    )
+  ).decision;
 }
 
 function blockedToolValue(decision, tool) {
@@ -184,7 +279,7 @@ function blockedToolValue(decision, tool) {
     return { agentguard: "pending", tool, reason: decision.reason, decision: decision.decision_type };
   }
   if (decision.decision_type === DecisionType.DEGRADE) {
-    return { agentguard: "degraded", tool, reason: decision.reason };
+    return { agentguard: "degraded", tool, reason: decision.reason, decision: decision.decision_type };
   }
   return null;
 }
@@ -202,86 +297,175 @@ function blockedResultValue(decision, tool) {
   return null;
 }
 
-function makeGuardedTool(guard, fn, { name, tool = null, capabilities = null } = {}) {
+function blockedLLMValue(decision) {
+  if (decision.decision_type === DecisionType.DENY) {
+    return { agentguard: "blocked", reason: decision.reason };
+  }
+  if (decision.decision_type === DecisionType.SANITIZE) {
+    return { agentguard: "sanitized", reason: decision.reason };
+  }
+  if (decision.requires_user || decision.requires_remote) {
+    return { agentguard: "pending", reason: decision.reason, decision: decision.decision_type };
+  }
+  if (decision.decision_type === DecisionType.DEGRADE) {
+    return { agentguard: "degraded", reason: decision.reason, decision: decision.decision_type };
+  }
+  return null;
+}
+
+async function syncLocalCacheNow(guard, { reason }) {
+  const runtime = guard && guard.runtime;
+  if (runtime && typeof runtime.sync_local_cache_now === "function") {
+    await runtime.sync_local_cache_now({ reason });
+  }
+}
+
+function syncLocalCacheAsync(guard, { reason }) {
+  const runtime = guard && guard.runtime;
+  if (runtime && typeof runtime.sync_local_cache_async === "function") {
+    runtime.sync_local_cache_async({ reason });
+  }
+}
+
+function makeGuardedTool(
+  guard,
+  fn,
+  { name, tool = null, capabilities = null, normalizer = null, owner = null, callTarget = null } = {}
+) {
   if (isGuarded(fn)) {
     return fn;
   }
+
   const metadata = registerToolMetadata(guard, fn, { name, tool, capabilities });
   const wrapper = async (...args) => {
     try {
       const arguments_ = bindArguments(fn, args);
-      const decision = await guardToolBefore(guard, metadata, arguments_);
+      const decision = await guardToolBefore(guard, metadata, arguments_, {
+        normalizer,
+        fn,
+        owner,
+      });
       const blocked = blockedToolValue(decision, metadata.name);
-      if (blocked) {
+      if (blocked !== null) {
         return blocked;
       }
+
       let value;
       try {
-        value = await fn(...args);
+        value = await (callTarget != null ? fn.apply(callTarget, args) : fn(...args));
       } catch (error) {
-        await guardToolAfter(guard, metadata.name, null, { error: String(error.message || error) });
+        await guardToolAfter(guard, metadata.name, null, {
+          error: String(error && error.message ? error.message : error),
+          normalizer,
+          fn,
+          owner,
+        });
         throw error;
       }
-      const resultDecision = await guardToolAfter(guard, metadata.name, value);
-      return blockedResultValue(resultDecision, metadata.name) || value;
+
+      const resultDecision = await guardToolAfter(guard, metadata.name, value, {
+        normalizer,
+        fn,
+        owner,
+      });
+      const resultBlocked = blockedResultValue(resultDecision, metadata.name);
+      return resultBlocked !== null ? resultBlocked : value;
     } catch (error) {
-      await guard.runtime.sync_local_cache_now({ reason: "client_error" });
+      await syncLocalCacheNow(guard, { reason: "client_error" });
       throw error;
     } finally {
-      guard.runtime.sync_local_cache_async({ reason: "round_complete" });
+      syncLocalCacheAsync(guard, { reason: "round_complete" });
     }
   };
   return markGuarded(wrapper);
 }
 
-function makeGuardedLLMCallable(guard, fn, { label } = {}) {
+function makeGuardedLLMCallable(
+  guard,
+  fn,
+  { label, normalizer = null, owner = null, callTarget = null } = {}
+) {
   if (isGuarded(fn)) {
     return fn;
   }
+
   const wrapper = async (...args) => {
     try {
-      await guardLLMBefore(guard, { label, args });
-      const raw = await fn(...args);
-      const decision = await guardLLMAfter(guard, raw);
-      if (decision.decision_type === DecisionType.DENY) {
-        return { agentguard: "blocked", reason: decision.reason };
+      const beforeDecision = await guardLLMBefore(guard, {
+        label,
+        args,
+        normalizer,
+        fn,
+        owner,
+      });
+      const beforeBlocked = blockedLLMValue(beforeDecision);
+      if (beforeBlocked !== null) {
+        return beforeBlocked;
       }
-      if (decision.decision_type === DecisionType.SANITIZE) {
-        return { agentguard: "sanitized", reason: decision.reason };
-      }
-      return raw;
+
+      const raw = await (callTarget != null ? fn.apply(callTarget, args) : fn(...args));
+      const decision = await guardLLMAfter(guard, raw, {
+        label,
+        normalizer,
+        fn,
+        owner,
+      });
+      const blocked = blockedLLMValue(decision);
+      return blocked !== null ? blocked : raw;
     } catch (error) {
-      await guard.runtime.sync_local_cache_now({ reason: "client_error" });
+      await syncLocalCacheNow(guard, { reason: "client_error" });
       throw error;
     } finally {
-      guard.runtime.sync_local_cache_async({ reason: "round_complete" });
+      syncLocalCacheAsync(guard, { reason: "round_complete" });
     }
   };
   return markGuarded(wrapper);
 }
 
-function patchLLMMethods(guard, obj, { methods = ["create", "complete", "completion", "generate", "invoke", "ainvoke", "predict", "chat"] } = {}) {
+function resolveAttrPath(obj, path) {
+  if (!String(path || "").includes(".")) {
+    return [obj, path, obj ? obj[path] : undefined];
+  }
+
+  const parts = String(path).split(".");
+  let target = obj;
+  for (const part of parts.slice(0, -1)) {
+    target = target ? target[part] : null;
+    if (target == null) {
+      return [obj, parts[parts.length - 1], undefined];
+    }
+  }
+  const leaf = parts[parts.length - 1];
+  return [target, leaf, target ? target[leaf] : undefined];
+}
+
+function patchLLMMethods(
+  guard,
+  obj,
+  {
+    methods = ["create", "complete", "completion", "generate", "invoke", "ainvoke", "predict", "chat"],
+    normalizer = null,
+    owner = null,
+  } = {}
+) {
   let patched = 0;
   for (const name of methods) {
-    if (name.includes(".")) {
-      const parts = name.split(".");
-      let target = obj;
-      for (const part of parts.slice(0, -1)) {
-        target = target ? target[part] : null;
-      }
-      const leaf = parts[parts.length - 1];
-      if (!target || typeof target[leaf] !== "function" || isGuarded(target[leaf])) {
-        continue;
-      }
-      if (setAttr(target, leaf, makeGuardedLLMCallable(guard, target[leaf].bind(target), { label: name }))) {
-        patched += 1;
-      }
+    const [target, leaf, fn] = resolveAttrPath(obj, name);
+    if (typeof fn !== "function" || isGuarded(fn)) {
       continue;
     }
-    if (!obj || typeof obj[name] !== "function" || isGuarded(obj[name])) {
-      continue;
-    }
-    if (setAttr(obj, name, makeGuardedLLMCallable(guard, obj[name].bind(obj), { label: name }))) {
+    if (
+      setAttr(
+        target,
+        leaf,
+        makeGuardedLLMCallable(guard, fn, {
+          label: name,
+          normalizer,
+          owner: owner != null ? owner : target,
+          callTarget: target,
+        })
+      )
+    ) {
       patched += 1;
     }
   }
@@ -289,18 +473,18 @@ function patchLLMMethods(guard, obj, { methods = ["create", "complete", "complet
 }
 
 module.exports = {
+  bindArguments,
+  guardLLMAfter,
+  guardLLMBefore,
+  guardToolAfter,
+  guardToolBefore,
   isGuarded,
+  makeGuardedLLMCallable,
+  makeGuardedTool,
   markGuarded,
   markPatched,
-  toolName,
-  bindArguments,
-  setAttr,
-  registerToolMetadata,
-  guardLLMBefore,
-  guardLLMAfter,
-  guardToolBefore,
-  guardToolAfter,
-  makeGuardedTool,
-  makeGuardedLLMCallable,
   patchLLMMethods,
+  registerToolMetadata,
+  setAttr,
+  toolName,
 };

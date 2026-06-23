@@ -41,6 +41,59 @@ Each `AuditTraceEntry` contains the canonical trace fields `session_id`, `agent_
 
 `AuditResult` currently uses four normalized severity levels: `critical`, `high`, `warning`, and `ok`. Each result also includes a human-readable `reason` and optional `metadata`.
 
+The current type is defined in `src/server/backend/audit/base.py`:
+
+```python
+@dataclass
+class AuditResult:
+    level: AuditLevel = "ok"
+    reason: str = "No issue detected in trace."
+    metadata: dict[str, Any] = field(default_factory=dict)
+```
+
+### AuditResult fields
+
+| Field | Type | Meaning | When to use it |
+| --- | --- | --- | --- |
+| `level` | `"critical" \| "high" \| "warning" \| "ok"` | The final severity produced by the auditor. Callers and UI usually read this first to understand how serious the trace is. | Set this whenever you want to express the overall risk of the trace. In practice, `ok` means no issue found, `warning` means suspicious signals worth reviewing, `high` means clear risk, and `critical` means urgent attention or escalation is needed. |
+| `reason` | `str` | A human-readable summary explaining why the auditor chose this severity. | Almost always populate this. A full sentence works well because it can be shown directly in UI, logs, or API responses. |
+| `metadata` | `dict[str, Any]` | Structured extra context for downstream consumers, dashboards, or follow-up automation. | Use this when the caller needs machine-readable details in addition to the headline conclusion, such as event IDs, risk signals, counts, tool names, or user identifiers. |
+
+### Common AuditResult patterns
+
+- Returning only the conclusion:
+
+  ```python
+  return AuditResult(level="high", reason="The trace contains denied high-risk actions.")
+  ```
+
+- Returning conclusion plus structured details:
+
+  ```python
+  return AuditResult(
+      level="warning",
+      reason="Suspicious outbound behavior detected.",
+      metadata={
+          "event_ids": suspicious_event_ids,
+          "risk_signals": sorted(risky_signals),
+          "tool_names": sorted(tool_names),
+      },
+  )
+  ```
+
+- Returning a clean result when no issue is found:
+
+  ```python
+  return AuditResult.ok()
+  ```
+
+### AuditResult helper methods
+
+| Member | What it does | When to use it |
+| --- | --- | --- |
+| `AuditResult.ok(reason="No issue detected in trace.")` | Quickly builds a result with `level="ok"`. | Use this when the auditor found no issue and you want the shortest, most explicit success return path. |
+| `result.to_dict()` | Converts the result into a serializable dictionary with `level`, `reason`, and `metadata`. | Use this when returning data through API layers, writing snapshot tests, logging, or doing extra JSON serialization. |
+
 ## AuditTraceEntry
 
 `AuditTraceEntry` is the normalized record type passed into `BaseAuditor.audit()`. One entry usually represents one stored runtime event plus the decision and detection metadata produced for that event.
