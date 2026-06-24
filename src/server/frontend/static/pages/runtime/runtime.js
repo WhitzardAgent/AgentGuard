@@ -412,7 +412,6 @@
     const payload = {
       event: selected.raw?.event || {},
       decision: selected.raw?.decision || {},
-      matched_rules: selected.matchedRules,
     };
     elements.auditDetail.textContent = JSON.stringify(payload, null, 2);
   }

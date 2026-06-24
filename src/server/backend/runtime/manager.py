@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import threading
 import urllib.error
 import urllib.parse
@@ -437,7 +438,43 @@ class RuntimeManager:
             trajectory_window=trace_window,
             stop_on_first_decision=True,
         )
+        plugin_result = _plugin_result_dict(check)
+        audit_plugin_result = _audit_safe_plugin_result(plugin_result)
         decision = _decision_from_plugin_result(check)
+        plugin_outcomes = audit_plugin_result.get("metadata", {}).get("plugin_outcomes")
+        if isinstance(plugin_outcomes, list):
+            decision.metadata["plugin_outcomes"] = plugin_outcomes
+        review_tickets = self._enqueue_plugin_review_tickets(
+            event=event,
+            context=context,
+            check=check,
+        )
+        if review_tickets:
+            if not (decision.requires_user or decision.requires_remote):
+                final_ticket = review_tickets[-1]
+                final_reason = str(final_ticket.get("reason") or "Review required by server plugin.")
+                final_policy_id = (
+                    str(final_ticket.get("policy_id") or "").strip() or decision.policy_id
+                )
+                final_signals = list(dict.fromkeys(check.risk_signals or decision.risk_signals))
+                if str(final_ticket.get("decision_type") or "") == DecisionType.REQUIRE_REMOTE_REVIEW.value:
+                    decision = GuardDecision.require_remote_review(
+                        final_reason,
+                        policy_id=final_policy_id,
+                        risk_signals=final_signals,
+                        metadata=dict(decision.metadata),
+                    )
+                else:
+                    decision = GuardDecision.human_check(
+                        final_reason,
+                        policy_id=final_policy_id,
+                        risk_signals=final_signals,
+                        metadata=dict(decision.metadata),
+                    )
+            decision.metadata["review_tickets"] = review_tickets
+            final_ticket = review_tickets[-1]
+            decision.metadata["review_ticket_id"] = final_ticket["ticket_id"]
+            decision.metadata["review_status"] = final_ticket["status"]
 
         # 2. Degrade plan if needed.
         if decision.decision_type == DecisionType.DEGRADE:
@@ -447,18 +484,6 @@ class RuntimeManager:
                 decision.reason,
             )
             decision.metadata["degrade_plan"] = plan.to_dict()
-        elif decision.requires_user or decision.requires_remote:
-            ticket = self.review_queue.enqueue(
-                event=event.to_dict(),
-                decision=decision.to_dict(),
-                principal={
-                    "session_id": context.session_id or event.context.session_id,
-                    "agent_id": context.agent_id or event.context.agent_id,
-                    "user_id": context.user_id or event.context.user_id,
-                },
-            )
-            decision.metadata["review_ticket_id"] = ticket["ticket_id"]
-            decision.metadata["review_status"] = ticket["status"]
 
         # 3. Audit.
         self.audit.record(event.to_dict(), decision.to_dict())
@@ -471,7 +496,7 @@ class RuntimeManager:
                 reason="guard_decide",
                 event=event,
                 decision=decision,
-                plugin_result=_plugin_result_dict(check),
+                plugin_result=audit_plugin_result,
                 plugin_input={
                     "event": event.to_dict(),
                     "context": context.to_dict(),
@@ -496,7 +521,7 @@ class RuntimeManager:
         return {
             "decision": decision.to_dict(),
             "risk_signals": risk_signals,
-            "plugin_result": _plugin_result_dict(check),
+            "plugin_result": plugin_result,
         }
 
     def get_trace_records(
@@ -611,6 +636,58 @@ class RuntimeManager:
                 return PolicyEngine(store=configured_policy_store)
         return None
 
+    def _enqueue_plugin_review_tickets(
+        self,
+        *,
+        event: RuntimeEvent,
+        context: RuntimeContext,
+        check: CheckResult,
+    ) -> list[dict[str, Any]]:
+        outcomes = check.metadata.get("plugin_outcomes")
+        if not isinstance(outcomes, list):
+            return []
+        principal = {
+            "session_id": context.session_id or event.context.session_id,
+            "agent_id": context.agent_id or event.context.agent_id,
+            "user_id": context.user_id or event.context.user_id,
+        }
+        review_tickets: list[dict[str, Any]] = []
+        for outcome in outcomes:
+            if not isinstance(outcome, dict):
+                continue
+            decision_dict = outcome.get("decision_candidate")
+            if not isinstance(decision_dict, dict) or not decision_dict.get("decision_type"):
+                continue
+            try:
+                plugin_decision = GuardDecision.from_dict(decision_dict)
+            except Exception:
+                continue
+            if not (plugin_decision.requires_user or plugin_decision.requires_remote):
+                continue
+            plugin_name = str(outcome.get("plugin") or "").strip()
+            metadata = dict(plugin_decision.metadata or {})
+            if plugin_name:
+                metadata.setdefault("plugin", plugin_name)
+            ticket = self.review_queue.enqueue(
+                event=event.to_dict(),
+                decision={
+                    **plugin_decision.to_dict(),
+                    "metadata": metadata,
+                },
+                principal=principal,
+            )
+            review_tickets.append(
+                {
+                    "ticket_id": ticket["ticket_id"],
+                    "status": ticket["status"],
+                    "plugin": plugin_name,
+                    "decision_type": plugin_decision.decision_type.value,
+                    "reason": plugin_decision.reason,
+                    "policy_id": plugin_decision.policy_id,
+                }
+            )
+        return review_tickets
+
 
 def _plugin_result_dict(check: CheckResult) -> dict[str, Any]:
     return {
@@ -621,6 +698,11 @@ def _plugin_result_dict(check: CheckResult) -> dict[str, Any]:
         ),
         "metadata": dict(check.metadata),
     }
+
+
+def _audit_safe_plugin_result(plugin_result: dict[str, Any]) -> dict[str, Any]:
+    # Normalize through JSON to break shared references before audit/logging.
+    return json.loads(json.dumps(plugin_result))
 
 def _decision_from_plugin_result(check: CheckResult) -> GuardDecision:
     if check.is_final and check.decision_candidate is not None:

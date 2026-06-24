@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from shared.schemas.context import RuntimeContext
+from shared.schemas.decisions import DecisionType, GuardDecision
 from shared.schemas.events import EventType, RuntimeEvent
 
 from backend.runtime.plugins.base import BasePlugin, CheckResult
@@ -20,6 +21,22 @@ _EVENT_PHASE = {
     EventType.LLM_OUTPUT: "llm_after",
     EventType.TOOL_INVOKE: "tool_before",
     EventType.TOOL_RESULT: "tool_after",
+}
+
+_DECISION_RANK = {
+    DecisionType.ALLOW: 0,
+    DecisionType.LOG_ONLY: 1,
+    DecisionType.ALIGN_THOUGHT: 2,
+    DecisionType.LOOP_BACK_TO_LLM: 3,
+    DecisionType.REPAIR: 4,
+    DecisionType.REWRITE: 5,
+    DecisionType.SANITIZE: 6,
+    DecisionType.DEGRADE: 7,
+    DecisionType.HUMAN_CHECK: 8,
+    DecisionType.REQUIRE_APPROVAL: 8,
+    DecisionType.REQUIRE_REMOTE_REVIEW: 9,
+    DecisionType.DROP_THOUGHT: 9,
+    DecisionType.DENY: 10,
 }
 
 
@@ -127,8 +144,10 @@ class PluginManager:
     ) -> CheckResult:
         merged_signals: list[str] = []
         candidate = None
-        is_final = False
+        candidate_is_final = False
         meta: dict[str, Any] = {}
+        plugin_outcomes: list[dict[str, Any]] = []
+        selected_outcome_index: int | None = None
         phase = _EVENT_PHASE.get(event.event_type, "global")
         phase_plugins = list(self.plugins_by_phase.get(phase, []))
         phase_plugins.extend(self.plugins_by_phase.get("global", []))
@@ -140,24 +159,34 @@ class PluginManager:
             except Exception as exc:
                 meta[f"{plugin.name}_error"] = str(exc)
                 continue
+            plugin_outcomes.append(_plugin_outcome_dict(plugin, res))
             for signal in res.risk_signals:
                 if signal not in merged_signals:
                     merged_signals.append(signal)
                 event.add_signal(signal)
             if res.metadata:
                 meta.update(res.metadata)
-            if res.decision_candidate and (candidate is None or res.is_final):
+            if res.decision_candidate and _should_replace_decision(
+                current=candidate,
+                current_is_final=candidate_is_final,
+                incoming=res.decision_candidate,
+                incoming_is_final=res.is_final,
+            ):
                 candidate = res.decision_candidate
-                is_final = is_final or res.is_final
-                if stop_on_first_decision:
+                candidate_is_final = res.is_final
+                selected_outcome_index = len(plugin_outcomes) - 1
+                if stop_on_first_decision and _should_stop_on_decision(candidate, candidate_is_final):
                     break
 
         for signal in merged_signals:
             event.add_signal(signal)
+        meta["plugin_outcomes"] = plugin_outcomes
+        if selected_outcome_index is not None:
+            meta["selected_outcome_index"] = selected_outcome_index
         return CheckResult(
             decision_candidate=candidate,
             risk_signals=merged_signals,
-            is_final=is_final,
+            is_final=candidate_is_final,
             metadata=meta,
         )
 
@@ -237,6 +266,50 @@ def _call_plugin(
     if len(params) >= 3:
         return plugin.check(event, context, trajectory_window)
     return plugin.check(event, context)  # type: ignore[call-arg]
+
+
+def _plugin_outcome_dict(plugin: BasePlugin, res: CheckResult) -> dict[str, Any]:
+    return {
+        "plugin": plugin.name,
+        "decision_candidate": (
+            res.decision_candidate.to_dict() if res.decision_candidate is not None else None
+        ),
+        "risk_signals": list(res.risk_signals),
+        "is_final": bool(res.is_final),
+        "metadata": dict(res.metadata),
+    }
+
+
+def _decision_rank(decision: GuardDecision | None) -> int:
+    if decision is None:
+        return -1
+    return _DECISION_RANK.get(decision.decision_type, -1)
+
+
+def _should_replace_decision(
+    *,
+    current: GuardDecision | None,
+    current_is_final: bool,
+    incoming: GuardDecision,
+    incoming_is_final: bool,
+) -> bool:
+    if current is None:
+        return True
+    incoming_rank = _decision_rank(incoming)
+    current_rank = _decision_rank(current)
+    if incoming_rank != current_rank:
+        return incoming_rank > current_rank
+    if incoming_is_final != current_is_final:
+        return incoming_is_final
+    return False
+
+
+def _should_stop_on_decision(decision: GuardDecision | None, is_final: bool) -> bool:
+    return bool(
+        decision is not None
+        and is_final
+        and decision.decision_type == DecisionType.DENY
+    )
 
 
 def _load_plugin_class(path: str) -> type[BasePlugin]:

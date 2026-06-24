@@ -293,6 +293,10 @@ class ConsoleState:
 
         event_dict = self._build_event_dict(event, now)
         decision_dict = self._build_decision_dict(decision, matched, risk)
+        plugin_result = dict((decision.metadata or {}).get("plugin_result") or {})
+        plugin_outcomes = plugin_result.get("metadata", {}).get("plugin_outcomes")
+        if isinstance(plugin_outcomes, list):
+            decision_dict["plugin_outcomes"] = plugin_outcomes
 
         with self._lock:
             self._traffic.append(entry)
@@ -330,6 +334,7 @@ class ConsoleState:
     def _build_decision_dict(
         decision: GuardDecision, matched: list[str], risk: float
     ) -> dict[str, Any]:
+        review_tickets = decision.metadata.get("review_tickets")
         return {
             "action": _DECISION_TO_ACTION.get(decision.decision_type, "allow"),
             "risk_score": risk,
@@ -338,6 +343,7 @@ class ConsoleState:
             "rule_version": decision.metadata.get("policy_version", "unknown"),
             "ttl_ms": 0,
             "reason": decision.reason,
+            "review_tickets": review_tickets if isinstance(review_tickets, list) else [],
         }
 
     @classmethod
@@ -389,6 +395,9 @@ class ConsoleState:
         matched = metadata.get("matched_rule_ids") or (
             [decision.get("policy_id")] if decision.get("policy_id") else []
         )
+        plugin_name = str(metadata.get("plugin") or "").strip()
+        if plugin_name:
+            matched = [plugin_name, *matched]
         try:
             action_key = DecisionType(str(decision.get("decision_type") or "allow"))
         except ValueError:
