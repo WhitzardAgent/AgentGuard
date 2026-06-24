@@ -49,8 +49,11 @@ class RemoteGuardClient {
     this.snapshot_path = options.snapshot_path || "/v1/server/policy/snapshot";
     this.trace_path = options.trace_path || "/v1/server/trace/upload";
     this.tool_report_path = options.tool_report_path || "/v1/server/tools/report";
+    this.approval_path = options.approval_path || "/v1/server/approvals/{ticket_id}";
     this.register_path = options.register_path || "/v1/server/session/register";
     this.unregister_path = options.unregister_path || "/v1/server/session/unregister";
+    this.approval_wait_timeout_s = options.approval_wait_timeout_s ?? options.approvalWaitTimeoutS ?? 600.0;
+    this.approval_wait_chunk_s = Math.max(1.0, options.approval_wait_chunk_s ?? options.approvalWaitChunkS ?? 25.0);
     this.breaker = new CircuitBreaker();
   }
 
@@ -83,7 +86,7 @@ class RemoteGuardClient {
     }
     decision.metadata.plugin_result = decision.metadata.plugin_result || payload.plugin_result || {};
     decision.metadata.source = decision.metadata.source || "remote";
-    return decision;
+    return this.awaitReviewResolution(decision);
   }
 
   fetch_snapshot() {
@@ -180,6 +183,46 @@ class RemoteGuardClient {
 
   get(path) {
     return this.request("GET", path, null);
+  }
+
+  async awaitReviewResolution(decision) {
+    if (!(decision.requires_user || decision.requires_remote)) {
+      return decision;
+    }
+    const ticketId = String(
+      decision.metadata.review_ticket_id || decision.metadata.ticket_id || "",
+    ).trim();
+    if (!ticketId) {
+      return decision;
+    }
+    const timeoutS = Number(this.approval_wait_timeout_s || 0);
+    const deadline = timeoutS > 0 ? Date.now() + timeoutS * 1000 : null;
+    const maxWaitS = Math.max(Number(this.timeout_s || 0) - 0.5, 1.0);
+    while (true) {
+      const remainingMs = deadline == null ? null : deadline - Date.now();
+      if (remainingMs != null && remainingMs <= 0) {
+        return decision;
+      }
+      const waitS = remainingMs == null
+        ? Math.min(this.approval_wait_chunk_s, maxWaitS)
+        : Math.min(this.approval_wait_chunk_s, maxWaitS, remainingMs / 1000);
+      const path = this.approval_path.replace(
+        "{ticket_id}",
+        encodeURIComponent(ticketId),
+      );
+      const payload = await this.get(`${path}?wait_ms=${Math.max(0, Math.floor(waitS * 1000))}`);
+      const status = String(payload && payload.status ? payload.status : "").toLowerCase();
+      if (status === "approved" || status === "denied") {
+        const resolved = payload && payload.resolved_decision;
+        if (resolved && typeof resolved === "object" && resolved.decision_type) {
+          return GuardDecision.fromDict(resolved);
+        }
+        return decision;
+      }
+      if (status !== "pending") {
+        return decision;
+      }
+    }
   }
 }
 

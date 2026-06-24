@@ -18,6 +18,7 @@ from backend.runtime.plugins import server_plugin_manager
 from backend.runtime.plugins.config_utils import merge_plugin_configs, normalize_plugin_config
 from backend.runtime.degrade.planner import DegradePlanner
 from backend.runtime.policy.engine import PolicyEngine
+from backend.runtime.review import ReviewQueue
 from backend.runtime.storage import SessionPool, TraceStore, trace_entry_event_dict
 from shared.utils.json import safe_dumps, safe_loads
 from shared.utils.time import now_ts
@@ -46,6 +47,7 @@ class RuntimeManager:
         self.audit = audit or AuditLogger()
         self.trace_store = TraceStore()
         self.session_pool = SessionPool()
+        self.review_queue = ReviewQueue()
         self._session_health_interval_s = session_health_interval_s
         self._session_health_max_age_s = session_health_max_age_s
         self._session_health_stop = threading.Event()
@@ -445,6 +447,18 @@ class RuntimeManager:
                 decision.reason,
             )
             decision.metadata["degrade_plan"] = plan.to_dict()
+        elif decision.requires_user or decision.requires_remote:
+            ticket = self.review_queue.enqueue(
+                event=event.to_dict(),
+                decision=decision.to_dict(),
+                principal={
+                    "session_id": context.session_id or event.context.session_id,
+                    "agent_id": context.agent_id or event.context.agent_id,
+                    "user_id": context.user_id or event.context.user_id,
+                },
+            )
+            decision.metadata["review_ticket_id"] = ticket["ticket_id"]
+            decision.metadata["review_status"] = ticket["status"]
 
         # 3. Audit.
         self.audit.record(event.to_dict(), decision.to_dict())

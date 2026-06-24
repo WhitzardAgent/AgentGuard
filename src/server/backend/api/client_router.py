@@ -35,6 +35,18 @@ def guard_decide(req: GuardDecideRequest, request: Request) -> GuardDecideRespon
     return GuardDecideResponse(**result)
 
 
+@router.get("/v1/server/approvals/{ticket_id}")
+def approval_status(ticket_id: str, request: Request, wait_ms: int = 0) -> dict[str, Any]:
+    _validate_client_session(request)
+    ticket = _manager.review_queue.get(ticket_id)
+    if ticket is None or not _ticket_belongs_to_request(ticket, request):
+        raise HTTPException(status_code=404, detail="ticket not found")
+    waited = _manager.review_queue.wait(ticket_id, timeout_s=max(wait_ms, 0) / 1000.0)
+    if waited is None:
+        raise HTTPException(status_code=404, detail="ticket not found")
+    return waited
+
+
 @router.get("/v1/server/policy/snapshot")
 def policy_snapshot(request: Request) -> dict:
     _validate_client_session(request)
@@ -142,3 +154,15 @@ def _session_key_error(exc: PermissionError) -> HTTPException:
     message = str(exc)
     status = 401 if "missing" in message else 403
     return HTTPException(status_code=status, detail=message)
+
+
+def _ticket_belongs_to_request(ticket: dict[str, Any], request: Request) -> bool:
+    principal = dict(ticket.get("principal") or {})
+    return (
+        str(principal.get("session_id") or "")
+        == str(request.headers.get("x-agentguard-session-id") or "")
+        and str(principal.get("agent_id") or "")
+        == str(request.headers.get("x-agentguard-agent-id") or "")
+        and str(principal.get("user_id") or "")
+        == str(request.headers.get("x-agentguard-user-id") or "")
+    )

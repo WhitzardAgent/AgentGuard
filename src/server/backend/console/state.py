@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import threading
 import time
-import uuid
 from collections import deque
 from typing import Any
 
@@ -28,13 +27,6 @@ _DECISION_TO_ACTION = {
     DecisionType.DEGRADE: "degrade",
     DecisionType.SANITIZE: "degrade",
 }
-_HELD = {
-    DecisionType.REQUIRE_APPROVAL,
-    DecisionType.HUMAN_CHECK,
-    DecisionType.REQUIRE_REMOTE_REVIEW,
-}
-
-
 class ConsoleState:
     def __init__(self, manager: RuntimeManager) -> None:
         self.manager = manager
@@ -49,7 +41,6 @@ class ConsoleState:
 
         self._traffic: deque[dict[str, Any]] = deque(maxlen=1000)
         self._audit: deque[dict[str, Any]] = deque(maxlen=1000)
-        self._tickets: dict[str, dict[str, Any]] = {}
 
         manager.add_observer(self._observe)
 
@@ -251,18 +242,19 @@ class ConsoleState:
         return entries[-max(1, n):][::-1]
 
     def approvals(self, agent_id: str | None = None) -> list[dict[str, Any]]:
-        with self._lock:
-            items = list(self._tickets.values())
+        items = [
+            self._build_approval_item(ticket)
+            for ticket in self.manager.review_queue.pending()
+        ]
         if agent_id:
             items = [
-                t for t in items
-                if (t.get("event") or {}).get("principal", {}).get("agent_id") == agent_id
+                item for item in items
+                if (item.get("event") or {}).get("principal", {}).get("agent_id") == agent_id
             ]
-        return sorted(items, key=lambda t: t["created_ms"])
+        return items
 
     def resolve_ticket(self, ticket_id: str, approved: bool, note: str = "") -> bool:
-        with self._lock:
-            return self._tickets.pop(ticket_id, None) is not None
+        return self.manager.review_queue.resolve(ticket_id, approved=approved, note=note) is not None
 
     # ---- observer ------------------------------------------------------
     def _traffic_entries(self, agent_id: str | None) -> list[dict[str, Any]]:
@@ -305,14 +297,6 @@ class ConsoleState:
         with self._lock:
             self._traffic.append(entry)
             self._audit.append({"event": event_dict, "decision": decision_dict})
-            if decision.decision_type in _HELD:
-                tid = f"ticket-{uuid.uuid4().hex[:12]}"
-                self._tickets[tid] = {
-                    "ticket_id": tid,
-                    "created_ms": int(now * 1000),
-                    "event": event_dict,
-                    "decision": decision_dict,
-                }
 
     @staticmethod
     def _build_event_dict(event: RuntimeEvent, ts: float) -> dict[str, Any]:
@@ -354,4 +338,68 @@ class ConsoleState:
             "rule_version": decision.metadata.get("policy_version", "unknown"),
             "ttl_ms": 0,
             "reason": decision.reason,
+        }
+
+    @classmethod
+    def _build_approval_item(cls, ticket: dict[str, Any]) -> dict[str, Any]:
+        event = cls._approval_event_view(ticket.get("event") or {})
+        decision = cls._approval_decision_view(ticket.get("guard_decision") or {})
+        return {
+            "ticket_id": ticket.get("ticket_id"),
+            "created_ms": ticket.get("created_ms"),
+            "status": ticket.get("status"),
+            "event": event,
+            "decision": decision,
+            "note": ticket.get("note") or "",
+            "resolved_ms": ticket.get("resolved_ms"),
+        }
+
+    @staticmethod
+    def _approval_event_view(event: dict[str, Any]) -> dict[str, Any]:
+        context = dict(event.get("context") or {})
+        payload = dict(event.get("payload") or {})
+        return {
+            "event_id": event.get("event_id"),
+            "ts_ms": int(float(event.get("timestamp") or 0.0) * 1000),
+            "event_type": event.get("event_type") or "tool_invoke",
+            "principal": {
+                "agent_id": context.get("agent_id"),
+                "session_id": context.get("session_id"),
+                "user_id": context.get("user_id"),
+                "role": "default",
+                "trust_level": 0,
+            },
+            "tool_call": {
+                "tool_name": payload.get("tool_name"),
+                "args": payload.get("arguments") or {},
+                "target": {},
+                "sink_type": "none",
+                "label": {
+                    "boundary": "internal",
+                    "sensitivity": "low",
+                    "integrity": "trusted",
+                    "tags": payload.get("capabilities") or [],
+                },
+            },
+        }
+
+    @staticmethod
+    def _approval_decision_view(decision: dict[str, Any]) -> dict[str, Any]:
+        metadata = dict(decision.get("metadata") or {})
+        matched = metadata.get("matched_rule_ids") or (
+            [decision.get("policy_id")] if decision.get("policy_id") else []
+        )
+        try:
+            action_key = DecisionType(str(decision.get("decision_type") or "allow"))
+        except ValueError:
+            action_key = DecisionType.HUMAN_CHECK
+        action = _DECISION_TO_ACTION.get(action_key, "human_check")
+        return {
+            "action": action,
+            "risk_score": 0.0,
+            "matched_rules": [str(item) for item in matched if str(item).strip()],
+            "obligations": [],
+            "rule_version": metadata.get("policy_version", "unknown"),
+            "ttl_ms": 0,
+            "reason": str(decision.get("reason") or ""),
         }

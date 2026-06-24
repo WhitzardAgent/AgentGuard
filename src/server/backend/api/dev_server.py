@@ -47,6 +47,20 @@ class _Handler(BaseHTTPRequestHandler):
             if not self._validate_client_session():
                 return
             self._send(200, snapshot_dict(self.manager.policy.store))
+        elif path.startswith("/v1/server/approvals/"):
+            if not self._validate_client_session():
+                return
+            ticket_id = path.rsplit("/", 1)[-1]
+            ticket = self.manager.review_queue.get(ticket_id)
+            if ticket is None or not self._ticket_belongs_to_headers(ticket):
+                self._send(404, {"error": "ticket not found"})
+                return
+            wait_ms = int(self._query_params().get("wait_ms", "0") or 0)
+            waited = self.manager.review_queue.wait(ticket_id, timeout_s=max(wait_ms, 0) / 1000.0)
+            if waited is None:
+                self._send(404, {"error": "ticket not found"})
+                return
+            self._send(200, waited)
         elif path == "/v1/backend/sessions":
             self._send(200, {"sessions": self.manager.session_pool.list()})
         elif path == "/v1/backend/auditors":
@@ -60,9 +74,14 @@ class _Handler(BaseHTTPRequestHandler):
             })
         elif path == "/v1/backend/tools":
             self._send(200, self.console.tools())
+        elif path == "/v1/backend/approvals":
+            self._send(200, self.console.approvals())
         elif path.startswith("/v1/backend/agents/") and path.endswith("/tools"):
             agent_id = path.split("/")[4]
             self._send(200, self.console.tools(agent_id))
+        elif path.startswith("/v1/backend/agents/") and path.endswith("/runtime/approvals"):
+            agent_id = path.split("/")[4]
+            self._send(200, self.console.approvals(agent_id))
         elif path.startswith("/v1/backend/sessions/"):
             session_id = path.rsplit("/", 1)[-1]
             record = self.manager.session_pool.get(
@@ -138,6 +157,18 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_session_key_error(exc)
                 return
             self._send(200, {"status": "ok", "session_id": session_id, "removed": removed})
+        elif self.path.startswith("/v1/backend/approvals/") and self.path.endswith("/approve"):
+            ticket_id = self.path.split("/")[4]
+            if self.console.resolve_ticket(ticket_id, approved=True, note=body.get("note", "")):
+                self._send(200, {"ok": True})
+            else:
+                self._send(404, {"error": "ticket not found or already resolved"})
+        elif self.path.startswith("/v1/backend/approvals/") and self.path.endswith("/deny"):
+            ticket_id = self.path.split("/")[4]
+            if self.console.resolve_ticket(ticket_id, approved=False, note=body.get("note", "")):
+                self._send(200, {"ok": True})
+            else:
+                self._send(404, {"error": "ticket not found or already resolved"})
         elif self.path == "/v1/backend/plugins/config":
             try:
                 loaded = self.manager.update_plugin_config(body.get("config"))
@@ -270,6 +301,17 @@ class _Handler(BaseHTTPRequestHandler):
     def _send_session_key_error(self, exc: PermissionError) -> None:
         message = str(exc)
         self._send(401 if "missing" in message else 403, {"error": message})
+
+    def _ticket_belongs_to_headers(self, ticket: dict[str, Any]) -> bool:
+        principal = dict(ticket.get("principal") or {})
+        return (
+            str(principal.get("session_id") or "")
+            == str(self.headers.get("X-AgentGuard-Session-Id") or "")
+            and str(principal.get("agent_id") or "")
+            == str(self.headers.get("X-AgentGuard-Agent-Id") or "")
+            and str(principal.get("user_id") or "")
+            == str(self.headers.get("X-AgentGuard-User-Id") or "")
+        )
 
     def _query_params(self) -> dict[str, str]:
         raw = self.path.split("?", 1)

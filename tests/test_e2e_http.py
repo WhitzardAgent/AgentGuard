@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -100,6 +101,59 @@ def test_e2e_skill_run_over_http(server):
     guard = AgentGuard(session_id="e2e2", server_url=server)
     out = guard.run_skill("rule_linter", {"data": {"rules": [{"rule_id": "x", "effect": "deny", "reason": "r"}]}})
     assert "success" in out
+
+
+def test_e2e_human_check_waits_for_frontend_approval():
+    manager = RuntimeManager(
+        plugin_config={
+            "phases": {
+                "tool_before": {"client": [], "server": ["tool_invoke", "rule_based_plugin"]}
+            }
+        }
+    )
+    manager.policy.store.set_rules(_runtime_rules())
+    base_url, srv, _ = start_dev_server(manager=manager)
+    guard = AgentGuard(
+        session_id="approval-session",
+        user_id="approval-user",
+        agent_id="approval-agent",
+        server_url=base_url,
+        remote_timeout_s=3.0,
+        sandbox="noop",
+    )
+    try:
+        def send_email(to: str, body: str) -> str:
+            return f"sent to {to}: {body}"
+
+        send = guard.wrap_tool(send_email, capabilities=["external_send"])
+
+        worker_errors: list[str] = []
+
+        def approve_later() -> None:
+            deadline = time.time() + 3
+            while time.time() < deadline:
+                pending = manager.review_queue.pending()
+                if pending:
+                    _post_json(
+                        f"{base_url}/v1/backend/approvals/{pending[0]['ticket_id']}/approve",
+                        {"note": "approved in test"},
+                    )
+                    return
+                time.sleep(0.05)
+            worker_errors.append("expected a pending approval ticket")
+
+        worker = threading.Thread(target=approve_later, daemon=True)
+        worker.start()
+
+        result = send("teammate@example.com", "hello")
+
+        worker.join(timeout=1)
+        assert result == "sent to teammate@example.com: hello"
+        assert worker_errors == []
+        assert manager.review_queue.pending() == []
+    finally:
+        guard.close()
+        srv.shutdown()
 
 
 def test_agentguard_close_unregisters_server_session():

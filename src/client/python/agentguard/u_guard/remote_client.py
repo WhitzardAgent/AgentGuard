@@ -4,6 +4,7 @@ from __future__ import annotations
 import time
 import threading
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from typing import Any
@@ -60,8 +61,11 @@ class RemoteGuardClient:
         snapshot_path: str = "/v1/server/policy/snapshot",
         trace_path: str = "/v1/server/trace/upload",
         tool_report_path: str = "/v1/server/tools/report",
+        approval_path: str = "/v1/server/approvals/{ticket_id}",
         register_path: str = "/v1/server/session/register",
         unregister_path: str = "/v1/server/session/unregister",
+        approval_wait_timeout_s: float = 600.0,
+        approval_wait_chunk_s: float = 25.0,
     ) -> None:
         self.server_url = (server_url or "").rstrip("/")
         self.api_key = api_key
@@ -75,8 +79,11 @@ class RemoteGuardClient:
         self.snapshot_path = snapshot_path
         self.trace_path = trace_path
         self.tool_report_path = tool_report_path
+        self.approval_path = approval_path
         self.register_path = register_path
         self.unregister_path = unregister_path
+        self.approval_wait_timeout_s = approval_wait_timeout_s
+        self.approval_wait_chunk_s = max(1.0, approval_wait_chunk_s)
         self.breaker = CircuitBreaker()
 
     @property
@@ -119,6 +126,7 @@ class RemoteGuardClient:
                 gd.risk_signals.append(s)
         gd.metadata.setdefault("plugin_result", payload.get("plugin_result") or {})
         gd.metadata.setdefault("source", "remote")
+        gd = self._await_review_resolution(gd)
         return gd
 
     def fetch_snapshot(self) -> dict[str, Any]:
@@ -211,3 +219,36 @@ class RemoteGuardClient:
 
     def _get(self, path: str) -> dict[str, Any]:
         return self._request("GET", path, None)
+
+    def _await_review_resolution(self, decision: GuardDecision) -> GuardDecision:
+        if not (decision.requires_user or decision.requires_remote):
+            return decision
+        ticket_id = str(
+            decision.metadata.get("review_ticket_id")
+            or decision.metadata.get("ticket_id")
+            or ""
+        ).strip()
+        if not ticket_id:
+            return decision
+
+        timeout_s = self.approval_wait_timeout_s
+        deadline = None if timeout_s <= 0 else (time.time() + timeout_s)
+        max_wait_s = max(self.timeout_s - 0.5, 1.0)
+        while True:
+            remaining = None if deadline is None else (deadline - time.time())
+            if remaining is not None and remaining <= 0:
+                return decision
+            wait_s = max_wait_s if remaining is None else min(max_wait_s, remaining)
+            wait_s = min(wait_s, self.approval_wait_chunk_s)
+            path = self.approval_path.format(
+                ticket_id=urllib.parse.quote(ticket_id, safe="")
+            )
+            payload = self._get(f"{path}?wait_ms={int(max(wait_s, 0.0) * 1000)}")
+            status = str(payload.get("status") or "").lower()
+            if status in {"approved", "denied"}:
+                resolved = payload.get("resolved_decision")
+                if isinstance(resolved, dict) and resolved.get("decision_type"):
+                    return GuardDecision.from_dict(resolved)
+                return decision
+            if status != "pending":
+                return decision

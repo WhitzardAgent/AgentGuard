@@ -76,6 +76,29 @@ def test_manager_denies_exfiltration():
     assert "exfiltration_detected" in res["risk_signals"]
 
 
+def test_manager_enqueues_review_ticket_for_held_decision():
+    m = RuntimeManager(
+        plugin_config={
+            "phases": {
+                "tool_before": {"client": [], "server": ["tool_invoke", "rule_based_plugin"]}
+            }
+        }
+    )
+    m.policy.store.set_rules(_runtime_rules())
+    req = _exfil_request()
+    req["trajectory_window"] = []
+
+    res = m.decide(req)
+
+    assert res["decision"]["decision_type"] == "require_remote_review"
+    ticket_id = res["decision"]["metadata"]["review_ticket_id"]
+    assert ticket_id.startswith("ticket-")
+    ticket = m.review_queue.get(ticket_id)
+    assert ticket is not None
+    assert ticket["status"] == "pending"
+    assert ticket["principal"]["session_id"] == "s1"
+
+
 def test_manager_has_policy_version():
     m = RuntimeManager()
     assert m.policy_version
