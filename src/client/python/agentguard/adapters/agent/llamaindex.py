@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import functools
 import inspect
+import re
 from collections.abc import AsyncIterator, Iterator, Sequence
+from dataclasses import dataclass
 from typing import Any, Callable
 
 from agentguard.adapters.agent.base import BaseAgentAdapter, LLMBinding
@@ -143,7 +145,7 @@ class LlamaIndexAgentAdapter(BaseAgentAdapter):
     ) -> LLMOutputNormalization:
         _ = fn
         return LLMOutputNormalization(
-            payload=_normalize_llamaindex_value(output),
+            payload=_normalize_llamaindex_llm_output(output),
             metadata=_llamaindex_meta(label=label, owner=owner),
         )
 
@@ -689,6 +691,108 @@ def _normalize_llamaindex_value(value: Any) -> Any:
             except Exception:
                 continue
     return str(value)
+
+
+def _normalize_llamaindex_llm_output(value: Any) -> Any:
+    normalized = _normalize_llamaindex_value(value)
+    llm_output = _extract_llamaindex_llm_output_fields(normalized)
+    return llm_output if llm_output is not None else normalized
+
+
+def _extract_llamaindex_llm_output_fields(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+
+    candidate = value
+    message = value.get("message")
+    if isinstance(message, dict):
+        candidate = message
+
+    visible = _first_text_field(candidate, "content", "text", "delta")
+    if visible is None:
+        visible = _first_text_field(value, "content", "text", "output", "delta")
+    if visible is None:
+        return None
+
+    thought = _extract_llamaindex_thought(candidate)
+    final_output = visible
+    if thought is None:
+        parsed = _parse_tagged_llamaindex_output(visible)
+        thought = parsed.thought
+        final_output = parsed.final_output
+
+    payload: dict[str, Any] = {"output": visible, "final_output": final_output}
+    if thought is not None:
+        payload["thought"] = thought
+    return payload
+
+
+def _first_text_field(value: dict[str, Any], *keys: str) -> str | None:
+    for key in keys:
+        item = value.get(key)
+        if isinstance(item, str) and item:
+            return item
+    return None
+
+
+def _extract_llamaindex_thought(value: dict[str, Any]) -> str | None:
+    additional_kwargs = value.get("additional_kwargs")
+    if isinstance(additional_kwargs, dict):
+        for key in ("reasoning_content", "reasoningContent", "thinking", "thought"):
+            item = additional_kwargs.get(key)
+            if isinstance(item, str) and item:
+                return item
+
+    blocks = value.get("blocks")
+    if not isinstance(blocks, list):
+        return None
+
+    thought_parts: list[str] = []
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        block_type = str(block.get("type") or "").lower()
+        if block_type not in {"thinkingblock", "thinking", "reasoningblock", "reasoning"}:
+            continue
+        text = _first_text_field(block, "content", "text", "thinking", "reasoning")
+        if text:
+            thought_parts.append(text)
+    return "\n\n".join(thought_parts) or None
+
+
+@dataclass(frozen=True)
+class _ParsedLlamaIndexOutput:
+    thought: str | None
+    final_output: str
+
+
+_LLAMAINDEX_THOUGHT_TAG_RE = re.compile(
+    r"<(?P<tag>think|thought|reason|reasoning)\b[^>]*>(?P<body>.*?)</(?P=tag)>",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+_LLAMAINDEX_FINAL_TAG_RE = re.compile(
+    r"<(?P<tag>answer|final|final_output)\b[^>]*>(?P<body>.*?)</(?P=tag)>",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+
+
+def _parse_tagged_llamaindex_output(output: str) -> _ParsedLlamaIndexOutput:
+    thought_matches = list(_LLAMAINDEX_THOUGHT_TAG_RE.finditer(output))
+    if not thought_matches:
+        return _ParsedLlamaIndexOutput(thought=None, final_output=output)
+
+    thought_parts = [match.group("body").strip() for match in thought_matches]
+    thought = "\n\n".join(part for part in thought_parts if part) or None
+    remainder = _LLAMAINDEX_THOUGHT_TAG_RE.sub("", output).strip()
+
+    final_matches = list(_LLAMAINDEX_FINAL_TAG_RE.finditer(remainder))
+    if final_matches:
+        final_parts = [match.group("body").strip() for match in final_matches]
+        final_output = "\n\n".join(part for part in final_parts if part)
+    else:
+        final_output = remainder
+
+    return _ParsedLlamaIndexOutput(thought=thought, final_output=final_output)
 
 
 def _normalize_message_like(value: Any) -> dict[str, Any] | None:

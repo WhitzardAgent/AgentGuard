@@ -9,6 +9,8 @@ from agentguard import AgentGuard
 from agentguard.adapters.agent.base import BaseAgentAdapter
 from agentguard.adapters.agent import langchain as langchain_adapter
 from agentguard.adapters.agent import langgraph as langgraph_adapter
+from agentguard.schemas import events as ev
+from agentguard.schemas.context import RuntimeContext
 
 
 def _event_types(guard: AgentGuard) -> list[str]:
@@ -115,6 +117,69 @@ def test_attach_langchain_patches_tools_by_name():
     assert "llm_input" in _event_types(guard)
     assert "llm_output" in _event_types(guard)
     assert _first_event(guard, "llm_output").metadata["output_type"] == "str"
+
+
+def test_langchain_message_dict_output_exposes_top_level_content():
+    adapter = langchain_adapter.LangChainAgentAdapter()
+    normalized = langchain_adapter._normalize_langchain_message_dict(
+        {
+            "type": "ai",
+            "data": {
+                "content": "final answer",
+                "id": "msg-1",
+                "tool_calls": [{"name": "lookup", "args": {"value": "abc"}}],
+                "response_metadata": {"finish_reason": "stop"},
+            },
+        }
+    )
+
+    event = ev.llm_output(
+        RuntimeContext(session_id="s"),
+        adapter.normalize_llm_output(label="invoke", output=normalized).payload,
+    )
+
+    assert normalized["content"] == "final answer"
+    assert normalized["tool_calls"] == [{"name": "lookup", "args": {"value": "abc"}}]
+    assert event.payload.output == "final answer"
+    assert event.payload.final_output == "final answer"
+
+
+def test_langchain_output_uses_reasoning_content_as_thought():
+    adapter = langchain_adapter.LangChainAgentAdapter()
+    normalized = adapter.normalize_llm_output(
+        label="invoke",
+        output={
+            "content": "visible answer",
+            "additional_kwargs": {"reasoning_content": "hidden reasoning"},
+        },
+    ).payload
+
+    event = ev.llm_output(RuntimeContext(session_id="s"), normalized)
+
+    assert normalized["output"] == "visible answer"
+    assert normalized["thought"] == "hidden reasoning"
+    assert normalized["final_output"] == "visible answer"
+    assert event.payload.output == "visible answer"
+    assert event.payload.thought == "hidden reasoning"
+    assert event.payload.final_output == "visible answer"
+
+
+def test_langchain_output_splits_think_tags_when_reasoning_content_missing():
+    adapter = langchain_adapter.LangChainAgentAdapter()
+    content = "<think>hidden reasoning</think>\nvisible answer"
+    normalized = adapter.normalize_llm_output(
+        label="invoke",
+        output={"content": content, "additional_kwargs": {}},
+    ).payload
+
+    event = ev.llm_output(RuntimeContext(session_id="s"), normalized)
+
+    assert normalized["output"] == content
+    assert normalized["thought"] == "hidden reasoning"
+    assert normalized["final_output"] == "visible answer"
+    assert event.payload.output == content
+    assert event.payload.thought == "hidden reasoning"
+    assert event.payload.final_output == "visible answer"
 
 
 def test_attach_langchain_patches_agent_executor_llm_chain_model():
@@ -784,18 +849,97 @@ class _FakeLlamaToolOutput:
 
 
 class _FakeLlamaChatMessage:
-    def __init__(self, role: str, content: str) -> None:
+    def __init__(self, role: str, content: str, blocks: list[dict] | None = None) -> None:
         self.role = role
         self.content = content
+        self.blocks = blocks or []
         self.additional_kwargs = {}
 
 
 class _FakeLlamaChatResponse:
-    def __init__(self, content: str, delta: str | None = None) -> None:
-        self.message = _FakeLlamaChatMessage("assistant", content)
+    def __init__(
+        self,
+        content: str,
+        delta: str | None = None,
+        blocks: list[dict] | None = None,
+    ) -> None:
+        self.message = _FakeLlamaChatMessage("assistant", content, blocks=blocks)
         self.delta = delta
         self.raw = {"content": content}
         self.additional_kwargs = {}
+
+
+def test_llamaindex_chat_response_output_exposes_thinking_block_as_thought():
+    from agentguard.adapters.agent import llamaindex as llamaindex_adapter
+
+    adapter = llamaindex_adapter.LlamaIndexAgentAdapter()
+    normalized = adapter.normalize_llm_output(
+        label="achat",
+        output=_FakeLlamaChatResponse(
+            'Thought: use a tool\nAction: retrieve_doc\nAction Input: {"id": 0}',
+            blocks=[
+                {
+                    "type": "ThinkingBlock",
+                    "content": "Need to retrieve document 0 before emailing it.",
+                },
+                {
+                    "type": "TextBlock",
+                    "text": 'Thought: use a tool\nAction: retrieve_doc\nAction Input: {"id": 0}',
+                },
+            ],
+        ),
+    ).payload
+
+    event = ev.llm_output(RuntimeContext(session_id="s"), normalized)
+
+    assert normalized["output"] == 'Thought: use a tool\nAction: retrieve_doc\nAction Input: {"id": 0}'
+    assert normalized["final_output"] == normalized["output"]
+    assert normalized["thought"] == "Need to retrieve document 0 before emailing it."
+    assert event.payload.output == normalized["output"]
+    assert event.payload.final_output == normalized["output"]
+    assert event.payload.thought == "Need to retrieve document 0 before emailing it."
+
+
+def test_llamaindex_chat_response_splits_think_tags_when_thinking_block_missing():
+    from agentguard.adapters.agent import llamaindex as llamaindex_adapter
+
+    adapter = llamaindex_adapter.LlamaIndexAgentAdapter()
+    content = "<think>hidden reasoning</think>\nvisible answer"
+    normalized = adapter.normalize_llm_output(
+        label="achat",
+        output=_FakeLlamaChatResponse(
+            content,
+            blocks=[{"type": "TextBlock", "text": content}],
+        ),
+    ).payload
+
+    event = ev.llm_output(RuntimeContext(session_id="s"), normalized)
+
+    assert normalized["output"] == content
+    assert normalized["thought"] == "hidden reasoning"
+    assert normalized["final_output"] == "visible answer"
+    assert event.payload.output == content
+    assert event.payload.thought == "hidden reasoning"
+    assert event.payload.final_output == "visible answer"
+
+
+def test_llamaindex_chat_response_sets_plain_content_as_final_output():
+    from agentguard.adapters.agent import llamaindex as llamaindex_adapter
+
+    adapter = llamaindex_adapter.LlamaIndexAgentAdapter()
+    normalized = adapter.normalize_llm_output(
+        label="achat",
+        output=_FakeLlamaChatResponse("visible answer"),
+    ).payload
+
+    event = ev.llm_output(RuntimeContext(session_id="s"), normalized)
+
+    assert normalized["output"] == "visible answer"
+    assert "thought" not in normalized
+    assert normalized["final_output"] == "visible answer"
+    assert event.payload.output == "visible answer"
+    assert event.payload.thought is None
+    assert event.payload.final_output == "visible answer"
 
 
 def test_agentguard_exposes_attach_llamaindex():

@@ -273,6 +273,8 @@ class ConsoleState:
         action = _DECISION_TO_ACTION.get(decision.decision_type, "allow")
         ctx = event.context
         tool = getattr(event.payload, "tool_name", None) or event.event_type.value
+        plugin_result = _safe_dict(request.get("plugin_result"))
+        plugin_summary = _plugin_summary(plugin_result)
         matched = decision.metadata.get("matched_rule_ids") or (
             [decision.policy_id] if decision.policy_id else []
         )
@@ -289,14 +291,12 @@ class ConsoleState:
             "risk": risk,
             "rules": list(matched),
             "reason": decision.reason,
+            "plugin_summary": plugin_summary,
+            "plugin_result": plugin_result,
         }
 
         event_dict = self._build_event_dict(event, now)
-        decision_dict = self._build_decision_dict(decision, matched, risk)
-        plugin_result = dict((decision.metadata or {}).get("plugin_result") or {})
-        plugin_outcomes = plugin_result.get("metadata", {}).get("plugin_outcomes")
-        if isinstance(plugin_outcomes, list):
-            decision_dict["plugin_outcomes"] = plugin_outcomes
+        decision_dict = self._build_decision_dict(decision, matched, risk, plugin_result)
 
         with self._lock:
             self._traffic.append(entry)
@@ -332,9 +332,12 @@ class ConsoleState:
 
     @staticmethod
     def _build_decision_dict(
-        decision: GuardDecision, matched: list[str], risk: float
+        decision: GuardDecision,
+        matched: list[str],
+        risk: float,
+        plugin_result: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        review_tickets = decision.metadata.get("review_tickets")
+        plugin_result = _safe_dict(plugin_result)
         return {
             "action": _DECISION_TO_ACTION.get(decision.decision_type, "allow"),
             "risk_score": risk,
@@ -343,7 +346,9 @@ class ConsoleState:
             "rule_version": decision.metadata.get("policy_version", "unknown"),
             "ttl_ms": 0,
             "reason": decision.reason,
-            "review_tickets": review_tickets if isinstance(review_tickets, list) else [],
+            "policy_id": decision.policy_id,
+            "plugin_result": plugin_result,
+            "plugin_summary": _plugin_summary(plugin_result),
         }
 
     @classmethod
@@ -412,3 +417,41 @@ class ConsoleState:
             "ttl_ms": 0,
             "reason": str(decision.get("reason") or ""),
         }
+
+
+def _safe_dict(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _plugin_summary(plugin_result: dict[str, Any]) -> list[dict[str, Any]]:
+    metadata = _safe_dict(plugin_result.get("metadata"))
+    summary: list[dict[str, Any]] = []
+    agentdog = _safe_dict(metadata.get("agentdog"))
+    if agentdog:
+        item = {
+            "name": "agentdog",
+            "label": str(agentdog.get("label") or agentdog.get("decision") or "unknown"),
+            "prediction": agentdog.get("prediction"),
+            "reason": str(agentdog.get("reason") or agentdog.get("error") or ""),
+        }
+        if agentdog.get("error"):
+            item["error"] = str(agentdog.get("error"))
+        summary.append(item)
+
+    for name, value in metadata.items():
+        if name == "agentdog":
+            continue
+        if isinstance(value, dict):
+            label = value.get("decision") or value.get("label") or value.get("status") or "observed"
+            reason = value.get("reason") or value.get("error") or ""
+        else:
+            label = "observed"
+            reason = ""
+        summary.append(
+            {
+                "name": str(name),
+                "label": str(label),
+                "reason": str(reason),
+            }
+        )
+    return summary

@@ -12,17 +12,13 @@
       "client": [],
       "server": [
         {
-          "name": "rule_based_plugin",
-          "env": {
-            "policy_path": "",
-            "rule_pack_config": "",
-            "watch": 0,
-            "llm_backend": "openai",
-            "llm_model": "gpt-4o",
-            "llm_base_url": "",
-            "llm_api_key": "",
-            "llm_trace_max_steps": 5
-          }
+          "name": "agentdog",
+          "agentdog_url": "http://gw-bzokqkvr2cblz8ok6y.cn-wulanchabu-acdr-1.pai-eas.aliyuncs.com/api/predict/llm_hg_agentdogs_1_5_qwen_3_5_4b/v1/chat/completions",
+          "agentdog_model": "AgentDoG1.5-Qwen3.5-4B",
+          "temperature": 1,
+          "max_tokens": 2048,
+          "timeout_s": 60,
+          "agentdog_apiKey": "NTg1MWM4MDViNWZlNjEzZDkyMDkzNGU5YjcxNzkxYzFjZjdkYjlhZA=="
         }
       ]
     },

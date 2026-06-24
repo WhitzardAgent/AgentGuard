@@ -81,3 +81,82 @@ def test_llm_output_aliases_fill_specific_fields():
     assert final_event.payload.output == "visible answer"
     assert final_event.payload.thought is None
     assert final_event.payload.final_output == "visible answer"
+
+
+def test_llm_output_preserves_explicit_fields_without_parsing_output():
+    ctx = RuntimeContext(session_id="s")
+    event = ev.llm_output(
+        ctx,
+        {
+            "output": "<think>parsed thought</think>parsed final",
+            "thought": "explicit thought",
+            "final_output": "explicit final",
+        },
+    )
+
+    assert event.payload.output == "<think>parsed thought</think>parsed final"
+    assert event.payload.thought == "explicit thought"
+    assert event.payload.final_output == "explicit final"
+
+
+def test_llm_output_does_not_split_think_tag_without_explicit_fields():
+    ctx = RuntimeContext(session_id="s")
+    raw = "<think>内部思考</think>\n最终回答"
+    event = ev.llm_output(ctx, raw)
+
+    assert event.payload.output == raw
+    assert event.payload.thought is None
+    assert event.payload.final_output is None
+
+
+def test_llm_output_does_not_split_reason_and_answer_tags():
+    ctx = RuntimeContext(session_id="s")
+    raw = "<reason>分析过程</reason><answer>最终回答</answer>"
+    event = ev.llm_output(ctx, raw)
+
+    assert event.payload.output == raw
+    assert event.payload.thought is None
+    assert event.payload.final_output is None
+
+
+def test_llm_output_does_not_set_untagged_output_as_final_output():
+    ctx = RuntimeContext(session_id="s")
+    event = ev.llm_output(ctx, "普通模型回答")
+
+    assert event.payload.output == "普通模型回答"
+    assert event.payload.thought is None
+    assert event.payload.final_output is None
+
+
+def test_llm_output_parser_ignores_unclosed_thought_tags():
+    ctx = RuntimeContext(session_id="s")
+    raw = "<think>未闭合的内部思考\n最终回答"
+    event = ev.llm_output(ctx, raw)
+
+    assert event.payload.thought is None
+    assert event.payload.final_output is None
+
+
+def test_llm_output_does_not_parse_thought_only_output():
+    ctx = RuntimeContext(session_id="s")
+    raw = "<think>内部思考</think>"
+    event = ev.llm_output(ctx, raw)
+
+    assert event.payload.output == raw
+    assert event.payload.thought is None
+    assert event.payload.final_output is None
+
+
+def test_llm_output_ignores_nested_reasoning_fields():
+    ctx = RuntimeContext(session_id="s")
+    event = ev.llm_output(
+        ctx,
+        {
+            "text": "visible answer",
+            "additional_kwargs": {"reasoning_content": "hidden reasoning"},
+        },
+    )
+
+    assert event.payload.output == "visible answer"
+    assert event.payload.thought is None
+    assert event.payload.final_output is None

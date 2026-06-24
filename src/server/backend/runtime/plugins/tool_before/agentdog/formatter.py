@@ -125,6 +125,15 @@ def _append_message_item(
 
 
 def _append_llm_output(payload: dict[str, Any], history_lines: list[str]) -> None:
+    thought = _extract_text(payload.get("thought"))
+    final_output = _extract_text(payload.get("final_output"))
+    if thought or final_output:
+        if thought:
+            history_lines.append(f"[THINKING] {thought}")
+        if final_output:
+            history_lines.append(f"[ASSISTANT] {final_output}")
+        return
+
     structured = _parse_structured_payload(payload.get("output"))
     if isinstance(structured, dict):
         data = structured.get("data") if isinstance(structured.get("data"), dict) else structured

@@ -176,6 +176,7 @@
 
   function normalizeTrafficItem(item) {
     const rules = Array.isArray(item?.rules) ? item.rules.map(String) : [];
+    const pluginSummary = Array.isArray(item?.plugin_summary) ? item.plugin_summary : [];
     return {
       time: formatTimestamp(typeof item?.ts === "number" ? item.ts * 1000 : NaN),
       tool: String(item?.tool || "-"),
@@ -184,6 +185,7 @@
       risk: typeof item?.risk === "number" ? item.risk : Number(item?.risk || 0),
       rules,
       reason: String(item?.reason || "").trim(),
+      pluginSummary: pluginSummary.map(normalizePluginSummaryItem).filter((entry) => entry.name),
     };
   }
 
@@ -221,6 +223,7 @@
     const event = item?.event || {};
     const decision = item?.decision || {};
     const rules = Array.isArray(decision?.matched_rules) ? decision.matched_rules.map(String) : [];
+    const pluginSummary = Array.isArray(decision?.plugin_summary) ? decision.plugin_summary : [];
     return {
       session: String(event?.principal?.session_id || "-"),
       agent: String(event?.principal?.agent_id || "-"),
@@ -228,8 +231,31 @@
       action: String(decision?.action || "unknown").toLowerCase(),
       risk: typeof decision?.risk_score === "number" ? decision.risk_score : Number(decision?.risk_score || 0),
       matchedRules: rules,
+      pluginSummary: pluginSummary.map(normalizePluginSummaryItem).filter((entry) => entry.name),
       raw: item,
     };
+  }
+
+  function normalizePluginSummaryItem(item) {
+    return {
+      name: String(item?.name || "").trim(),
+      label: String(item?.label || "").trim(),
+      prediction: item?.prediction,
+      reason: String(item?.reason || item?.error || "").trim(),
+      error: String(item?.error || "").trim(),
+    };
+  }
+
+  function formatPluginSummary(items) {
+    const summaries = Array.isArray(items) ? items : [];
+    if (!summaries.length) {
+      return "";
+    }
+    return summaries.map((item) => {
+      const label = item.label ? `: ${item.label}` : "";
+      const prediction = item.prediction === undefined || item.prediction === null ? "" : ` (${item.prediction})`;
+      return `${item.name}${label}${prediction}`;
+    }).join(", ");
   }
 
   function buildOverview() {
@@ -306,8 +332,11 @@
         `session=${item.session}`,
         `risk=${formatRisk(item.risk)}`,
       ];
+      const pluginText = formatPluginSummary(item.pluginSummary);
       if (firstRule) {
         detailSegments.push(`matched=${firstRule}`);
+      } else if (pluginText) {
+        detailSegments.push(`plugin=${pluginText}`);
       } else if (item.reason) {
         detailSegments.push(`reason=${item.reason}`);
       }
@@ -365,14 +394,14 @@
     elements.auditBody.innerHTML = "";
     if (state.errors.audit) {
       const row = document.createElement("tr");
-      row.innerHTML = `<td colspan="6"><div class="empty-state">${escapeHtml(state.errors.audit)}</div></td>`;
+      row.innerHTML = `<td colspan="7"><div class="empty-state">${escapeHtml(state.errors.audit)}</div></td>`;
       elements.auditBody.appendChild(row);
       elements.auditDetail.textContent = "Audit data is unavailable.";
       return;
     }
     if (!state.auditRows.length) {
       const row = document.createElement("tr");
-      row.innerHTML = `<td colspan="6"><div class="empty-state">No audit records have been captured yet.</div></td>`;
+      row.innerHTML = `<td colspan="7"><div class="empty-state">No audit records have been captured yet.</div></td>`;
       elements.auditBody.appendChild(row);
       elements.auditDetail.textContent = "No audit detail available.";
       return;
@@ -395,6 +424,7 @@
         <td>${escapeHtml(item.tool)}</td>
         <td><span class="pill ${actionTone(item.action)}">${escapeHtml(formatAction(item.action))}</span></td>
         <td>${escapeHtml(formatRisk(item.risk))}</td>
+        <td>${escapeHtml(formatPluginSummary(item.pluginSummary) || "-")}</td>
         <td>${escapeHtml(item.matchedRules.join(", ") || "-")}</td>
       `;
       elements.auditBody.appendChild(row);
@@ -412,6 +442,9 @@
     const payload = {
       event: selected.raw?.event || {},
       decision: selected.raw?.decision || {},
+      matched_rules: selected.matchedRules,
+      plugin_summary: selected.pluginSummary,
+      plugin_result: selected.raw?.decision?.plugin_result || {},
     };
     elements.auditDetail.textContent = JSON.stringify(payload, null, 2);
   }

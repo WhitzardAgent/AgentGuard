@@ -10,11 +10,6 @@
       "tool_names": ["send_email_to"],
       "conditions": [
         {
-          "field": "payload.arguments.doc",
-          "op": "contains",
-          "value": "DOC#0:"
-        },
-        {
           "field": "payload.arguments.addr",
           "op": "ne",
           "value": "admin@example.com"

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from backend.console.dsl import parse_source, policy_rule_to_source
 from backend.console.state import ConsoleState
+from backend.runtime.plugins.base import BasePlugin, CheckResult
 from backend.runtime.manager import RuntimeManager
 from backend.runtime.plugins.base import BasePlugin, CheckResult
 from shared.schemas.decisions import GuardDecision
@@ -165,6 +166,53 @@ def test_observer_records_traffic_audit_and_tickets():
     tid = tickets[0]["ticket_id"]
     assert con.resolve_ticket(tid, approved=True) is True
     assert con.approvals("agent-alpha") == []
+
+
+def test_observer_exposes_agentdog_plugin_summary():
+    class FakeAgentDogPlugin(BasePlugin):
+        name = "agentdog"
+        event_types = [EventType.TOOL_INVOKE]
+
+        def check(self, event, context, trajectory_window=None):
+            return CheckResult(
+                metadata={
+                    "agentdog": {
+                        "prediction": 0,
+                        "label": "safe",
+                        "reason": "allowed by fake AgentDog",
+                    }
+                }
+            )
+
+    con = ConsoleState(
+        RuntimeManager(
+            plugin_config={
+                "phases": {
+                    "tool_before": {"client": [], "server": [FakeAgentDogPlugin]}
+                }
+            }
+        )
+    )
+
+    con.manager.decide(
+        {
+            "context": {"session_id": "s-agentdog", "agent_id": "agent-alpha"},
+            "current_event": {
+                "event_type": "tool_invoke",
+                "payload": {"tool_name": "send_email", "arguments": {}, "capabilities": []},
+            },
+            "trajectory_window": [],
+        }
+    )
+
+    traffic = con.traffic("agent-alpha")
+    assert traffic[0]["plugin_summary"][0]["name"] == "agentdog"
+    assert traffic[0]["plugin_summary"][0]["label"] == "safe"
+
+    audit = con.audit_recent("agent-alpha")
+    decision = audit[0]["decision"]
+    assert decision["plugin_result"]["metadata"]["agentdog"]["prediction"] == 0
+    assert decision["plugin_summary"][0]["reason"] == "allowed by fake AgentDog"
 
 
 def test_health_reports_rule_counts():

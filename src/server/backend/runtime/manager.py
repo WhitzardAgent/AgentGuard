@@ -510,6 +510,7 @@ class RuntimeManager:
         )
 
         # 3b. Observers (traffic/telemetry/approvals for the console).
+        request["plugin_result"] = _plugin_result_dict(check)
         for observer in self.observers:
             try:
                 observer(event, decision, request)

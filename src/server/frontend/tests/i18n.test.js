@@ -253,3 +253,20 @@ test("i18n applies explicit translations and translated values in Chinese mode",
   assert.equal(refresh.getAttribute("title"), "刷新智能体目录");
   assert.equal(textarea.value, "用这个字段记录面向运维人员的规则说明。");
 });
+
+test("i18n translates home page text nodes in Chinese mode", () => {
+  const body = new FakeElement("body");
+  const button = new FakeButtonElement("button", { id: "sidebar-language-toggle", textContent: "中文" });
+  const pluginCardCopy = new FakeElement("p");
+  pluginCardCopy.appendChild(new FakeTextNode("Enable remote or local plugins for the selected agent, including optional built-in policy and safety flows."));
+  const ctaLabel = new FakeElement("span");
+  ctaLabel.appendChild(new FakeTextNode("Start WITH Agent Selection"));
+  body.appendChild(button);
+  body.appendChild(pluginCardCopy);
+  body.appendChild(ctaLabel);
+
+  loadI18n({ language: "zh", body });
+
+  assert.equal(pluginCardCopy.textContent, "为所选智能体启用远程或本地插件，包括可选的内置策略与安全流程。");
+  assert.equal(ctaLabel.textContent, "从智能体选择开始");
+});

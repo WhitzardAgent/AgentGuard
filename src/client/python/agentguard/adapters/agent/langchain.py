@@ -4,7 +4,9 @@ from __future__ import annotations
 import functools
 import inspect
 import json
+import re
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from agentguard.adapters.agent.base import BaseAgentAdapter, ToolBinding
@@ -113,7 +115,7 @@ class LangChainAgentAdapter(BaseAgentAdapter):
     ) -> LLMOutputNormalization:
         _ = fn
         return LLMOutputNormalization(
-            payload=_normalize_langchain_value(output),
+            payload=_normalize_langchain_llm_output(output),
             metadata=self._langchain_meta(label=label, owner=owner),
         )
 
@@ -370,6 +372,88 @@ def _normalize_langchain_request(
     return payload
 
 
+def _normalize_langchain_llm_output(value: Any) -> Any:
+    normalized = _normalize_langchain_value(value)
+    return _extract_langchain_llm_output_fields(normalized)
+
+
+def _extract_langchain_llm_output_fields(value: Any) -> Any:
+    if not isinstance(value, dict):
+        return value
+
+    content = _first_non_empty_text(value, "content", "text", "output", "message")
+    if content is None:
+        return value
+
+    thought = _extract_langchain_reasoning_field(value)
+    final_output: str | None = content
+    if thought is None:
+        parsed = _parse_tagged_llm_output(content)
+        thought = parsed.thought
+        final_output = parsed.final_output
+
+    payload = dict(value)
+    payload["output"] = content
+    payload["final_output"] = final_output
+    if thought is not None:
+        payload["thought"] = thought
+    return payload
+
+
+def _extract_langchain_reasoning_field(value: dict[str, Any]) -> str | None:
+    for container_key in ("additional_kwargs", "response_metadata", "metadata"):
+        nested = value.get(container_key)
+        if not isinstance(nested, dict):
+            continue
+        reasoning = _first_non_empty_text(nested, "reasoning_content")
+        if reasoning is not None:
+            return reasoning
+    return None
+
+
+def _first_non_empty_text(value: dict[str, Any], *keys: str) -> str | None:
+    for key in keys:
+        item = value.get(key)
+        if isinstance(item, str) and item:
+            return item
+    return None
+
+
+@dataclass(frozen=True)
+class _ParsedLLMOutput:
+    thought: str | None
+    final_output: str
+
+
+_THOUGHT_TAG_RE = re.compile(
+    r"<(?P<tag>think|thought|reason|reasoning)\b[^>]*>(?P<body>.*?)</(?P=tag)>",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+_FINAL_TAG_RE = re.compile(
+    r"<(?P<tag>answer|final|final_output)\b[^>]*>(?P<body>.*?)</(?P=tag)>",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+
+
+def _parse_tagged_llm_output(output: str) -> _ParsedLLMOutput:
+    thought_matches = list(_THOUGHT_TAG_RE.finditer(output))
+    if not thought_matches:
+        return _ParsedLLMOutput(thought=None, final_output=output)
+
+    thought_parts = [match.group("body").strip() for match in thought_matches]
+    thought = "\n\n".join(part for part in thought_parts if part) or None
+    remainder = _THOUGHT_TAG_RE.sub("", output).strip()
+
+    final_matches = list(_FINAL_TAG_RE.finditer(remainder))
+    if final_matches:
+        final_parts = [match.group("body").strip() for match in final_matches]
+        final_output = "\n\n".join(part for part in final_parts if part)
+    else:
+        final_output = remainder
+
+    return _ParsedLLMOutput(thought=thought, final_output=final_output)
+
+
 def _normalize_langchain_value(value: Any) -> Any:
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
@@ -381,7 +465,7 @@ def _normalize_langchain_value(value: Any) -> Any:
     message_serializer = _get_langchain_message_serializer()
     if message_serializer is not None:
         try:
-            return message_serializer(value)
+            return _normalize_langchain_message_dict(message_serializer(value))
         except Exception:
             pass
 
@@ -405,13 +489,52 @@ def _normalize_langchain_value(value: Any) -> Any:
             "type": value.__class__.__name__,
             "content": _normalize_langchain_value(content),
         }
-        for attr in ("name", "id", "tool_calls", "invalid_tool_calls", "response_metadata"):
+        for attr in (
+            "name",
+            "id",
+            "tool_calls",
+            "invalid_tool_calls",
+            "additional_kwargs",
+            "response_metadata",
+        ):
             attr_value = getattr(value, attr, None)
             if attr_value:
                 normalized[attr] = _normalize_langchain_value(attr_value)
         return normalized
 
     return repr(value)
+
+
+def _normalize_langchain_message_dict(value: Any) -> Any:
+    if not isinstance(value, dict):
+        return value
+
+    data = value.get("data")
+    if not isinstance(data, dict):
+        return value
+
+    normalized: dict[str, Any] = {}
+    message_type = value.get("type")
+    if message_type is not None:
+        normalized["type"] = _normalize_langchain_value(message_type)
+
+    if "content" in data:
+        normalized["content"] = _normalize_langchain_value(data.get("content"))
+
+    for attr in (
+        "name",
+        "id",
+        "tool_calls",
+        "invalid_tool_calls",
+        "additional_kwargs",
+        "response_metadata",
+        "usage_metadata",
+    ):
+        attr_value = data.get(attr)
+        if attr_value:
+            normalized[attr] = _normalize_langchain_value(attr_value)
+
+    return normalized or value
 
 
 @functools.lru_cache(maxsize=1)

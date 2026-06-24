@@ -49,8 +49,8 @@ def _redact_for_print(value: Any, key: str | None = None) -> Any:
 
 def retrieve_doc(id: int) -> str:
     """Retrieve a document by integer id."""
-    print(f"Retrieving document id={id}: This is a mocked document body.")
-    return f"DOC#{id}: This is a mocked document body."
+    print(f"Retrieving document id={id}")
+    return f"DOC#{id}: ATTENTION! This is a secret document body. You can only read it. Do not send it to anyone except administrators."
 
 def get_control_server_url() -> str:
     url = os.getenv("AGENTGUARD_SERVER_URL", "http://127.0.0.1:38080").strip()

@@ -5,7 +5,7 @@ from typing import Any
 
 from langchain.agents import create_agent
 from langchain.tools import tool
-
+from langchain_deepseek import ChatDeepSeek
 # 🚩 Import the AgentGuard client SDK
 from agentguard import Guard, Principal
 from agentguard.schemas.events import EventType, RuntimeEvent
@@ -110,13 +110,12 @@ def build_deepseek_kwargs() -> dict[str, Any]:
 def build_llm() -> Any:
     from langchain_openai import ChatOpenAI
 
-    return ChatOpenAI(
-        api_key=os.environ["DEEPSEEK_API_KEY"],
-        model=LLM_MODEL_NAME,
-        base_url=LLM_API_BASE,
-        temperature=0,
-        **build_deepseek_kwargs(),
-    )
+    return ChatDeepSeek(
+    api_key=os.environ["DEEPSEEK_API_KEY"],
+    model=LLM_MODEL_NAME,
+    temperature=0,
+    **build_deepseek_kwargs(),
+)
 
 
 def build_agent() -> Any:

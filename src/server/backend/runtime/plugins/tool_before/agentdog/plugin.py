@@ -97,10 +97,20 @@ class AgentDogPlugin(BasePlugin):
     def _build_client(self, url: str) -> Any:
         timeout_s = _float_config(getattr(self, "timeout_s", 10.0), 10.0)
         api_key = str(getattr(self, "agentdog_apiKey", "") or "")
+        model = str(getattr(self, "agentdog_model", "AgentDoG1.5-Qwen3.5-4B") or "")
+        temperature = _float_config(getattr(self, "temperature", 1.0), 1.0)
+        max_tokens = _int_config(getattr(self, "max_tokens", 2048), 2048)
         client_factory = getattr(self, "client_factory", None)
         if client_factory is not None:
             return client_factory(url, api_key, timeout_s)
-        return AgentDogClient(url, api_key=api_key, timeout_s=timeout_s)
+        return AgentDogClient(
+            url,
+            api_key=api_key,
+            timeout_s=timeout_s,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
 
 
 def _base_metadata(
