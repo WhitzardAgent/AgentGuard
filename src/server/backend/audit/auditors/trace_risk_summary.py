@@ -21,7 +21,7 @@ _HIGH_SIGNALS = {
     "tool_misuse",
 }
 _CRITICAL_DECISIONS = {"deny", "require_remote_review"}
-_HIGH_DECISIONS = {"require_approval", "ask_user"}
+_HIGH_DECISIONS = {"require_approval", "human_check"}
 _WARNING_DECISIONS = {"degrade", "sanitize", "log_only"}
 
 

@@ -7,7 +7,7 @@ const DecisionType = Object.freeze({
   REWRITE: "rewrite",
   REPAIR: "repair",
   DEGRADE: "degrade",
-  ASK_USER: "ask_user",
+  HUMAN_CHECK: "human_check",
   REQUIRE_APPROVAL: "require_approval",
   REQUIRE_REMOTE_REVIEW: "require_remote_review",
   LOOP_BACK_TO_LLM: "loop_back_to_llm",
@@ -19,16 +19,17 @@ const DecisionType = Object.freeze({
 const BLOCKING = new Set([
   DecisionType.DENY,
   DecisionType.DEGRADE,
-  DecisionType.ASK_USER,
+  DecisionType.HUMAN_CHECK,
   DecisionType.REQUIRE_APPROVAL,
   DecisionType.DROP_THOUGHT,
 ]);
-const REQUIRES_USER = new Set([DecisionType.ASK_USER, DecisionType.REQUIRE_APPROVAL]);
+const REQUIRES_USER = new Set([DecisionType.HUMAN_CHECK, DecisionType.REQUIRE_APPROVAL]);
 const REQUIRES_REMOTE = new Set([DecisionType.REQUIRE_REMOTE_REVIEW]);
 
 class GuardDecision {
   constructor(data = {}) {
-    this.decision_type = data.decision_type || data.decisionType || DecisionType.ALLOW;
+    const incomingDecisionType = data.decision_type || data.decisionType || DecisionType.ALLOW;
+    this.decision_type = incomingDecisionType === "ask_user" ? DecisionType.HUMAN_CHECK : incomingDecisionType;
     this.reason = data.reason || "";
     this.policy_id = data.policy_id ?? data.policyId ?? null;
     this.confidence = data.confidence ?? null;
@@ -78,7 +79,7 @@ GuardDecision.sanitize = (reason, extra = {}) => makeDecision(DecisionType.SANIT
 GuardDecision.rewrite = (reason, extra = {}) => makeDecision(DecisionType.REWRITE, reason, extra);
 GuardDecision.repair = (reason, extra = {}) => makeDecision(DecisionType.REPAIR, reason, extra);
 GuardDecision.degrade = (reason, extra = {}) => makeDecision(DecisionType.DEGRADE, reason, extra);
-GuardDecision.ask_user = (reason, extra = {}) => makeDecision(DecisionType.ASK_USER, reason, extra);
+GuardDecision.human_check = (reason, extra = {}) => makeDecision(DecisionType.HUMAN_CHECK, reason, extra);
 GuardDecision.require_approval = (reason, extra = {}) => makeDecision(DecisionType.REQUIRE_APPROVAL, reason, extra);
 GuardDecision.require_remote_review = (reason, extra = {}) =>
   makeDecision(DecisionType.REQUIRE_REMOTE_REVIEW, reason, extra);

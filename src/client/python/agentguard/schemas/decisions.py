@@ -15,7 +15,7 @@ class DecisionType(str, Enum):
     REPAIR = "repair"
 
     DEGRADE = "degrade"
-    ASK_USER = "ask_user"
+    HUMAN_CHECK = "human_check"
     REQUIRE_APPROVAL = "require_approval"
     REQUIRE_REMOTE_REVIEW = "require_remote_review"
 
@@ -25,16 +25,22 @@ class DecisionType(str, Enum):
 
     LOG_ONLY = "log_only"
 
+    @classmethod
+    def _missing_(cls, value: object) -> "DecisionType" | None:
+        if value == "ask_user":
+            return cls.HUMAN_CHECK
+        return None
+
 
 # Decision types that block execution of the original action.
 _BLOCKING = {
     DecisionType.DENY,
     DecisionType.DEGRADE,
-    DecisionType.ASK_USER,
+    DecisionType.HUMAN_CHECK,
     DecisionType.REQUIRE_APPROVAL,
     DecisionType.DROP_THOUGHT,
 }
-_REQUIRES_USER = {DecisionType.ASK_USER, DecisionType.REQUIRE_APPROVAL}
+_REQUIRES_USER = {DecisionType.HUMAN_CHECK, DecisionType.REQUIRE_APPROVAL}
 _REQUIRES_REMOTE = {DecisionType.REQUIRE_REMOTE_REVIEW}
 
 
@@ -112,8 +118,8 @@ class GuardDecision:
         return GuardDecision(DecisionType.DEGRADE, reason, **kw)
 
     @staticmethod
-    def ask_user(reason: str, **kw: Any) -> "GuardDecision":
-        return GuardDecision(DecisionType.ASK_USER, reason, **kw)
+    def human_check(reason: str, **kw: Any) -> "GuardDecision":
+        return GuardDecision(DecisionType.HUMAN_CHECK, reason, **kw)
 
     @staticmethod
     def require_approval(reason: str, **kw: Any) -> "GuardDecision":

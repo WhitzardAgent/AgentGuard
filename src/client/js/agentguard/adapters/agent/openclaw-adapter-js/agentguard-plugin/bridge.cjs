@@ -790,7 +790,7 @@ class AgentGuardOpenClawBridge {
       return undefined;
     }
     if (
-      decision.decision_type === DecisionType.ASK_USER ||
+      decision.decision_type === DecisionType.HUMAN_CHECK ||
       decision.decision_type === DecisionType.REQUIRE_APPROVAL
     ) {
       await this.flushNow(state, "guard_decide");

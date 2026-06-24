@@ -150,7 +150,7 @@ class CheckResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 ```
 
-- `decision_candidate`: optional `GuardDecision` recommendation. Use it when the plugin wants to propose `ALLOW`, `DENY`, `SANITIZE`, `HUMAN_CHECK`, or another supported decision.
+- `decision_candidate`: optional `GuardDecision` recommendation. Use it when the plugin wants to propose `ALLOW` (allow immediately), `DENY` (block execution), `SANITIZE` (modify the input content and continue execution), `HUMAN_CHECK` (keep the action pending until a user decides on the server whether to allow it), `LOG_ONLY` (annotate it in audit logs but still allow it), or another supported decision.
 - `risk_signals`: risk labels detected by this plugin. The manager deduplicates them and writes them back to `event.risk_signals`.
 - `is_final`: whether `decision_candidate` should be treated as the authoritative server-side decision. It defaults to `True`. If `True`, the runtime can use this decision directly.
 - `metadata`: structured debug or detection details. The manager merges plugin metadata into the final plugin result.

@@ -30,3 +30,14 @@ def test_decision_roundtrip_and_properties():
     restored = GuardDecision.from_dict(d.to_dict())
     assert restored.decision_type == DecisionType.REQUIRE_APPROVAL
     assert restored.reason == "needs human"
+
+
+def test_human_check_roundtrip_and_legacy_compatibility():
+    decision = GuardDecision.human_check("needs review")
+    restored = GuardDecision.from_dict(decision.to_dict())
+    legacy = GuardDecision.from_dict({"decision_type": "ask_user", "reason": "legacy review"})
+
+    assert restored.decision_type == DecisionType.HUMAN_CHECK
+    assert restored.requires_user is True
+    assert legacy.decision_type == DecisionType.HUMAN_CHECK
+    assert legacy.to_dict()["decision_type"] == "human_check"

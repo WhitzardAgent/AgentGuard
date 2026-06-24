@@ -23,14 +23,14 @@ _DECISION_TO_ACTION = {
     DecisionType.LOG_ONLY: "allow",
     DecisionType.DENY: "deny",
     DecisionType.REQUIRE_APPROVAL: "human_check",
-    DecisionType.ASK_USER: "human_check",
+    DecisionType.HUMAN_CHECK: "human_check",
     DecisionType.REQUIRE_REMOTE_REVIEW: "human_check",
     DecisionType.DEGRADE: "degrade",
     DecisionType.SANITIZE: "degrade",
 }
 _HELD = {
     DecisionType.REQUIRE_APPROVAL,
-    DecisionType.ASK_USER,
+    DecisionType.HUMAN_CHECK,
     DecisionType.REQUIRE_REMOTE_REVIEW,
 }
 
