@@ -376,62 +376,7 @@ The high-level architecture of AgentGuard is shown below.
 
 ## 👥 Contributors
 
-<table width="100%">
-  <tr>
-    <td width="20%" valign="top">
-      <a href="https://djrrr.github.io/" target="_blank" rel="noreferrer"><img src="./docs/figs/avatar-placeholder.svg" width="56" height="56" alt="Jiarun Dai" /></a><br />
-      <a href="https://djrrr.github.io/" target="_blank" rel="noreferrer"><sub><strong>Jiarun Dai</strong></sub></a><br />
-      <sub>Asst. Prof.</sub><br />
-      <sub>Fudan University</sub>
-    </td>
-    <td width="20%" valign="top">
-      <img src="./docs/figs/avatar-placeholder.svg" width="56" height="56" alt="Jiaqi Luo" /><br />
-      <sub><strong>Jiaqi Luo</strong></sub><br />
-      <sub>PhD Student</sub><br />
-      <sub>Fudan University</sub>
-    </td>
-    <td width="20%" valign="top">
-      <img src="./docs/figs/avatar-placeholder.svg" width="56" height="56" alt="Songyang Peng" /><br />
-      <sub><strong>Songyang Peng</strong></sub><br />
-      <sub>Master Student</sub><br />
-      <sub>Fudan University</sub>
-    </td>
-    <td width="20%" valign="top">
-      <img src="./docs/figs/avatar-placeholder.svg" width="56" height="56" alt="Zhile Chen" /><br />
-      <sub><strong>Zhile Chen</strong></sub><br />
-      <sub>Master Student</sub><br />
-      <sub>Fudan University</sub>
-    </td>
-    <td width="20%" valign="top">
-      <img src="./docs/figs/avatar-placeholder.svg" width="56" height="56" alt="Jingren Huang" /><br />
-      <sub><strong>Jingren Huang</strong></sub><br />
-      <sub>Master Student</sub><br />
-      <sub>Fudan University</sub>
-    </td>
-  </tr>
-  <tr>
-    <td width="20%" valign="top">
-      <a href="https://zhxshen.github.io/" target="_blank" rel="noreferrer"><img src="./docs/figs/avatar-placeholder.svg" width="56" height="56" alt="Zhuoxiang Shen" /></a><br />
-      <a href="https://zhxshen.github.io/" target="_blank" rel="noreferrer"><sub><strong>Zhuoxiang Shen</strong></sub></a><br />
-      <sub>Eng.D Student</sub><br />
-      <sub>Fudan University</sub>
-    </td>
-    <td width="20%" valign="top">
-      <a href="https://ravensanstete.github.io/" target="_blank" rel="noreferrer"><img src="./docs/figs/avatar-placeholder.svg" width="56" height="56" alt="Xudong Pan" /></a><br />
-      <a href="https://ravensanstete.github.io/" target="_blank" rel="noreferrer"><sub><strong>Xudong Pan</strong></sub></a><br />
-      <sub>Asst. Prof.</sub><br />
-      <sub>Fudan University</sub>
-    </td>
-    <td width="20%" valign="top">
-      <a href="https://ghong.site/" target="_blank" rel="noreferrer"><img src="./docs/figs/avatar-placeholder.svg" width="56" height="56" alt="Geng Hong" /></a><br />
-      <a href="https://ghong.site/" target="_blank" rel="noreferrer"><sub><strong>Geng Hong</strong></sub></a><br />
-      <sub>Asst. Prof.</sub><br />
-      <sub>Fudan University</sub>
-    </td>
-    <td width="20%" valign="top">&nbsp;</td>
-    <td width="20%" valign="top">&nbsp;</td>
-  </tr>
-</table>
+<img src="./docs/figs/contributors-en.svg" width="100%" alt="AgentGuard contributors" />
 
 Listed in no particular order. Thanks to everyone who helped shape AgentGuard.
 

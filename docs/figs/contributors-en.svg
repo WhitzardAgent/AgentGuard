@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 430" role="img" aria-labelledby="title desc">
+  <title id="title">AgentGuard contributors</title>
+  <desc id="desc">Contributor grid for AgentGuard with five columns per row.</desc>
+  <style>
+    text { fill: #24292f; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; text-anchor: middle; }
+    .name { font-size: 18px; font-weight: 600; }
+    .role { font-size: 15px; }
+    .school { font-size: 15px; }
+    .avatar-bg { fill: #f6f8fa; }
+    .avatar-fg { fill: #8c959f; }
+  </style>
+
+  <defs>
+    <g id="avatar">
+      <circle class="avatar-bg" cx="0" cy="0" r="30" />
+      <circle class="avatar-fg" cx="0" cy="-8" r="11" />
+      <path class="avatar-fg" d="M-18 20c3-10 11-16 18-16s15 6 18 16" />
+    </g>
+    <g id="card-jd">
+      <use href="#avatar" x="0" y="0" />
+      <text class="name" x="0" y="58">Jiarun Dai</text>
+      <text class="role" x="0" y="82">Asst. Prof.</text>
+      <text class="school" x="0" y="104">Fudan University</text>
+    </g>
+    <g id="card-jl">
+      <use href="#avatar" x="0" y="0" />
+      <text class="name" x="0" y="58">Jiaqi Luo</text>
+      <text class="role" x="0" y="82">PhD Student</text>
+      <text class="school" x="0" y="104">Fudan University</text>
+    </g>
+    <g id="card-sp">
+      <use href="#avatar" x="0" y="0" />
+      <text class="name" x="0" y="58">Songyang Peng</text>
+      <text class="role" x="0" y="82">Master Student</text>
+      <text class="school" x="0" y="104">Fudan University</text>
+    </g>
+    <g id="card-zc">
+      <use href="#avatar" x="0" y="0" />
+      <text class="name" x="0" y="58">Zhile Chen</text>
+      <text class="role" x="0" y="82">Master Student</text>
+      <text class="school" x="0" y="104">Fudan University</text>
+    </g>
+    <g id="card-jh">
+      <use href="#avatar" x="0" y="0" />
+      <text class="name" x="0" y="58">Jingren Huang</text>
+      <text class="role" x="0" y="82">Master Student</text>
+      <text class="school" x="0" y="104">Fudan University</text>
+    </g>
+    <g id="card-zs">
+      <use href="#avatar" x="0" y="0" />
+      <text class="name" x="0" y="58">Zhuoxiang Shen</text>
+      <text class="role" x="0" y="82">Eng.D Student</text>
+      <text class="school" x="0" y="104">Fudan University</text>
+    </g>
+    <g id="card-xp">
+      <use href="#avatar" x="0" y="0" />
+      <text class="name" x="0" y="58">Xudong Pan</text>
+      <text class="role" x="0" y="82">Asst. Prof.</text>
+      <text class="school" x="0" y="104">Fudan University</text>
+    </g>
+    <g id="card-gh">
+      <use href="#avatar" x="0" y="0" />
+      <text class="name" x="0" y="58">Geng Hong</text>
+      <text class="role" x="0" y="82">Asst. Prof.</text>
+      <text class="school" x="0" y="104">Fudan University</text>
+    </g>
+  </defs>
+
+  <g transform="translate(120 82)"><a href="https://djrrr.github.io/"><use href="#card-jd" /></a></g>
+  <g transform="translate(360 82)"><use href="#card-jl" /></g>
+  <g transform="translate(600 82)"><use href="#card-sp" /></g>
+  <g transform="translate(840 82)"><use href="#card-zc" /></g>
+  <g transform="translate(1080 82)"><use href="#card-jh" /></g>
+
+  <g transform="translate(120 276)"><a href="https://zhxshen.github.io/"><use href="#card-zs" /></a></g>
+  <g transform="translate(360 276)"><a href="https://ravensanstete.github.io/"><use href="#card-xp" /></a></g>
+  <g transform="translate(600 276)"><a href="https://ghong.site/"><use href="#card-gh" /></a></g>
+</svg>

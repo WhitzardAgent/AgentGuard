@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 430" role="img" aria-labelledby="title desc">
+  <title id="title">AgentGuard 贡献者</title>
+  <desc id="desc">AgentGuard 贡献者展示图，每行五列。</desc>
+  <style>
+    text { fill: #24292f; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; text-anchor: middle; }
+    .name { font-size: 18px; font-weight: 600; }
+    .role { font-size: 15px; }
+    .school { font-size: 15px; }
+    .avatar-bg { fill: #f6f8fa; }
+    .avatar-fg { fill: #8c959f; }
+  </style>
+
+  <defs>
+    <g id="avatar">
+      <circle class="avatar-bg" cx="0" cy="0" r="30" />
+      <circle class="avatar-fg" cx="0" cy="-8" r="11" />
+      <path class="avatar-fg" d="M-18 20c3-10 11-16 18-16s15 6 18 16" />
+    </g>
+    <g id="card-djr">
+      <use href="#avatar" x="0" y="0" />
+      <text class="name" x="0" y="58">戴嘉润</text>
+      <text class="role" x="0" y="82">助理教授</text>
+      <text class="school" x="0" y="104">复旦大学</text>
+    </g>
+    <g id="card-ljq">
+      <use href="#avatar" x="0" y="0" />
+      <text class="name" x="0" y="58">罗嘉骐</text>
+      <text class="role" x="0" y="82">博士生</text>
+      <text class="school" x="0" y="104">复旦大学</text>
+    </g>
+    <g id="card-psy">
+      <use href="#avatar" x="0" y="0" />
+      <text class="name" x="0" y="58">彭松洋</text>
+      <text class="role" x="0" y="82">硕士生</text>
+      <text class="school" x="0" y="104">复旦大学</text>
+    </g>
+    <g id="card-czl">
+      <use href="#avatar" x="0" y="0" />
+      <text class="name" x="0" y="58">陈知乐</text>
+      <text class="role" x="0" y="82">硕士生</text>
+      <text class="school" x="0" y="104">复旦大学</text>
+    </g>
+    <g id="card-hjr">
+      <use href="#avatar" x="0" y="0" />
+      <text class="name" x="0" y="58">黄景任</text>
+      <text class="role" x="0" y="82">硕士生</text>
+      <text class="school" x="0" y="104">复旦大学</text>
+    </g>
+    <g id="card-szx">
+      <use href="#avatar" x="0" y="0" />
+      <text class="name" x="0" y="58">申卓祥</text>
+      <text class="role" x="0" y="82">工程博士生</text>
+      <text class="school" x="0" y="104">复旦大学</text>
+    </g>
+    <g id="card-pxd">
+      <use href="#avatar" x="0" y="0" />
+      <text class="name" x="0" y="58">潘旭东</text>
+      <text class="role" x="0" y="82">助理教授</text>
+      <text class="school" x="0" y="104">复旦大学</text>
+    </g>
+    <g id="card-hg">
+      <use href="#avatar" x="0" y="0" />
+      <text class="name" x="0" y="58">洪赓</text>
+      <text class="role" x="0" y="82">助理教授</text>
+      <text class="school" x="0" y="104">复旦大学</text>
+    </g>
+  </defs>
+
+  <g transform="translate(120 82)"><a href="https://djrrr.github.io/"><use href="#card-djr" /></a></g>
+  <g transform="translate(360 82)"><use href="#card-ljq" /></g>
+  <g transform="translate(600 82)"><use href="#card-psy" /></g>
+  <g transform="translate(840 82)"><use href="#card-czl" /></g>
+  <g transform="translate(1080 82)"><use href="#card-hjr" /></g>
+
+  <g transform="translate(120 276)"><a href="https://zhxshen.github.io/"><use href="#card-szx" /></a></g>
+  <g transform="translate(360 276)"><a href="https://ravensanstete.github.io/"><use href="#card-pxd" /></a></g>
+  <g transform="translate(600 276)"><a href="https://ghong.site/"><use href="#card-hg" /></a></g>
+</svg>
