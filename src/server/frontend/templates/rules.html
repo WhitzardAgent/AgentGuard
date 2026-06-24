@@ -1,9 +1,10 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AgentGuard Frontend Preview</title>
+  <script src="/static/common/i18n.js"></script>
   <script>
     (function () {
       try {
@@ -101,7 +102,7 @@
                 </div>
                 <div class="field" id="on-field">
                   <label for="rule-on-subtype-input">Select Target Tool and Trigger Stage</label>
-                  <p class="subtle" id="trace-on-field-hint">
+                  <p class="subtle" id="trace-on-field-hint" data-i18n-html="Rules Trace On Hint">
                     When you use <strong>Tool Trace</strong>, the <strong>Tool</strong> and <strong>Trigger Stage</strong> here apply to the <strong>last tool</strong> on that trace.
                   </p>
                   <div class="on-filter-row">
@@ -230,7 +231,7 @@
                 </div>
                 <div class="field">
                   <label for="rule-description-input">DESCRIPTION</label>
-                  <textarea id="rule-description-input">Use this field to capture the operator-facing explanation for the rule.</textarea>
+                  <textarea id="rule-description-input" data-i18n-value="Use this field to capture the operator-facing explanation for the rule.">Use this field to capture the operator-facing explanation for the rule.</textarea>
                 </div>
                 <div class="wizard-step-actions">
                   <button class="btn" data-prev-step="3" type="button">Back</button>

@@ -1,0 +1,681 @@
+(function () {
+  const LANGUAGE_KEY = "agentguard.language";
+  const DEFAULT_LANGUAGE = "en";
+  const SUPPORTED_LANGUAGES = new Set(["en", "zh"]);
+  const OBSERVED_ATTRIBUTES = ["title", "placeholder", "aria-label"];
+  const EXACT_TRANSLATIONS = {
+    zh: {
+      "AgentGuard Frontend Preview": "AgentGuard 前端预览",
+      Home: "首页",
+      Agents: "智能体",
+      Plugins: "插件",
+      Labels: "标签",
+      Rules: "规则",
+      User: "用户",
+      Doc: "文档",
+      GitHub: "GitHub",
+      DashBoard: "仪表盘",
+      "Current User": "当前用户",
+      "AgentGuard Home": "AgentGuard 首页",
+      "keeps your agent workflow in control.": "让你的智能体工作流始终处于可控状态。",
+      "Start with agent selection, configure plugins when needed, and optionally add rule-based controls for labels, rules, and runtime review.": "从选择智能体开始；按需配置插件，并可为标签、规则和运行时审查添加基于规则的控制。",
+      "Start with agent selection, then configure plugins and optional rule-based workflows.": "从选择智能体开始，然后配置插件和可选的规则化工作流。",
+      "Choose which registered agent you want to inspect and use that selection to scope the rest of the frontend.": "选择你要查看的已注册智能体，并让该选择作用于整个前端范围。",
+      "Watch runtime activity for the selected agent. Rule-based plugins can add more policy-specific signals, but dashboard visibility is always available.": "观察所选智能体的运行时活动。基于规则的插件可补充更多策略信号，但仪表盘始终可用。",
+      "Choose an agent": "选择一个智能体",
+      "to focus the monitoring surface.": "来聚焦监控视图。",
+      "Agent Monitoring": "智能体监控",
+      "Available Agents": "可用智能体",
+      "Preparing agent catalog...": "正在准备智能体目录…",
+      "Refresh agent catalog": "刷新智能体目录",
+      "Clear selected agent": "清除当前智能体",
+      "AgentGuard sections": "AgentGuard 分区",
+      "Agent scoped sections": "智能体作用域分区",
+      "Current agent context": "当前智能体上下文",
+      "Current user context": "当前用户上下文",
+      "Choose which registered agent to watch from the agent list.": "从智能体列表中选择你想监控的已注册智能体。",
+      "Agent Selection": "智能体选择",
+      "Choose which registered agent you want to keep in view across the frontend.": "选择你希望在整个前端中持续关注的已注册智能体。",
+      "No agents are discoverable yet. Sync the tool catalog after agents register tools.": "暂时还没有可发现的智能体。请在智能体注册工具后同步工具目录。",
+      "No tools registered.": "尚未注册任何工具。",
+      "Refreshing agent catalog...": "正在刷新智能体目录…",
+      "Syncing agent catalog...": "正在同步智能体目录…",
+      "Synced just now": "刚刚已同步",
+      "Agent catalog refreshed.": "智能体目录已刷新。",
+      "Showing the built-in empty agent catalog fallback.": "正在显示内置的空智能体目录兜底数据。",
+      "Failed to refresh agent catalog.": "刷新智能体目录失败。",
+      "Plugin Config": "插件配置",
+      "Configure plugins for": "为",
+      "the selected agent": "当前选中的智能体",
+      "Configure plugins for the selected agent.": "为当前选中的智能体 配置插件。",
+      "Configure server plugins and client plugins separately. Changes save immediately and apply to the next guarded events.": "分别配置服务端插件和客户端插件。变更会立即保存，并在下一次受保护事件中生效。",
+      "Available Plugins": "可用插件",
+      "Loading plugin catalog...": "正在加载插件目录…",
+      Server: "服务端",
+      Client: "客户端",
+      "Loading server plugins...": "正在加载服务端插件…",
+      "Loading client plugins...": "正在加载客户端插件…",
+      "Refresh plugin catalog": "刷新插件目录",
+      "No server plugins are available for this agent yet.": "该智能体暂无可用的服务端插件。",
+      "No client plugins are available for this agent yet. Start a client config API to discover client-side plugins.": "该智能体暂无可用的客户端插件。请启动客户端配置 API 以发现客户端插件。",
+      "Plugin Config": "插件配置",
+      "Configure server and client plugin scopes for the selected agent.": "为选中的智能体配置服务端与客户端插件范围。",
+      "Phase not declared": "未声明阶段",
+      "No plugin description provided.": "未提供插件描述。",
+      "Select an agent first.": "请先选择一个智能体。",
+      "Using server default plugin config": "使用服务端默认插件配置",
+      "Current plugins": "当前插件",
+      "Refreshing plugin catalog...": "正在刷新插件目录…",
+      "Loading plugin catalog...": "正在加载插件目录…",
+      "Plugin catalog refreshed.": "插件目录已刷新。",
+      "Failed to load plugin catalog.": "加载插件目录失败。",
+      "Plugin config updated.": "插件配置已更新。",
+      "Failed to update plugin config.": "更新插件配置失败。",
+      "Labels Studio": "标签工作台",
+      "Tool Labels": "工具标签",
+      "Review the current tool catalog, inspect default metadata, and adjust label values.": "查看当前工具目录、检查默认元数据，并调整标签值。",
+      "Tool Label Editor": "工具标签编辑器",
+      "This page loads `/api/tools`, caches the result locally, and lets you refine labels on top of the current tool definitions.": "此页面会加载 `/api/tools`，将结果缓存到本地，并允许你在当前工具定义之上细化标签。",
+      "Refresh tool catalog": "刷新工具目录",
+      "Preparing tool catalog...": "正在准备工具目录…",
+      "Select a tool": "选择一个工具",
+      "Selected Label Rows": "已选标签行",
+      "Labels to write": "待写入标签",
+      "Labels to write:": "待写入标签：",
+      "Save Tool Labels": "保存工具标签",
+      "Reset Selection": "重置选择",
+      "Configured Tool Labels": "已配置工具标签",
+      "This table shows the catalog values currently available to the labels, rules, and runtime pages.": "此表展示当前可供标签、规则和运行时页面使用的目录值。",
+      Agent: "智能体",
+      Tool: "工具",
+      Boundary: "边界",
+      Sensitivity: "敏感度",
+      Integrity: "完整性",
+      "Inspect the tool catalog, tune label values, and keep the shared label surface clean.": "检查工具目录、调整标签值，并保持共享标签面整洁。",
+      "Choose an agent first to load that agent's tools.": "请先选择一个智能体以加载该智能体的工具。",
+      "Waiting for agent selection": "等待选择智能体",
+      "Select a tool first.": "请先选择一个工具。",
+      "No label rows selected yet. Click + to add one.": "还没有选择任何标签行。点击 + 添加一行。",
+      "Click + to add a label row.": "点击 + 添加一行标签。",
+      "Select a tool, then click + to add a label row.": "先选择一个工具，再点击 + 添加标签行。",
+      "Select category": "选择类别",
+      "Select value": "选择值",
+      "Select category first": "请先选择类别",
+      "Choose an agent first.": "请先选择一个智能体。",
+      "Tool catalog refreshed.": "工具目录已刷新。",
+      "Showing the built-in empty tool catalog fallback.": "正在显示内置的空工具目录兜底数据。",
+      "No sync yet": "尚未同步",
+      "Failed to refresh tool catalog.": "刷新工具目录失败。",
+      "Select a valid tool first.": "请先选择一个有效工具。",
+      "Failed to save tool labels.": "保存工具标签失败。",
+      "Runtime Monitor": "运行时监控",
+      "Runtime Overview": "运行时概览",
+      Connecting: "连接中",
+      "Refresh Now": "立即刷新",
+      "Total Requests": "总请求数",
+      Denied: "拒绝数",
+      "Pending Approvals": "待审批",
+      "Deny Rate": "拒绝率",
+      "Agent:": "智能体：",
+      "Rule Version:": "规则版本：",
+      "Mode:": "模式：",
+      "Runtime:": "运行时：",
+      "Uptime:": "运行时长：",
+      "Recent Traffic": "最近流量",
+      "Recent Audit": "最近审计",
+      Session: "会话",
+      Decision: "决策",
+      Risk: "风险",
+      "Matched Rules": "命中规则",
+      "Selected Audit Detail": "选中审计详情",
+      "Select an audit row to inspect event and decision JSON.": "选择一条审计记录以查看事件和决策 JSON。",
+      Healthy: "健康",
+      Connected: "已连接",
+      Partial: "部分可用",
+      Unreachable: "不可达",
+      "No target summary available.": "没有可用的目标摘要。",
+      "No recent traffic in the current runtime window.": "当前运行时窗口内暂无最近流量。",
+      "No pending human-check tickets right now.": "当前没有待处理的人审工单。",
+      Approve: "批准",
+      Deny: "拒绝",
+      "Audit data is unavailable.": "审计数据不可用。",
+      "No audit records have been captured yet.": "尚未捕获任何审计记录。",
+      "No audit detail available.": "没有可用的审计详情。",
+      "Traffic payload has an unexpected format.": "流量数据格式不符合预期。",
+      "Approvals payload has an unexpected format.": "审批数据格式不符合预期。",
+      "Audit payload has an unexpected format.": "审计数据格式不符合预期。",
+      "Failed to resolve approval ticket.": "处理审批工单失败。",
+      "Runtime data refreshed.": "运行时数据已刷新。",
+      "Failed to refresh runtime data.": "刷新运行时数据失败。",
+      "Runtime Overview": "运行时概览",
+      "Inspect agent-scoped runtime metrics, traffic, approvals, and audit activity for the selected agent.": "查看当前所选智能体的运行时指标、流量、审批与审计活动。",
+      "Rule Studio": "规则工作台",
+      "Rule Builder": "规则构建器",
+      "Build DSL rules from structured inputs and manage rule publication.": "通过结构化输入构建 DSL 规则，并管理规则发布。",
+      "Guided Rule Builder": "引导式规则构建器",
+      "Create a new rule step by step, or load an existing rule into the editor for modification.": "逐步创建新规则，或将已有规则载入编辑器进行修改。",
+      "Back To Guided Create": "返回引导创建",
+      "1. Name": "1. 名称",
+      "2. Match": "2. 匹配",
+      "3. Condition": "3. 条件",
+      "4. Details": "4. 详情",
+      "Step 1": "步骤 1",
+      "Rule Name": "规则名称",
+      "Start rule construction with a rule name.": "从规则名称开始构建规则。",
+      "Continue To Match Mode": "继续到匹配模式",
+      "Step 2": "步骤 2",
+      "Formal Match Mode": "形式匹配模式",
+      "Choose the ideal path matching approach for your rule.": "为你的规则选择合适的路径匹配方式。",
+      "Single Tool": "单工具",
+      "I just want constraints on a single tool.": "我只想对单个工具添加约束。",
+      "Tool Trace": "工具轨迹",
+      "I want to monitor an execution chain. In trace mode, any tool / trigger stage filter refers to the last tool on the tool trace.": "我想监控一条执行链。在 trace 模式下，任何工具/触发阶段筛选都指向该工具轨迹中的最后一个工具。",
+      "Select Target Tool and Trigger Stage": "选择目标工具与触发阶段",
+      "When you use": "当你使用",
+      ", the": "时，这里的",
+      "here apply to the": "会作用于该轨迹中的",
+      "on that trace.": "。",
+      "Trigger Stage": "触发阶段",
+      "Choose when the rule should trigger in the tool invocation lifecycle.": "选择规则应在工具调用生命周期的哪个阶段触发。",
+      "Trigger stage (optional)": "触发阶段（可选）",
+      "requested (pre call)": "requested（调用前）",
+      "completed (post call)": "completed（调用后）",
+      "failed (call failed)": "failed（调用失败）",
+      "Optionally narrow the rule to one specific tool under the selected trigger stage.": "可选地将规则收窄到所选触发阶段下的某个具体工具。",
+      "Select tool (optional)": "选择工具（可选）",
+      "e.g. Tool A -> * -> Tool C": "例如：Tool A -> * -> Tool C",
+      "Continue To Condition": "继续到条件配置",
+      Back: "返回",
+      "Step 3": "步骤 3",
+      "Condition Builder": "条件构建器",
+      "Craft single conditions and combine them into complex ones.": "创建单个条件，并将它们组合成复杂条件。",
+      "Build single conditions with the guided flow first, then assemble them into nested AND / OR logic below.": "先通过引导流程构建单个条件，然后在下方将它们组装成嵌套的 AND / OR 逻辑。",
+      "Add condition": "添加条件",
+      "Continue To Details": "继续到详情",
+      "Step 4": "步骤 4",
+      "Additional Details": "附加详情",
+      "Finish the optional metadata that helps operators understand and manage the rule later.": "完善可选元数据，帮助后续运维理解和管理该规则。",
+      ACTION: "动作",
+      "SELECT ACTION": "选择动作",
+      Prompt: "提示词",
+      "LLM review system prompt for this rule.": "该规则对应的 LLM 审查系统提示词。",
+      "DEGRADE Target": "DEGRADE 目标",
+      "Select target tool": "选择目标工具",
+      Severity: "严重级别",
+      "Select severity": "选择严重级别",
+      Category: "分类",
+      Reason: "原因",
+      DESCRIPTION: "描述",
+      "Use this field to capture the operator-facing explanation for the rule.": "用这个字段记录面向运维人员的规则说明。",
+      "Preview Result": "预览结果",
+      "Generate Rule": "生成规则",
+      "Check Rule": "校验规则",
+      "Clear Form": "清空表单",
+      "Rule List": "规则列表",
+      All: "全部",
+      Published: "已发布",
+      Unpublished: "未发布",
+      "Build rules from structured inputs, preview DSL output, and manage unpublished and published states.": "从结构化输入构建规则、预览 DSL 输出，并管理未发布与已发布状态。",
+      "Local draft": "本地草稿",
+      "Built-in": "内置",
+      "Default pack": "默认规则包",
+      "Agent runtime": "智能体运行时",
+      "Rule validation failed.": "规则校验失败。",
+      "Rule check passed.": "规则校验通过。",
+      "Failed to check rule.": "校验规则失败。",
+      "Select an agent before publishing a rule.": "发布规则前请先选择一个智能体。",
+      "Failed to build DSL source.": "构建 DSL 源失败。",
+      "Failed to publish rules.": "发布规则失败。",
+      "Select an agent before deleting a published rule.": "删除已发布规则前请先选择一个智能体。",
+      "Failed to restore the disabled published rule back into the local rule list.": "将已停用的发布规则恢复到本地规则列表失败。",
+      "Failed to disable rule.": "停用规则失败。",
+      "Active rules refreshed.": "活动规则已刷新。",
+      "Failed to load active rules.": "加载活动规则失败。",
+      "Guided rule builder reset.": "引导式规则构建器已重置。",
+      "Select tool": "选择工具",
+      "No tools available": "没有可用工具",
+      "Please finish the TRACE builder before continuing.": "继续前请先完成 TRACE 构建器。",
+      "Please configure the ON filter before continuing.": "继续前请先配置 ON 过滤条件。",
+      "Please enter a rule name first.": "请先输入规则名称。",
+      "Please select an action first.": "请先选择一个动作。",
+      "Please select a DEGRADE target first.": "请先选择一个 DEGRADE 目标。",
+      "Rule Editor": "规则编辑器",
+      "The legacy full-form editor is kept for modifying existing rules and drafts.": "保留旧版完整表单编辑器，用于修改已有规则和草稿。",
+      "Create a new rule step by step.": "按步骤创建新规则。",
+      "Edit path": "编辑路径",
+      "Add path segment": "添加路径段",
+      "PATH must contain at least one concrete segment.": "PATH 至少需要包含一个具体段。",
+      "PATH must start with Tool A.": "PATH 必须从 Tool A 开始。",
+      "PATH cannot end with a wildcard segment.": "PATH 不能以通配段结束。",
+      "PATH is valid.": "PATH 有效。",
+      "Build Tool TRACE by adding one or more concrete or wildcard segments. Any tool or trigger stage filter refers to the final tool on the trace.": "通过添加一个或多个具体段或通配段来构建 Tool TRACE。任何工具或触发阶段筛选都指向该轨迹中的最后一个工具。",
+      "PATH:": "PATH：",
+      "TRACE is empty. Click + to add the first segment.": "TRACE 为空。点击 + 添加第一个段。",
+      Start: "开始",
+      "Confirm path": "确认路径",
+      "Delete path segment": "删除路径段",
+      "There are no published runtime rules right now.": "当前没有已发布的运行时规则。",
+      "There are no unpublished local rules yet. Generate one to keep it here before publishing.": "当前还没有未发布的本地规则。先生成一条，再在发布前保留在这里。",
+      "There are no rules yet. Generate a local rule or publish one to the runtime.": "当前还没有规则。请生成本地规则，或将规则发布到运行时。",
+      "Publish rule": "发布规则",
+      "Delete unpublished rule": "删除未发布规则",
+      "Disable published rule": "停用已发布规则",
+      "Checking...": "检查中…",
+      "Waiting for first sync": "等待首次同步",
+      "Shared frontend shell is ready.": "共享前端外壳已就绪。",
+      "Not synced yet": "尚未同步",
+      "Request failed.": "请求失败。",
+      "Cannot reach the AgentGuard API.": "无法连接到 AgentGuard API。",
+      Unavailable: "不可用",
+      "Agent catalog payload has an unexpected format.": "智能体目录返回格式不符合预期。",
+      "Tool catalog payload has an unexpected format.": "工具目录返回格式不符合预期。",
+      "Rule list payload has an unexpected format.": "规则列表返回格式不符合预期。",
+      "No rule detail": "无规则详情",
+      "No sync yet": "尚未同步",
+      "Construct the Trace format you want to monitor.": "构造你希望监控的 Trace 格式。",
+      "Rules Trace On Hint": "当你使用 <strong>Tool Trace</strong> 时，这里的 <strong>Tool</strong> 和 <strong>Trigger Stage</strong> 会作用于该轨迹中的<strong>最后一个工具</strong>。",
+      "User Studio": "用户工作台",
+      "User Centre": "用户中心",
+      "Manage your personal information and settings on this page.": "在此页面管理你的个人信息和设置。",
+      "User Management": "用户管理",
+      "Coming soon.": "敬请期待。",
+      "basic user management features to be added...": "基础用户管理功能即将加入……",
+      "Manage frontend user identities and related configuration.": "管理前端用户身份及相关配置。",
+      "Manage frontend user identities and related configuration.": "管理前端用户身份及相关配置。",
+      "Manage your personal information and settings on this page.": "在此页面管理你的个人信息和设置。",
+      "Manage frontend user identities and related configuration.": "管理前端用户身份与相关配置。",
+      "Configure server plugins and client plugins separately. Changes save immediately and apply to the next guarded events.": "分别配置服务端插件与客户端插件。变更会立即保存，并作用于后续受保护事件。",
+      "Inspect agent-scoped runtime metrics, traffic, approvals, and audit activity for the selected agent.": "查看选中智能体的运行时指标、流量、审批与审计活动。",
+      "Manage frontend user identities and related configuration.": "管理前端用户身份和相关配置。",
+      "Close condition builder": "关闭条件构建器",
+      "Path rule": "路径规则",
+      "Single tool rule": "单工具规则",
+      "Rule Scope": "规则范围",
+      "Path tool": "路径工具",
+      "Generate single rule": "生成单个规则",
+      "Next builder step": "下一步",
+      "Choose a saved condition from the group's + menu first.": "请先从分组的 + 菜单中选择一个已保存条件。",
+      "Saved Conditions": "已保存条件",
+      "You can build single conditions here with the guided flow.": "你可以在这里通过引导流程构建单个条件。",
+      "No saved conditions yet.": "还没有已保存条件。",
+      "Edit saved condition": "编辑已保存条件",
+      "Delete saved condition": "删除已保存条件",
+      "Add node": "添加节点",
+      Group: "分组",
+      "Delete condition": "删除条件",
+      "Logic Root": "逻辑根",
+      "Set root logic to AND": "将根逻辑设为 AND",
+      "Set group logic to AND": "将分组逻辑设为 AND",
+      "Set root logic to OR": "将根逻辑设为 OR",
+      "Set group logic to OR": "将分组逻辑设为 OR",
+      "Delete group": "删除分组",
+      "Empty group. Insert a saved condition or a nested group.": "空分组。请插入一个已保存条件或嵌套分组。",
+      "Logic Canvas": "逻辑画布",
+      "You can combine saved single conditions here to package them into a complex rule.": "你可以在这里组合已保存的单个条件，将它们封装成复杂规则。",
+      "CONDITION Preview": "条件预览",
+      "CONDITION is locked until TRACE or ON is configured.": "在配置 TRACE 或 ON 之前，CONDITION 会被锁定。",
+      "Finish the guided single-condition builder, then save it into the library.": "先完成引导式单条件构建，然后将其保存到条件库。",
+      "Create a saved single condition first, then insert it into the logic tree.": "请先创建一个已保存的单条件，再将其插入逻辑树。",
+      "Use each group's + menu to insert a saved condition or add a nested group.": "使用每个分组的 + 菜单插入已保存条件，或添加嵌套分组。",
+      "Complete the single condition builder, then save it to the library.": "完成单条件构建器后，再将其保存到条件库。",
+      "Finish the condition fields before saving.": "保存前请先完成条件字段。",
+      "Choose rule scope": "选择规则范围",
+      "Select the tool format.": "选择工具格式。",
+      "Choose tool node": "选择工具节点",
+      "Choose the tool node you want to inspect.": "选择你要检查的工具节点。",
+      "Choose property": "选择属性",
+      "Select the property and subproperty to constrain.": "选择要约束的属性和子属性。",
+      "Choose relation and target value": "选择关系与目标值",
+      "Set the comparison operator and the target value.": "设置比较运算符和目标值。",
+      "Select sub-property": "选择子属性",
+      "Select property": "选择属性",
+      "Select comparison": "选择比较方式",
+      "Target values": "目标值列表",
+      "Target list": "目标列表",
+      "Target value": "目标值",
+      "Select target value": "选择目标值",
+      "Numeric value": "数值",
+      "Create >": "创建 >",
+      "At least one condition is required.": "至少需要一个条件。",
+      "One condition is incomplete.": "有一个条件尚未完成。",
+      "Trace syntax conditions need a tool selection first.": "Trace 语法条件需要先选择工具。",
+      "Context conditions need a valid field path.": "Context 条件需要一个有效的字段路径。",
+      "CONDITION is valid.": "CONDITION 有效。",
+      "Request failed.": "请求失败。",
+      "Cannot reach the AgentGuard API.": "无法访问 AgentGuard API。",
+      "Inspect agent-scoped runtime metrics, traffic, approvals, and audit activity for the selected agent.": "检查所选智能体的运行时指标、流量、审批和审计活动。",
+      "Rule ID is required before deleting a published rule.": "删除已发布规则前必须提供规则 ID。",
+      "Active rules payload has an unexpected format.": "活动规则数据格式不符合预期。",
+      "Unbalanced parentheses.": "括号不平衡。",
+      "Malformed condition expression.": "条件表达式格式错误。",
+      "Context conditions require a context path before publishing.": "发布前，Context 条件必须提供 context 路径。",
+      "Syntax conditions require a syntax field before publishing.": "发布前，Syntax 条件必须提供 syntax 字段。",
+      "Condition operator is required before publishing.": "发布前必须提供条件运算符。",
+      "Condition value is required before publishing.": "发布前必须提供条件值。",
+      "At least one condition is required before publishing.": "发布前至少需要一个条件。",
+      "At least one formal match is required before publishing.": "发布前至少需要一个形式匹配条件。",
+      "DEGRADE target is required before publishing.": "发布前必须提供 DEGRADE 目标。",
+      "At least one local rule is required before publishing.": "发布前至少需要一个本地规则。",
+    },
+  };
+  const PATTERN_TRANSLATIONS = {
+    zh: [
+      { re: /^Now watching (.+)\.$/, replace: "正在监控 $1。" },
+      { re: /^Synced (\d+) agents\. Last updated: (.+)$/, replace: "已同步 $1 个智能体。最后更新：$2" },
+      { re: /^Last synced (.+)$/, replace: "上次同步：$1" },
+      { re: /^Showing cached catalog\. Last successful sync: (.+)$/, replace: "正在显示缓存目录。上次成功同步：$1" },
+      { re: /^Select an agent to view (server|client) plugins\.$/, fn: (match) => `请先选择一个智能体 以查看${match[1] === "server" ? "服务端" : "客户端"}插件。` },
+      { re: /^(\d+) of (\d+) (server|client) plugins enabled\.$/, fn: (match) => `已启用 ${match[1]} / ${match[2]} 个${match[3] === "server" ? "服务端" : "客户端"}插件。` },
+      { re: /^Current plugins for (.+): server \[(.*)\], client \[(.*)\]\.$/, replace: "$1 的当前插件：服务端 [$2]，客户端 [$3]。" },
+      { re: /^No plugin config has been applied to (.+) yet\.$/, replace: "尚未为 $1 应用任何插件配置。" },
+      { re: /^Using server default plugin config for (.+)\.$/, replace: "正在为 $1 使用服务端默认插件配置。" },
+      { re: /^Loaded plugin config for (.+)\.$/, replace: "已加载 $1 的插件配置。" },
+      { re: /^Updating plugin config for (.+)\.\.\.$/, replace: "正在更新 $1 的插件配置…" },
+      { re: /^Select at least one label for (.+)\.$/, replace: "请至少为 $1 选择一个标签。" },
+      { re: /^(.+) labels saved\.$/, replace: "$1 的标签已保存。" },
+      { re: /^Approved ticket (.+)\.$/, replace: "已批准工单 $1。" },
+      { re: /^Denied ticket (.+)\.$/, replace: "已拒绝工单 $1。" },
+      { re: /^Inspect agent-scoped runtime metrics, traffic, approvals, and audit activity for (.+)\.$/, replace: "查看 $1 的运行时指标、流量、审批与审计活动。" },
+      { re: /^Rule (.+) was loaded at startup and cannot be disabled here\.$/, replace: "规则 $1 在启动时已加载，无法在这里停用。" },
+      { re: /^Disabled rule (.+)\.$/, replace: "已停用规则 $1。" },
+      { re: /^Rule (.+) was not created in this workspace and cannot be deleted here\.$/, replace: "规则 $1 不是在当前工作区创建的，无法在这里删除。" },
+      { re: /^Deleted unpublished rule (.+)\.$/, replace: "已删除未发布规则 $1。" },
+      { re: /^(\d+) tool$/, replace: "$1 个工具" },
+      { re: /^(\d+) tools$/, replace: "$1 个工具" },
+      { re: /^Toggle plugin (.+)$/, replace: "切换插件 $1" },
+      { re: /^session=(.+) \| risk=(.+) \| matched=(.+)$/, replace: "会话=$1 | 风险=$2 | 命中=$3" },
+      { re: /^session=(.+) \| risk=(.+) \| reason=(.+)$/, replace: "会话=$1 | 风险=$2 | 原因=$3" },
+      { re: /^agent=(.+) \| session=(.+) \| created=(.+)$/, replace: "智能体=$1 | 会话=$2 | 创建时间=$3" },
+      { re: /^Rule name "(.+)" is not a valid DSL identifier\.$/, replace: "规则名“$1”不是有效的 DSL 标识符。" },
+      { re: /^Action "(.+)" is not supported by the AgentGuard DSL\.$/, replace: "动作“$1”不受 AgentGuard DSL 支持。" },
+      { re: /^Unsupported context path "(.+)"\.$/, replace: "不支持的 context 路径“$1”。" },
+      { re: /^Unsupported condition feature "(.+)"\.$/, replace: "不支持的条件特性“$1”。" },
+      { re: /^ON clause "(.+)" is not a supported tool_call expression\.$/, replace: "ON 子句“$1”不是受支持的 tool_call 表达式。" },
+      { re: /^Step (\d+)$/, replace: "步骤 $1" },
+      { re: /^param-(.+)$/, replace: "参数-$1" },
+    ],
+  };
+
+  function normalizeLanguage(language) {
+    const normalized = String(language || "").trim().toLowerCase();
+    return SUPPORTED_LANGUAGES.has(normalized) ? normalized : DEFAULT_LANGUAGE;
+  }
+
+  function readStoredLanguage() {
+    try {
+      return normalizeLanguage(window.localStorage?.getItem(LANGUAGE_KEY));
+    } catch {
+      return DEFAULT_LANGUAGE;
+    }
+  }
+
+  function currentLanguage() {
+    return readStoredLanguage();
+  }
+
+  function currentLocale() {
+    return currentLanguage() === "zh" ? "zh-CN" : "en-US";
+  }
+
+  function persistLanguage(language) {
+    try {
+      window.localStorage?.setItem(LANGUAGE_KEY, normalizeLanguage(language));
+    } catch {
+      // Ignore localStorage write errors in preview mode.
+    }
+  }
+
+  function normalizeWhitespace(value) {
+    return String(value || "").replace(/\s+/g, " ").trim();
+  }
+
+  function interpolate(template, variables = {}) {
+    return String(template || "").replace(/\{(\w+)\}/g, (match, key) => {
+      if (!Object.prototype.hasOwnProperty.call(variables, key)) {
+        return match;
+      }
+      return String(variables[key] ?? "");
+    });
+  }
+
+  function translateValue(value, variables = {}) {
+    const language = currentLanguage();
+    const normalized = normalizeWhitespace(value);
+    if (!normalized || language === "en") {
+      return interpolate(value, variables);
+    }
+
+    const exactDictionary = EXACT_TRANSLATIONS[language] || {};
+    if (Object.prototype.hasOwnProperty.call(exactDictionary, normalized)) {
+      return interpolate(exactDictionary[normalized], variables);
+    }
+
+    const patterns = PATTERN_TRANSLATIONS[language] || [];
+    for (const pattern of patterns) {
+      const matched = normalized.match(pattern.re);
+      if (!matched) {
+        continue;
+      }
+      if (typeof pattern.fn === "function") {
+        return pattern.fn(matched, variables);
+      }
+      if (pattern.replace) {
+        return normalized.replace(pattern.re, pattern.replace);
+      }
+    }
+
+    return interpolate(value, variables);
+  }
+
+  function isExcludedElement(element) {
+    if (!(element instanceof HTMLElement)) {
+      return false;
+    }
+    return ["SCRIPT", "STYLE", "NOSCRIPT", "PRE"].includes(element.tagName);
+  }
+
+  function translateTextNode(node) {
+    const original = String(node.nodeValue || "");
+    const normalized = normalizeWhitespace(original);
+    if (!normalized) {
+      return;
+    }
+    const translated = translateValue(normalized);
+    if (translated === normalized) {
+      return;
+    }
+    const leading = original.match(/^\s*/)?.[0] || "";
+    const trailing = original.match(/\s*$/)?.[0] || "";
+    node.nodeValue = `${leading}${translated}${trailing}`;
+  }
+
+  function translateAttribute(element, attributeName) {
+    if (!(element instanceof HTMLElement) || !element.hasAttribute(attributeName)) {
+      return;
+    }
+    const original = element.getAttribute(attributeName);
+    const normalized = normalizeWhitespace(original);
+    if (!normalized) {
+      return;
+    }
+    const translated = translateValue(normalized);
+    if (translated !== normalized) {
+      element.setAttribute(attributeName, translated);
+    }
+  }
+
+  function translateExplicitBindings(element) {
+    if (!(element instanceof HTMLElement)) {
+      return;
+    }
+
+    const textKey = element.getAttribute("data-i18n");
+    if (textKey) {
+      element.textContent = translateValue(textKey);
+    }
+
+    const htmlKey = element.getAttribute("data-i18n-html");
+    if (htmlKey) {
+      element.innerHTML = translateValue(htmlKey);
+    }
+
+    const placeholderKey = element.getAttribute("data-i18n-placeholder");
+    if (placeholderKey) {
+      element.setAttribute("placeholder", translateValue(placeholderKey));
+    }
+
+    const titleKey = element.getAttribute("data-i18n-title");
+    if (titleKey) {
+      element.setAttribute("title", translateValue(titleKey));
+    }
+
+    const ariaLabelKey = element.getAttribute("data-i18n-aria-label");
+    if (ariaLabelKey) {
+      element.setAttribute("aria-label", translateValue(ariaLabelKey));
+    }
+
+    const valueKey = element.getAttribute("data-i18n-value");
+    if (valueKey && (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) {
+      element.value = translateValue(valueKey);
+    }
+  }
+
+  function applyToElement(element) {
+    if (!(element instanceof HTMLElement) || isExcludedElement(element)) {
+      return;
+    }
+    const elements = [element];
+    if (typeof element.querySelectorAll === "function") {
+      elements.push(...element.querySelectorAll("*"));
+    }
+    elements.forEach((item) => {
+      if (!(item instanceof HTMLElement) || isExcludedElement(item)) {
+        return;
+      }
+      translateExplicitBindings(item);
+      OBSERVED_ATTRIBUTES.forEach((attributeName) => translateAttribute(item, attributeName));
+    });
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    const textNodes = [];
+    let currentNode = walker.nextNode();
+    while (currentNode) {
+      if (currentNode.parentElement && !isExcludedElement(currentNode.parentElement)) {
+        textNodes.push(currentNode);
+      }
+      currentNode = walker.nextNode();
+    }
+    textNodes.forEach(translateTextNode);
+  }
+
+  function applyToNode(node) {
+    if (!node) {
+      return;
+    }
+    if (node.nodeType === Node.TEXT_NODE) {
+      if (node.parentElement && !isExcludedElement(node.parentElement)) {
+        translateTextNode(node);
+      }
+      return;
+    }
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      applyToElement(node);
+    }
+  }
+
+  function applyDocumentTranslations() {
+    if (typeof document === "undefined") {
+      return;
+    }
+    if (document.documentElement) {
+      document.documentElement.lang = currentLanguage() === "zh" ? "zh-CN" : "en";
+    }
+    if (document.title) {
+      document.title = translateValue(document.title);
+    }
+    if (document.body) {
+      applyToElement(document.body);
+    }
+    renderLanguageToggle();
+  }
+
+  function renderLanguageToggle() {
+    const button = document.getElementById("sidebar-language-toggle") || document.getElementById("locale-toggle-button");
+    if (!(button instanceof HTMLButtonElement)) {
+      return;
+    }
+    const language = currentLanguage();
+    button.textContent = language === "zh" ? "English" : "中文";
+    button.setAttribute("aria-label", language === "zh" ? "Switch to English" : "Switch to Chinese");
+    button.setAttribute("title", language === "zh" ? "Switch to English" : "Switch to Chinese");
+    if (button.dataset.boundLanguageToggle === "true") {
+      return;
+    }
+    button.addEventListener("click", () => {
+      const nextLanguage = currentLanguage() === "zh" ? "en" : "zh";
+      setLanguage(nextLanguage);
+    });
+    button.dataset.boundLanguageToggle = "true";
+  }
+
+  function observeMutations() {
+    if (typeof MutationObserver === "undefined" || currentLanguage() !== "zh" || !document.body) {
+      return;
+    }
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        if (mutation.type === "characterData") {
+          applyToNode(mutation.target);
+          return;
+        }
+        if (mutation.type === "attributes") {
+          applyToNode(mutation.target);
+          return;
+        }
+        mutation.addedNodes.forEach(applyToNode);
+      });
+    });
+    observer.observe(document.body, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: OBSERVED_ATTRIBUTES,
+    });
+  }
+
+  function setLanguage(language, options = {}) {
+    const normalized = normalizeLanguage(language);
+    persistLanguage(normalized);
+    if (options.reload === false) {
+      applyDocumentTranslations();
+      return normalized;
+    }
+    if (typeof window !== "undefined" && window.location) {
+      window.location.reload();
+    }
+    return normalized;
+  }
+
+  if (currentLanguage() !== "zh") {
+    persistLanguage(DEFAULT_LANGUAGE);
+  }
+
+  window.AgentGuardI18n = {
+    getLanguage: currentLanguage,
+    getLocale: currentLocale,
+    setLanguage,
+    apply: applyDocumentTranslations,
+    t: translateValue,
+  };
+
+  function initialize() {
+    applyDocumentTranslations();
+    observeMutations();
+  }
+
+  if (typeof document !== "undefined" && document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initialize, { once: true });
+  } else {
+    initialize();
+  }
+})();

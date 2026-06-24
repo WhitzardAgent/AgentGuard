@@ -214,6 +214,15 @@ a {
   transition: background 0.18s ease, color 0.18s ease, transform 0.18s ease;
 }
 
+button.sidebar-nav-item {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
 .sidebar-nav-item-child {
   margin-left: 18px;
   padding: 10px 18px 10px 34px;
@@ -256,6 +265,17 @@ a {
   background: rgba(47, 107, 59, 0.09);
   color: var(--text);
   transform: translateX(2px);
+}
+
+.sidebar-locale-button {
+  justify-content: flex-start;
+  align-items: center;
+  margin-top: 4px;
+  width: 100%;
+  border: 1px solid rgba(47, 107, 59, 0.12);
+  border-radius: 16px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.72);
 }
 
 .sidebar-nav-item.active {

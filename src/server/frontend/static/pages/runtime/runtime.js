@@ -5,6 +5,7 @@
   };
   const api = window.AgentGuardApi;
   const shell = window.AgentGuardShell;
+  const i18n = window.AgentGuardI18n;
   const actionTone = window.AgentGuardUIHelpers?.actionTone || function fallbackActionTone(action) {
     const normalized = String(action || "").trim().toUpperCase();
     if (normalized === "DENY") {
@@ -67,6 +68,10 @@
     window.AgentGuardUI.showToast(message, tone);
   }
 
+  function currentLocaleTag() {
+    return i18n?.getLocale?.() || "en-US";
+  }
+
   function formatAction(action) {
     return String(action || "unknown").toUpperCase();
   }
@@ -75,7 +80,7 @@
     if (typeof value !== "number" || Number.isNaN(value)) {
       return "--";
     }
-    return value.toLocaleString("en-US");
+    return value.toLocaleString(currentLocaleTag());
   }
 
   function formatRisk(value) {
@@ -96,7 +101,7 @@
     if (typeof value !== "number" || Number.isNaN(value) || value <= 0) {
       return "--";
     }
-    return new Date(value).toLocaleTimeString("zh-CN", {
+    return new Date(value).toLocaleTimeString(currentLocaleTag(), {
       hour12: false,
     });
   }
@@ -255,7 +260,7 @@
       return;
     }
     const updatedText = state.lastUpdatedAt
-      ? new Date(state.lastUpdatedAt).toLocaleTimeString("zh-CN", { hour12: false })
+      ? new Date(state.lastUpdatedAt).toLocaleTimeString(currentLocaleTag(), { hour12: false })
       : "--";
     elements.healthPill.textContent = state.health?.ok ? "Healthy" : "Connected";
     elements.healthPill.className = "pill";
