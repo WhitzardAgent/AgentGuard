@@ -11,19 +11,47 @@ const PLUGIN_LIST_PATH = "/v1/client/plugins/list";
 const CLIENT_HEALTH_PATH = "/v1/client/health";
 
 class ClientConfigAPIServer {
-  constructor(guard, { host = "127.0.0.1", port = 38181 } = {}) {
+  constructor(
+    guard,
+    {
+      host = "127.0.0.1",
+      port = 38181,
+      advertise_host = null,
+      advertiseHost = advertise_host,
+      advertise_port = null,
+      advertisePort = advertise_port,
+    } = {}
+  ) {
     this.guard = guard;
     this.host = host;
     this.port = port;
+    this.advertise_host = advertiseHost;
+    this.advertise_port = advertisePort;
     this.server = null;
   }
 
   get base_url() {
+    const advertisedHost = this.advertised_host;
+    const advertisedPort = this.advertised_port;
+    if (advertisedHost && advertisedPort) {
+      return `http://${advertisedHost}:${advertisedPort}`;
+    }
     if (!this.server || !this.server.address()) {
-      return `http://${this.host}:${this.port}`;
+      return `http://${defaultAdvertisedHost(this.host)}:${advertisedPort || this.port}`;
     }
     const address = this.server.address();
-    return `http://${address.address}:${address.port}`;
+    const host = advertisedHost || defaultAdvertisedHost(address.address || this.host);
+    const port = advertisedPort || address.port;
+    return `http://${host}:${port}`;
+  }
+
+  get advertised_host() {
+    return normalizeAdvertisedHost(this.advertise_host);
+  }
+
+  get advertised_port() {
+    const port = normalizePort(this.advertise_port);
+    return port != null ? port : normalizePort(this.port);
   }
 
   get plugin_config_url() {
@@ -175,10 +203,35 @@ function readJson(req) {
   });
 }
 
+function normalizeAdvertisedHost(host) {
+  const value = String(host || "").trim();
+  return value || null;
+}
+
+function normalizePort(port) {
+  if (port == null || port === "") {
+    return null;
+  }
+  const normalized = Number.parseInt(String(port), 10);
+  if (!Number.isFinite(normalized) || normalized < 0) {
+    return null;
+  }
+  return normalized;
+}
+
+function defaultAdvertisedHost(host) {
+  const normalized = String(host || "").trim();
+  if (!normalized || ["0.0.0.0", "::", "[::]"].includes(normalized)) {
+    return "127.0.0.1";
+  }
+  return normalized;
+}
+
 module.exports = {
   ClientConfigAPIServer,
   PLUGIN_CONFIG_PATH,
   PLUGIN_LIST_PATH,
   CLIENT_HEALTH_PATH,
   listRegisteredPlugins,
+  defaultAdvertisedHost,
 };

@@ -142,6 +142,50 @@ test("agentguard auto-registers remote session with plugin config metadata", asy
   await guard.close();
 });
 
+test("agentguard defaults agent_id to session_id when omitted", () => {
+  const { AgentGuard } = require("./guard");
+  const guard = new AgentGuard("sess-default-agent");
+
+  assert.equal(guard.context.session_id, "sess-default-agent");
+  assert.equal(guard.context.agent_id, "sess-default-agent");
+});
+
+test("agentguard registers advertised client config api urls when configured", async () => {
+  const calls = [];
+  global.fetch = async (url, options = {}) => {
+    calls.push({ url, options });
+    return {
+      ok: true,
+      async json() {
+        return { status: "ok" };
+      },
+    };
+  };
+
+  const { AgentGuard } = require("./guard");
+  const guard = new AgentGuard("sess-advertised", {
+    server_url: "http://server.test",
+    agent_id: "agent-advertised",
+    user_id: "user-advertised",
+    client_config_api_host: "0.0.0.0",
+    client_config_api_port: 39001,
+    client_config_api_advertise_host: "10.10.0.25",
+    client_config_api_advertise_port: 39001,
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  await guard.ensureRemoteSessionRegistered();
+
+  const registerCalls = calls.filter((call) => call.url.endsWith("/v1/server/session/register"));
+  assert.equal(registerCalls.length, 1);
+  const body = JSON.parse(registerCalls[0].options.body);
+  assert.equal(body.context.metadata.client_config_url, "http://10.10.0.25:39001/v1/client/plugins/config");
+  assert.equal(body.context.metadata.client_plugin_list_url, "http://10.10.0.25:39001/v1/client/plugins/list");
+  assert.equal(body.context.metadata.client_health_url, "http://10.10.0.25:39001/v1/client/health");
+
+  await guard.close();
+});
+
 test("agentguard flushRemoteOperations waits for tool reports", async () => {
   const calls = [];
   global.fetch = async (url, options = {}) => {
@@ -450,6 +494,46 @@ test("js langchain adapter patches classic agent.llm_chain.llm", async () => {
   assert.equal(patched.tools, 1);
   assert.equal(patched.llm, 1);
   assert.equal(await agent.agent.llm_chain.llm.invoke("hello"), "reply:hello");
+  await guard.close();
+});
+
+test("js langchain adapter patches real createAgent agent.invoke llm path", async () => {
+  const { createAgent, FakeToolCallingModel, tool } = require("langchain");
+  const { z } = require("zod");
+  const { AgentGuard } = require("./guard");
+
+  const readLocalFile = tool(async ({ path }) => `safe preview for ${path}`, {
+    name: "read_local_file",
+    description: "Read a local file preview",
+    schema: z.object({
+      path: z.string(),
+    }),
+  });
+
+  const model = new FakeToolCallingModel({});
+  const agent = createAgent({
+    model,
+    tools: [readLocalFile],
+    systemPrompt: "You are a careful assistant.",
+  });
+
+  const guard = new AgentGuard("js-langchain-real-create-agent", { sandbox: "noop" });
+  const patched = guard.attach_langchain(agent);
+
+  assert.equal(patched.tools, 1);
+  assert.equal(patched.llm, 1);
+  const result = await agent.invoke({
+    messages: [{ role: "user", content: "hello" }],
+  });
+  assert.ok(result);
+  assert.equal(
+    guard.trace.entries.filter((entry) => entry.event && entry.event.event_type === "llm_input").length,
+    1
+  );
+  assert.equal(
+    guard.trace.entries.filter((entry) => entry.event && entry.event.event_type === "llm_output").length,
+    1
+  );
   await guard.close();
 });
 

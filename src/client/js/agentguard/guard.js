@@ -31,10 +31,11 @@ class AgentGuard {
     const pluginPayload = pluginConfigPayload(options.plugin_config || null);
     const snapshot = this.loadSnapshot(options.policy || null);
     this.session_key = options.session_key || options.sessionKey || generateSessionKey();
+    const resolvedAgentId = options.agent_id || options.agentId || session_id;
     this.context = new RuntimeContext({
       session_id,
       user_id: options.user_id || options.userId || null,
-      agent_id: options.agent_id || options.agentId || null,
+      agent_id: resolvedAgentId,
       policy: options.policy || null,
       policy_version: snapshot.version,
       environment: options.environment || null,
@@ -93,6 +94,20 @@ class AgentGuard {
     this.remote_session_registration = null;
     this.remote_session_registered = false;
     this.pending_remote_operations = new Set();
+    this.client_config_api_options = {
+      host: options.client_config_api_host || options.clientConfigApiHost || "127.0.0.1",
+      port: options.client_config_api_port ?? options.clientConfigApiPort ?? 0,
+      advertise_host: (
+        options.client_config_api_advertise_host
+        || options.clientConfigApiAdvertiseHost
+        || null
+      ),
+      advertise_port: (
+        options.client_config_api_advertise_port
+        ?? options.clientConfigApiAdvertisePort
+        ?? null
+      ),
+    };
     this.registerRemoteSession();
   }
 
@@ -133,12 +148,38 @@ class AgentGuard {
     return Promise.resolve();
   }
 
-  async start_config_api({ host = "127.0.0.1", port = 38181, sync_remote = true, syncRemote = sync_remote } = {}) {
+  async start_config_api({
+    host = null,
+    port = null,
+    advertise_host = null,
+    advertiseHost = advertise_host,
+    advertise_port = null,
+    advertisePort = advertise_port,
+    sync_remote = true,
+    syncRemote = sync_remote,
+  } = {}) {
     const prevConfigUrl = this.context.metadata.client_config_url;
     const prevPluginListUrl = this.context.metadata.client_plugin_list_url;
     const prevHealthUrl = this.context.metadata.client_health_url;
+    const resolvedHost = host || this.client_config_api_options.host || "127.0.0.1";
+    const resolvedPort = port ?? this.client_config_api_options.port ?? 0;
+    const resolvedAdvertiseHost = (
+      advertiseHost
+      || this.client_config_api_options.advertise_host
+      || null
+    );
+    const resolvedAdvertisePort = (
+      advertisePort
+      ?? this.client_config_api_options.advertise_port
+      ?? null
+    );
     if (!this.config_api) {
-      this.config_api = new ClientConfigAPIServer(this, { host, port });
+      this.config_api = new ClientConfigAPIServer(this, {
+        host: resolvedHost,
+        port: resolvedPort,
+        advertise_host: resolvedAdvertiseHost,
+        advertise_port: resolvedAdvertisePort,
+      });
     }
     this.context.metadata.client_config_url = this.config_api.plugin_config_url;
     this.context.metadata.client_plugin_list_url = this.config_api.plugin_list_url;
@@ -319,7 +360,13 @@ class AgentGuard {
     if (this.remote_session_registration) {
       return;
     }
-    this.remote_session_registration = this.start_config_api({ port: 0, syncRemote: false })
+    this.remote_session_registration = this.start_config_api({
+      host: this.client_config_api_options.host,
+      port: this.client_config_api_options.port,
+      advertise_host: this.client_config_api_options.advertise_host,
+      advertise_port: this.client_config_api_options.advertise_port,
+      syncRemote: false,
+    })
       .catch(() => null)
       .then(() => this.remote.register_session(this.context))
       .then(() => {

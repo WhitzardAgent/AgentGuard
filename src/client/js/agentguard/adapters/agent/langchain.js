@@ -9,6 +9,8 @@ const {
 const { BaseAgentAdapter } = require("./base");
 const {
   bindArguments,
+  guardLLMAfter,
+  guardLLMBefore,
   guardToolAfter,
   guardToolBefore,
   isGuarded,
@@ -72,22 +74,18 @@ class LangChainAgentAdapter extends BaseAgentAdapter {
   gettools(agent) {
     const bindings = [];
     bindings.push(...collectContainerTools(agent, this));
+    bindings.push(...collectContainerTools(agent && agent.options, this));
     for (const [, toolNode] of iterToolNodes(agent)) {
       bindings.push(...collectToolNode(toolNode, this));
     }
 
-    const nodes = (agent && (agent.nodes || agent._nodes)) || null;
-    const iterable = Array.isArray(nodes)
-      ? nodes
-      : nodes && typeof nodes === "object"
-        ? Object.values(nodes)
-        : [];
-
-    for (const node of iterable) {
-      bindings.push(...collectContainerTools(node, this));
-      const runnable = node && node.runnable;
-      if (runnable != null) {
-        bindings.push(...collectContainerTools(runnable, this));
+    for (const owner of [agent, agent && agent.builder]) {
+      for (const node of iterGraphNodes(owner)) {
+        bindings.push(...collectContainerTools(node, this));
+        const runnable = node && node.runnable;
+        if (runnable != null) {
+          bindings.push(...collectContainerTools(runnable, this));
+        }
       }
     }
     return bindings;
@@ -108,7 +106,7 @@ class LangChainAgentAdapter extends BaseAgentAdapter {
   normalize_llm_output({ label, output, fn = null, owner = null } = {}) {
     void fn;
     return new LLMOutputNormalization({
-      payload: normalizeLangchainValue(output),
+      payload: normalizeLangchainOutput(output),
       metadata: this._langchainMeta({ label, owner }),
     });
   }
@@ -257,6 +255,14 @@ function collectToolNode(toolNode, adapter) {
 }
 
 function collectLangchainLLM(agent, adapter) {
+  const modelRunnable = getLangchainModelRunnable(agent);
+  if (modelRunnable != null) {
+    const bindings = collectLangchainAgentNodeLLM(modelRunnable, adapter);
+    if (bindings.length) {
+      return bindings;
+    }
+  }
+
   const baseModel = getLangchainBaseModel(agent);
   if (baseModel == null) {
     return [];
@@ -269,17 +275,47 @@ function collectLangchainLLM(agent, adapter) {
   return collectLangchainConcreteLLM(target, adapter);
 }
 
+function collectLangchainAgentNodeLLM(runnable, adapter) {
+  const fn = runnable && runnable.func;
+  if (typeof fn !== "function" || isGuarded(fn)) {
+    return [];
+  }
+  return [
+    adapter.buildLLMBinding({
+      label: "model_request",
+      fn,
+      owner: runnable,
+      attr: "func",
+      installer: installLangchainAgentNodeLLMBinding,
+      metadata: { logical_id: "langchain:model_request" },
+    }),
+  ];
+}
+
+function iterGraphNodes(owner) {
+  const nodes = owner && (owner.nodes || owner._nodes);
+  if (Array.isArray(nodes)) {
+    return nodes;
+  }
+  if (nodes && typeof nodes === "object") {
+    return Object.values(nodes);
+  }
+  return [];
+}
+
 function getLangchainModelRunnable(agent) {
   for (const owner of [agent, agent && agent.builder]) {
-    const nodes = owner && owner.nodes;
+    const nodes = owner && (owner.nodes || owner._nodes);
     if (!nodes || typeof nodes !== "object" || Array.isArray(nodes)) {
       continue;
     }
-    const modelNode = nodes.model;
-    if (!modelNode || modelNode.runnable == null) {
-      continue;
+    for (const key of ["model", "model_request"]) {
+      const modelNode = nodes[key];
+      if (!modelNode || modelNode.runnable == null) {
+        continue;
+      }
+      return modelNode.runnable;
     }
-    return modelNode.runnable;
   }
   return null;
 }
@@ -288,6 +324,11 @@ function getLangchainBaseModel(agent) {
   const directModel = agent && agent.model;
   if (directModel != null) {
     return directModel;
+  }
+
+  const optionsModel = agent && agent.options && agent.options.model;
+  if (optionsModel != null) {
+    return optionsModel;
   }
 
   const chainModel = agent && agent.agent && agent.agent.llm_chain && agent.agent.llm_chain.llm;
@@ -350,6 +391,13 @@ function normalizeLangchainRequest(args, kwargs = {}) {
     modelInput = args[0];
   }
 
+  if (modelInput && typeof modelInput === "object" && Array.isArray(modelInput.messages)) {
+    return normalizeLangchainValue(modelInput.messages);
+  }
+  if (Array.isArray(modelInput)) {
+    return normalizeLangchainValue(modelInput);
+  }
+
   const payload = {
     input: normalizeLangchainValue(modelInput),
   };
@@ -369,6 +417,17 @@ function normalizeLangchainRequest(args, kwargs = {}) {
   return payload;
 }
 
+function normalizeLangchainOutput(output) {
+  const messages = extractLangchainMessages(output);
+  if (messages.length === 1) {
+    return normalizeLangchainValue(messages[0]);
+  }
+  if (messages.length > 1) {
+    return normalizeLangchainValue(messages);
+  }
+  return normalizeLangchainValue(output);
+}
+
 function normalizeLangchainValue(value) {
   if (value == null || ["boolean", "number", "string"].includes(typeof value)) {
     return value;
@@ -377,6 +436,24 @@ function normalizeLangchainValue(value) {
     return value.map((item) => normalizeLangchainValue(item));
   }
   if (value && typeof value === "object") {
+    if (Object.prototype.hasOwnProperty.call(value, "content")) {
+      const out = {
+        type: value && value.constructor && value.constructor.name ? value.constructor.name : "Object",
+        content: normalizeLangchainValue(extractLangchainMessageContent(value)),
+      };
+      const role = langchainMessageRole(value);
+      if (role) {
+        out.role = role;
+      }
+      for (const attr of ["name", "id", "tool_calls", "invalid_tool_calls", "response_metadata"]) {
+        const attrValue = readLangchainMessageAttr(value, attr);
+        if (attrValue) {
+          out[attr] = normalizeLangchainValue(attrValue);
+        }
+      }
+      return out;
+    }
+
     const serializer = getLangchainMessageSerializer();
     if (serializer) {
       try {
@@ -396,19 +473,6 @@ function normalizeLangchainValue(value) {
       }
     }
 
-    if (Object.prototype.hasOwnProperty.call(value, "content")) {
-      const out = {
-        type: value && value.constructor && value.constructor.name ? value.constructor.name : "Object",
-        content: normalizeLangchainValue(value.content),
-      };
-      for (const attr of ["name", "id", "tool_calls", "invalid_tool_calls", "response_metadata"]) {
-        if (value[attr]) {
-          out[attr] = normalizeLangchainValue(value[attr]);
-        }
-      }
-      return out;
-    }
-
     return Object.fromEntries(
       Object.entries(value).map(([key, item]) => [String(key), normalizeLangchainValue(item)])
     );
@@ -416,8 +480,91 @@ function normalizeLangchainValue(value) {
   return String(value);
 }
 
+function extractLangchainMessageContent(value) {
+  const direct = value && value.content;
+  if (direct !== undefined) {
+    return direct;
+  }
+  if (value && value.data && Object.prototype.hasOwnProperty.call(value.data, "content")) {
+    return value.data.content;
+  }
+  return null;
+}
+
+function readLangchainMessageAttr(value, attr) {
+  if (value && value[attr] != null) {
+    return value[attr];
+  }
+  if (value && value.data && value.data[attr] != null) {
+    return value.data[attr];
+  }
+  return null;
+}
+
+function langchainMessageRole(value) {
+  const directRole = value && value.role;
+  if (typeof directRole === "string") {
+    return directRole;
+  }
+  const type = String(value && (value.type || (value.constructor && value.constructor.name) || "")).toLowerCase();
+  if (type.includes("human")) {
+    return "user";
+  }
+  if (type.includes("ai")) {
+    return "assistant";
+  }
+  if (type.includes("system")) {
+    return "system";
+  }
+  if (type.includes("tool")) {
+    return "tool";
+  }
+  return null;
+}
+
+function extractLangchainMessages(value, seen = new Set()) {
+  if (value == null || !["object", "function"].includes(typeof value)) {
+    return [];
+  }
+  if (seen.has(value)) {
+    return [];
+  }
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => extractLangchainMessages(item, seen));
+  }
+  if (isLangchainMessageLike(value)) {
+    return [value];
+  }
+  if (Array.isArray(value.messages)) {
+    return extractLangchainMessages(value.messages, seen);
+  }
+  if (value.update && Array.isArray(value.update.messages)) {
+    return extractLangchainMessages(value.update.messages, seen);
+  }
+  return [];
+}
+
+function isLangchainMessageLike(value) {
+  return Boolean(
+    value
+      && typeof value === "object"
+      && Object.prototype.hasOwnProperty.call(value, "content")
+      && (
+        typeof value.role === "string"
+        || typeof value.type === "string"
+        || value.lc_namespace
+      )
+  );
+}
+
 let _langchainMessageSerializer;
 let _langchainMessageSerializerLoaded = false;
+let _langchainAIMessageClass;
+let _langchainAIMessageClassLoaded = false;
+let _langchainCommandClass;
+let _langchainCommandClassLoaded = false;
 
 function getLangchainMessageSerializer() {
   if (_langchainMessageSerializerLoaded) {
@@ -430,6 +577,32 @@ function getLangchainMessageSerializer() {
     _langchainMessageSerializer = null;
   }
   return _langchainMessageSerializer;
+}
+
+function getLangchainAIMessageClass() {
+  if (_langchainAIMessageClassLoaded) {
+    return _langchainAIMessageClass;
+  }
+  _langchainAIMessageClassLoaded = true;
+  try {
+    ({ AIMessage: _langchainAIMessageClass } = require("@langchain/core/messages"));
+  } catch (_) {
+    _langchainAIMessageClass = null;
+  }
+  return _langchainAIMessageClass;
+}
+
+function getLangchainCommandClass() {
+  if (_langchainCommandClassLoaded) {
+    return _langchainCommandClass;
+  }
+  _langchainCommandClassLoaded = true;
+  try {
+    ({ Command: _langchainCommandClass } = require("@langchain/langgraph"));
+  } catch (_) {
+    _langchainCommandClass = null;
+  }
+  return _langchainCommandClass;
 }
 
 function collectToolObject(tool, adapter, { name }) {
@@ -530,6 +703,50 @@ function installLangchainToolBinding(guard, binding, adapter) {
   return setAttr(tool, attr, markGuarded(wrapper)) ? 1 : 0;
 }
 
+function installLangchainAgentNodeLLMBinding(guard, binding, adapter) {
+  const fn = binding.callable;
+  const owner = binding.owner;
+  const attr = binding.attr || "func";
+  const label = owner && owner.name ? String(owner.name) : String(binding.label || "model_request");
+
+  const wrapper = async (...args) => {
+    try {
+      const beforeDecision = await guardLLMBefore(guard, {
+        label,
+        args,
+        normalizer: adapter,
+        fn,
+        owner,
+      });
+      const beforeBlocked = blockedLangchainLLMValue(beforeDecision, { label });
+      if (beforeBlocked !== null) {
+        return beforeBlocked;
+      }
+
+      const raw = await fn.apply(owner, args);
+      const decision = await guardLLMAfter(guard, raw, {
+        label,
+        normalizer: adapter,
+        fn,
+        owner,
+      });
+      const blocked = blockedLangchainLLMValue(decision, { label });
+      return blocked !== null ? blocked : raw;
+    } catch (error) {
+      if (guard && guard.runtime && typeof guard.runtime.sync_local_cache_now === "function") {
+        await guard.runtime.sync_local_cache_now({ reason: "client_error" });
+      }
+      throw error;
+    } finally {
+      if (guard && guard.runtime && typeof guard.runtime.sync_local_cache_async === "function") {
+        guard.runtime.sync_local_cache_async({ reason: "round_complete" });
+      }
+    }
+  };
+
+  return setAttr(owner, attr, markGuarded(wrapper)) ? 1 : 0;
+}
+
 function buildLangchainToolArguments(fn, args, kwargs = {}) {
   const toolCall = extractLangchainToolCall(args, kwargs);
   if (toolCall && Object.prototype.hasOwnProperty.call(toolCall, "args")) {
@@ -616,6 +833,50 @@ function blockedLangchainResultValue(decision, toolNameValue, args, kwargs = {})
   return null;
 }
 
+function blockedLangchainLLMValue(decision, { label = "model" } = {}) {
+  if (decision.decision_type === DecisionType.DENY) {
+    return langchainLLMNodeResponse(
+      {
+        agentguard: "blocked",
+        reason: decision.reason,
+        decision: decision.decision_type,
+      },
+      { label }
+    );
+  }
+  if (decision.decision_type === DecisionType.SANITIZE) {
+    return langchainLLMNodeResponse(
+      {
+        agentguard: "sanitized",
+        reason: decision.reason,
+        decision: decision.decision_type,
+      },
+      { label }
+    );
+  }
+  if (decision.requires_user || decision.requires_remote) {
+    return langchainLLMNodeResponse(
+      {
+        agentguard: "pending",
+        reason: decision.reason,
+        decision: decision.decision_type,
+      },
+      { label }
+    );
+  }
+  if (decision.decision_type === DecisionType.DEGRADE) {
+    return langchainLLMNodeResponse(
+      {
+        agentguard: "degraded",
+        reason: decision.reason,
+        decision: decision.decision_type,
+      },
+      { label }
+    );
+  }
+  return null;
+}
+
 function langchainToolMessage(payload, { toolName: toolNameValue, args, kwargs = {} } = {}) {
   const content = JSON.stringify(payload);
   const toolCall = extractLangchainToolCall(args, kwargs);
@@ -633,6 +894,36 @@ function langchainToolMessage(payload, { toolName: toolNameValue, args, kwargs =
     }
   }
   return content;
+}
+
+function langchainLLMNodeResponse(payload, { label = "model" } = {}) {
+  const message = langchainLLMMessage(payload, { label });
+  const Command = getLangchainCommandClass();
+  if (Command) {
+    try {
+      return [new Command({ update: { messages: [message] } })];
+    } catch (_) {}
+  }
+  return { messages: [message] };
+}
+
+function langchainLLMMessage(payload, { label = "model" } = {}) {
+  const content = JSON.stringify(payload);
+  const AIMessage = getLangchainAIMessageClass();
+  if (AIMessage) {
+    try {
+      return new AIMessage({
+        content,
+        name: label,
+        tool_calls: [],
+      });
+    } catch (_) {}
+  }
+  return {
+    role: "assistant",
+    content,
+    name: label,
+  };
 }
 
 function buildLangchainToolEventMetadata(args, kwargs = {}) {
