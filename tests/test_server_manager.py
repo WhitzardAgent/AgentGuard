@@ -12,6 +12,7 @@ from backend.runtime.plugins.tool_before.rule_based_plugin import RuleBasedPlugi
 from backend.runtime.manager import RuntimeManager
 from backend.llm.provider import HeuristicProvider, OpenAICompatibleProvider, get_provider
 from shared.schemas.context import RuntimeContext
+from shared.schemas.decisions import GuardDecision
 from shared.schemas.events import EventType, RuntimeEvent
 from shared.schemas.policy import PolicyEffect, PolicyRule, RuleCondition
 
@@ -691,8 +692,6 @@ class StopsChainPlugin(BasePlugin):
     event_types = [EventType.TOOL_INVOKE]
 
     def check(self, event, context, trajectory_window=None):
-        from shared.schemas.decisions import GuardDecision
-
         return CheckResult(
             decision_candidate=GuardDecision.deny("first decision wins", policy_id="server:first"),
             risk_signals=["chain_stopped"],
@@ -706,6 +705,44 @@ class ShouldNotRunPlugin(BasePlugin):
 
     def check(self, event, context, trajectory_window=None):
         raise AssertionError("checker chain should have stopped before this checker")
+
+
+class HumanCheckPlugin(BasePlugin):
+    name = "human_check_plugin"
+    event_types = [EventType.TOOL_INVOKE]
+
+    def check(self, event, context, trajectory_window=None):
+        return CheckResult(
+            decision_candidate=GuardDecision.human_check(
+                "needs review before execution",
+                policy_id="server:human-check",
+            ),
+            risk_signals=["human_check_seen"],
+            is_final=True,
+        )
+
+
+class RecordsExecutionPlugin(BasePlugin):
+    name = "records_execution"
+    event_types = [EventType.TOOL_INVOKE]
+
+    def check(self, event, context, trajectory_window=None):
+        return CheckResult(risk_signals=["ran_after_human_check"])
+
+
+class AllowPlugin(BasePlugin):
+    name = "allow_plugin"
+    event_types = [EventType.TOOL_INVOKE]
+
+    def check(self, event, context, trajectory_window=None):
+        return CheckResult(
+            decision_candidate=GuardDecision.allow(
+                "explicit allow after review",
+                policy_id="server:allow-after-review",
+            ),
+            risk_signals=["allow_seen"],
+            is_final=True,
+        )
 
 
 def test_manager_uses_session_scoped_client_plugin_config():
@@ -802,6 +839,164 @@ def test_manager_stops_remote_plugin_chain_on_first_decision():
 
     assert res["decision"]["decision_type"] == "deny"
     assert res["decision"]["policy_id"] == "server:first"
+
+
+def test_manager_continues_after_human_check_to_collect_stronger_decision():
+    m = RuntimeManager(
+        plugin_config={
+            "phases": {
+                "tool_before": {
+                    "client": [],
+                    "server": [HumanCheckPlugin, StopsChainPlugin, ShouldNotRunPlugin],
+                }
+            }
+        },
+    )
+    req = {
+        "request_id": "review-then-deny",
+        "context": {"session_id": "review-then-deny"},
+        "current_event": {
+            "event_type": "tool_invoke",
+            "payload": {"tool_name": "read_file", "arguments": {}, "capabilities": []},
+            "risk_signals": [],
+        },
+        "trajectory_window": [],
+        "local_signals": [],
+    }
+
+    res = m.decide(req)
+
+    assert res["decision"]["decision_type"] == "deny"
+    assert res["decision"]["policy_id"] == "server:first"
+    assert "human_check_seen" in res["plugin_result"]["risk_signals"]
+    assert "chain_stopped" in res["plugin_result"]["risk_signals"]
+
+
+def test_manager_does_not_stop_chain_on_human_check_alone():
+    m = RuntimeManager(
+        plugin_config={
+            "phases": {
+                "tool_before": {
+                    "client": [],
+                    "server": [HumanCheckPlugin, RecordsExecutionPlugin],
+                }
+            }
+        },
+    )
+    req = {
+        "request_id": "review-continues",
+        "context": {"session_id": "review-continues"},
+        "current_event": {
+            "event_type": "tool_invoke",
+            "payload": {"tool_name": "read_file", "arguments": {}, "capabilities": []},
+            "risk_signals": [],
+        },
+        "trajectory_window": [],
+        "local_signals": [],
+    }
+
+    res = m.decide(req)
+
+    assert res["decision"]["decision_type"] == "human_check"
+    assert res["decision"]["policy_id"] == "server:human-check"
+    assert "human_check_seen" in res["plugin_result"]["risk_signals"]
+    assert "ran_after_human_check" in res["plugin_result"]["risk_signals"]
+
+
+def test_manager_enqueues_review_ticket_for_each_review_plugin():
+    m = RuntimeManager(
+        plugin_config={
+            "phases": {
+                "tool_before": {
+                    "client": [],
+                    "server": [HumanCheckPlugin, RecordsExecutionPlugin, HumanCheckPlugin],
+                }
+            }
+        },
+        enable_session_health_monitor=False,
+    )
+    req = {
+        "request_id": "multi-review",
+        "context": {"session_id": "multi-review"},
+        "current_event": {
+            "event_type": "tool_invoke",
+            "payload": {"tool_name": "read_file", "arguments": {}, "capabilities": []},
+            "risk_signals": [],
+        },
+        "trajectory_window": [],
+        "local_signals": [],
+    }
+
+    res = m.decide(req)
+
+    tickets = m.review_queue.pending()
+    assert len(tickets) == 2
+    assert res["decision"]["metadata"]["review_ticket_id"] == tickets[-1]["ticket_id"]
+    assert len(res["decision"]["metadata"]["review_tickets"]) == 2
+
+
+def test_manager_returns_last_decision_while_preserving_plugin_outcomes():
+    m = RuntimeManager(
+        plugin_config={
+            "phases": {
+                "tool_before": {
+                    "client": [],
+                    "server": [HumanCheckPlugin, StopsChainPlugin],
+                }
+            }
+        },
+        enable_session_health_monitor=False,
+    )
+    req = {
+        "request_id": "last-decision",
+        "context": {"session_id": "last-decision"},
+        "current_event": {
+            "event_type": "tool_invoke",
+            "payload": {"tool_name": "read_file", "arguments": {}, "capabilities": []},
+            "risk_signals": [],
+        },
+        "trajectory_window": [],
+        "local_signals": [],
+    }
+
+    res = m.decide(req)
+
+    assert res["decision"]["decision_type"] == "deny"
+    assert [item["plugin"] for item in res["plugin_result"]["metadata"]["plugin_outcomes"]] == [
+        "human_check_plugin",
+        "stops_chain",
+    ]
+
+
+def test_manager_keeps_review_decision_when_review_tickets_exist():
+    m = RuntimeManager(
+        plugin_config={
+            "phases": {
+                "tool_before": {
+                    "client": [],
+                    "server": [HumanCheckPlugin, AllowPlugin],
+                }
+            }
+        },
+        enable_session_health_monitor=False,
+    )
+    req = {
+        "request_id": "review-must-hold",
+        "context": {"session_id": "review-must-hold"},
+        "current_event": {
+            "event_type": "tool_invoke",
+            "payload": {"tool_name": "read_file", "arguments": {}, "capabilities": []},
+            "risk_signals": [],
+        },
+        "trajectory_window": [],
+        "local_signals": [],
+    }
+
+    res = m.decide(req)
+
+    assert res["decision"]["decision_type"] == "human_check"
+    assert res["decision"]["metadata"]["review_status"] == "pending"
+    assert len(res["decision"]["metadata"]["review_tickets"]) == 1
 
 
 class TraceAwarePlugin(BasePlugin):

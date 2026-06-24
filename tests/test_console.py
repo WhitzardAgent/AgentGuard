@@ -4,6 +4,9 @@ from __future__ import annotations
 from backend.console.dsl import parse_source, policy_rule_to_source
 from backend.console.state import ConsoleState
 from backend.runtime.manager import RuntimeManager
+from backend.runtime.plugins.base import BasePlugin, CheckResult
+from shared.schemas.decisions import GuardDecision
+from shared.schemas.events import EventType
 from shared.schemas.policy import PolicyEffect, PolicyRule, RuleCondition
 
 _DENY_RULE = (
@@ -195,3 +198,59 @@ def test_register_tool_adds_or_updates_console_catalog():
 
     scoped = con.tools("live-agent")
     assert any(item["name"] == "docs.search" for item in scoped)
+
+
+class _ConsoleHumanCheckPlugin(BasePlugin):
+    name = "console_human_check"
+    event_types = [EventType.TOOL_INVOKE]
+
+    def check(self, event, context, trajectory_window=None):
+        return CheckResult(
+            decision_candidate=GuardDecision.human_check(
+                "console review",
+                policy_id="server:console-review",
+            ),
+            risk_signals=["console_human_check_seen"],
+            is_final=True,
+        )
+
+
+class _ConsoleSecondPlugin(BasePlugin):
+    name = "console_second"
+    event_types = [EventType.TOOL_INVOKE]
+
+    def check(self, event, context, trajectory_window=None):
+        return CheckResult(risk_signals=["console_second_seen"])
+
+
+def test_audit_recent_keeps_plugin_outcomes():
+    con = ConsoleState(
+        RuntimeManager(
+            plugin_config={
+                "phases": {
+                    "tool_before": {
+                        "client": [],
+                        "server": [_ConsoleHumanCheckPlugin, _ConsoleSecondPlugin],
+                    }
+                }
+            },
+            enable_session_health_monitor=False,
+        )
+    )
+    con.manager.decide(
+        {
+            "context": {"session_id": "s-audit", "agent_id": "agent-audit"},
+            "current_event": {
+                "event_type": "tool_invoke",
+                "payload": {"tool_name": "read_file", "arguments": {}, "capabilities": []},
+            },
+            "trajectory_window": [],
+            "local_signals": [],
+        }
+    )
+
+    audit = con.audit_recent("agent-audit")
+
+    assert len(audit) == 1
+    outcomes = audit[0]["decision"].get("plugin_outcomes") or []
+    assert [item["plugin"] for item in outcomes] == ["console_human_check", "console_second"]
