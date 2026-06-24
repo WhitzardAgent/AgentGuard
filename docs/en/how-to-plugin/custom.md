@@ -365,6 +365,20 @@ That value is then used to build:
 
 So the key goal of `LLMOutputNormalization` is to preserve useful structure from complex provider responses instead of collapsing everything into an opaque string.
 
+If your framework can separate hidden reasoning from the final surfaced answer, prefer returning a structured payload such as:
+
+```python
+LLMOutputNormalization(
+    payload={
+        "thought": "intermediate reasoning",
+        "final_output": "answer shown to the user",
+    },
+    metadata={...},
+)
+```
+
+AgentGuard will keep both semantic fields and also derive `payload.output` for backward-compatible scanning and existing plugin logic.
+
 ### `ToolInvokeNormalization`
 
 It has three fields:

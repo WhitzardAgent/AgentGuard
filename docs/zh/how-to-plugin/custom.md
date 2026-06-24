@@ -365,6 +365,20 @@ LLMOutputNormalization(
 
 所以 `LLMOutputNormalization` 的关键是：尽量把复杂 provider response 转成对策略和审计更有价值的结构，而不是退化成一段难以分析的字符串。
 
+如果你的框架能把隐藏推理和最终可见回答区分开，推荐返回这种结构化 payload：
+
+```python
+LLMOutputNormalization(
+    payload={
+        "thought": "intermediate reasoning",
+        "final_output": "answer shown to the user",
+    },
+    metadata={...},
+)
+```
+
+AgentGuard 会同时保留这两个语义字段，并额外推导出 `payload.output`，用于兼容旧扫描逻辑和现有 plugin。
+
 ### `ToolInvokeNormalization`
 
 它有三个字段：

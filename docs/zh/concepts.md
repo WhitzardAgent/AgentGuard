@@ -81,9 +81,17 @@ AgentGuard 客户端运行在智能体进程内或智能体进程旁边。多数
 事件 payload 会按事件阶段使用类型化结构：
 
 - `LLMInput(messages=[{"role": "...", "content": "..."}])`
-- `LLMOutput(output="...")`
+- `LLMOutput(output="...", thought=None, final_output=None)`
 - `ToolInvoke(tool_name="...", arguments={...}, capabilities=[...])`
 - `ToolResult(tool_name="...", result="...")`
+
+`LLMOutput` 现在拆成了一个通用字段和两个可选语义字段：
+
+- `output`：标准文本字段，用于兼容旧逻辑和通用扫描。如果存在 `final_output`，`output` 通常会与它保持一致；否则会回退到 `thought` 或原始输出文本。
+- `thought`：可选的内部推理文本或中间思考内容，前提是 adapter 能把它识别出来。
+- `final_output`：可选的最终对外回答，也就是模型准备返回给调用方的可见内容。
+
+大多数 plugin 和策略直接读取 `payload.output` 就够用了；如果你需要区分“内部思考”和“最终回复”，再单独读取 `payload.thought` 与 `payload.final_output`。
 
 Plugin 和策略会读取这些字段来识别风险并生成决策。
 

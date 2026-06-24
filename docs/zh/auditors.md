@@ -145,7 +145,7 @@ class AuditTraceEntry:
 
 - `event: RuntimeEvent | None = None`
 
-  `event` 是被审计的原始运行时事件。它说明“发生了什么”，包括事件类型、类型化 payload、上下文、风险信号和 adapter metadata。例如，`TOOL_INVOKE` 事件会暴露 `event.payload.tool_name`、`event.payload.arguments` 和 `event.payload.capabilities`；`LLM_INPUT` 事件会暴露 `event.payload.messages`；`LLM_OUTPUT` 事件会暴露 `event.payload.output`。
+  `event` 是被审计的原始运行时事件。它说明“发生了什么”，包括事件类型、类型化 payload、上下文、风险信号和 adapter metadata。例如，`TOOL_INVOKE` 事件会暴露 `event.payload.tool_name`、`event.payload.arguments` 和 `event.payload.capabilities`；`LLM_INPUT` 事件会暴露 `event.payload.messages`；`LLM_OUTPUT` 事件会暴露 `event.payload.output`、`event.payload.thought` 和 `event.payload.final_output`。
 
   当 auditor 需要检查实际运行行为时读取 `event`：
 

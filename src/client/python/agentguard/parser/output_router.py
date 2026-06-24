@@ -36,7 +36,13 @@ def route_output(output: Any) -> RouterResult:
     if isinstance(output, dict):
         if output.get("type") == "tool_use" or any(k in output for k in _TOOL_KEYS):
             return _route_tool(output)
-        text = output.get("text") or output.get("content") or output.get("output")
+        text = (
+            output.get("text")
+            or output.get("content")
+            or output.get("output")
+            or output.get("final_output")
+            or output.get("thought")
+        )
         return _route_text(text_of(text if text is not None else output), raw=output)
 
     if isinstance(output, list):

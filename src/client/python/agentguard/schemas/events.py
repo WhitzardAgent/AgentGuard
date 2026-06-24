@@ -66,10 +66,26 @@ class LLMInput(_PayloadMapping):
 
 @dataclass
 class LLMOutput(_PayloadMapping):
-    output: str
+    output: str = ""
+    thought: str | None = None
+    final_output: str | None = None
+
+    def __post_init__(self) -> None:
+        self.output = _coerce_text(self.output)
+        self.thought = _coerce_optional_text(self.thought)
+        self.final_output = _coerce_optional_text(self.final_output)
+        if not self.output:
+            if self.final_output is not None:
+                self.output = self.final_output
+            elif self.thought is not None:
+                self.output = self.thought
 
     def to_dict(self) -> dict[str, Any]:
-        return {"output": self.output}
+        return {
+            "output": self.output,
+            "thought": self.thought,
+            "final_output": self.final_output,
+        }
 
 
 @dataclass
@@ -223,12 +239,13 @@ def llm_input(context: RuntimeContext, messages: Any, **meta: Any) -> RuntimeEve
 
 def llm_output(context: RuntimeContext, output: Any, **meta: Any) -> RuntimeEvent:
     meta.setdefault("output_type", type(output).__name__)
-    return _make(EventType.LLM_OUTPUT, context, LLMOutput(output=_coerce_text(output)), metadata=meta)
+    return _make(EventType.LLM_OUTPUT, context, _coerce_llm_output(output), metadata=meta)
 
 
 def llm_thought(context: RuntimeContext, thought: str, **meta: Any) -> RuntimeEvent:
     """Compatibility alias: thoughts are no longer a separate event type."""
-    return _make(EventType.LLM_OUTPUT, context, LLMOutput(output=str(thought)), metadata=meta)
+    text = _coerce_text(thought)
+    return _make(EventType.LLM_OUTPUT, context, LLMOutput(output=text, thought=text), metadata=meta)
 
 
 def tool_invoke(
@@ -263,7 +280,13 @@ def tool_result(
 
 def final_response(context: RuntimeContext, text: str, **meta: Any) -> RuntimeEvent:
     """Compatibility alias: final text is now represented as LLM_OUTPUT."""
-    return _make(EventType.LLM_OUTPUT, context, LLMOutput(output=str(text)), metadata=meta)
+    output = _coerce_text(text)
+    return _make(
+        EventType.LLM_OUTPUT,
+        context,
+        LLMOutput(output=output, final_output=output),
+        metadata=meta,
+    )
 
 
 def _payload_from_dict(event_type: EventType, payload: Any) -> RuntimePayload:
@@ -278,8 +301,20 @@ def _payload_from_dict(event_type: EventType, payload: Any) -> RuntimePayload:
     if event_type == EventType.LLM_OUTPUT:
         output = data.get("output")
         if output is None:
+            output = data.get("text")
+        if output is None:
+            output = data.get("content")
+        if output is None:
             output = data.get("message")
-        return LLMOutput(output=_coerce_text(output))
+        thought = data.get("thought")
+        final_output = data.get("final_output")
+        if output is None:
+            output = final_output if final_output is not None else thought
+        return LLMOutput(
+            output=_coerce_text(output),
+            thought=_coerce_optional_text(thought),
+            final_output=_coerce_optional_text(final_output),
+        )
     if event_type == EventType.TOOL_INVOKE:
         return ToolInvoke(
             tool_name=_coerce_text(data.get("tool_name")),
@@ -328,3 +363,74 @@ def _coerce_text(value: Any) -> str:
     if isinstance(value, str):
         return value
     return str(value)
+
+
+def _coerce_optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    return _coerce_text(value)
+
+
+def _coerce_llm_output(value: Any) -> LLMOutput:
+    if isinstance(value, LLMOutput):
+        return LLMOutput(
+            output=value.output,
+            thought=value.thought,
+            final_output=value.final_output,
+        )
+
+    data = _llm_output_fields(value)
+    if data is None:
+        return LLMOutput(output=_coerce_text(value))
+
+    thought = data.get("thought")
+    final_output = data.get("final_output")
+    output = data.get("output")
+    if output is None:
+        output = data.get("text")
+    if output is None:
+        output = data.get("content")
+    if output is None:
+        output = data.get("message")
+    if output is None:
+        output = final_output if final_output is not None else thought
+    return LLMOutput(
+        output=_coerce_text(output),
+        thought=_coerce_optional_text(thought),
+        final_output=_coerce_optional_text(final_output),
+    )
+
+
+def _llm_output_fields(value: Any) -> dict[str, Any] | None:
+    data: dict[str, Any] | None = None
+    if isinstance(value, _PayloadMapping):
+        data = value.to_dict()
+    elif isinstance(value, dict):
+        data = dict(value)
+    else:
+        for method_name in ("model_dump", "to_dict", "dict"):
+            dumper = getattr(value, method_name, None)
+            if not callable(dumper):
+                continue
+            try:
+                dumped = dumper()
+            except TypeError:
+                continue
+            if isinstance(dumped, dict):
+                data = dict(dumped)
+                break
+        if data is None:
+            attrs = {
+                key: getattr(value, key)
+                for key in ("output", "text", "content", "message", "thought", "final_output")
+                if getattr(value, key, None) is not None
+            }
+            data = attrs or None
+
+    if not data:
+        return None
+
+    recognized = ("output", "text", "content", "message", "thought", "final_output")
+    if not any(data.get(key) is not None for key in recognized):
+        return None
+    return data

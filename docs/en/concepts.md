@@ -81,9 +81,17 @@ Common event types are:
 The event payload is typed by event phase:
 
 - `LLMInput(messages=[{"role": "...", "content": "..."}])`
-- `LLMOutput(output="...")`
+- `LLMOutput(output="...", thought=None, final_output=None)`
 - `ToolInvoke(tool_name="...", arguments={...}, capabilities=[...])`
 - `ToolResult(tool_name="...", result="...")`
+
+`LLMOutput` is intentionally split into a generic field plus two optional semantic fields:
+
+- `output`: the canonical text field used for backward compatibility and generic scanning. If `final_output` exists, `output` usually mirrors it; otherwise it falls back to `thought` or the raw output text.
+- `thought`: optional internal reasoning or hidden intermediate text when an adapter can distinguish it.
+- `final_output`: optional user-visible answer that the model intends to return to the caller.
+
+Most plugins and policies can safely inspect `payload.output`. If you need to distinguish hidden reasoning from the surfaced answer, inspect `payload.thought` and `payload.final_output` directly.
 
 Plugins and policies inspect these fields to identify risk and produce decisions.
 

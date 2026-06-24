@@ -53,7 +53,7 @@ Common payload shapes:
 LLMInput(messages=[{"role": "user", "content": "..."}])
 
 # LLM_OUTPUT
-LLMOutput(output="...")
+LLMOutput(output="...", thought=None, final_output=None)
 
 # TOOL_INVOKE
 ToolInvoke(
@@ -65,6 +65,14 @@ ToolInvoke(
 # TOOL_RESULT
 ToolResult(tool_name="read_file", result="...")
 ```
+
+For `LLMOutput`, the three fields have different purposes:
+
+- `payload.output`: canonical text for backward compatibility and general-purpose policy checks.
+- `payload.thought`: optional hidden reasoning text when the adapter can separate it.
+- `payload.final_output`: optional user-visible final answer.
+
+In most plugins, start with `payload.output`. Only read `payload.thought` or `payload.final_output` when your logic explicitly cares about that distinction.
 
 ### `context: RuntimeContext`
 

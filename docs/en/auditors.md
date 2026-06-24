@@ -145,7 +145,7 @@ These three fields are the main inputs most auditors read:
 
 - `event: RuntimeEvent | None = None`
 
-  `event` is the original runtime event being audited. It tells you what happened: the event type, typed payload, context, risk signals, and adapter metadata. For example, a `TOOL_INVOKE` event exposes `event.payload.tool_name`, `event.payload.arguments`, and `event.payload.capabilities`; an `LLM_INPUT` event exposes `event.payload.messages`; an `LLM_OUTPUT` event exposes `event.payload.output`.
+  `event` is the original runtime event being audited. It tells you what happened: the event type, typed payload, context, risk signals, and adapter metadata. For example, a `TOOL_INVOKE` event exposes `event.payload.tool_name`, `event.payload.arguments`, and `event.payload.capabilities`; an `LLM_INPUT` event exposes `event.payload.messages`; an `LLM_OUTPUT` event exposes `event.payload.output`, `event.payload.thought`, and `event.payload.final_output`.
 
   Use `event` when the auditor needs to inspect the actual runtime behavior:
 

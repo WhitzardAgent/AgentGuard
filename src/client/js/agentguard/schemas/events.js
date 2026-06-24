@@ -60,12 +60,34 @@ class LLMInput {
 }
 
 class LLMOutput {
-  constructor(output = "") {
-    this.output = coerceText(output);
+  constructor(output = "", thought = null, final_output = null) {
+    const data = llmOutputFields(output);
+    if (data) {
+      this.output = coerceOutputText(
+        data.output ?? data.text ?? data.content ?? data.message ?? data.final_output ?? data.thought ?? ""
+      );
+      this.thought = coerceOptionalText(data.thought);
+      this.final_output = coerceOptionalText(data.final_output);
+    } else {
+      this.output = coerceOutputText(output);
+      this.thought = coerceOptionalText(thought);
+      this.final_output = coerceOptionalText(final_output);
+    }
+    if (!this.output) {
+      if (this.final_output != null) {
+        this.output = this.final_output;
+      } else if (this.thought != null) {
+        this.output = this.thought;
+      }
+    }
   }
 
   toDict() {
-    return { output: this.output };
+    return {
+      output: this.output,
+      thought: this.thought,
+      final_output: this.final_output,
+    };
   }
 
   get(key, defaultValue = undefined) {
@@ -194,7 +216,8 @@ function llm_output(context, output, meta = {}) {
 }
 
 function llm_thought(context, thought, meta = {}) {
-  return llm_output(context, thought, meta);
+  const text = coerceOutputText(thought);
+  return makeEvent(EventType.LLM_OUTPUT, context, new LLMOutput(text, text), { metadata: meta });
 }
 
 function tool_invoke(context, tool_name, arguments_, options = {}) {
@@ -223,7 +246,8 @@ function tool_result(context, tool_name, result, options = {}) {
 }
 
 function final_response(context, text, meta = {}) {
-  return llm_output(context, text, meta);
+  const output = coerceOutputText(text);
+  return makeEvent(EventType.LLM_OUTPUT, context, new LLMOutput(output, null, output), { metadata: meta });
 }
 
 module.exports = {
@@ -255,7 +279,11 @@ function payloadFromDict(eventType, payload) {
     return new LLMInput(messages || []);
   }
   if (eventType === EventType.LLM_OUTPUT) {
-    return new LLMOutput(data.output ?? data.message ?? "");
+    return new LLMOutput({
+      output: data.output ?? data.text ?? data.content ?? data.message,
+      thought: data.thought,
+      final_output: data.final_output,
+    });
   }
   if (eventType === EventType.TOOL_INVOKE) {
     return new ToolInvoke({
@@ -297,4 +325,46 @@ function coerceText(value) {
     return "";
   }
   return typeof value === "string" ? value : String(value);
+}
+
+function coerceOptionalText(value) {
+  if (value == null) {
+    return null;
+  }
+  return coerceText(value);
+}
+
+function coerceOutputText(value) {
+  if (value == null) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch (_) {
+      return String(value);
+    }
+  }
+  return String(value);
+}
+
+function llmOutputFields(value) {
+  let data = null;
+  if (value instanceof LLMOutput) {
+    data = value.toDict();
+  } else if (value && typeof value.toDict === "function") {
+    data = value.toDict();
+  } else if (value && typeof value === "object" && !Array.isArray(value)) {
+    data = { ...value };
+  }
+
+  if (!data) {
+    return null;
+  }
+
+  const recognized = ["output", "text", "content", "message", "thought", "final_output"];
+  return recognized.some((key) => data[key] != null) ? data : null;
 }

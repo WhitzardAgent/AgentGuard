@@ -188,6 +188,9 @@ function buildLLMOutputPayload(payload) {
   if (payload == null || typeof payload === "string") {
     return payload;
   }
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    return payload;
+  }
   return safeJSONStringify(payload);
 }
 

@@ -53,7 +53,7 @@ RuntimeEvent(
 LLMInput(messages=[{"role": "user", "content": "..."}])
 
 # LLM_OUTPUT
-LLMOutput(output="...")
+LLMOutput(output="...", thought=None, final_output=None)
 
 # TOOL_INVOKE
 ToolInvoke(
@@ -65,6 +65,14 @@ ToolInvoke(
 # TOOL_RESULT
 ToolResult(tool_name="read_file", result="...")
 ```
+
+对于 `LLMOutput`，这三个字段的职责不一样：
+
+- `payload.output`：标准文本字段，用于兼容旧逻辑和通用策略检查。
+- `payload.thought`：可选的隐藏推理文本，前提是 adapter 能把它拆出来。
+- `payload.final_output`：可选的最终对外回答。
+
+大多数 plugin 先读取 `payload.output` 就可以；只有当你的逻辑明确需要区分内部推理和最终回复时，再读取 `payload.thought` 或 `payload.final_output`。
 
 ### `context: RuntimeContext`
 

@@ -41,3 +41,43 @@ def test_human_check_roundtrip_and_legacy_compatibility():
     assert restored.requires_user is True
     assert legacy.decision_type == DecisionType.HUMAN_CHECK
     assert legacy.to_dict()["decision_type"] == "human_check"
+
+
+def test_llm_output_supports_thought_and_final_output_roundtrip():
+    ctx = RuntimeContext(session_id="s")
+    event = ev.llm_output(
+        ctx,
+        {"thought": "internal chain", "final_output": "visible answer"},
+    )
+
+    assert event.payload.output == "visible answer"
+    assert event.payload.thought == "internal chain"
+    assert event.payload.final_output == "visible answer"
+
+    restored = ev.RuntimeEvent.from_dict(event.to_dict())
+    assert restored.payload.output == "visible answer"
+    assert restored.payload.thought == "internal chain"
+    assert restored.payload.final_output == "visible answer"
+
+
+def test_llm_output_preserves_unstructured_dict_as_output_text():
+    ctx = RuntimeContext(session_id="s")
+    event = ev.llm_output(ctx, {"tool_calls": [{"name": "search"}]})
+
+    assert "tool_calls" in event.payload.output
+    assert event.payload.thought is None
+    assert event.payload.final_output is None
+
+
+def test_llm_output_aliases_fill_specific_fields():
+    ctx = RuntimeContext(session_id="s")
+    thought_event = ev.llm_thought(ctx, "internal chain")
+    final_event = ev.final_response(ctx, "visible answer")
+
+    assert thought_event.payload.output == "internal chain"
+    assert thought_event.payload.thought == "internal chain"
+    assert thought_event.payload.final_output is None
+
+    assert final_event.payload.output == "visible answer"
+    assert final_event.payload.thought is None
+    assert final_event.payload.final_output == "visible answer"
