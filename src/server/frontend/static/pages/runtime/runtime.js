@@ -394,14 +394,14 @@
     elements.auditBody.innerHTML = "";
     if (state.errors.audit) {
       const row = document.createElement("tr");
-      row.innerHTML = `<td colspan="7"><div class="empty-state">${escapeHtml(state.errors.audit)}</div></td>`;
+      row.innerHTML = `<td colspan="6"><div class="empty-state">${escapeHtml(state.errors.audit)}</div></td>`;
       elements.auditBody.appendChild(row);
       elements.auditDetail.textContent = "Audit data is unavailable.";
       return;
     }
     if (!state.auditRows.length) {
       const row = document.createElement("tr");
-      row.innerHTML = `<td colspan="7"><div class="empty-state">No audit records have been captured yet.</div></td>`;
+      row.innerHTML = `<td colspan="6"><div class="empty-state">No audit records have been captured yet.</div></td>`;
       elements.auditBody.appendChild(row);
       elements.auditDetail.textContent = "No audit detail available.";
       return;
@@ -424,7 +424,6 @@
         <td>${escapeHtml(item.tool)}</td>
         <td><span class="pill ${actionTone(item.action)}">${escapeHtml(formatAction(item.action))}</span></td>
         <td>${escapeHtml(formatRisk(item.risk))}</td>
-        <td>${escapeHtml(formatPluginSummary(item.pluginSummary) || "-")}</td>
         <td>${escapeHtml(item.matchedRules.join(", ") || "-")}</td>
       `;
       elements.auditBody.appendChild(row);

@@ -40,24 +40,16 @@
       </section>
 
       <section class="stack-section rules-page">
-        <div class="card rule-ai-launch-card">
-          <div class="heading-row">
-            <div>
-              <h3>AI Rule Generation</h3>
-              <p class="subtle section-intro">
-                Open the generator to draft a rule from natural language, refine it, then apply the accepted candidate back into the builder.
-              </p>
-            </div>
-            <div class="heading-actions">
-              <button class="btn primary" id="open-rule-ai-modal-button" type="button">Open AI Generator</button>
-            </div>
-          </div>
-        </div>
-
         <div class="card rule-generator-card">
           <div class="heading-row">
             <div>
-              <h3 id="rule-builder-title">Guided Rule Builder</h3>
+              <div class="rule-builder-title-row">
+                <h3 id="rule-builder-title">Guided Rule Builder</h3>
+                <button class="rule-ai-inline-link" id="open-rule-ai-modal-button" type="button">
+                  <span>Too hard to use? Ask AI for help</span>
+                  <span class="rule-ai-inline-link-arrow" aria-hidden="true">→</span>
+                </button>
+              </div>
               <p class="subtle section-intro" id="rule-builder-subtitle">
                 Create a new rule step by step, or load an existing rule into the editor for modification.
               </p>
@@ -299,67 +291,46 @@
           </div>
 
           <div class="rule-ai-modal-body">
-            <div class="grid two equal rule-ai-layout">
-              <div class="rule-pane">
-                <div class="field">
-                  <label for="rule-generate-requirement-input">Requirement</label>
+            <div class="rule-ai-workspace">
+              <div class="rule-ai-chat-shell">
+                <div class="rule-ai-chat-header">
+                  <div>
+                    <strong>Conversation</strong>
+                    <p class="subtle">Ask for a policy, review the returned rule and rationale, then keep refining in plain language.</p>
+                  </div>
+                  <button class="btn" id="rule-ai-reset-button" type="button">Reset Session</button>
+                </div>
+
+                <div class="rule-ai-thread" id="rule-ai-thread">
+                  <div class="rule-ai-empty-state">
+                    <div class="rule-ai-avatar rule-ai-avatar-assistant">AI</div>
+                    <div class="rule-ai-message-card">
+                      <strong>Start with a policy request</strong>
+                      <p>Describe what should trigger, what the action should be, and any constraints. The model will answer with a candidate rule plus its reasoning.</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="rule-ai-apply-bar" id="rule-ai-apply-bar" hidden>
+                  <div class="rule-ai-apply-copy">
+                    <strong id="rule-ai-apply-title">Rule Ready</strong>
+                    <p class="subtle" id="rule-ai-apply-summary">The latest validated rule is ready to apply to the builder.</p>
+                  </div>
+                  <button class="btn primary" id="rule-ai-apply-button" type="button">Apply Rule</button>
+                </div>
+
+                <div class="field rule-ai-composer">
+                  <div class="preview-header rule-ai-composer-header">
+                    <strong id="rule-ai-composer-title">Message</strong>
+                    <span class="subtle" id="rule-ai-composer-hint">
+                      Send your first message to generate a rule. After that, each new message refines the current rule.
+                    </span>
+                  </div>
                   <textarea id="rule-generate-requirement-input" placeholder="Example: If a tool sends data to an external HTTP endpoint and sensitivity is not low, require human approval."></textarea>
+                  <div class="toolbar rule-ai-composer-actions">
+                    <button class="btn primary" id="rule-ai-generate-button" type="button">Send</button>
+                  </div>
                 </div>
-                <div class="field">
-                  <label for="rule-generate-feedback-input">Refinement Feedback</label>
-                  <textarea id="rule-generate-feedback-input" placeholder="Optional: explain how the latest candidate should change."></textarea>
-                </div>
-                <div class="toolbar">
-                  <button class="btn primary" id="rule-ai-generate-button" type="button">AI Generate</button>
-                  <button class="btn" id="rule-ai-refine-button" type="button">Refine Candidate</button>
-                  <button class="btn" id="rule-ai-apply-button" type="button">Apply To Builder</button>
-                </div>
-                <div class="rule-ai-meta" id="rule-ai-meta">
-                  <span class="pill">Status: <strong id="rule-ai-status">Idle</strong></span>
-                  <span class="pill">Attempts: <strong id="rule-ai-attempt-count">0</strong></span>
-                  <span class="pill">Rounds Left: <strong id="rule-ai-remaining-rounds">0</strong></span>
-                </div>
-              </div>
-
-              <div class="rule-pane">
-                <div class="preview-header">
-                  <strong>Generated Candidate DSL</strong>
-                </div>
-                <pre class="code-block rule-preview-block" id="rule-ai-preview-block">No AI candidate yet.</pre>
-              </div>
-            </div>
-
-            <div class="grid two equal rule-ai-layout">
-              <div class="rule-pane">
-                <div class="preview-header">
-                  <strong>Summary / Assumptions / Warnings</strong>
-                </div>
-                <div class="rule-ai-notes" id="rule-ai-notes">
-                  <div class="empty-state">Generation notes will appear here.</div>
-                </div>
-              </div>
-
-              <div class="rule-pane">
-                <div class="preview-header">
-                  <strong>Validation</strong>
-                </div>
-                <pre class="code-block rule-preview-block" id="rule-ai-validation-block">No validation result yet.</pre>
-              </div>
-            </div>
-
-            <div class="grid two equal rule-ai-layout">
-              <div class="rule-pane">
-                <div class="preview-header">
-                  <strong>Attempt Diagnostics</strong>
-                </div>
-                <pre class="code-block rule-preview-block" id="rule-ai-attempts-block">No attempt diagnostics yet.</pre>
-              </div>
-
-              <div class="rule-pane">
-                <div class="preview-header">
-                  <strong>Last Raw Model Output</strong>
-                </div>
-                <pre class="code-block rule-preview-block" id="rule-ai-raw-response-block">No raw model output yet.</pre>
               </div>
             </div>
           </div>
