@@ -322,9 +322,9 @@ class LLMRuleGeneratorWorkflow:
         )
         return _join_sections(
             prompt,
-            ("现有规则摘要", _serialize_existing_rules(request.existing_rules)),
-            ("策略偏好", _serialize_list(request.strategy_preferences)),
-            ("会话补充上下文", _serialize_list(request.conversation_notes)),
+            ("current rules: ", _serialize_existing_rules(request.existing_rules)),
+            ("strategy preferences: ", _serialize_list(request.strategy_preferences)),
+            ("context: ", _serialize_list(request.conversation_notes)),
         )
 
     def build_repair_prompt(
@@ -335,15 +335,15 @@ class LLMRuleGeneratorWorkflow:
         return _join_sections(
             self.build_generation_prompt(request),
             (
-                "上一轮输出未通过校验，请直接修复",
+                "current round output failed validation, please fix directly",
                 _format_validation_issues(failed_candidate.validation.errors),
             ),
-            ("上一轮模型输出", failed_candidate.raw_response.strip()),
+            ("previous round LLM output", failed_candidate.raw_response.strip()),
             (
-                "修复要求",
+                "repair requirements",
                 (
-                    "保留用户需求不变；严格修复所有错误；继续只返回合法 JSON；"
-                    "不要解释，不要输出 Markdown。"
+                    "keep user requirements unchanged; strictly fix all errors; continue to return only valid JSON;"
+                    "do not explain, do not output Markdown."
                 ),
             ),
         )
@@ -358,13 +358,13 @@ class LLMRuleGeneratorWorkflow:
             raise ValueError("refinement requires an accepted candidate payload")
         return _join_sections(
             self.build_generation_prompt(session.request),
-            ("当前已通过校验的候选规则", json.dumps(accepted.payload, ensure_ascii=False, indent=2)),
-            ("用户修改意见", user_feedback),
+            ("current accepted candidate rules", json.dumps(accepted.payload, ensure_ascii=False, indent=2)),
+            ("user feedback", user_feedback),
             (
-                "修改要求",
+                "refinement requirements",
                 (
-                    "在保留原始目标的前提下按用户意见修改规则；"
-                    "继续输出完整 JSON，不要只输出 diff。"
+                    "modify rules according to user feedback while keeping original objectives;"
+                    "continue to output complete JSON, do not output only diffs."
                 ),
             ),
         )

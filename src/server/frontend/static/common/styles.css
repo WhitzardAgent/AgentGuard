@@ -1171,7 +1171,7 @@ textarea {
 
 .rule-ai-chat-shell {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
   min-height: 0;
   height: 100%;
   border: 1px solid rgba(24, 57, 31, 0.08);
@@ -1181,6 +1181,7 @@ textarea {
 }
 
 .rule-ai-chat-header {
+  grid-row: 1;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -1202,6 +1203,7 @@ textarea {
 }
 
 .rule-ai-thread {
+  grid-row: 3;
   display: grid;
   gap: 18px;
   min-height: 0;
@@ -1210,11 +1212,14 @@ textarea {
 }
 
 .rule-ai-config-panel {
+  grid-row: 2;
   display: grid;
   gap: 14px;
   padding: 18px 20px;
   border-bottom: 1px solid rgba(24, 57, 31, 0.08);
   background: linear-gradient(180deg, rgba(246, 250, 242, 0.98) 0%, rgba(239, 245, 234, 0.94) 100%);
+  min-height: 120px;
+  z-index: 9999;
 }
 
 .rule-ai-config-panel[hidden] {
@@ -1252,6 +1257,7 @@ textarea {
 }
 
 .rule-ai-apply-bar {
+  grid-row: 4;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1381,32 +1387,57 @@ textarea {
 }
 
 .rule-ai-composer {
+  grid-row: 5;
   display: grid;
-  gap: 10px;
-  padding: 18px 20px 20px;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 12px 18px 14px;
   border-top: 1px solid rgba(24, 57, 31, 0.08);
   background: linear-gradient(180deg, rgba(249, 251, 247, 0.92) 0%, rgba(241, 246, 237, 0.96) 100%);
 }
 
-.rule-ai-composer-header {
-  display: grid;
-  gap: 6px;
+.rule-ai-composer-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
+.rule-ai-composer-hint,
 .rule-ai-composer .subtle {
   margin: 0;
 }
 
 .rule-ai-composer textarea {
-  min-height: 118px;
+  min-height: 72px;
   border-radius: 20px;
-  padding: 16px 18px;
+  padding: 12px 16px;
   background: rgba(255, 255, 255, 0.98);
   box-shadow: inset 0 1px 2px rgba(24, 32, 24, 0.04);
 }
 
 .rule-ai-composer-actions {
+  display: flex;
   justify-content: flex-end;
+  flex: 0 0 auto;
+}
+
+.rule-ai-composer-actions .btn {
+  min-height: 36px;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.rule-ai-composer-topline strong {
+  line-height: 1.2;
+}
+
+.rule-ai-composer-hint {
+  line-height: 1.4;
+}
+
+.rule-ai-composer textarea {
+  resize: vertical;
 }
 
 .rule-ai-modal-backdrop {
@@ -1638,8 +1669,12 @@ textarea {
 }
 
 .rule-preview-block {
-  min-height: 358px;
+  max-width: 100%;
+  min-height: 258px;
   margin: 0;
+  overflow-x: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .rule-builder-actions {

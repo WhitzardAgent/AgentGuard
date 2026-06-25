@@ -343,16 +343,16 @@
                 </div>
 
                 <div class="field rule-ai-composer">
-                  <div class="preview-header rule-ai-composer-header">
+                  <div class="rule-ai-composer-topline">
                     <strong id="rule-ai-composer-title">Message</strong>
-                    <span class="subtle" id="rule-ai-composer-hint">
-                      Send your first message to generate a rule. After that, each new message refines the current rule.
-                    </span>
+                    <div class="rule-ai-composer-actions">
+                      <button class="btn primary" id="rule-ai-generate-button" type="button">Send</button>
+                    </div>
                   </div>
-                  <textarea id="rule-generate-requirement-input" placeholder="Example: If a tool sends data to an external HTTP endpoint and sensitivity is not low, require human approval."></textarea>
-                  <div class="toolbar rule-ai-composer-actions">
-                    <button class="btn primary" id="rule-ai-generate-button" type="button">Send</button>
-                  </div>
+                  <span class="subtle rule-ai-composer-hint" id="rule-ai-composer-hint">
+                    Send your first message to generate a rule. After that, each new message refines the current rule.
+                  </span>
+                  <textarea id="rule-generate-requirement-input" rows="3" placeholder="Example: If a tool sends data to an external HTTP endpoint and sensitivity is not low, require human approval."></textarea>
                 </div>
               </div>
             </div>
