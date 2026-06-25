@@ -277,6 +277,42 @@ def test_agent_rule_create_proxy_forwards_payload_and_api_key():
     assert json.loads(str(observed["body"]))["source"].startswith("RULE: agent_rule")
 
 
+def test_agent_rule_generate_proxy_forwards_payload_and_api_key():
+    observed: dict[str, object] = {}
+
+    class UpstreamHandler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            observed["path"] = self.path
+            observed["api_key"] = self.headers.get("X-Api-Key")
+            length = int(self.headers.get("Content-Length", "0"))
+            observed["body"] = self.rfile.read(length).decode("utf-8")
+            body = json.dumps({"ok": True, "candidate": {"summary": "generated"}}).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    with _ThreadedServer(UpstreamHandler) as upstream:
+        with patched_proxy_target(upstream.url, api_key="test-secret"):
+            with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+                status, payload = _json_request(
+                    "POST",
+                    preview.url,
+                    "/api/agents/agent-a/rules/generate",
+                    {"requirement": "限制对外发邮件", "max_rounds": 3},
+                )
+
+    assert status == 200
+    assert payload["ok"] is True
+    assert observed["path"] == "/v1/backend/agents/agent-a/rules/generate"
+    assert observed["api_key"] == "test-secret"
+    assert json.loads(str(observed["body"]))["requirement"] == "限制对外发邮件"
+
+
 def test_agent_rule_delete_proxy_forwards_request():
     observed: dict[str, object] = {}
 

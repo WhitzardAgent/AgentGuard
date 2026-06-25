@@ -40,6 +40,20 @@
       </section>
 
       <section class="stack-section rules-page">
+        <div class="card rule-ai-launch-card">
+          <div class="heading-row">
+            <div>
+              <h3>AI Rule Generation</h3>
+              <p class="subtle section-intro">
+                Open the generator to draft a rule from natural language, refine it, then apply the accepted candidate back into the builder.
+              </p>
+            </div>
+            <div class="heading-actions">
+              <button class="btn primary" id="open-rule-ai-modal-button" type="button">Open AI Generator</button>
+            </div>
+          </div>
+        </div>
+
         <div class="card rule-generator-card">
           <div class="heading-row">
             <div>
@@ -267,6 +281,91 @@
         </div>
       </section>
     </main>
+
+    <div class="rule-ai-modal-backdrop" id="rule-ai-modal-backdrop" hidden>
+      <section class="rule-ai-modal" id="rule-ai-modal" aria-modal="true" aria-labelledby="rule-ai-modal-title" role="dialog">
+        <div class="rule-ai-modal-shell">
+          <div class="rule-ai-modal-header">
+            <div>
+              <p class="page-kicker">AI Rule Generation</p>
+              <h3 id="rule-ai-modal-title">Generate And Refine Candidate DSL</h3>
+              <p class="subtle">
+                Describe the policy you want in natural language, inspect the candidate, then apply it into the builder when it looks right.
+              </p>
+            </div>
+            <button class="icon-label rule-ai-close-button" id="close-rule-ai-modal-button" type="button" aria-label="Close AI generator" title="Close AI generator">
+              <img class="btn-icon-image" src="/assets/close.png" alt="">
+            </button>
+          </div>
+
+          <div class="rule-ai-modal-body">
+            <div class="grid two equal rule-ai-layout">
+              <div class="rule-pane">
+                <div class="field">
+                  <label for="rule-generate-requirement-input">Requirement</label>
+                  <textarea id="rule-generate-requirement-input" placeholder="Example: If a tool sends data to an external HTTP endpoint and sensitivity is not low, require human approval."></textarea>
+                </div>
+                <div class="field">
+                  <label for="rule-generate-feedback-input">Refinement Feedback</label>
+                  <textarea id="rule-generate-feedback-input" placeholder="Optional: explain how the latest candidate should change."></textarea>
+                </div>
+                <div class="toolbar">
+                  <button class="btn primary" id="rule-ai-generate-button" type="button">AI Generate</button>
+                  <button class="btn" id="rule-ai-refine-button" type="button">Refine Candidate</button>
+                  <button class="btn" id="rule-ai-apply-button" type="button">Apply To Builder</button>
+                </div>
+                <div class="rule-ai-meta" id="rule-ai-meta">
+                  <span class="pill">Status: <strong id="rule-ai-status">Idle</strong></span>
+                  <span class="pill">Attempts: <strong id="rule-ai-attempt-count">0</strong></span>
+                  <span class="pill">Rounds Left: <strong id="rule-ai-remaining-rounds">0</strong></span>
+                </div>
+              </div>
+
+              <div class="rule-pane">
+                <div class="preview-header">
+                  <strong>Generated Candidate DSL</strong>
+                </div>
+                <pre class="code-block rule-preview-block" id="rule-ai-preview-block">No AI candidate yet.</pre>
+              </div>
+            </div>
+
+            <div class="grid two equal rule-ai-layout">
+              <div class="rule-pane">
+                <div class="preview-header">
+                  <strong>Summary / Assumptions / Warnings</strong>
+                </div>
+                <div class="rule-ai-notes" id="rule-ai-notes">
+                  <div class="empty-state">Generation notes will appear here.</div>
+                </div>
+              </div>
+
+              <div class="rule-pane">
+                <div class="preview-header">
+                  <strong>Validation</strong>
+                </div>
+                <pre class="code-block rule-preview-block" id="rule-ai-validation-block">No validation result yet.</pre>
+              </div>
+            </div>
+
+            <div class="grid two equal rule-ai-layout">
+              <div class="rule-pane">
+                <div class="preview-header">
+                  <strong>Attempt Diagnostics</strong>
+                </div>
+                <pre class="code-block rule-preview-block" id="rule-ai-attempts-block">No attempt diagnostics yet.</pre>
+              </div>
+
+              <div class="rule-pane">
+                <div class="preview-header">
+                  <strong>Last Raw Model Output</strong>
+                </div>
+                <pre class="code-block rule-preview-block" id="rule-ai-raw-response-block">No raw model output yet.</pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
 
     <div class="toast" id="toast"></div>
   </div>

@@ -169,6 +169,17 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(200, {"ok": True})
             else:
                 self._send(404, {"error": "ticket not found or already resolved"})
+        elif self.path.startswith("/v1/backend/agents/") and self.path.endswith("/rules/generate"):
+            agent_id = self.path.split("/")[4]
+            result = self.console.generate_rule(
+                agent_id,
+                str(body.get("requirement") or ""),
+                user_feedback=str(body.get("user_feedback") or ""),
+                current_candidate=body.get("current_candidate"),
+                max_rounds=int(body.get("max_rounds") or 4),
+                llm_config=body.get("llm_config") if isinstance(body.get("llm_config"), dict) else None,
+            )
+            self._send(int(result.pop("code", 200 if result.get("ok") else 422)), result)
         elif self.path == "/v1/backend/plugins/config":
             try:
                 loaded = self.manager.update_plugin_config(body.get("config"))

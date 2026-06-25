@@ -29,6 +29,14 @@ class RuleSourceBody(BaseModel):
     keep_builtin: bool | None = None
 
 
+class RuleGenerateBody(BaseModel):
+    requirement: str = ""
+    user_feedback: str = ""
+    current_candidate: dict[str, Any] | None = None
+    max_rounds: int = 4
+    llm_config: dict[str, Any] | None = None
+
+
 class ApprovalBody(BaseModel):
     note: str = ""
 
@@ -70,6 +78,21 @@ def list_agent_rules(agent_id: str) -> list[dict[str, Any]]:
 @router.post("/v1/backend/rules/check")
 def check_rules(body: RuleSourceBody) -> dict[str, Any]:
     return get_console().check(body.source)
+
+
+@router.post("/v1/backend/agents/{agent_id}/rules/generate")
+def generate_rule(agent_id: str, body: RuleGenerateBody) -> Any:
+    result = get_console().generate_rule(
+        agent_id,
+        body.requirement,
+        user_feedback=body.user_feedback,
+        current_candidate=body.current_candidate,
+        max_rounds=body.max_rounds,
+        llm_config=body.llm_config,
+    )
+    if not result.get("ok"):
+        return JSONResponse(result, status_code=int(result.pop("code", 422)))
+    return result
 
 
 @router.post("/v1/backend/rules/reload")

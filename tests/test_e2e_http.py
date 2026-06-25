@@ -210,6 +210,54 @@ def test_backend_plugin_config_update_changes_server_runtime():
         srv.shutdown()
 
 
+def test_backend_rule_generation_endpoint_uses_agent_tool_context(monkeypatch):
+    manager = RuntimeManager()
+    base_url, srv, _ = start_dev_server(manager=manager)
+    try:
+        console = type(srv.RequestHandlerClass).console
+        console.register_tool(
+            {"agent_id": "agent-alpha"},
+            {
+                "name": "email.send",
+                "input_params": ["to", "body"],
+                "labels": {"boundary": "external", "sensitivity": "moderate", "integrity": "trusted"},
+            },
+        )
+
+        observed: dict[str, object] = {}
+
+        def _fake_generate_rule(agent_id, requirement, **kwargs):
+            observed["agent_id"] = agent_id
+            observed["requirement"] = requirement
+            observed["tools"] = console.tools(agent_id)
+            return {
+                "ok": True,
+                "agent_id": agent_id,
+                "requirement": requirement,
+                "stop_reason": "ready_for_user_review",
+                "attempt_count": 1,
+                "remaining_rounds": 3,
+                "candidate": {"summary": "generated", "rules": []},
+                "validation": {"ok": True, "errors": [], "warnings": [], "parsed_dsl_rules": [], "normalized_rules": []},
+                "attempts": [],
+                "user_feedback_history": [],
+            }
+
+        monkeypatch.setattr(console, "generate_rule", _fake_generate_rule)
+
+        result = _post_json(
+            f"{base_url}/v1/backend/agents/agent-alpha/rules/generate",
+            {"requirement": "限制对外发邮件", "max_rounds": 3},
+        )
+
+        assert result["ok"] is True
+        assert observed["agent_id"] == "agent-alpha"
+        assert observed["requirement"] == "限制对外发邮件"
+        assert any(tool["name"] == "email.send" for tool in observed["tools"])
+    finally:
+        srv.shutdown()
+
+
 def test_backend_plugin_config_update_pushes_to_client():
     manager = RuntimeManager()
     base_url, srv, _ = start_dev_server(manager=manager)

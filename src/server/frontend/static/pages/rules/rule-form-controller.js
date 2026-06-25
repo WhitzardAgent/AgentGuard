@@ -567,6 +567,31 @@
       writeRuleFormState(formStateFromRule(rule));
     }
 
+    function applyGeneratedCandidate(candidate) {
+      const source = String(candidate?.rules || "").trim();
+      if (!source) {
+        throw new Error("Generated candidate did not include DSL rules.");
+      }
+      if (typeof window.AgentGuardRuleParser?.parsePublishedRuleSource !== "function") {
+        throw new Error("Rule parser is unavailable.");
+      }
+      const parsed = window.AgentGuardRuleParser.parsePublishedRuleSource(
+        source,
+        model.normalizeRule,
+        "unpublished",
+      );
+      if (!parsed) {
+        throw new Error("Generated DSL could not be loaded back into the builder.");
+      }
+      applyRule({
+        ...parsed,
+        description: String(candidate?.summary || parsed.description || "").trim(),
+        source,
+      });
+      renderPreview();
+      return parsed;
+    }
+
     function renderPreview() {
       const rule = currentRule();
       if (!rule.name && !rule.path && !rule.onClause && !rule.condition && !rule.action && !rule.description) {
@@ -741,6 +766,7 @@
 
     return {
       applyRule,
+      applyGeneratedCandidate,
       currentRule,
       formStateFromRule,
       initEventHandlers,

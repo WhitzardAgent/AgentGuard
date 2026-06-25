@@ -116,6 +116,23 @@ const elements = {
   ruleSeverityInput: getElement("rule-severity-input"),
   ruleCategoryInput: getElement("rule-category-input"),
   ruleReasonInput: getElement("rule-reason-input"),
+  ruleGenerateRequirementInput: getElement("rule-generate-requirement-input"),
+  ruleGenerateFeedbackInput: getElement("rule-generate-feedback-input"),
+  openRuleAiModalButton: getElement("open-rule-ai-modal-button"),
+  closeRuleAiModalButton: getElement("close-rule-ai-modal-button"),
+  ruleAiModalBackdrop: getElement("rule-ai-modal-backdrop"),
+  ruleAiModal: getElement("rule-ai-modal"),
+  ruleAiGenerateButton: getElement("rule-ai-generate-button"),
+  ruleAiRefineButton: getElement("rule-ai-refine-button"),
+  ruleAiApplyButton: getElement("rule-ai-apply-button"),
+  ruleAiPreviewBlock: getElement("rule-ai-preview-block"),
+  ruleAiValidationBlock: getElement("rule-ai-validation-block"),
+  ruleAiAttemptsBlock: getElement("rule-ai-attempts-block"),
+  ruleAiRawResponseBlock: getElement("rule-ai-raw-response-block"),
+  ruleAiNotes: getElement("rule-ai-notes"),
+  ruleAiStatus: getElement("rule-ai-status"),
+  ruleAiAttemptCount: getElement("rule-ai-attempt-count"),
+  ruleAiRemainingRounds: getElement("rule-ai-remaining-rounds"),
   traceOnFieldHint: getElement("trace-on-field-hint"),
   pathField: getElement("path-field"),
   onField: getElement("on-field"),
@@ -142,6 +159,13 @@ const state = {
   activeRules: [],
   filter: "all",
   busy: false,
+  aiCandidate: null,
+  aiValidation: null,
+  aiAttemptCount: 0,
+  aiRemainingRounds: 0,
+  aiStopReason: "",
+  aiAttempts: [],
+  aiModalOpen: false,
 };
 
 shell?.setPageContext({
@@ -151,6 +175,101 @@ shell?.setPageContext({
 
 function showToast(message, tone) {
   window.AgentGuardUI.showToast(message, tone);
+}
+
+function formatIssueList(issues = []) {
+  if (!Array.isArray(issues) || !issues.length) {
+    return "None";
+  }
+  return issues.map((issue) => {
+    const path = String(issue?.path || "").trim();
+    const message = String(issue?.message || "").trim() || String(issue || "");
+    return path ? `- [${path}] ${message}` : `- ${message}`;
+  }).join("\n");
+}
+
+function renderAiPanel() {
+  if (elements.ruleAiModalBackdrop) {
+    elements.ruleAiModalBackdrop.hidden = !state.aiModalOpen;
+  }
+  if (elements.ruleAiStatus) {
+    elements.ruleAiStatus.textContent = state.aiStopReason || (state.aiCandidate ? "ready_for_user_review" : "Idle");
+  }
+  if (elements.ruleAiAttemptCount) {
+    elements.ruleAiAttemptCount.textContent = String(state.aiAttemptCount || 0);
+  }
+  if (elements.ruleAiRemainingRounds) {
+    elements.ruleAiRemainingRounds.textContent = String(state.aiRemainingRounds || 0);
+  }
+  if (elements.ruleAiPreviewBlock) {
+    elements.ruleAiPreviewBlock.textContent = String(state.aiCandidate?.rules || "").trim() || "No AI candidate yet.";
+  }
+  if (elements.ruleAiValidationBlock) {
+    const validation = state.aiValidation;
+    elements.ruleAiValidationBlock.textContent = validation
+      ? [
+        `ok: ${Boolean(validation.ok)}`,
+        "",
+        "errors:",
+        formatIssueList(validation.errors || []),
+        "",
+        "warnings:",
+        formatIssueList(validation.warnings || []),
+      ].join("\n")
+      : "No validation result yet.";
+  }
+  if (elements.ruleAiAttemptsBlock) {
+    elements.ruleAiAttemptsBlock.textContent = Array.isArray(state.aiAttempts) && state.aiAttempts.length
+      ? state.aiAttempts.map((attempt) => {
+        const errors = formatIssueList(attempt?.validation?.errors || []);
+        const warnings = formatIssueList(attempt?.validation?.warnings || []);
+        return [
+          `round ${attempt?.round_index || "?"} | mode=${attempt?.mode || "generate"} | accepted=${Boolean(attempt?.accepted)}`,
+          "errors:",
+          errors,
+          "warnings:",
+          warnings,
+        ].join("\n");
+      }).join("\n\n---\n\n")
+      : "No attempt diagnostics yet.";
+  }
+  if (elements.ruleAiRawResponseBlock) {
+    const latestAttempt = Array.isArray(state.aiAttempts) && state.aiAttempts.length
+      ? state.aiAttempts[state.aiAttempts.length - 1]
+      : null;
+    elements.ruleAiRawResponseBlock.textContent = String(latestAttempt?.raw_response || "").trim() || "No raw model output yet.";
+  }
+  if (elements.ruleAiNotes) {
+    const candidate = state.aiCandidate;
+    if (!candidate) {
+      elements.ruleAiNotes.innerHTML = '<div class="empty-state">Generation notes will appear here.</div>';
+    } else {
+      const summary = String(candidate.summary || "").trim() || "No summary.";
+      const assumptions = Array.isArray(candidate.assumptions) ? candidate.assumptions : [];
+      const warnings = Array.isArray(candidate.warnings) ? candidate.warnings : [];
+      elements.ruleAiNotes.innerHTML = `
+        <div class="list">
+          <div class="list-item"><strong>Summary</strong><span>${summary}</span></div>
+          <div class="list-item"><strong>Assumptions</strong><span>${assumptions.length ? assumptions.join("; ") : "None"}</span></div>
+          <div class="list-item"><strong>Warnings</strong><span>${warnings.length ? warnings.join("; ") : "None"}</span></div>
+        </div>
+      `;
+    }
+  }
+  if (elements.ruleAiGenerateButton) {
+    elements.ruleAiGenerateButton.disabled = state.busy;
+  }
+  if (elements.ruleAiRefineButton) {
+    elements.ruleAiRefineButton.disabled = state.busy || !state.aiCandidate;
+  }
+  if (elements.ruleAiApplyButton) {
+    elements.ruleAiApplyButton.disabled = state.busy || !String(state.aiCandidate?.rules || "").trim();
+  }
+}
+
+function setAiModalOpen(nextOpen) {
+  state.aiModalOpen = Boolean(nextOpen);
+  renderAiPanel();
 }
 
 function normalizeActiveRule(rule) {
@@ -289,6 +408,12 @@ function renderRuleList() {
   list.render(ruleItems());
 }
 
+function setBusy(nextBusy) {
+  state.busy = Boolean(nextBusy);
+  form.setBusy(state.busy);
+  renderAiPanel();
+}
+
 function setRuleFilter(nextFilter) {
   state.filter = nextFilter;
   list.setFilter(nextFilter);
@@ -339,11 +464,6 @@ const list = ruleListControllerModule.create({
   unpublishedStatus: ruleUtils.RULE_STATUS_UNPUBLISHED,
 });
 
-function setBusy(isBusy) {
-  state.busy = Boolean(isBusy);
-  form.setBusy(state.busy);
-}
-
 function upsertGeneratedRule(rule) {
   const nextRule = store.upsert(rule);
   state.generatedRules = store.list();
@@ -352,6 +472,77 @@ function upsertGeneratedRule(rule) {
 
 function removeGeneratedRule(rule) {
   state.generatedRules = store.remove(rule);
+}
+
+async function runAiGeneration({ refine = false } = {}) {
+  if (!state.selectedAgentId) {
+    showToast("Select an agent before generating a rule.", "warning");
+    return;
+  }
+  const requirement = String(elements.ruleGenerateRequirementInput?.value || "").trim();
+  const feedback = String(elements.ruleGenerateFeedbackInput?.value || "").trim();
+  if (!requirement) {
+    showToast("Enter a requirement before generating a rule.", "warning");
+    return;
+  }
+  if (refine && !state.aiCandidate) {
+    showToast("Generate a candidate first before refining it.", "warning");
+    return;
+  }
+  if (refine && !feedback) {
+    showToast("Enter refinement feedback first.", "warning");
+    return;
+  }
+
+  setBusy(true);
+  try {
+    const result = await service.generateCandidate(state.selectedAgentId, {
+      requirement,
+      user_feedback: refine ? feedback : "",
+      current_candidate: refine ? state.aiCandidate : null,
+      max_rounds: 4,
+    });
+    state.aiCandidate = result?.candidate || null;
+    state.aiValidation = result?.validation || null;
+    state.aiAttemptCount = Number(result?.attempt_count || 0);
+    state.aiRemainingRounds = Number(result?.remaining_rounds || 0);
+    state.aiStopReason = String(result?.stop_reason || "").trim();
+    state.aiAttempts = Array.isArray(result?.attempts) ? result.attempts : [];
+    renderAiPanel();
+    if (!state.aiCandidate) {
+      showToast("AI generation did not return an accepted candidate.", "warning");
+      return;
+    }
+    showToast(refine ? "AI candidate refined." : "AI candidate generated.", "success");
+  } catch (error) {
+    const payload = error && typeof error === "object" ? error.payload : null;
+    if (payload && typeof payload === "object") {
+      state.aiCandidate = payload.candidate || null;
+      state.aiValidation = payload.validation || null;
+      state.aiAttemptCount = Number(payload.attempt_count || 0);
+      state.aiRemainingRounds = Number(payload.remaining_rounds || 0);
+      state.aiStopReason = String(payload.stop_reason || "").trim();
+      state.aiAttempts = Array.isArray(payload.attempts) ? payload.attempts : [];
+      renderAiPanel();
+    }
+    showToast(error instanceof Error ? error.message : "Failed to generate rule candidate.", "warning");
+  } finally {
+    setBusy(false);
+  }
+}
+
+function applyAiCandidateToBuilder() {
+  if (!state.aiCandidate) {
+    showToast("Generate a candidate first.", "warning");
+    return;
+  }
+  try {
+    form.applyGeneratedCandidate(state.aiCandidate);
+    setAiModalOpen(false);
+    showToast("Applied generated candidate to the builder.", "success");
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "Failed to apply generated candidate.", "warning");
+  }
 }
 
 async function checkCurrentRule({ saveGeneratedRule = false } = {}) {
@@ -540,8 +731,43 @@ form.initEventHandlers({
 state.generatedRules = store.load();
 form.initialize();
 form.prepareNewRule();
+renderAiPanel();
 list.setFilter(state.filter);
 renderRuleList();
+
+elements.ruleAiGenerateButton?.addEventListener("click", () => {
+  runAiGeneration({ refine: false });
+});
+
+elements.ruleAiRefineButton?.addEventListener("click", () => {
+  runAiGeneration({ refine: true });
+});
+
+elements.ruleAiApplyButton?.addEventListener("click", () => {
+  applyAiCandidateToBuilder();
+});
+
+elements.openRuleAiModalButton?.addEventListener("click", () => {
+  setAiModalOpen(true);
+});
+
+elements.closeRuleAiModalButton?.addEventListener("click", () => {
+  setAiModalOpen(false);
+});
+
+elements.ruleAiModalBackdrop?.addEventListener("click", (event) => {
+  if (event.target === elements.ruleAiModalBackdrop) {
+    setAiModalOpen(false);
+  }
+});
+
+if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && state.aiModalOpen) {
+      setAiModalOpen(false);
+    }
+  });
+}
 
 if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
   window.addEventListener("agentguard:selected-agent-change", (event) => {

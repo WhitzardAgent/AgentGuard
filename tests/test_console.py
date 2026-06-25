@@ -248,6 +248,99 @@ def test_register_tool_adds_or_updates_console_catalog():
     assert any(item["name"] == "docs.search" for item in scoped)
 
 
+def test_generate_rule_uses_agent_context_and_returns_candidate(monkeypatch):
+    con = _console()
+    con.register_tool(
+        {"agent_id": "agent-alpha"},
+        {
+            "name": "email.send",
+            "input_params": ["to", "body"],
+            "labels": {"boundary": "external", "sensitivity": "moderate", "integrity": "trusted"},
+        },
+    )
+
+    observed: dict[str, object] = {}
+
+    class _FakeWorkflow:
+        def __init__(self, **kwargs):
+            observed["init"] = kwargs
+
+        def generate(self, request):
+            observed["request"] = request
+            validation = type(
+                "_Validation",
+                (),
+                {
+                    "to_dict": lambda self: {
+                        "ok": True,
+                        "errors": [],
+                        "warnings": [],
+                        "parsed_dsl_rules": [],
+                        "normalized_rules": [],
+                    }
+                },
+            )()
+            candidate = type(
+                "_Candidate",
+                (),
+                {"payload": {"summary": "generated", "rules": []}, "validation": validation},
+            )()
+            return type(
+                "_Session",
+                (),
+                {
+                    "request": request,
+                    "stop_reason": "ready_for_user_review",
+                    "attempts": [],
+                    "accepted_candidate": candidate,
+                    "latest_candidate": candidate,
+                    "user_feedback_history": [],
+                    "remaining_rounds": 3,
+                },
+            )()
+
+    monkeypatch.setattr("backend.console.state.LLMRuleGeneratorWorkflow", _FakeWorkflow)
+
+    result = con.generate_rule("agent-alpha", "限制对外发邮件")
+
+    assert result["ok"] is True
+    assert result["agent_id"] == "agent-alpha"
+    request = observed["request"]
+    assert request.agent_id == "agent-alpha"
+    assert request.user_requirement == "限制对外发邮件"
+    assert any(tool["name"] == "email.send" for tool in request.tool_catalog)
+    assert isinstance(request.existing_rules, list)
+
+
+def test_generate_rule_refine_requires_valid_current_candidate(monkeypatch):
+    con = _console()
+
+    class _FakeWorkflow:
+        def __init__(self, **kwargs):
+            pass
+
+        def validate_candidate(self, payload, request):
+            class _Validation:
+                ok = False
+
+                def to_dict(self):
+                    return {"ok": False, "errors": [{"code": "bad", "message": "bad candidate"}], "warnings": [], "parsed_dsl_rules": [], "normalized_rules": []}
+
+            return _Validation()
+
+    monkeypatch.setattr("backend.console.state.LLMRuleGeneratorWorkflow", _FakeWorkflow)
+
+    result = con.generate_rule(
+        "agent-alpha",
+        "限制对外发邮件",
+        user_feedback="改成 review",
+        current_candidate={"summary": "old", "rules": []},
+    )
+
+    assert result["ok"] is False
+    assert result["error"] == "current_candidate failed validation"
+
+
 class _ConsoleHumanCheckPlugin(BasePlugin):
     name = "console_human_check"
     event_types = [EventType.TOOL_INVOKE]

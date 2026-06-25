@@ -1068,6 +1068,33 @@ textarea {
   white-space: pre;
 }
 
+.field {
+  display: grid;
+  gap: 8px;
+}
+
+.field span {
+  font-size: 13px;
+  font-weight: 700;
+  color: #41503f;
+}
+
+.field input,
+.field textarea,
+.field select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text);
+}
+
+.field textarea {
+  min-height: 140px;
+  resize: vertical;
+}
+
 .runtime-audit-detail {
   max-height: 520px;
   overflow-x: auto;
@@ -1089,6 +1116,90 @@ textarea {
 .rule-generator-card,
 .rule-list-card {
   min-width: 0;
+}
+
+.rule-ai-launch-card {
+  min-width: 0;
+}
+
+.rule-ai-layout {
+  align-items: start;
+}
+
+.rule-ai-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.rule-ai-notes {
+  min-height: 160px;
+}
+
+.rule-ai-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  background: rgba(24, 32, 24, 0.42);
+  backdrop-filter: blur(8px);
+}
+
+.rule-ai-modal-backdrop[hidden] {
+  display: none !important;
+}
+
+.rule-ai-modal {
+  width: min(1120px, calc(100vw - 56px));
+  max-height: calc(100vh - 56px);
+  overflow: hidden;
+  border-radius: 26px;
+  border: 1px solid rgba(24, 57, 31, 0.1);
+  background:
+    radial-gradient(circle at top right, rgba(47, 107, 59, 0.12), transparent 24%),
+    linear-gradient(180deg, rgba(252, 253, 250, 0.99) 0%, rgba(242, 247, 238, 0.98) 100%);
+  box-shadow: 0 28px 80px rgba(24, 32, 24, 0.24);
+}
+
+.rule-ai-modal-shell {
+  display: grid;
+  max-height: calc(100vh - 56px);
+}
+
+.rule-ai-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 24px 24px 18px;
+  border-bottom: 1px solid rgba(24, 57, 31, 0.08);
+}
+
+.rule-ai-modal-header h3 {
+  margin: 0 0 6px;
+  font-size: 28px;
+}
+
+.rule-ai-modal-header .subtle {
+  margin: 0;
+  max-width: 760px;
+}
+
+.rule-ai-close-button {
+  flex: 0 0 auto;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(24, 57, 31, 0.08);
+  border-radius: 999px;
+}
+
+.rule-ai-modal-body {
+  display: grid;
+  gap: 16px;
+  padding: 22px 24px 24px;
+  overflow-y: auto;
 }
 
 .section-intro {
@@ -2420,6 +2531,23 @@ textarea {
 
   .condition-tree-editor-grid {
     grid-template-columns: 1fr;
+  }
+
+  .rule-ai-modal-backdrop {
+    padding: 18px;
+  }
+
+  .rule-ai-modal {
+    width: calc(100vw - 36px);
+    max-height: calc(100vh - 36px);
+  }
+
+  .rule-ai-modal-shell {
+    max-height: calc(100vh - 36px);
+  }
+
+  .rule-ai-modal-header {
+    flex-direction: column;
   }
 
   .condition-field {

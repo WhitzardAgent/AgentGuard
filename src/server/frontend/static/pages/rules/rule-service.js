@@ -113,6 +113,37 @@
       });
     }
 
+    async function generateCandidate(agentId, payload) {
+      const normalizedAgentId = String(agentId || "").trim();
+      if (!normalizedAgentId) {
+        throw new Error("Select an agent before generating a rule.");
+      }
+      const requirement = String(payload?.requirement || "").trim();
+      if (!requirement) {
+        throw new Error("Requirement is required before generating a rule.");
+      }
+      return api.fetchJson(
+        `/api/agents/${encodeURIComponent(normalizedAgentId)}/rules/generate`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            requirement,
+            user_feedback: String(payload?.user_feedback || "").trim(),
+            current_candidate: payload?.current_candidate && typeof payload.current_candidate === "object"
+              ? payload.current_candidate
+              : null,
+            max_rounds: Number(payload?.max_rounds || 4),
+            llm_config: payload?.llm_config && typeof payload.llm_config === "object"
+              ? payload.llm_config
+              : null,
+          }),
+        },
+      );
+    }
+
     async function deleteAgentRule(agentId, ruleId) {
       const normalizedAgentId = String(agentId || "").trim();
       const normalizedRuleId = String(ruleId || "").trim();
@@ -144,6 +175,7 @@
       checkSource,
       createAgentRule,
       deleteAgentRule,
+      generateCandidate,
       listActive,
       publishedRulesSourceWith,
       reload,

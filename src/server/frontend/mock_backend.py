@@ -23,6 +23,7 @@ class FrontendMockBackend:
     )
     _AGENT_RULES_ROUTE = MockRoute("GET", re.compile(r"^/api/agents/(?P<agent_id>[^/]+)/rules$"))
     _AGENT_RULES_CREATE_ROUTE = MockRoute("POST", re.compile(r"^/api/agents/(?P<agent_id>[^/]+)/rules$"))
+    _AGENT_RULES_GENERATE_ROUTE = MockRoute("POST", re.compile(r"^/api/agents/(?P<agent_id>[^/]+)/rules/generate$"))
     _AGENT_RULE_DELETE_ROUTE = MockRoute("DELETE", re.compile(r"^/api/agents/(?P<agent_id>[^/]+)/rules/(?P<rule_id>[^/]+)$"))
 
     def __init__(self) -> None:
@@ -84,6 +85,38 @@ class FrontendMockBackend:
                 return True
             response, status = self._create_agent_rule(match.group("agent_id"), payload)
             self._send_json(handler, response, status=status)
+            return True
+
+        match = self._AGENT_RULES_GENERATE_ROUTE.pattern.match(path)
+        if method == self._AGENT_RULES_GENERATE_ROUTE.method and match:
+            payload = self._read_json_body(handler)
+            if payload is None:
+                self._send_json(handler, self._invalid_json_response(), status=HTTPStatus.BAD_REQUEST)
+                return True
+            response = {
+                "ok": True,
+                "agent_id": match.group("agent_id"),
+                "requirement": str(payload.get("requirement", "")).strip(),
+                "stop_reason": "ready_for_user_review",
+                "attempt_count": 1,
+                "remaining_rounds": max(0, int(payload.get("max_rounds", 4) or 4) - 1),
+                "candidate": {
+                    "summary": "mock generated rule",
+                    "assumptions": [],
+                    "warnings": [],
+                    "rules": "",
+                },
+                "validation": {
+                    "ok": True,
+                    "errors": [],
+                    "warnings": [],
+                    "parsed_dsl_rules": [],
+                    "normalized_rules": [],
+                },
+                "attempts": [],
+                "user_feedback_history": [str(payload.get("user_feedback", "")).strip()] if str(payload.get("user_feedback", "")).strip() else [],
+            }
+            self._send_json(handler, response, status=HTTPStatus.OK)
             return True
 
         match = self._AGENT_RULE_DELETE_ROUTE.pattern.match(path)

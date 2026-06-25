@@ -578,9 +578,12 @@
       if (shell?.setApiStatus) {
         shell.setApiStatus(text.sidebarApiPartial || "Partial", "warning");
       }
-      throw new Error(
+      const nextError = new Error(
         payload?.error || payload?.detail || text.genericRequestError || "Request failed.",
       );
+      nextError.status = response.status;
+      nextError.payload = payload;
+      throw nextError;
     }
 
     if (shell?.setApiStatus) {
@@ -711,6 +714,7 @@
       }),
     });
   }
+
 
   function groupToolsByAgent(catalog) {
     return (Array.isArray(catalog) ? catalog : []).reduce((acc, tool) => {

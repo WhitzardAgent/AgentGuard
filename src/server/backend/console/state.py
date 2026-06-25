@@ -14,6 +14,11 @@ from typing import Any
 from shared.schemas.decisions import DecisionType, GuardDecision
 from shared.schemas.events import RuntimeEvent
 from shared.schemas.policy import PolicyRule
+from shared.rules.llm_dsl_generator import (
+    LLMRuleGeneratorWorkflow,
+    RuleGenerationRequest,
+    RuleGenerationSession,
+)
 from backend.console.dsl import ParsedRule, parse_source, rule_to_console_dict
 from backend.runtime.manager import RuntimeManager
 
@@ -115,6 +120,67 @@ class ConsoleState:
         _, report = parse_source(source)
         return report.to_dict()
 
+    def generate_rule(
+        self,
+        agent_id: str,
+        requirement: str,
+        *,
+        user_feedback: str = "",
+        current_candidate: dict[str, Any] | None = None,
+        max_rounds: int = 4,
+        llm_config: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized_agent_id = str(agent_id or "").strip()
+        normalized_requirement = str(requirement or "").strip()
+        if not normalized_agent_id:
+            return {"ok": False, "error": "agent_id is required", "code": 400}
+        if not normalized_requirement:
+            return {"ok": False, "error": "requirement is required", "code": 400}
+
+        workflow = LLMRuleGeneratorWorkflow(llm_config=llm_config or {})
+        tools = self.tools(normalized_agent_id)
+        existing_rules = self.list_rules(normalized_agent_id)
+        request = RuleGenerationRequest(
+            user_requirement=normalized_requirement,
+            agent_id=normalized_agent_id,
+            tool_catalog=tools,
+            existing_rules=existing_rules,
+            max_rounds=max(1, int(max_rounds)),
+        )
+
+        if user_feedback.strip():
+            if not isinstance(current_candidate, dict):
+                return {
+                    "ok": False,
+                    "error": "current_candidate is required when user_feedback is provided",
+                    "code": 400,
+                }
+            session = RuleGenerationSession(request=request)
+            validation = workflow.validate_candidate(current_candidate, request)
+            if not validation.ok:
+                return {
+                    "ok": False,
+                    "error": "current_candidate failed validation",
+                    "validation": validation.to_dict(),
+                    "code": 422,
+                }
+            from shared.rules.llm_dsl_generator import RuleCandidate  # noqa: PLC0415
+
+            accepted = RuleCandidate(
+                round_index=0,
+                prompt="",
+                raw_response="",
+                payload=current_candidate,
+                validation=validation,
+                mode="refine",
+            )
+            session.accepted_candidate = accepted
+            updated = workflow.refine(session, user_feedback)
+            return self._rule_generation_response(updated)
+
+        session = workflow.generate(request)
+        return self._rule_generation_response(session)
+
     def list_rules(self, agent_id: str | None = None) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
         for rule in self._base_rules:
@@ -187,6 +253,43 @@ class ConsoleState:
     def _rebuild_policy(self) -> None:
         rules = list(self._base_rules) + [e["rule"] for e in self._console_rules.values()]
         self.manager.policy.store.set_rules(rules)
+
+    @staticmethod
+    def _rule_generation_response(session: RuleGenerationSession) -> dict[str, Any]:
+        candidate = session.accepted_candidate
+        latest_validation = (
+            candidate.validation.to_dict() if candidate else (
+                session.latest_candidate.validation.to_dict() if session.latest_candidate else None
+            )
+        )
+        payload = {
+            "ok": candidate is not None,
+            "agent_id": session.request.agent_id,
+            "requirement": session.request.user_requirement,
+            "stop_reason": session.stop_reason,
+            "attempt_count": len(session.attempts),
+            "remaining_rounds": session.remaining_rounds,
+            "candidate": candidate.payload if candidate else None,
+            "validation": latest_validation,
+            "attempts": [
+                {
+                    "round_index": item.round_index,
+                    "mode": item.mode,
+                    "accepted": item.accepted,
+                    "validation": item.validation.to_dict(),
+                    "payload": item.payload,
+                    "raw_response": item.raw_response,
+                }
+                for item in session.attempts
+            ],
+            "user_feedback_history": list(session.user_feedback_history),
+        }
+        if candidate is None:
+            errors = list((latest_validation or {}).get("errors") or [])
+            first_message = str(errors[0].get("message") or "").strip() if errors else ""
+            payload["error"] = first_message or "Rule generation did not produce a valid candidate."
+            payload["code"] = 422
+        return payload
 
     # ---- runtime observability ----------------------------------------
     def health(self) -> dict[str, Any]:
