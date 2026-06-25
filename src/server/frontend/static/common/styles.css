@@ -1193,12 +1193,62 @@ textarea {
   margin: 6px 0 0;
 }
 
+.rule-ai-chat-header-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .rule-ai-thread {
   display: grid;
   gap: 18px;
   min-height: 0;
   padding: 20px;
   overflow-y: auto;
+}
+
+.rule-ai-config-panel {
+  display: grid;
+  gap: 14px;
+  padding: 18px 20px;
+  border-bottom: 1px solid rgba(24, 57, 31, 0.08);
+  background: linear-gradient(180deg, rgba(246, 250, 242, 0.98) 0%, rgba(239, 245, 234, 0.94) 100%);
+}
+
+.rule-ai-config-panel[hidden] {
+  display: none !important;
+}
+
+.rule-ai-config-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.rule-ai-config-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.rule-ai-config-panel .field {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 0;
+}
+
+.rule-ai-config-panel .field label {
+  margin: 0;
+  white-space: nowrap;
+}
+
+.rule-ai-config-panel input {
+  background: rgba(255, 255, 255, 0.98);
+  min-width: 0;
 }
 
 .rule-ai-apply-bar {
@@ -2942,6 +2992,24 @@ textarea {
 
   .rule-ai-chat-header {
     flex-direction: column;
+  }
+
+  .rule-ai-chat-header-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .rule-ai-config-header {
+    flex-direction: column;
+  }
+
+  .rule-ai-config-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .rule-ai-config-panel .field {
+    grid-template-columns: 1fr;
+    gap: 8px;
   }
 }
 

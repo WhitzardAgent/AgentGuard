@@ -29,6 +29,7 @@ const ruleServiceModule = resolveRuleModule("AgentGuardRuleService", "./rule-ser
 const ruleStoreModule = resolveRuleModule("AgentGuardGeneratedRuleStore", "./rule-store.js");
 const ruleFormControllerModule = resolveRuleModule("AgentGuardRuleFormController", "./rule-form-controller.js");
 const ruleListControllerModule = resolveRuleModule("AgentGuardRuleListController", "./rule-list-controller.js");
+const RULE_AI_LLM_CONFIG_STORAGE_KEY = "agentguard.ruleAiLlmConfig";
 
 const parseConditionItems = ruleParser.parseConditionItems || function fallbackParseConditionItems() {
   return [];
@@ -120,6 +121,11 @@ const elements = {
   ruleAiComposerTitle: getElement("rule-ai-composer-title"),
   ruleAiComposerHint: getElement("rule-ai-composer-hint"),
   ruleAiThread: getElement("rule-ai-thread"),
+  ruleAiToggleConfigButton: getElement("rule-ai-toggle-config-button"),
+  ruleAiConfigPanel: getElement("rule-ai-config-panel"),
+  ruleAiModelInput: getElement("rule-ai-model-input"),
+  ruleAiBaseUrlInput: getElement("rule-ai-base-url-input"),
+  ruleAiApiKeyInput: getElement("rule-ai-api-key-input"),
   ruleAiApplyBar: getElement("rule-ai-apply-bar"),
   ruleAiApplyTitle: getElement("rule-ai-apply-title"),
   ruleAiApplySummary: getElement("rule-ai-apply-summary"),
@@ -163,8 +169,10 @@ const state = {
   aiStopReason: "",
   aiAttempts: [],
   aiModalOpen: false,
+  aiConfigOpen: false,
   aiRequirement: "",
   aiMessages: [],
+  llmConfig: loadStoredLlmConfig(),
 };
 
 shell?.setPageContext({
@@ -174,6 +182,77 @@ shell?.setPageContext({
 
 function showToast(message, tone) {
   window.AgentGuardUI.showToast(message, tone);
+}
+
+function normalizeLlmConfig(input) {
+  const config = input && typeof input === "object" ? input : {};
+  return {
+    model: String(config.model || "").trim(),
+    base_url: String(config.base_url || "").trim(),
+    api_key: String(config.api_key || "").trim(),
+  };
+}
+
+function loadStoredLlmConfig() {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return normalizeLlmConfig({});
+  }
+  try {
+    const raw = window.localStorage.getItem(RULE_AI_LLM_CONFIG_STORAGE_KEY);
+    if (!raw) {
+      return normalizeLlmConfig({});
+    }
+    return normalizeLlmConfig(JSON.parse(raw));
+  } catch {
+    return normalizeLlmConfig({});
+  }
+}
+
+function buildRequestLlmConfig() {
+  const normalized = normalizeLlmConfig(state.llmConfig);
+  const payload = {};
+  if (normalized.model) {
+    payload.model = normalized.model;
+  }
+  if (normalized.base_url) {
+    payload.base_url = normalized.base_url;
+  }
+  if (normalized.api_key) {
+    payload.api_key = normalized.api_key;
+  }
+  return Object.keys(payload).length ? payload : null;
+}
+
+function persistLlmConfig() {
+  state.llmConfig = normalizeLlmConfig({
+    model: elements.ruleAiModelInput?.value,
+    base_url: elements.ruleAiBaseUrlInput?.value,
+    api_key: elements.ruleAiApiKeyInput?.value,
+  });
+  if (typeof window === "undefined" || !window.localStorage) {
+    return;
+  }
+  try {
+    window.localStorage.setItem(
+      RULE_AI_LLM_CONFIG_STORAGE_KEY,
+      JSON.stringify(state.llmConfig),
+    );
+  } catch {
+    // Ignore storage write failures and keep the in-memory config.
+  }
+}
+
+function hydrateLlmConfigInputs() {
+  const normalized = normalizeLlmConfig(state.llmConfig);
+  if (elements.ruleAiModelInput) {
+    elements.ruleAiModelInput.value = normalized.model;
+  }
+  if (elements.ruleAiBaseUrlInput) {
+    elements.ruleAiBaseUrlInput.value = normalized.base_url;
+  }
+  if (elements.ruleAiApiKeyInput) {
+    elements.ruleAiApiKeyInput.value = normalized.api_key;
+  }
 }
 
 function formatIssueList(issues = []) {
@@ -299,6 +378,13 @@ function renderAiThread() {
 function renderAiPanel() {
   if (elements.ruleAiModalBackdrop) {
     elements.ruleAiModalBackdrop.hidden = !state.aiModalOpen;
+  }
+  if (elements.ruleAiConfigPanel) {
+    elements.ruleAiConfigPanel.hidden = !state.aiConfigOpen;
+  }
+  if (elements.ruleAiToggleConfigButton) {
+    elements.ruleAiToggleConfigButton.textContent = state.aiConfigOpen ? "Hide LLM Settings" : "LLM Settings";
+    elements.ruleAiToggleConfigButton.setAttribute("aria-expanded", state.aiConfigOpen ? "true" : "false");
   }
   renderAiThread();
   const candidateReady = isCandidateReady(state.aiValidation, state.aiCandidate);
@@ -597,6 +683,7 @@ async function runAiGeneration({ refine = false } = {}) {
       user_feedback: feedback,
       current_candidate: refine ? state.aiCandidate : null,
       max_rounds: 4,
+      llm_config: buildRequestLlmConfig(),
     });
     if (!refine) {
       state.aiRequirement = requirement;
@@ -861,9 +948,25 @@ form.prepareNewRule();
 renderAiPanel();
 list.setFilter(state.filter);
 renderRuleList();
+hydrateLlmConfigInputs();
 
 elements.ruleAiGenerateButton?.addEventListener("click", () => {
   sendAiMessage();
+});
+
+elements.ruleAiToggleConfigButton?.addEventListener("click", () => {
+  state.aiConfigOpen = !state.aiConfigOpen;
+  renderAiPanel();
+});
+
+[
+  elements.ruleAiModelInput,
+  elements.ruleAiBaseUrlInput,
+  elements.ruleAiApiKeyInput,
+].forEach((input) => {
+  input?.addEventListener("input", () => {
+    persistLlmConfig();
+  });
 });
 
 elements.ruleAiResetButton?.addEventListener("click", () => {

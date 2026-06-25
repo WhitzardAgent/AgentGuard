@@ -298,7 +298,30 @@
                     <strong>Conversation</strong>
                     <p class="subtle">Ask for a policy, review the returned rule and rationale, then keep refining in plain language.</p>
                   </div>
-                  <button class="btn" id="rule-ai-reset-button" type="button">Reset Session</button>
+                  <div class="rule-ai-chat-header-actions">
+                    <button class="btn" id="rule-ai-toggle-config-button" type="button" aria-expanded="false" aria-controls="rule-ai-config-panel">LLM Settings</button>
+                    <button class="btn" id="rule-ai-reset-button" type="button">Reset Session</button>
+                  </div>
+                </div>
+
+                <div class="rule-ai-config-panel" id="rule-ai-config-panel" hidden>
+                  <div class="rule-ai-config-header">
+                    <strong>LLM Settings</strong>
+                  </div>
+                  <div class="rule-ai-config-grid">
+                    <div class="field">
+                      <label for="rule-ai-model-input">Model</label>
+                      <input id="rule-ai-model-input" type="text" placeholder="gpt-4o-mini">
+                    </div>
+                    <div class="field">
+                      <label for="rule-ai-base-url-input">Base URL</label>
+                      <input id="rule-ai-base-url-input" type="text" placeholder="api.openai.com/v1">
+                    </div>
+                    <div class="field">
+                      <label for="rule-ai-api-key-input">API Key</label>
+                      <input id="rule-ai-api-key-input" type="password" placeholder="sk-...">
+                    </div>
+                  </div>
                 </div>
 
                 <div class="rule-ai-thread" id="rule-ai-thread">
