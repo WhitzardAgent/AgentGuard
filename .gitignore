@@ -73,3 +73,5 @@ secrets/
 docs/_book/
 node_modules/
 package-lock.json
+
+.codex/

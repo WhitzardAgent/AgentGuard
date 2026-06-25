@@ -1,4 +1,4 @@
-"""Format AgentGuard runtime events as AgentDog trajectory text."""
+"""Format AgentGuard audit events as AgentDog trajectory text."""
 from __future__ import annotations
 
 from dataclasses import dataclass

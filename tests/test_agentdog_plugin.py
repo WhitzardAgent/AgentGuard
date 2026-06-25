@@ -52,6 +52,53 @@ def test_agentdog_formatter_marks_only_tool_result_errors():
     assert "\n[ERROR]" not in formatted.trajectory
 
 
+def test_agentdog_formatter_marks_denied_tool_result_as_not_executed():
+    ctx = RuntimeContext(session_id="s1")
+    blocked = '{"agentguard":"blocked","tool":"send_email_to","decision":"deny"}'
+    formatted = format_agentdog_trajectory(
+        [ev.tool_result(ctx, "send_email_to", blocked)]
+    )
+
+    assert (
+        "[TOOL_CALL: send_email_to] Tool was denied by AgentGuard and was not executed."
+        in formatted.trajectory
+    )
+    assert "[TOOL_RESULT: send_email_to]" not in formatted.trajectory
+
+
+def test_agentdog_formatter_marks_denied_langchain_tool_message_as_not_executed():
+    ctx = RuntimeContext(session_id="s1")
+    formatted = format_agentdog_trajectory(
+        [
+            ev.llm_input(
+                ctx,
+                [
+                    {
+                        "input": [
+                            {
+                                "type": "tool",
+                                "name": "send_email_to",
+                                "content": (
+                                    '{"agentguard":"blocked","tool":"send_email_to",'
+                                    '"decision":"deny"}'
+                                ),
+                            }
+                        ],
+                        "role": "user",
+                        "content": "",
+                    }
+                ],
+            )
+        ]
+    )
+
+    assert (
+        "[TOOL_CALL: send_email_to] Tool was denied by AgentGuard and was not executed."
+        in formatted.trajectory
+    )
+    assert "[TOOL_RESULT: send_email_to]" not in formatted.trajectory
+
+
 def test_agentdog_formatter_uses_dynamic_unknown_role_tag():
     ctx = RuntimeContext(session_id="s1")
     llm_input = ev.llm_input(
