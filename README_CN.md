@@ -411,7 +411,6 @@ https://github.com/user-attachments/assets/75a17e37-7f51-4c59-96fa-ea449eb79859
 ### v2.1
 
 - 兼容 LlamaIndex、Langflow。
-- 兼容 AgentDoG plugin。
 - 支持基于大模型的规则生成。
 
 ### v2.0

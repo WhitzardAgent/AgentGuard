@@ -78,22 +78,6 @@ def builtin_rules() -> list[PolicyRule]:
         #     risk_signals=["pii_email", "pii_detected"],
         # ),
         # PolicyRule(
-        #     rule_id="deny_agentdog_exfiltration",
-        #     effect=PolicyEffect.DENY,
-        #     reason="AgentDoG detected a trajectory-level exfiltration pattern.",
-        #     priority=120,
-        #     event_types=["tool_invoke"],
-        #     risk_signals=["exfiltration_detected"],
-        # ),
-        # PolicyRule(
-        #     rule_id="review_agentdog_high_risk",
-        #     effect=PolicyEffect.REQUIRE_REMOTE_REVIEW,
-        #     reason="AgentDoG flagged high trajectory risk.",
-        #     priority=65,
-        #     event_types=["tool_invoke", "llm_output"],
-        #     risk_signals=["agentdog_high_risk", "instruction_hijack"],
-        # ),
-        # PolicyRule(
         #     rule_id="deny_prompt_injection_tool",
         #     effect=PolicyEffect.DENY,
         #     reason="Tool result injection leading to unsafe tool call.",

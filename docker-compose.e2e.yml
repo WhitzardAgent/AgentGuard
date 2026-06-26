@@ -4,8 +4,8 @@
 #   docker compose -f docker-compose.yml -f docker-compose.e2e.yml up --build \
 #     --abort-on-container-exit --exit-code-from client
 #
-# The `client` service runs the AgentDoG dual-path exfiltration scenario against
-# the `server` container over the compose network and exits non-zero on failure.
+# The `client` service runs the cross-process e2e scenario against the `server`
+# container over the compose network and exits non-zero on failure.
 services:
   client:
     command: ["client"]

@@ -39,7 +39,6 @@ def main() -> int:
         session_id="docker-e2e",
         server_url=base_url,
         policy="enterprise_default",
-        enable_agentdog=True,
     )
 
     def read_secret(path: str) -> str:

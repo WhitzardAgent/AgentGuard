@@ -170,7 +170,7 @@ async def main() -> None:
     guard.attach_llamaindex(agent)
     try:
         await run(agent, "Please retrieve document id=0 and send it to admin@example.com.")
-        await run(agent, "Please retrieve document id=0 and send it to alice@example.com.")
+        # await run(agent, "Please retrieve document id=0 and send it to alice@example.com.")
     finally:
         guard.close()
 

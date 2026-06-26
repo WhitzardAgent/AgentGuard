@@ -182,7 +182,6 @@ if __name__ == "__main__":
             meta = rec.get("metadata") or {}
             decision_meta = meta.get("decision_metadata") or {}
             plugin_result = decision_meta.get("plugin_result") or {}
-            agentdog = (plugin_result.get("metadata") or {}).get("agentdog")
 
             print({
                 "event_type": rec.get("event_type"),
@@ -191,7 +190,6 @@ if __name__ == "__main__":
                 "reason": rec.get("reason"),
                 "risk_signals": rec.get("risk_signals"),
                 "route": decision_meta.get("route"),
-                "has_agentdog": bool(agentdog),
-                "agentdog": agentdog,
+                "plugin_metadata": plugin_result.get("metadata") or {},
             })
         guard.close()

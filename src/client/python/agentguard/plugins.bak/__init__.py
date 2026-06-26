@@ -2,10 +2,6 @@
 from __future__ import annotations
 
 from agentguard.plugins.base import ClientPlugin
-from agentguard.plugins.builtin.agentdog_proxy import (
-    AgentDoGProxyConfig,
-    AgentDoGProxyPlugin,
-)
 from agentguard.plugins.manager import PluginManager
 from agentguard.plugins.registry import PluginRegistry
 
@@ -13,6 +9,4 @@ __all__ = [
     "ClientPlugin",
     "PluginManager",
     "PluginRegistry",
-    "AgentDoGProxyPlugin",
-    "AgentDoGProxyConfig",
 ]

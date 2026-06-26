@@ -168,18 +168,18 @@ def test_observer_records_traffic_audit_and_tickets():
     assert con.approvals("agent-alpha") == []
 
 
-def test_observer_exposes_agentdog_plugin_summary():
-    class FakeAgentDogPlugin(BasePlugin):
-        name = "agentdog"
+def test_observer_exposes_plugin_summary_metadata():
+    class FakeDiagnosticPlugin(BasePlugin):
+        name = "diagnostic"
         event_types = [EventType.TOOL_INVOKE]
 
         def check(self, event, context, trajectory_window=None):
             return CheckResult(
                 metadata={
-                    "agentdog": {
+                    "diagnostic": {
                         "prediction": 0,
                         "label": "safe",
-                        "reason": "allowed by fake AgentDog",
+                        "reason": "allowed by fake diagnostic plugin",
                     }
                 }
             )
@@ -188,7 +188,7 @@ def test_observer_exposes_agentdog_plugin_summary():
         RuntimeManager(
             plugin_config={
                 "phases": {
-                    "tool_before": {"client": [], "server": [FakeAgentDogPlugin]}
+                    "tool_before": {"client": [], "server": [FakeDiagnosticPlugin]}
                 }
             }
         )
@@ -196,7 +196,7 @@ def test_observer_exposes_agentdog_plugin_summary():
 
     con.manager.decide(
         {
-            "context": {"session_id": "s-agentdog", "agent_id": "agent-alpha"},
+            "context": {"session_id": "s-diagnostic", "agent_id": "agent-alpha"},
             "current_event": {
                 "event_type": "tool_invoke",
                 "payload": {"tool_name": "send_email", "arguments": {}, "capabilities": []},
@@ -206,13 +206,13 @@ def test_observer_exposes_agentdog_plugin_summary():
     )
 
     traffic = con.traffic("agent-alpha")
-    assert traffic[0]["plugin_summary"][0]["name"] == "agentdog"
+    assert traffic[0]["plugin_summary"][0]["name"] == "diagnostic"
     assert traffic[0]["plugin_summary"][0]["label"] == "safe"
 
     audit = con.audit_recent("agent-alpha")
     decision = audit[0]["decision"]
-    assert decision["plugin_result"]["metadata"]["agentdog"]["prediction"] == 0
-    assert decision["plugin_summary"][0]["reason"] == "allowed by fake AgentDog"
+    assert decision["plugin_result"]["metadata"]["diagnostic"]["prediction"] == 0
+    assert decision["plugin_summary"][0]["reason"] == "allowed by fake diagnostic plugin"
 
 
 def test_health_reports_rule_counts():

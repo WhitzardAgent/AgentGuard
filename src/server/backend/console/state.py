@@ -529,21 +529,8 @@ def _safe_dict(value: Any) -> dict[str, Any]:
 def _plugin_summary(plugin_result: dict[str, Any]) -> list[dict[str, Any]]:
     metadata = _safe_dict(plugin_result.get("metadata"))
     summary: list[dict[str, Any]] = []
-    agentdog = _safe_dict(metadata.get("agentdog"))
-    if agentdog:
-        item = {
-            "name": "agentdog",
-            "label": str(agentdog.get("label") or agentdog.get("decision") or "unknown"),
-            "prediction": agentdog.get("prediction"),
-            "reason": str(agentdog.get("reason") or agentdog.get("error") or ""),
-        }
-        if agentdog.get("error"):
-            item["error"] = str(agentdog.get("error"))
-        summary.append(item)
 
     for name, value in metadata.items():
-        if name == "agentdog":
-            continue
         if isinstance(value, dict):
             label = value.get("decision") or value.get("label") or value.get("status") or "observed"
             reason = value.get("reason") or value.get("error") or ""

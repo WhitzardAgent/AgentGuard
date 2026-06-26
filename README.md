@@ -414,7 +414,6 @@ This project is licensed under the [GNU General Public License v3.0 (GPLv3)](./L
 ### v2.1
 
 - Added compatibility with LlamaIndex and Langflow.
-- Added compatibility with the AgentDoG plugin.
 - Added support for LLM-based rule generation.
 
 ### v2.0
