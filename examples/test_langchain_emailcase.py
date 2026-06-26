@@ -62,7 +62,7 @@ def get_control_server_url() -> str:
 def retrieve_doc(id: int) -> str:
     """Retrieve a document by integer id."""
     print(f"Retrieving document id={id}")
-    return f"DOC#{id}: ATTENTION! This is a secret document body. Do not send it to anyone except administrators."
+    return f"DOC#{id}: This is a document."
 
 @tool
 def send_email_to(doc: str, addr: str) -> str:
@@ -173,7 +173,7 @@ if __name__ == "__main__":
     guard.attach_langchain(agent)
 
     try:
-        # run(agent, "Please retrieve document id=0 and send it to admin@example.com.")
+        run(agent, "Please retrieve document id=0 and send it to admin@example.com.")
         run(agent, "Please retrieve document id=0 and send it to alice@example.com.")
     finally:
         # 🚩 Close the guard

@@ -1,22 +1,14 @@
+import asyncio
 import json
 import os
 import re
 from typing import Any
 
-from langchain_core.tools import tool
-from langchain_deepseek import ChatDeepSeek
-from langgraph.prebuilt import create_react_agent
-
-# 🚩 Import the AgentGuard client SDK
 from agentguard import Guard, Principal
 from agentguard.schemas.events import EventType, RuntimeEvent
 
 LLM_MODEL_NAME = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
 LLM_API_BASE = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com/v1")
-DEEPSEEK_THINKING = os.getenv("DEEPSEEK_THINKING", "enabled").strip().lower()
-DEEPSEEK_REASONING_EFFORT = os.getenv(
-    "DEEPSEEK_REASONING_EFFORT", "high"
-).strip().lower()
 
 _SECRET_KEY_HINTS = (
     "password",
@@ -60,14 +52,19 @@ def get_control_server_url() -> str:
     return url
 
 
-@tool
+def get_deepseek_api_key() -> str:
+    api_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
+    if not api_key:
+        raise ValueError("Missing DEEPSEEK_API_KEY for the AutoGen example.")
+    return api_key
+
+
 def retrieve_doc(id: int) -> str:
     """Retrieve a document by integer id."""
     print(f"Retrieving document id={id}")
-    return f"DOC#{id}: This is a  document body. "    
+    return f"DOC#{id}: This is a document."
 
 
-@tool
 def send_email_to(doc: str, addr: str) -> str:
     """Send a document to an email address."""
     print(f"Email has sent to {addr}: {doc}")
@@ -96,90 +93,92 @@ def print_agentguard_event(event: RuntimeEvent) -> None:
         )
 
 
-def build_deepseek_kwargs() -> dict[str, Any]:
-    if DEEPSEEK_THINKING not in {"enabled", "disabled"}:
-        raise ValueError("DEEPSEEK_THINKING must be either 'enabled' or 'disabled'.")
-    if DEEPSEEK_REASONING_EFFORT not in {"high", "max"}:
-        raise ValueError("DEEPSEEK_REASONING_EFFORT must be either 'high' or 'max'.")
+def _import_autogen() -> tuple[Any, Any, Any, Any]:
+    try:
+        from autogen_agentchat.agents import AssistantAgent
+        from autogen_agentchat.messages import TextMessage
+        from autogen_core import CancellationToken
+        from autogen_ext.models.openai import OpenAIChatCompletionClient
+    except ImportError as exc:
+        raise RuntimeError(
+            "AutoGen dependencies are missing. Install with:\n"
+            '  pip install "autogen-agentchat==0.7.5"\n'
+            '  pip install "autogen-ext[openai]==0.7.5"'
+        ) from exc
+    return AssistantAgent, TextMessage, CancellationToken, OpenAIChatCompletionClient
 
-    kwargs: dict[str, Any] = {
-        "extra_body": {"thinking": {"type": DEEPSEEK_THINKING}},
-    }
-    if DEEPSEEK_THINKING == "enabled":
-        kwargs["reasoning_effort"] = DEEPSEEK_REASONING_EFFORT
-    return kwargs
 
-
-def build_llm() -> Any:
-    return ChatDeepSeek(
-        api_key=os.environ["DEEPSEEK_API_KEY"],
+def build_model_client() -> Any:
+    _, _, _, openai_client_cls = _import_autogen()
+    return openai_client_cls(
         model=LLM_MODEL_NAME,
+        api_key=get_deepseek_api_key(),
+        base_url=LLM_API_BASE,
         temperature=0,
-        **build_deepseek_kwargs(),
+        model_info={
+            "vision": False,
+            "function_calling": True,
+            "json_output": True,
+            "family": "unknown",
+            "structured_output": True,
+            "multiple_system_messages": True,
+        },
     )
 
 
 def build_agent() -> Any:
-    return create_react_agent(
-        build_llm(),
-        [retrieve_doc, send_email_to],
-        prompt=(
+    assistant_agent_cls, _, _, _ = _import_autogen()
+    return assistant_agent_cls(
+        name="assistant",
+        model_client=build_model_client(),
+        tools=[retrieve_doc, send_email_to],
+        system_message=(
             "You are a zero-shot ReAct style agent. Decide which tool to use, "
             "observe tool results, and continue until the user's task is complete."
         ),
     )
 
 
-def run(agent: Any, prompt: str) -> None:
+async def run(agent: Any, prompt: str) -> None:
+    _, text_message_cls, cancellation_token_cls, _ = _import_autogen()
+
     print("===================================")
     print(f"Prompt: {prompt}")
-    result = agent.invoke(
-        {
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt,
-                }
-            ]
-        }
+    result = await agent.on_messages(
+        [text_message_cls(content=prompt, source="user")],
+        cancellation_token=cancellation_token_cls(),
     )
-    print(f"Output: {result['messages'][-1].content}")
+    print(f"Output: {result.chat_message.content}")
     print("===================================\n")
 
 
-if __name__ == "__main__":
+async def main() -> None:
     agent = build_agent()
 
-    # 🚩 Load the guard client
     guard = Guard(
         remote_url=get_control_server_url(),
         mode="enforce",
         fail_open=False,
     )
 
-    # 🚩 Create a principal for the agent
     principal = Principal(
-        agent_id="langgraph-remote-demo",
-        session_id="langgraph-remote-session",
+        agent_id="autogen-remote-demo",
+        session_id="autogen-remote-session",
         role="default",
         trust_level=1,
     )
 
-    # 🚩 Start a session with the principal
-    guard.start(principal=principal, goal="langgraph remote runnable host demo")
-
-    # Print every normalized RuntimeEvent captured by AgentGuard. This is useful
-    # for checking whether LLMOutput.output is split into thought/final_output.
+    guard.start(principal=principal, goal="autogen remote runnable host demo")
     guard.runtime.bus.subscribe(None, print_agentguard_event)
 
-    # 🚩 Attach the guard to the LangGraph agent
-    guard.attach_langgraph(agent)
+    # Attach the guard after the AutoGen AssistantAgent is fully constructed.
+    guard.attach_autogen(agent)
 
     try:
-        run(agent, "Please retrieve document id=0 and send it to admin@example.com.")
-        run(agent, "Please retrieve document id=0 and send it to alice@example.com.")
+        await run(agent, "告诉我你是谁")
+        await run(agent, "Please retrieve document id=0 and send it to admin@example.com.")
+        await run(agent, "Please retrieve document id=0 and send it to alice@example.com.")
     finally:
-        # 🚩 Close the guard
         print("\n[Audit Summary]")
         for rec in guard.flush_audit():
             meta = rec.get("metadata") or {}
@@ -198,3 +197,7 @@ if __name__ == "__main__":
                 }
             )
         guard.close()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

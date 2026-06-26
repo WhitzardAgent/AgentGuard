@@ -6,9 +6,11 @@ import types
 import pytest
 
 from agentguard import AgentGuard
+from agentguard.adapters.agent import autogen as autogen_adapter
 from agentguard.adapters.agent.base import BaseAgentAdapter
 from agentguard.adapters.agent import langchain as langchain_adapter
 from agentguard.adapters.agent import langgraph as langgraph_adapter
+from agentguard.adapters.agent import openai_agents as openai_agents_adapter
 from agentguard.schemas import events as ev
 from agentguard.schemas.context import RuntimeContext
 
@@ -84,6 +86,91 @@ def test_attach_autogen_patches_tool_and_llm_method():
     assert "llm_input" in _event_types(guard)
     assert "llm_output" in _event_types(guard)
     assert _first_event(guard, "llm_output").metadata["output_type"] == "str"
+
+
+def test_autogen_output_uses_explicit_thought_field():
+    adapter = autogen_adapter.AutogenAgentAdapter()
+    normalized = adapter.normalize_llm_output(
+        label="create",
+        output={
+            "content": "visible answer",
+            "thought": "hidden reasoning",
+        },
+    ).payload
+
+    event = ev.llm_output(RuntimeContext(session_id="s"), normalized)
+
+    assert normalized["output"] == "visible answer"
+    assert normalized["thought"] == "hidden reasoning"
+    assert normalized["final_output"] == "visible answer"
+    assert event.payload.output == "visible answer"
+    assert event.payload.thought == "hidden reasoning"
+    assert event.payload.final_output == "visible answer"
+
+
+def test_autogen_output_splits_think_tags_when_thought_missing():
+    adapter = autogen_adapter.AutogenAgentAdapter()
+    normalized = adapter.normalize_llm_output(
+        label="create",
+        output={"content": "<think>hidden reasoning</think>\nvisible answer"},
+    ).payload
+
+    event = ev.llm_output(RuntimeContext(session_id="s"), normalized)
+
+    assert normalized["output"] == "<think>hidden reasoning</think>\nvisible answer"
+    assert normalized["thought"] == "hidden reasoning"
+    assert normalized["final_output"] == "visible answer"
+    assert event.payload.output == "<think>hidden reasoning</think>\nvisible answer"
+    assert event.payload.thought == "hidden reasoning"
+    assert event.payload.final_output == "visible answer"
+
+
+def test_autogen_output_reads_chat_message_wrapper_fields():
+    adapter = autogen_adapter.AutogenAgentAdapter()
+    normalized = adapter.normalize_llm_output(
+        label="create",
+        output={
+            "chat_message": {
+                "content": "visible answer",
+                "thought": "hidden reasoning",
+            }
+        },
+    ).payload
+
+    event = ev.llm_output(RuntimeContext(session_id="s"), normalized)
+
+    assert normalized["output"] == "visible answer"
+    assert normalized["thought"] == "hidden reasoning"
+    assert normalized["final_output"] == "visible answer"
+    assert event.payload.output == "visible answer"
+    assert event.payload.thought == "hidden reasoning"
+    assert event.payload.final_output == "visible answer"
+
+
+def test_autogen_tool_call_only_output_is_empty():
+    adapter = autogen_adapter.AutogenAgentAdapter()
+    normalized = adapter.normalize_llm_output(
+        label="create",
+        output={
+            "content": [
+                {
+                    "id": "call_1",
+                    "name": "retrieve_doc",
+                    "arguments": "{\"id\": 0}",
+                }
+            ],
+            "thought": "I should call the tool first.",
+        },
+    ).payload
+
+    event = ev.llm_output(RuntimeContext(session_id="s"), normalized)
+
+    assert normalized["output"] == ""
+    assert normalized["final_output"] is None
+    assert "thought" not in normalized
+    assert event.payload.output == ""
+    assert event.payload.thought is None
+    assert event.payload.final_output is None
 
 
 def test_attach_langchain_patches_tools_by_name():
@@ -757,6 +844,81 @@ def test_langgraph_and_langchain_adapter_boundaries():
     assert langchain.can_wrap(PureLangGraph()) is False
     assert langgraph.can_wrap(LangChainAgent()) is False
     assert langchain.can_wrap(LangChainAgent()) is True
+
+
+class _FakeOpenAIResponsesToolCall:
+    def __init__(self, arguments: str, call_id: str, name: str) -> None:
+        self.arguments = arguments
+        self.call_id = call_id
+        self.name = name
+        self.type = "function_call"
+        self.id = None
+        self.namespace = None
+        self.status = None
+
+
+class _FakeOpenAIResponsesOutputText:
+    def __init__(self, text: str) -> None:
+        self.annotations = None
+        self.text = text
+        self.type = "output_text"
+        self.logprobs = None
+
+
+class _FakeOpenAIResponsesOutputMessage:
+    def __init__(self, text: str) -> None:
+        self.id = None
+        self.content = [_FakeOpenAIResponsesOutputText(text)]
+        self.role = "assistant"
+        self.status = None
+        self.type = "message"
+        self.phase = None
+
+
+class _FakeOpenAIModelResponse:
+    def __init__(self, output: list[object]) -> None:
+        self.output = output
+        self.usage = None
+        self.response_id = "resp_1"
+        self.request_id = "req_1"
+
+
+def test_openai_agents_tool_call_only_output_is_empty():
+    adapter = openai_agents_adapter.OpenAIAgentsAdapter()
+    normalized = adapter.normalize_llm_output(
+        label="get_response",
+        output=_FakeOpenAIModelResponse(
+            [_FakeOpenAIResponsesToolCall('{"id":0}', "call_1", "retrieve_doc")]
+        ),
+    ).payload
+
+    event = ev.llm_output(RuntimeContext(session_id="s"), normalized)
+
+    assert normalized["output"] == ""
+    assert normalized["final_output"] is None
+    assert "thought" not in normalized
+    assert event.payload.output == ""
+    assert event.payload.thought is None
+    assert event.payload.final_output is None
+
+
+def test_openai_agents_output_text_sets_final_output():
+    adapter = openai_agents_adapter.OpenAIAgentsAdapter()
+    normalized = adapter.normalize_llm_output(
+        label="get_response",
+        output=_FakeOpenAIModelResponse(
+            [_FakeOpenAIResponsesOutputMessage("Done.")]
+        ),
+    ).payload
+
+    event = ev.llm_output(RuntimeContext(session_id="s"), normalized)
+
+    assert normalized["output"] == "Done."
+    assert normalized["final_output"] == "Done."
+    assert "thought" not in normalized
+    assert event.payload.output == "Done."
+    assert event.payload.thought is None
+    assert event.payload.final_output == "Done."
 
 
 @pytest.mark.asyncio

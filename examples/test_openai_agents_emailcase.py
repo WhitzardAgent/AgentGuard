@@ -1,22 +1,19 @@
+import asyncio
 import json
 import os
 import re
 from typing import Any
 
-from langchain_core.tools import tool
-from langchain_deepseek import ChatDeepSeek
-from langgraph.prebuilt import create_react_agent
+import _bootstrap  # noqa: F401
+from agents import Agent, Runner, function_tool, set_default_openai_client, set_tracing_disabled
+from openai import AsyncOpenAI
 
-# 🚩 Import the AgentGuard client SDK
 from agentguard import Guard, Principal
 from agentguard.schemas.events import EventType, RuntimeEvent
 
-LLM_MODEL_NAME = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
-LLM_API_BASE = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com/v1")
-DEEPSEEK_THINKING = os.getenv("DEEPSEEK_THINKING", "enabled").strip().lower()
-DEEPSEEK_REASONING_EFFORT = os.getenv(
-    "DEEPSEEK_REASONING_EFFORT", "high"
-).strip().lower()
+OPENAI_MODEL_NAME = os.getenv("OPENAI_MODEL", "gpt-5.4").strip()
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "").strip()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 
 _SECRET_KEY_HINTS = (
     "password",
@@ -60,14 +57,37 @@ def get_control_server_url() -> str:
     return url
 
 
-@tool
+def configure_openai_client() -> None:
+    """Allow the example to target OpenAI-compatible endpoints via OPENAI_BASE_URL."""
+    if not OPENAI_BASE_URL:
+        return
+    if "<" in OPENAI_BASE_URL or ">" in OPENAI_BASE_URL or " " in OPENAI_BASE_URL:
+        raise ValueError(
+            "Invalid OPENAI_BASE_URL. Use a real endpoint, for example "
+            "https://api.openai.com/v1 or your compatible provider URL."
+        )
+    if not OPENAI_API_KEY:
+        raise ValueError("OPENAI_API_KEY is required when OPENAI_BASE_URL is set.")
+
+    # Custom OpenAI-compatible providers often do not support OpenAI tracing.
+    set_tracing_disabled(True)
+    set_default_openai_client(
+        AsyncOpenAI(
+            api_key=OPENAI_API_KEY,
+            base_url=OPENAI_BASE_URL,
+        ),
+        use_for_tracing=False,
+    )
+
+
+@function_tool
 def retrieve_doc(id: int) -> str:
     """Retrieve a document by integer id."""
     print(f"Retrieving document id={id}")
-    return f"DOC#{id}: This is a  document body. "    
+    return f"DOC#{id}: This is a document."
 
 
-@tool
+@function_tool
 def send_email_to(doc: str, addr: str) -> str:
     """Send a document to an email address."""
     print(f"Email has sent to {addr}: {doc}")
@@ -96,90 +116,51 @@ def print_agentguard_event(event: RuntimeEvent) -> None:
         )
 
 
-def build_deepseek_kwargs() -> dict[str, Any]:
-    if DEEPSEEK_THINKING not in {"enabled", "disabled"}:
-        raise ValueError("DEEPSEEK_THINKING must be either 'enabled' or 'disabled'.")
-    if DEEPSEEK_REASONING_EFFORT not in {"high", "max"}:
-        raise ValueError("DEEPSEEK_REASONING_EFFORT must be either 'high' or 'max'.")
-
-    kwargs: dict[str, Any] = {
-        "extra_body": {"thinking": {"type": DEEPSEEK_THINKING}},
-    }
-    if DEEPSEEK_THINKING == "enabled":
-        kwargs["reasoning_effort"] = DEEPSEEK_REASONING_EFFORT
-    return kwargs
-
-
-def build_llm() -> Any:
-    return ChatDeepSeek(
-        api_key=os.environ["DEEPSEEK_API_KEY"],
-        model=LLM_MODEL_NAME,
-        temperature=0,
-        **build_deepseek_kwargs(),
-    )
-
-
-def build_agent() -> Any:
-    return create_react_agent(
-        build_llm(),
-        [retrieve_doc, send_email_to],
-        prompt=(
+def build_agent() -> Agent:
+    return Agent(
+        name="openai-agentguard-demo",
+        model=OPENAI_MODEL_NAME,
+        instructions=(
             "You are a zero-shot ReAct style agent. Decide which tool to use, "
             "observe tool results, and continue until the user's task is complete."
         ),
+        tools=[retrieve_doc, send_email_to],
     )
 
 
-def run(agent: Any, prompt: str) -> None:
+async def run(agent: Agent, prompt: str) -> None:
     print("===================================")
     print(f"Prompt: {prompt}")
-    result = agent.invoke(
-        {
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt,
-                }
-            ]
-        }
-    )
-    print(f"Output: {result['messages'][-1].content}")
+    result = await Runner.run(agent, prompt)
+    print(f"Output: {result.final_output}")
     print("===================================\n")
 
 
-if __name__ == "__main__":
+async def main() -> None:
+    configure_openai_client()
     agent = build_agent()
 
-    # 🚩 Load the guard client
     guard = Guard(
         remote_url=get_control_server_url(),
         mode="enforce",
         fail_open=False,
     )
 
-    # 🚩 Create a principal for the agent
     principal = Principal(
-        agent_id="langgraph-remote-demo",
-        session_id="langgraph-remote-session",
+        agent_id="openai-agents-remote-demo",
+        session_id="openai-agents-remote-session",
         role="default",
         trust_level=1,
     )
 
-    # 🚩 Start a session with the principal
-    guard.start(principal=principal, goal="langgraph remote runnable host demo")
-
-    # Print every normalized RuntimeEvent captured by AgentGuard. This is useful
-    # for checking whether LLMOutput.output is split into thought/final_output.
+    guard.start(principal=principal, goal="openai agents remote runnable host demo")
     guard.runtime.bus.subscribe(None, print_agentguard_event)
-
-    # 🚩 Attach the guard to the LangGraph agent
-    guard.attach_langgraph(agent)
+    guard.attach_openai_agents(agent)
 
     try:
-        run(agent, "Please retrieve document id=0 and send it to admin@example.com.")
-        run(agent, "Please retrieve document id=0 and send it to alice@example.com.")
+        await run(agent, "Please retrieve document id=0 and send it to admin@example.com.")
+        await run(agent, "Please retrieve document id=0 and send it to alice@example.com.")
     finally:
-        # 🚩 Close the guard
         print("\n[Audit Summary]")
         for rec in guard.flush_audit():
             meta = rec.get("metadata") or {}
@@ -198,3 +179,7 @@ if __name__ == "__main__":
                 }
             )
         guard.close()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

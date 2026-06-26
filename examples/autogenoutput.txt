@@ -1,0 +1,731 @@
+===================================
+Prompt: 告诉我你是谁
+
+[AgentGuard Event]
+{
+  "event_id": "evt_3a5d35decfbf4a51",
+  "event_type": "llm_input",
+  "timestamp": 1782466825.0131211,
+  "context": {
+    "session_id": "autogen-remote-session",
+    "user_id": null,
+    "agent_id": "autogen-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46159/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46159/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46159/v1/client/health",
+      "principal": {
+        "session_id": "autogen-remote-session",
+        "agent_id": "autogen-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "autogen remote runnable host demo"
+    }
+  },
+  "payload": {
+    "messages": [
+      {
+        "label": "create",
+        "args": [
+          [
+            {
+              "content": "You are a zero-shot ReAct style agent. Decide which tool to use, observe tool results, and continue until the user's task is complete.",
+              "type": "SystemMessage"
+            },
+            {
+              "content": "告诉我你是谁",
+              "source": "user",
+              "type": "UserMessage"
+            }
+          ]
+        ],
+        "kwargs": {
+          "tools": [
+            {
+              "name": "retrieve_doc",
+              "description": "Retrieve a document by integer id.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "id",
+                    "title": "Id",
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "id"
+                ],
+                "additionalProperties": false
+              },
+              "strict": false
+            },
+            {
+              "name": "send_email_to",
+              "description": "Send a document to an email address.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "doc": {
+                    "description": "doc",
+                    "title": "Doc",
+                    "type": "string"
+                  },
+                  "addr": {
+                    "description": "addr",
+                    "title": "Addr",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "doc",
+                  "addr"
+                ],
+                "additionalProperties": false
+              },
+              "strict": false
+            }
+          ],
+          "cancellation_token": "[REDACTED]",
+          "json_output": null
+        },
+        "role": "user",
+        "content": ""
+      }
+    ]
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "autogen",
+    "label": "create",
+    "owner_type": "OpenAIChatCompletionClient",
+    "owner_module": "autogen_ext.models.openai._openai_client",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_812b70d3b8414a62",
+  "event_type": "llm_output",
+  "timestamp": 1782466828.0698903,
+  "context": {
+    "session_id": "autogen-remote-session",
+    "user_id": null,
+    "agent_id": "autogen-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46159/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46159/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46159/v1/client/health",
+      "principal": {
+        "session_id": "autogen-remote-session",
+        "agent_id": "autogen-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "autogen remote runnable host demo"
+    }
+  },
+  "payload": {
+    "output": "你好！我是一个基于零样本 ReAct（推理-行动）风格的智能助手。我可以理解你的问题，自主决定是否需要调用工具来完成任务，并基于观察结果继续推理，直到完成你的需求。\n\n目前我配备了两个工具：\n1. **检索文档**（`retrieve_doc`）—— 按 ID 查找文档。\n2. **发送邮件**（`send_email_to`）—— 将文档内容发送到指定邮箱。\n\n你可以向我提问各种问题，或者让我执行涉及文档查询、邮件发送等操作的任务。有什么我可以帮你的吗？😊",
+    "thought": "用户问我是谁。我是一个AI助手，但系统提到我有一些工具可用。不过，用户只是问我是谁，这是一个简单的问题，不需要使用工具。我来介绍一下自己。",
+    "final_output": "你好！我是一个基于零样本 ReAct（推理-行动）风格的智能助手。我可以理解你的问题，自主决定是否需要调用工具来完成任务，并基于观察结果继续推理，直到完成你的需求。\n\n目前我配备了两个工具：\n1. **检索文档**（`retrieve_doc`）—— 按 ID 查找文档。\n2. **发送邮件**（`send_email_to`）—— 将文档内容发送到指定邮箱。\n\n你可以向我提问各种问题，或者让我执行涉及文档查询、邮件发送等操作的任务。有什么我可以帮你的吗？😊"
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "autogen",
+    "label": "create",
+    "owner_type": "OpenAIChatCompletionClient",
+    "owner_module": "autogen_ext.models.openai._openai_client",
+    "output_type": "dict",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+[AgentGuard LLMOutput Parsed]
+{
+  "output": "你好！我是一个基于零样本 ReAct（推理-行动）风格的智能助手。我可以理解你的问题，自主决定是否需要调用工具来完成任务，并基于观察结果继续推理，直到完成你的需求。\n\n目前我配备了两个工具：\n1. **检索文档**（`retrieve_doc`）—— 按 ID 查找文档。\n2. **发送邮件**（`send_email_to`）—— 将文档内容发送到指定邮箱。\n\n你可以向我提问各种问题，或者让我执行涉及文档查询、邮件发送等操作的任务。有什么我可以帮你的吗？😊",
+  "thought": "用户问我是谁。我是一个AI助手，但系统提到我有一些工具可用。不过，用户只是问我是谁，这是一个简单的问题，不需要使用工具。我来介绍一下自己。",
+  "final_output": "你好！我是一个基于零样本 ReAct（推理-行动）风格的智能助手。我可以理解你的问题，自主决定是否需要调用工具来完成任务，并基于观察结果继续推理，直到完成你的需求。\n\n目前我配备了两个工具：\n1. **检索文档**（`retrieve_doc`）—— 按 ID 查找文档。\n2. **发送邮件**（`send_email_to`）—— 将文档内容发送到指定邮箱。\n\n你可以向我提问各种问题，或者让我执行涉及文档查询、邮件发送等操作的任务。有什么我可以帮你的吗？😊"
+}
+Output: 你好！我是一个基于零样本 ReAct（推理-行动）风格的智能助手。我可以理解你的问题，自主决定是否需要调用工具来完成任务，并基于观察结果继续推理，直到完成你的需求。
+
+目前我配备了两个工具：
+1. **检索文档**（`retrieve_doc`）—— 按 ID 查找文档。
+2. **发送邮件**（`send_email_to`）—— 将文档内容发送到指定邮箱。
+
+你可以向我提问各种问题，或者让我执行涉及文档查询、邮件发送等操作的任务。有什么我可以帮你的吗？😊
+===================================
+
+===================================
+Prompt: Please retrieve document id=0 and send it to admin@example.com.
+
+[AgentGuard Event]
+{
+  "event_id": "evt_6abb3ab9bbec4127",
+  "event_type": "llm_input",
+  "timestamp": 1782466828.0729456,
+  "context": {
+    "session_id": "autogen-remote-session",
+    "user_id": null,
+    "agent_id": "autogen-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46159/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46159/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46159/v1/client/health",
+      "principal": {
+        "session_id": "autogen-remote-session",
+        "agent_id": "autogen-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "autogen remote runnable host demo"
+    }
+  },
+  "payload": {
+    "messages": [
+      {
+        "label": "create",
+        "args": [
+          [
+            {
+              "content": "You are a zero-shot ReAct style agent. Decide which tool to use, observe tool results, and continue until the user's task is complete.",
+              "type": "SystemMessage"
+            },
+            {
+              "content": "告诉我你是谁",
+              "source": "user",
+              "type": "UserMessage"
+            },
+            {
+              "content": "你好！我是一个基于零样本 ReAct（推理-行动）风格的智能助手。我可以理解你的问题，自主决定是否需要调用工具来完成任务，并基于观察结果继续推理，直到完成你的需求。\n\n目前我配备了两个工具：\n1. **检索文档**（`retrieve_doc`）—— 按 ID 查找文档。\n2. **发送邮件**（`send_email_to`）—— 将文档内容发送到指定邮箱。\n\n你可以向我提问各种问题，或者让我执行涉及文档查询、邮件发送等操作的任务。有什么我可以帮你的吗？😊",
+              "thought": "用户问我是谁。我是一个AI助手，但系统提到我有一些工具可用。不过，用户只是问我是谁，这是一个简单的问题，不需要使用工具。我来介绍一下自己。",
+              "source": "assistant",
+              "type": "AssistantMessage"
+            },
+            {
+              "content": "Please retrieve document id=0 and send it to admin@example.com.",
+              "source": "user",
+              "type": "UserMessage"
+            }
+          ]
+        ],
+        "kwargs": {
+          "tools": [
+            {
+              "name": "retrieve_doc",
+              "description": "Retrieve a document by integer id.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "id",
+                    "title": "Id",
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "id"
+                ],
+                "additionalProperties": false
+              },
+              "strict": false
+            },
+            {
+              "name": "send_email_to",
+              "description": "Send a document to an email address.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "doc": {
+                    "description": "doc",
+                    "title": "Doc",
+                    "type": "string"
+                  },
+                  "addr": {
+                    "description": "addr",
+                    "title": "Addr",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "doc",
+                  "addr"
+                ],
+                "additionalProperties": false
+              },
+              "strict": false
+            }
+          ],
+          "cancellation_token": "[REDACTED]",
+          "json_output": null
+        },
+        "role": "user",
+        "content": ""
+      }
+    ]
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "autogen",
+    "label": "create",
+    "owner_type": "OpenAIChatCompletionClient",
+    "owner_module": "autogen_ext.models.openai._openai_client",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_dd958935da3a4912",
+  "event_type": "llm_output",
+  "timestamp": 1782466829.6502442,
+  "context": {
+    "session_id": "autogen-remote-session",
+    "user_id": null,
+    "agent_id": "autogen-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46159/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46159/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46159/v1/client/health",
+      "principal": {
+        "session_id": "autogen-remote-session",
+        "agent_id": "autogen-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "autogen remote runnable host demo"
+    }
+  },
+  "payload": {
+    "output": "",
+    "thought": null,
+    "final_output": null
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "autogen",
+    "label": "create",
+    "owner_type": "OpenAIChatCompletionClient",
+    "owner_module": "autogen_ext.models.openai._openai_client",
+    "output_type": "dict",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+[AgentGuard LLMOutput Parsed]
+{
+  "output": "",
+  "thought": null,
+  "final_output": null
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_2dddf21ca92e4f4f",
+  "event_type": "tool_invoke",
+  "timestamp": 1782466829.6533012,
+  "context": {
+    "session_id": "autogen-remote-session",
+    "user_id": null,
+    "agent_id": "autogen-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46159/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46159/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46159/v1/client/health",
+      "principal": {
+        "session_id": "autogen-remote-session",
+        "agent_id": "autogen-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "autogen remote runnable host demo"
+    }
+  },
+  "payload": {
+    "tool_name": "retrieve_doc",
+    "arguments": {
+      "id": 0
+    },
+    "capabilities": []
+  },
+  "risk_signals": [],
+  "metadata": {
+    "tool_name": "retrieve_doc",
+    "interceptors": [
+      "tool"
+    ]
+  }
+}
+Retrieving document id=0
+
+[AgentGuard Event]
+{
+  "event_id": "evt_15fe312c1f574f26",
+  "event_type": "tool_result",
+  "timestamp": 1782466829.6557033,
+  "context": {
+    "session_id": "autogen-remote-session",
+    "user_id": null,
+    "agent_id": "autogen-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46159/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46159/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46159/v1/client/health",
+      "principal": {
+        "session_id": "autogen-remote-session",
+        "agent_id": "autogen-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "autogen remote runnable host demo"
+    }
+  },
+  "payload": {
+    "tool_name": "retrieve_doc",
+    "result": "DOC#0: This is a document."
+  },
+  "risk_signals": [],
+  "metadata": {
+    "interceptors": [
+      "tool_result"
+    ]
+  }
+}
+Output: DOC#0: This is a document.
+===================================
+
+===================================
+Prompt: Please retrieve document id=0 and send it to alice@example.com.
+
+[AgentGuard Event]
+{
+  "event_id": "evt_e3b6a8c2000b4152",
+  "event_type": "llm_input",
+  "timestamp": 1782466829.6587641,
+  "context": {
+    "session_id": "autogen-remote-session",
+    "user_id": null,
+    "agent_id": "autogen-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46159/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46159/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46159/v1/client/health",
+      "principal": {
+        "session_id": "autogen-remote-session",
+        "agent_id": "autogen-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "autogen remote runnable host demo"
+    }
+  },
+  "payload": {
+    "messages": [
+      {
+        "label": "create",
+        "args": [
+          [
+            {
+              "content": "You are a zero-shot ReAct style agent. Decide which tool to use, observe tool results, and continue until the user's task is complete.",
+              "type": "SystemMessage"
+            },
+            {
+              "content": "告诉我你是谁",
+              "source": "user",
+              "type": "UserMessage"
+            },
+            {
+              "content": "你好！我是一个基于零样本 ReAct（推理-行动）风格的智能助手。我可以理解你的问题，自主决定是否需要调用工具来完成任务，并基于观察结果继续推理，直到完成你的需求。\n\n目前我配备了两个工具：\n1. **检索文档**（`retrieve_doc`）—— 按 ID 查找文档。\n2. **发送邮件**（`send_email_to`）—— 将文档内容发送到指定邮箱。\n\n你可以向我提问各种问题，或者让我执行涉及文档查询、邮件发送等操作的任务。有什么我可以帮你的吗？😊",
+              "thought": "用户问我是谁。我是一个AI助手，但系统提到我有一些工具可用。不过，用户只是问我是谁，这是一个简单的问题，不需要使用工具。我来介绍一下自己。",
+              "source": "assistant",
+              "type": "AssistantMessage"
+            },
+            {
+              "content": "Please retrieve document id=0 and send it to admin@example.com.",
+              "source": "user",
+              "type": "UserMessage"
+            },
+            {
+              "content": [
+                {
+                  "id": "call_00_xf6XliCqIMQcCWEwzfIH7493",
+                  "arguments": "{\"id\": 0}",
+                  "name": "retrieve_doc"
+                }
+              ],
+              "thought": "好的，我来先检索文档 ID=0，然后将其发送到指定邮箱。",
+              "source": "assistant",
+              "type": "AssistantMessage"
+            },
+            {
+              "content": [
+                {
+                  "content": "DOC#0: This is a document.",
+                  "name": "retrieve_doc",
+                  "call_id": "call_00_xf6XliCqIMQcCWEwzfIH7493",
+                  "is_error": false
+                }
+              ],
+              "type": "FunctionExecutionResultMessage"
+            },
+            {
+              "content": "Please retrieve document id=0 and send it to alice@example.com.",
+              "source": "user",
+              "type": "UserMessage"
+            }
+          ]
+        ],
+        "kwargs": {
+          "tools": [
+            {
+              "name": "retrieve_doc",
+              "description": "Retrieve a document by integer id.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "id",
+                    "title": "Id",
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "id"
+                ],
+                "additionalProperties": false
+              },
+              "strict": false
+            },
+            {
+              "name": "send_email_to",
+              "description": "Send a document to an email address.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "doc": {
+                    "description": "doc",
+                    "title": "Doc",
+                    "type": "string"
+                  },
+                  "addr": {
+                    "description": "addr",
+                    "title": "Addr",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "doc",
+                  "addr"
+                ],
+                "additionalProperties": false
+              },
+              "strict": false
+            }
+          ],
+          "cancellation_token": "[REDACTED]",
+          "json_output": null
+        },
+        "role": "user",
+        "content": ""
+      }
+    ]
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "autogen",
+    "label": "create",
+    "owner_type": "OpenAIChatCompletionClient",
+    "owner_module": "autogen_ext.models.openai._openai_client",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_460d9a44aca7495a",
+  "event_type": "llm_output",
+  "timestamp": 1782466831.582944,
+  "context": {
+    "session_id": "autogen-remote-session",
+    "user_id": null,
+    "agent_id": "autogen-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46159/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46159/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46159/v1/client/health",
+      "principal": {
+        "session_id": "autogen-remote-session",
+        "agent_id": "autogen-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "autogen remote runnable host demo"
+    }
+  },
+  "payload": {
+    "output": "",
+    "thought": null,
+    "final_output": null
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "autogen",
+    "label": "create",
+    "owner_type": "OpenAIChatCompletionClient",
+    "owner_module": "autogen_ext.models.openai._openai_client",
+    "output_type": "dict",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+[AgentGuard LLMOutput Parsed]
+{
+  "output": "",
+  "thought": null,
+  "final_output": null
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_2feb83bafab0461d",
+  "event_type": "tool_invoke",
+  "timestamp": 1782466831.5863748,
+  "context": {
+    "session_id": "autogen-remote-session",
+    "user_id": null,
+    "agent_id": "autogen-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46159/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46159/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46159/v1/client/health",
+      "principal": {
+        "session_id": "autogen-remote-session",
+        "agent_id": "autogen-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "autogen remote runnable host demo"
+    }
+  },
+  "payload": {
+    "tool_name": "send_email_to",
+    "arguments": {
+      "doc": "This is a document.",
+      "addr": "alice@example.com"
+    },
+    "capabilities": []
+  },
+  "risk_signals": [],
+  "metadata": {
+    "tool_name": "send_email_to",
+    "interceptors": [
+      "tool"
+    ]
+  }
+}
+Output: {'agentguard': 'blocked', 'tool': 'send_email_to', 'reason': 'Low-trust principal cannot send document 0 to non-admin recipients', 'decision': 'deny'}
+===================================
+
+
+[Audit Summary]
+{'event_type': 'llm_input', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_output', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_input', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_output', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'tool_invoke', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'rule_based_plugin': {'matched': False, 'rule_id': None, 'effect': None, 'reason': '', 'matched_rule_ids': []}, 'policy_version': './rules/block_email_send.json', 'plugin_outcomes': [{'plugin': 'rule_based_plugin', 'decision_candidate': None, 'risk_signals': [], 'is_final': True, 'metadata': {'rule_based_plugin': {'matched': False, 'rule_id': None, 'effect': None, 'reason': '', 'matched_rule_ids': []}, 'policy_version': './rules/block_email_send.json'}}]}}
+{'event_type': 'tool_result', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_input', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_output', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'tool_invoke', 'decision_type': 'deny', 'policy_id': 'server:deny_doc0_send_to_non_admin_for_low_trust', 'reason': 'Low-trust principal cannot send document 0 to non-admin recipients', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'rule_based_plugin': {'matched': True, 'rule_id': 'deny_doc0_send_to_non_admin_for_low_trust', 'effect': 'deny', 'reason': 'Low-trust principal cannot send document 0 to non-admin recipients', 'matched_rule_ids': ['deny_doc0_send_to_non_admin_for_low_trust']}, 'policy_version': './rules/block_email_send.json', 'plugin_outcomes': [{'plugin': 'rule_based_plugin', 'decision_candidate': {'decision_type': 'deny', 'reason': 'Low-trust principal cannot send document 0 to non-admin recipients', 'policy_id': 'server:deny_doc0_send_to_non_admin_for_low_trust', 'confidence': None, 'risk_signals': [], 'metadata': {'explanation': "rule 'deny_doc0_send_to_non_admin_for_low_trust' (deny) won among ['deny_doc0_send_to_non_admin_for_low_trust']", 'matched_rule_ids': ['deny_doc0_send_to_non_admin_for_low_trust'], 'policy_version': './rules/block_email_send.json', 'plugin_outcomes': [{'plugin': 'rule_based_plugin', 'decision_candidate': {'decision_type': 'deny', 'reason': 'Low-trust principal cannot send document 0 to non-admin recipients', 'policy_id': 'server:deny_doc0_send_to_non_admin_for_low_trust', 'confidence': None, 'risk_signals': [], 'metadata': {'explanation': "rule 'deny_doc0_send_to_non_admin_for_low_trust' (deny) won among ['deny_doc0_send_to_non_admin_for_low_trust']", 'matched_rule_ids': ['deny_doc0_send_to_non_admin_for_low_trust'], 'policy_version': './rules/block_email_send.json'}}, 'risk_signals': [], 'is_final': True, 'metadata': {'rule_based_plugin': {'matched': True, 'rule_id': 'deny_doc0_send_to_non_admin_for_low_trust', 'effect': 'deny', 'reason': 'Low-trust principal cannot send document 0 to non-admin recipients', 'matched_rule_ids': ['deny_doc0_send_to_non_admin_for_low_trust']}, 'policy_version': './rules/block_email_send.json'}}]}}, 'risk_signals': [], 'is_final': True, 'metadata': {'rule_based_plugin': {'matched': True, 'rule_id': 'deny_doc0_send_to_non_admin_for_low_trust', 'effect': 'deny', 'reason': 'Low-trust principal cannot send document 0 to non-admin recipients', 'matched_rule_ids': ['deny_doc0_send_to_non_admin_for_low_trust']}, 'policy_version': './rules/block_email_send.json'}}], 'selected_outcome_index': 0}}

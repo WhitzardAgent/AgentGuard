@@ -1,0 +1,1329 @@
+===================================
+Prompt: Please retrieve document id=0 and send it to admin@example.com.
+
+[AgentGuard Event]
+{
+  "event_id": "evt_0cad5a80cdb14483",
+  "event_type": "llm_input",
+  "timestamp": 1782464356.0046625,
+  "context": {
+    "session_id": "langgraph-remote-session",
+    "user_id": null,
+    "agent_id": "langgraph-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:37183/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:37183/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:37183/v1/client/health",
+      "principal": {
+        "session_id": "langgraph-remote-session",
+        "agent_id": "langgraph-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langgraph remote runnable host demo"
+    }
+  },
+  "payload": {
+    "messages": [
+      {
+        "input": {
+          "messages": [
+            {
+              "type": "human",
+              "content": "Please retrieve document id=0 and send it to admin@example.com.",
+              "id": "dc70885d-c3b6-4857-a1da-00995bcdd5bd"
+            }
+          ],
+          "remaining_steps": 10006
+        },
+        "role": "user",
+        "content": ""
+      }
+    ]
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "langgraph",
+    "label": "invoke",
+    "owner_type": "RunnableSequence",
+    "owner_module": "langchain_core.runnables.base",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_776f206708b14e7a",
+  "event_type": "llm_output",
+  "timestamp": 1782464357.0557158,
+  "context": {
+    "session_id": "langgraph-remote-session",
+    "user_id": null,
+    "agent_id": "langgraph-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:37183/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:37183/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:37183/v1/client/health",
+      "principal": {
+        "session_id": "langgraph-remote-session",
+        "agent_id": "langgraph-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langgraph remote runnable host demo"
+    }
+  },
+  "payload": {
+    "output": "",
+    "thought": null,
+    "final_output": null
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "langgraph",
+    "label": "invoke",
+    "owner_type": "RunnableSequence",
+    "owner_module": "langchain_core.runnables.base",
+    "output_type": "dict",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+[AgentGuard LLMOutput Parsed]
+{
+  "output": "",
+  "thought": null,
+  "final_output": null
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_8489d42f9c264ff2",
+  "event_type": "tool_invoke",
+  "timestamp": 1782464357.0593424,
+  "context": {
+    "session_id": "langgraph-remote-session",
+    "user_id": null,
+    "agent_id": "langgraph-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:37183/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:37183/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:37183/v1/client/health",
+      "principal": {
+        "session_id": "langgraph-remote-session",
+        "agent_id": "langgraph-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langgraph remote runnable host demo"
+    }
+  },
+  "payload": {
+    "tool_name": "retrieve_doc",
+    "arguments": {
+      "id": 0
+    },
+    "capabilities": []
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "langgraph",
+    "owner_type": "StructuredTool",
+    "owner_module": "langchain_core.tools.structured",
+    "tool_name": "retrieve_doc",
+    "interceptors": [
+      "tool"
+    ]
+  }
+}
+Retrieving document id=0
+
+[AgentGuard Event]
+{
+  "event_id": "evt_e8a8b9a3fda44887",
+  "event_type": "tool_result",
+  "timestamp": 1782464357.061594,
+  "context": {
+    "session_id": "langgraph-remote-session",
+    "user_id": null,
+    "agent_id": "langgraph-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:37183/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:37183/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:37183/v1/client/health",
+      "principal": {
+        "session_id": "langgraph-remote-session",
+        "agent_id": "langgraph-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langgraph remote runnable host demo"
+    }
+  },
+  "payload": {
+    "tool_name": "retrieve_doc",
+    "result": "DOC#0: This is a  document body. "
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "langgraph",
+    "owner_type": "StructuredTool",
+    "owner_module": "langchain_core.tools.structured",
+    "interceptors": [
+      "tool_result"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_870ed63505db4f84",
+  "event_type": "llm_input",
+  "timestamp": 1782464357.0643525,
+  "context": {
+    "session_id": "langgraph-remote-session",
+    "user_id": null,
+    "agent_id": "langgraph-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:37183/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:37183/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:37183/v1/client/health",
+      "principal": {
+        "session_id": "langgraph-remote-session",
+        "agent_id": "langgraph-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langgraph remote runnable host demo"
+    }
+  },
+  "payload": {
+    "messages": [
+      {
+        "input": {
+          "messages": [
+            {
+              "type": "human",
+              "content": "Please retrieve document id=0 and send it to admin@example.com.",
+              "id": "dc70885d-c3b6-4857-a1da-00995bcdd5bd"
+            },
+            {
+              "type": "ai",
+              "content": "",
+              "id": "lc_run--019f0327-9ea7-7470-9048-4569463a4436-0",
+              "tool_calls": [
+                {
+                  "name": "retrieve_doc",
+                  "args": {
+                    "id": 0
+                  },
+                  "id": "call_00_OyN1xxblRP6BGCAdlaTf1909",
+                  "type": "tool_call"
+                }
+              ],
+              "additional_kwargs": {
+                "refusal": null,
+                "reasoning_content": "Let me start by retrieving document id=0."
+              },
+              "response_metadata": {
+                "token_usage": "[REDACTED]",
+                "model_provider": "deepseek",
+                "model_name": "deepseek-v4-flash",
+                "system_fingerprint": "fp_8b330d02d0_prod0820_fp8_kvcache_20260402",
+                "id": "3d932880-fa1b-4302-af7e-bad653451842",
+                "finish_reason": "tool_calls",
+                "logprobs": null
+              },
+              "usage_metadata": {
+                "input_tokens": "[REDACTED]",
+                "output_tokens": "[REDACTED]",
+                "total_tokens": "[REDACTED]",
+                "input_token_details": "[REDACTED]",
+                "output_token_details": "[REDACTED]"
+              }
+            },
+            {
+              "type": "tool",
+              "content": "DOC#0: This is a  document body. ",
+              "name": "retrieve_doc",
+              "id": "bb044171-8631-4e15-8905-1b28c0e57d0c"
+            }
+          ],
+          "remaining_steps": 10004
+        },
+        "role": "user",
+        "content": ""
+      }
+    ]
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "langgraph",
+    "label": "invoke",
+    "owner_type": "RunnableSequence",
+    "owner_module": "langchain_core.runnables.base",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_1bf071544def4c44",
+  "event_type": "llm_output",
+  "timestamp": 1782464358.3041694,
+  "context": {
+    "session_id": "langgraph-remote-session",
+    "user_id": null,
+    "agent_id": "langgraph-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:37183/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:37183/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:37183/v1/client/health",
+      "principal": {
+        "session_id": "langgraph-remote-session",
+        "agent_id": "langgraph-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langgraph remote runnable host demo"
+    }
+  },
+  "payload": {
+    "output": "Now let me send it to the specified email address.",
+    "thought": "Now I have the document content. Let me send it to admin@example.com.",
+    "final_output": "Now let me send it to the specified email address."
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "langgraph",
+    "label": "invoke",
+    "owner_type": "RunnableSequence",
+    "owner_module": "langchain_core.runnables.base",
+    "output_type": "dict",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+[AgentGuard LLMOutput Parsed]
+{
+  "output": "Now let me send it to the specified email address.",
+  "thought": "Now I have the document content. Let me send it to admin@example.com.",
+  "final_output": "Now let me send it to the specified email address."
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_808edea2f0994082",
+  "event_type": "tool_invoke",
+  "timestamp": 1782464358.3078103,
+  "context": {
+    "session_id": "langgraph-remote-session",
+    "user_id": null,
+    "agent_id": "langgraph-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:37183/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:37183/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:37183/v1/client/health",
+      "principal": {
+        "session_id": "langgraph-remote-session",
+        "agent_id": "langgraph-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langgraph remote runnable host demo"
+    }
+  },
+  "payload": {
+    "tool_name": "send_email_to",
+    "arguments": {
+      "doc": "DOC#0: This is a  document body. ",
+      "addr": "admin@example.com"
+    },
+    "capabilities": []
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "langgraph",
+    "owner_type": "StructuredTool",
+    "owner_module": "langchain_core.tools.structured",
+    "tool_name": "send_email_to",
+    "interceptors": [
+      "tool"
+    ]
+  }
+}
+Email has sent to admin@example.com: DOC#0: This is a  document body. 
+
+[AgentGuard Event]
+{
+  "event_id": "evt_a8eeb3579a5a48f2",
+  "event_type": "tool_result",
+  "timestamp": 1782464358.3103023,
+  "context": {
+    "session_id": "langgraph-remote-session",
+    "user_id": null,
+    "agent_id": "langgraph-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:37183/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:37183/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:37183/v1/client/health",
+      "principal": {
+        "session_id": "langgraph-remote-session",
+        "agent_id": "langgraph-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langgraph remote runnable host demo"
+    }
+  },
+  "payload": {
+    "tool_name": "send_email_to",
+    "result": "Email has sent to admin@example.com: DOC#0: This is a  document body. "
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "langgraph",
+    "owner_type": "StructuredTool",
+    "owner_module": "langchain_core.tools.structured",
+    "interceptors": [
+      "tool_result"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_667fad228ac9447b",
+  "event_type": "llm_input",
+  "timestamp": 1782464358.3133295,
+  "context": {
+    "session_id": "langgraph-remote-session",
+    "user_id": null,
+    "agent_id": "langgraph-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:37183/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:37183/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:37183/v1/client/health",
+      "principal": {
+        "session_id": "langgraph-remote-session",
+        "agent_id": "langgraph-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langgraph remote runnable host demo"
+    }
+  },
+  "payload": {
+    "messages": [
+      {
+        "input": {
+          "messages": [
+            {
+              "type": "human",
+              "content": "Please retrieve document id=0 and send it to admin@example.com.",
+              "id": "dc70885d-c3b6-4857-a1da-00995bcdd5bd"
+            },
+            {
+              "type": "ai",
+              "content": "",
+              "id": "lc_run--019f0327-9ea7-7470-9048-4569463a4436-0",
+              "tool_calls": [
+                {
+                  "name": "retrieve_doc",
+                  "args": {
+                    "id": 0
+                  },
+                  "id": "call_00_OyN1xxblRP6BGCAdlaTf1909",
+                  "type": "tool_call"
+                }
+              ],
+              "additional_kwargs": {
+                "refusal": null,
+                "reasoning_content": "Let me start by retrieving document id=0."
+              },
+              "response_metadata": {
+                "token_usage": "[REDACTED]",
+                "model_provider": "deepseek",
+                "model_name": "deepseek-v4-flash",
+                "system_fingerprint": "fp_8b330d02d0_prod0820_fp8_kvcache_20260402",
+                "id": "3d932880-fa1b-4302-af7e-bad653451842",
+                "finish_reason": "tool_calls",
+                "logprobs": null
+              },
+              "usage_metadata": {
+                "input_tokens": "[REDACTED]",
+                "output_tokens": "[REDACTED]",
+                "total_tokens": "[REDACTED]",
+                "input_token_details": "[REDACTED]",
+                "output_token_details": "[REDACTED]"
+              }
+            },
+            {
+              "type": "tool",
+              "content": "DOC#0: This is a  document body. ",
+              "name": "retrieve_doc",
+              "id": "bb044171-8631-4e15-8905-1b28c0e57d0c"
+            },
+            {
+              "type": "ai",
+              "content": "Now let me send it to the specified email address.",
+              "id": "lc_run--019f0327-a2ca-7222-ac5d-790e20f01452-0",
+              "tool_calls": [
+                {
+                  "name": "send_email_to",
+                  "args": {
+                    "doc": "DOC#0: This is a  document body. ",
+                    "addr": "admin@example.com"
+                  },
+                  "id": "call_00_gkek0OeUgSp11wJkOGCO9915",
+                  "type": "tool_call"
+                }
+              ],
+              "additional_kwargs": {
+                "refusal": null,
+                "reasoning_content": "Now I have the document content. Let me send it to admin@example.com."
+              },
+              "response_metadata": {
+                "token_usage": "[REDACTED]",
+                "model_provider": "deepseek",
+                "model_name": "deepseek-v4-flash",
+                "system_fingerprint": "fp_8b330d02d0_prod0820_fp8_kvcache_20260402",
+                "id": "61686147-9d94-4ebe-98f5-b85da6b105ad",
+                "finish_reason": "tool_calls",
+                "logprobs": null
+              },
+              "usage_metadata": {
+                "input_tokens": "[REDACTED]",
+                "output_tokens": "[REDACTED]",
+                "total_tokens": "[REDACTED]",
+                "input_token_details": "[REDACTED]",
+                "output_token_details": "[REDACTED]"
+              }
+            },
+            {
+              "type": "tool",
+              "content": "Email has sent to admin@example.com: DOC#0: This is a  document body. ",
+              "name": "send_email_to",
+              "id": "181aaa85-e567-45f0-b334-3436028cc967"
+            }
+          ],
+          "remaining_steps": 10002
+        },
+        "role": "user",
+        "content": ""
+      }
+    ]
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "langgraph",
+    "label": "invoke",
+    "owner_type": "RunnableSequence",
+    "owner_module": "langchain_core.runnables.base",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_11956fa8dab24f8b",
+  "event_type": "llm_output",
+  "timestamp": 1782464359.8191426,
+  "context": {
+    "session_id": "langgraph-remote-session",
+    "user_id": null,
+    "agent_id": "langgraph-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:37183/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:37183/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:37183/v1/client/health",
+      "principal": {
+        "session_id": "langgraph-remote-session",
+        "agent_id": "langgraph-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langgraph remote runnable host demo"
+    }
+  },
+  "payload": {
+    "output": "Done! Here's what happened:\n\n1. ✅ **Retrieved** document id=0 — its content is: \"DOC#0: This is a document body.\"\n2. ✅ **Sent** the document to **admin@example.com** successfully.",
+    "thought": "The task is complete. I retrieved document id=0 and sent it to admin@example.com successfully.",
+    "final_output": "Done! Here's what happened:\n\n1. ✅ **Retrieved** document id=0 — its content is: \"DOC#0: This is a document body.\"\n2. ✅ **Sent** the document to **admin@example.com** successfully."
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "langgraph",
+    "label": "invoke",
+    "owner_type": "RunnableSequence",
+    "owner_module": "langchain_core.runnables.base",
+    "output_type": "dict",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+[AgentGuard LLMOutput Parsed]
+{
+  "output": "Done! Here's what happened:\n\n1. ✅ **Retrieved** document id=0 — its content is: \"DOC#0: This is a document body.\"\n2. ✅ **Sent** the document to **admin@example.com** successfully.",
+  "thought": "The task is complete. I retrieved document id=0 and sent it to admin@example.com successfully.",
+  "final_output": "Done! Here's what happened:\n\n1. ✅ **Retrieved** document id=0 — its content is: \"DOC#0: This is a document body.\"\n2. ✅ **Sent** the document to **admin@example.com** successfully."
+}
+Output: Done! Here's what happened:
+
+1. ✅ **Retrieved** document id=0 — its content is: "DOC#0: This is a document body."
+2. ✅ **Sent** the document to **admin@example.com** successfully.
+===================================
+
+===================================
+Prompt: Please retrieve document id=0 and send it to alice@example.com.
+
+[AgentGuard Event]
+{
+  "event_id": "evt_429b507b5b104585",
+  "event_type": "llm_input",
+  "timestamp": 1782464359.8231223,
+  "context": {
+    "session_id": "langgraph-remote-session",
+    "user_id": null,
+    "agent_id": "langgraph-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:37183/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:37183/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:37183/v1/client/health",
+      "principal": {
+        "session_id": "langgraph-remote-session",
+        "agent_id": "langgraph-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langgraph remote runnable host demo"
+    }
+  },
+  "payload": {
+    "messages": [
+      {
+        "input": {
+          "messages": [
+            {
+              "type": "human",
+              "content": "Please retrieve document id=0 and send it to alice@example.com.",
+              "id": "ef7aaf2a-35ec-4605-9164-3c1b97570b6d"
+            }
+          ],
+          "remaining_steps": 10006
+        },
+        "role": "user",
+        "content": ""
+      }
+    ]
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "langgraph",
+    "label": "invoke",
+    "owner_type": "RunnableSequence",
+    "owner_module": "langchain_core.runnables.base",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_7365883189d6424c",
+  "event_type": "llm_output",
+  "timestamp": 1782464360.8553615,
+  "context": {
+    "session_id": "langgraph-remote-session",
+    "user_id": null,
+    "agent_id": "langgraph-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:37183/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:37183/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:37183/v1/client/health",
+      "principal": {
+        "session_id": "langgraph-remote-session",
+        "agent_id": "langgraph-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langgraph remote runnable host demo"
+    }
+  },
+  "payload": {
+    "output": "I'll start by retrieving document id=0.",
+    "thought": "The user wants me to retrieve document id=0 and then send it to alice@example.com. Let me start by retrieving the document first.",
+    "final_output": "I'll start by retrieving document id=0."
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "langgraph",
+    "label": "invoke",
+    "owner_type": "RunnableSequence",
+    "owner_module": "langchain_core.runnables.base",
+    "output_type": "dict",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+[AgentGuard LLMOutput Parsed]
+{
+  "output": "I'll start by retrieving document id=0.",
+  "thought": "The user wants me to retrieve document id=0 and then send it to alice@example.com. Let me start by retrieving the document first.",
+  "final_output": "I'll start by retrieving document id=0."
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_9bb8891892d94e4c",
+  "event_type": "tool_invoke",
+  "timestamp": 1782464360.859089,
+  "context": {
+    "session_id": "langgraph-remote-session",
+    "user_id": null,
+    "agent_id": "langgraph-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:37183/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:37183/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:37183/v1/client/health",
+      "principal": {
+        "session_id": "langgraph-remote-session",
+        "agent_id": "langgraph-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langgraph remote runnable host demo"
+    }
+  },
+  "payload": {
+    "tool_name": "retrieve_doc",
+    "arguments": {
+      "id": 0
+    },
+    "capabilities": []
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "langgraph",
+    "owner_type": "StructuredTool",
+    "owner_module": "langchain_core.tools.structured",
+    "tool_name": "retrieve_doc",
+    "interceptors": [
+      "tool"
+    ]
+  }
+}
+Retrieving document id=0
+
+[AgentGuard Event]
+{
+  "event_id": "evt_b154f6314f224525",
+  "event_type": "tool_result",
+  "timestamp": 1782464360.861777,
+  "context": {
+    "session_id": "langgraph-remote-session",
+    "user_id": null,
+    "agent_id": "langgraph-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:37183/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:37183/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:37183/v1/client/health",
+      "principal": {
+        "session_id": "langgraph-remote-session",
+        "agent_id": "langgraph-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langgraph remote runnable host demo"
+    }
+  },
+  "payload": {
+    "tool_name": "retrieve_doc",
+    "result": "DOC#0: This is a  document body. "
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "langgraph",
+    "owner_type": "StructuredTool",
+    "owner_module": "langchain_core.tools.structured",
+    "interceptors": [
+      "tool_result"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_e8e1fb2c0bca44a0",
+  "event_type": "llm_input",
+  "timestamp": 1782464360.8648756,
+  "context": {
+    "session_id": "langgraph-remote-session",
+    "user_id": null,
+    "agent_id": "langgraph-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:37183/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:37183/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:37183/v1/client/health",
+      "principal": {
+        "session_id": "langgraph-remote-session",
+        "agent_id": "langgraph-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langgraph remote runnable host demo"
+    }
+  },
+  "payload": {
+    "messages": [
+      {
+        "input": {
+          "messages": [
+            {
+              "type": "human",
+              "content": "Please retrieve document id=0 and send it to alice@example.com.",
+              "id": "ef7aaf2a-35ec-4605-9164-3c1b97570b6d"
+            },
+            {
+              "type": "ai",
+              "content": "I'll start by retrieving document id=0.",
+              "id": "lc_run--019f0327-ad91-7701-97b6-78e40ea633b3-0",
+              "tool_calls": [
+                {
+                  "name": "retrieve_doc",
+                  "args": {
+                    "id": 0
+                  },
+                  "id": "call_00_QlTjWf9b82RqMJWpkqGi5291",
+                  "type": "tool_call"
+                }
+              ],
+              "additional_kwargs": {
+                "refusal": null,
+                "reasoning_content": "The user wants me to retrieve document id=0 and then send it to alice@example.com. Let me start by retrieving the document first."
+              },
+              "response_metadata": {
+                "token_usage": "[REDACTED]",
+                "model_provider": "deepseek",
+                "model_name": "deepseek-v4-flash",
+                "system_fingerprint": "fp_8b330d02d0_prod0820_fp8_kvcache_20260402",
+                "id": "cbf9b30c-f18d-4d56-8f1d-9ec5201aaff1",
+                "finish_reason": "tool_calls",
+                "logprobs": null
+              },
+              "usage_metadata": {
+                "input_tokens": "[REDACTED]",
+                "output_tokens": "[REDACTED]",
+                "total_tokens": "[REDACTED]",
+                "input_token_details": "[REDACTED]",
+                "output_token_details": "[REDACTED]"
+              }
+            },
+            {
+              "type": "tool",
+              "content": "DOC#0: This is a  document body. ",
+              "name": "retrieve_doc",
+              "id": "77051524-6a26-4ee6-a986-cd592c34df9b"
+            }
+          ],
+          "remaining_steps": 10004
+        },
+        "role": "user",
+        "content": ""
+      }
+    ]
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "langgraph",
+    "label": "invoke",
+    "owner_type": "RunnableSequence",
+    "owner_module": "langchain_core.runnables.base",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_3d3cdc87ddd9487f",
+  "event_type": "llm_output",
+  "timestamp": 1782464362.2172186,
+  "context": {
+    "session_id": "langgraph-remote-session",
+    "user_id": null,
+    "agent_id": "langgraph-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:37183/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:37183/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:37183/v1/client/health",
+      "principal": {
+        "session_id": "langgraph-remote-session",
+        "agent_id": "langgraph-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langgraph remote runnable host demo"
+    }
+  },
+  "payload": {
+    "output": "Now I'll send the document to alice@example.com.",
+    "thought": "Now I have the document content: \"This is a  document body.\" I need to send it to alice@example.com. Let me do that now.",
+    "final_output": "Now I'll send the document to alice@example.com."
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "langgraph",
+    "label": "invoke",
+    "owner_type": "RunnableSequence",
+    "owner_module": "langchain_core.runnables.base",
+    "output_type": "dict",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+[AgentGuard LLMOutput Parsed]
+{
+  "output": "Now I'll send the document to alice@example.com.",
+  "thought": "Now I have the document content: \"This is a  document body.\" I need to send it to alice@example.com. Let me do that now.",
+  "final_output": "Now I'll send the document to alice@example.com."
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_cc6f0975e0b043d4",
+  "event_type": "tool_invoke",
+  "timestamp": 1782464362.2209184,
+  "context": {
+    "session_id": "langgraph-remote-session",
+    "user_id": null,
+    "agent_id": "langgraph-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:37183/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:37183/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:37183/v1/client/health",
+      "principal": {
+        "session_id": "langgraph-remote-session",
+        "agent_id": "langgraph-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langgraph remote runnable host demo"
+    }
+  },
+  "payload": {
+    "tool_name": "send_email_to",
+    "arguments": {
+      "doc": "This is a  document body.",
+      "addr": "alice@example.com"
+    },
+    "capabilities": []
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "langgraph",
+    "owner_type": "StructuredTool",
+    "owner_module": "langchain_core.tools.structured",
+    "tool_name": "send_email_to",
+    "interceptors": [
+      "tool"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_f0a4d86a3dc64b4c",
+  "event_type": "llm_input",
+  "timestamp": 1782464362.2246299,
+  "context": {
+    "session_id": "langgraph-remote-session",
+    "user_id": null,
+    "agent_id": "langgraph-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:37183/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:37183/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:37183/v1/client/health",
+      "principal": {
+        "session_id": "langgraph-remote-session",
+        "agent_id": "langgraph-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langgraph remote runnable host demo"
+    }
+  },
+  "payload": {
+    "messages": [
+      {
+        "input": {
+          "messages": [
+            {
+              "type": "human",
+              "content": "Please retrieve document id=0 and send it to alice@example.com.",
+              "id": "ef7aaf2a-35ec-4605-9164-3c1b97570b6d"
+            },
+            {
+              "type": "ai",
+              "content": "I'll start by retrieving document id=0.",
+              "id": "lc_run--019f0327-ad91-7701-97b6-78e40ea633b3-0",
+              "tool_calls": [
+                {
+                  "name": "retrieve_doc",
+                  "args": {
+                    "id": 0
+                  },
+                  "id": "call_00_QlTjWf9b82RqMJWpkqGi5291",
+                  "type": "tool_call"
+                }
+              ],
+              "additional_kwargs": {
+                "refusal": null,
+                "reasoning_content": "The user wants me to retrieve document id=0 and then send it to alice@example.com. Let me start by retrieving the document first."
+              },
+              "response_metadata": {
+                "token_usage": "[REDACTED]",
+                "model_provider": "deepseek",
+                "model_name": "deepseek-v4-flash",
+                "system_fingerprint": "fp_8b330d02d0_prod0820_fp8_kvcache_20260402",
+                "id": "cbf9b30c-f18d-4d56-8f1d-9ec5201aaff1",
+                "finish_reason": "tool_calls",
+                "logprobs": null
+              },
+              "usage_metadata": {
+                "input_tokens": "[REDACTED]",
+                "output_tokens": "[REDACTED]",
+                "total_tokens": "[REDACTED]",
+                "input_token_details": "[REDACTED]",
+                "output_token_details": "[REDACTED]"
+              }
+            },
+            {
+              "type": "tool",
+              "content": "DOC#0: This is a  document body. ",
+              "name": "retrieve_doc",
+              "id": "77051524-6a26-4ee6-a986-cd592c34df9b"
+            },
+            {
+              "type": "ai",
+              "content": "Now I'll send the document to alice@example.com.",
+              "id": "lc_run--019f0327-b1a3-7550-b6dc-53609b2268db-0",
+              "tool_calls": [
+                {
+                  "name": "send_email_to",
+                  "args": {
+                    "doc": "This is a  document body.",
+                    "addr": "alice@example.com"
+                  },
+                  "id": "call_00_uVUTnguA2bDGfL933v0b0995",
+                  "type": "tool_call"
+                }
+              ],
+              "additional_kwargs": {
+                "refusal": null,
+                "reasoning_content": "Now I have the document content: \"This is a  document body.\" I need to send it to alice@example.com. Let me do that now."
+              },
+              "response_metadata": {
+                "token_usage": "[REDACTED]",
+                "model_provider": "deepseek",
+                "model_name": "deepseek-v4-flash",
+                "system_fingerprint": "fp_8b330d02d0_prod0820_fp8_kvcache_20260402",
+                "id": "ead86508-fe86-48fb-9536-ca26bd0af036",
+                "finish_reason": "tool_calls",
+                "logprobs": null
+              },
+              "usage_metadata": {
+                "input_tokens": "[REDACTED]",
+                "output_tokens": "[REDACTED]",
+                "total_tokens": "[REDACTED]",
+                "input_token_details": "[REDACTED]",
+                "output_token_details": "[REDACTED]"
+              }
+            },
+            {
+              "type": "tool",
+              "content": "{\"agentguard\": \"blocked\", \"decision\": \"deny\", \"reason\": \"Low-trust principal cannot send document 0 to non-admin recipients\", \"tool\": \"send_email_to\"}",
+              "name": "send_email_to",
+              "id": "bebf6a6d-cbda-479a-aa82-098207c7fc5e"
+            }
+          ],
+          "remaining_steps": 10002
+        },
+        "role": "user",
+        "content": ""
+      }
+    ]
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "langgraph",
+    "label": "invoke",
+    "owner_type": "RunnableSequence",
+    "owner_module": "langchain_core.runnables.base",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_a4fd7575f1194ec0",
+  "event_type": "llm_output",
+  "timestamp": 1782464365.292228,
+  "context": {
+    "session_id": "langgraph-remote-session",
+    "user_id": null,
+    "agent_id": "langgraph-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:37183/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:37183/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:37183/v1/client/health",
+      "principal": {
+        "session_id": "langgraph-remote-session",
+        "agent_id": "langgraph-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langgraph remote runnable host demo"
+    }
+  },
+  "payload": {
+    "output": "Unfortunately, the action was blocked by a security policy. The system reports that it cannot send document 0 (which contains: \"This is a document body.\") to non-admin email addresses like alice@example.com. \n\nThis restriction appears to be due to security reasons — the document may be sensitive or require admin-level privileges to share externally. You may want to:\n\n1. **Check if alice@example.com is an admin recipient** — if her email can be configured as an admin address.\n2. **Ask an administrator** to send the document on your behalf.\n3. **Verify if there's another approved method** for sharing this document.\n\nWould you like me to help with any of these alternatives?",
+    "thought": "The action was blocked by a security guard. It says \"Low-trust principal cannot send document 0 to non-admin recipients\". This means I cannot complete the task as requested. I should inform the user about what happened.",
+    "final_output": "Unfortunately, the action was blocked by a security policy. The system reports that it cannot send document 0 (which contains: \"This is a document body.\") to non-admin email addresses like alice@example.com. \n\nThis restriction appears to be due to security reasons — the document may be sensitive or require admin-level privileges to share externally. You may want to:\n\n1. **Check if alice@example.com is an admin recipient** — if her email can be configured as an admin address.\n2. **Ask an administrator** to send the document on your behalf.\n3. **Verify if there's another approved method** for sharing this document.\n\nWould you like me to help with any of these alternatives?"
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "langgraph",
+    "label": "invoke",
+    "owner_type": "RunnableSequence",
+    "owner_module": "langchain_core.runnables.base",
+    "output_type": "dict",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+[AgentGuard LLMOutput Parsed]
+{
+  "output": "Unfortunately, the action was blocked by a security policy. The system reports that it cannot send document 0 (which contains: \"This is a document body.\") to non-admin email addresses like alice@example.com. \n\nThis restriction appears to be due to security reasons — the document may be sensitive or require admin-level privileges to share externally. You may want to:\n\n1. **Check if alice@example.com is an admin recipient** — if her email can be configured as an admin address.\n2. **Ask an administrator** to send the document on your behalf.\n3. **Verify if there's another approved method** for sharing this document.\n\nWould you like me to help with any of these alternatives?",
+  "thought": "The action was blocked by a security guard. It says \"Low-trust principal cannot send document 0 to non-admin recipients\". This means I cannot complete the task as requested. I should inform the user about what happened.",
+  "final_output": "Unfortunately, the action was blocked by a security policy. The system reports that it cannot send document 0 (which contains: \"This is a document body.\") to non-admin email addresses like alice@example.com. \n\nThis restriction appears to be due to security reasons — the document may be sensitive or require admin-level privileges to share externally. You may want to:\n\n1. **Check if alice@example.com is an admin recipient** — if her email can be configured as an admin address.\n2. **Ask an administrator** to send the document on your behalf.\n3. **Verify if there's another approved method** for sharing this document.\n\nWould you like me to help with any of these alternatives?"
+}
+Output: Unfortunately, the action was blocked by a security policy. The system reports that it cannot send document 0 (which contains: "This is a document body.") to non-admin email addresses like alice@example.com. 
+
+This restriction appears to be due to security reasons — the document may be sensitive or require admin-level privileges to share externally. You may want to:
+
+1. **Check if alice@example.com is an admin recipient** — if her email can be configured as an admin address.
+2. **Ask an administrator** to send the document on your behalf.
+3. **Verify if there's another approved method** for sharing this document.
+
+Would you like me to help with any of these alternatives?
+===================================
+
+
+[Audit Summary]
+{'event_type': 'llm_input', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_output', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'tool_invoke', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'rule_based_plugin': {'matched': False, 'rule_id': None, 'effect': None, 'reason': '', 'matched_rule_ids': []}, 'policy_version': './rules/block_email_send.json', 'plugin_outcomes': [{'plugin': 'rule_based_plugin', 'decision_candidate': None, 'risk_signals': [], 'is_final': True, 'metadata': {'rule_based_plugin': {'matched': False, 'rule_id': None, 'effect': None, 'reason': '', 'matched_rule_ids': []}, 'policy_version': './rules/block_email_send.json'}}]}}
+{'event_type': 'tool_result', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_input', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_output', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'tool_invoke', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'rule_based_plugin': {'matched': False, 'rule_id': None, 'effect': None, 'reason': '', 'matched_rule_ids': []}, 'policy_version': './rules/block_email_send.json', 'plugin_outcomes': [{'plugin': 'rule_based_plugin', 'decision_candidate': None, 'risk_signals': [], 'is_final': True, 'metadata': {'rule_based_plugin': {'matched': False, 'rule_id': None, 'effect': None, 'reason': '', 'matched_rule_ids': []}, 'policy_version': './rules/block_email_send.json'}}]}}
+{'event_type': 'tool_result', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_input', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_output', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_input', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_output', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'tool_invoke', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'rule_based_plugin': {'matched': False, 'rule_id': None, 'effect': None, 'reason': '', 'matched_rule_ids': []}, 'policy_version': './rules/block_email_send.json', 'plugin_outcomes': [{'plugin': 'rule_based_plugin', 'decision_candidate': None, 'risk_signals': [], 'is_final': True, 'metadata': {'rule_based_plugin': {'matched': False, 'rule_id': None, 'effect': None, 'reason': '', 'matched_rule_ids': []}, 'policy_version': './rules/block_email_send.json'}}]}}
+{'event_type': 'tool_result', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_input', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_output', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'tool_invoke', 'decision_type': 'deny', 'policy_id': 'server:deny_doc0_send_to_non_admin_for_low_trust', 'reason': 'Low-trust principal cannot send document 0 to non-admin recipients', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'rule_based_plugin': {'matched': True, 'rule_id': 'deny_doc0_send_to_non_admin_for_low_trust', 'effect': 'deny', 'reason': 'Low-trust principal cannot send document 0 to non-admin recipients', 'matched_rule_ids': ['deny_doc0_send_to_non_admin_for_low_trust']}, 'policy_version': './rules/block_email_send.json', 'plugin_outcomes': [{'plugin': 'rule_based_plugin', 'decision_candidate': {'decision_type': 'deny', 'reason': 'Low-trust principal cannot send document 0 to non-admin recipients', 'policy_id': 'server:deny_doc0_send_to_non_admin_for_low_trust', 'confidence': None, 'risk_signals': [], 'metadata': {'explanation': "rule 'deny_doc0_send_to_non_admin_for_low_trust' (deny) won among ['deny_doc0_send_to_non_admin_for_low_trust']", 'matched_rule_ids': ['deny_doc0_send_to_non_admin_for_low_trust'], 'policy_version': './rules/block_email_send.json', 'plugin_outcomes': [{'plugin': 'rule_based_plugin', 'decision_candidate': {'decision_type': 'deny', 'reason': 'Low-trust principal cannot send document 0 to non-admin recipients', 'policy_id': 'server:deny_doc0_send_to_non_admin_for_low_trust', 'confidence': None, 'risk_signals': [], 'metadata': {'explanation': "rule 'deny_doc0_send_to_non_admin_for_low_trust' (deny) won among ['deny_doc0_send_to_non_admin_for_low_trust']", 'matched_rule_ids': ['deny_doc0_send_to_non_admin_for_low_trust'], 'policy_version': './rules/block_email_send.json'}}, 'risk_signals': [], 'is_final': True, 'metadata': {'rule_based_plugin': {'matched': True, 'rule_id': 'deny_doc0_send_to_non_admin_for_low_trust', 'effect': 'deny', 'reason': 'Low-trust principal cannot send document 0 to non-admin recipients', 'matched_rule_ids': ['deny_doc0_send_to_non_admin_for_low_trust']}, 'policy_version': './rules/block_email_send.json'}}]}}, 'risk_signals': [], 'is_final': True, 'metadata': {'rule_based_plugin': {'matched': True, 'rule_id': 'deny_doc0_send_to_non_admin_for_low_trust', 'effect': 'deny', 'reason': 'Low-trust principal cannot send document 0 to non-admin recipients', 'matched_rule_ids': ['deny_doc0_send_to_non_admin_for_low_trust']}, 'policy_version': './rules/block_email_send.json'}}], 'selected_outcome_index': 0}}
+{'event_type': 'llm_input', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_output', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}

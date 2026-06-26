@@ -1,0 +1,1863 @@
+===================================
+Prompt: Please retrieve document id=0 and send it to admin@example.com.
+
+[AgentGuard Event]
+{
+  "event_id": "evt_aa9ec2993c094dba",
+  "event_type": "llm_input",
+  "timestamp": 1782464804.1744456,
+  "context": {
+    "session_id": "llamaindex-remote-session",
+    "user_id": null,
+    "agent_id": "llamaindex-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46515/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46515/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46515/v1/client/health",
+      "principal": {
+        "session_id": "llamaindex-remote-session",
+        "agent_id": "llamaindex-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "llamaindex remote runnable host demo"
+    }
+  },
+  "payload": {
+    "messages": [
+      {
+        "label": "astream_chat",
+        "input": [
+          {
+            "type": "ChatMessage",
+            "role": "system",
+            "content": "You are designed to help with a variety of tasks, from answering questions to providing summaries to other types of analyses.\n\n## Tools\n\nYou have access to a wide variety of tools. You are responsible for using the tools in any sequence you deem appropriate to complete the task at hand.\nThis may require breaking the task into subtasks and using different tools to complete each subtask.\n\nYou have access to the following tools:\n> Tool Name: retrieve_doc\nTool Description: retrieve_doc(id: int) -> str\nRetrieve a document by integer id.\nTool Args: {\"properties\": {\"id\": {\"title\": \"Id\", \"type\": \"integer\"}}, \"required\": [\"id\"], \"type\": \"object\"}\n\n> Tool Name: send_email_to\nTool Description: send_email_to(doc: str, addr: str) -> str\nSend a document to an email address.\nTool Args: {\"properties\": {\"doc\": {\"title\": \"Doc\", \"type\": \"string\"}, \"addr\": {\"title\": \"Addr\", \"type\": \"string\"}}, \"required\": [\"doc\", \"addr\"], \"type\": \"object\"}\n\n\nHere is some context to help you answer the question and plan:\nYou are a zero-shot ReAct style agent. Decide which tool to use, observe tool results, and continue until the user's task is complete.\n\n\n## Output Format\n\nPlease answer in the same language as the question and use the following format:\n\n```\nThought: The current language of the user is: (user's language). I need to use a tool to help me answer the question.\nAction: tool name (one of retrieve_doc, send_email_to) if using a tool.\nAction Input: the input to the tool, in a JSON format representing the kwargs (e.g. {\"input\": \"hello world\", \"num_beams\": 5})\n```\n\nPlease ALWAYS start with a Thought.\n\nNEVER surround your response with markdown code markers. You may use code markers within your response if you need to.\n\nPlease use a valid JSON format for the Action Input. Do NOT do this {'input': 'hello world', 'num_beams': 5}. If you include the \"Action:\" line, then you MUST include the \"Action Input:\" line too, even if the tool does not need kwargs, in that case you MUST use \"Action Input: {}\".\n\nIf this format is used, the tool will respond in the following format:\n\n```\nObservation: tool response\n```\n\nYou should keep repeating the above format till you have enough information to answer the question without using any more tools. At that point, you MUST respond in one of the following two formats:\n\n```\nThought: I can answer without using any more tools. I'll use the user's language to answer\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n```\nThought: I cannot answer the question with the provided tools.\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n## Current Conversation\n\nBelow is the current conversation consisting of interleaving human and assistant messages.\n",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "You are designed to help with a variety of tasks, from answering questions to providing summaries to other types of analyses.\n\n## Tools\n\nYou have access to a wide variety of tools. You are responsible for using the tools in any sequence you deem appropriate to complete the task at hand.\nThis may require breaking the task into subtasks and using different tools to complete each subtask.\n\nYou have access to the following tools:\n> Tool Name: retrieve_doc\nTool Description: retrieve_doc(id: int) -> str\nRetrieve a document by integer id.\nTool Args: {\"properties\": {\"id\": {\"title\": \"Id\", \"type\": \"integer\"}}, \"required\": [\"id\"], \"type\": \"object\"}\n\n> Tool Name: send_email_to\nTool Description: send_email_to(doc: str, addr: str) -> str\nSend a document to an email address.\nTool Args: {\"properties\": {\"doc\": {\"title\": \"Doc\", \"type\": \"string\"}, \"addr\": {\"title\": \"Addr\", \"type\": \"string\"}}, \"required\": [\"doc\", \"addr\"], \"type\": \"object\"}\n\n\nHere is some context to help you answer the question and plan:\nYou are a zero-shot ReAct style agent. Decide which tool to use, observe tool results, and continue until the user's task is complete.\n\n\n## Output Format\n\nPlease answer in the same language as the question and use the following format:\n\n```\nThought: The current language of the user is: (user's language). I need to use a tool to help me answer the question.\nAction: tool name (one of retrieve_doc, send_email_to) if using a tool.\nAction Input: the input to the tool, in a JSON format representing the kwargs (e.g. {\"input\": \"hello world\", \"num_beams\": 5})\n```\n\nPlease ALWAYS start with a Thought.\n\nNEVER surround your response with markdown code markers. You may use code markers within your response if you need to.\n\nPlease use a valid JSON format for the Action Input. Do NOT do this {'input': 'hello world', 'num_beams': 5}. If you include the \"Action:\" line, then you MUST include the \"Action Input:\" line too, even if the tool does not need kwargs, in that case you MUST use \"Action Input: {}\".\n\nIf this format is used, the tool will respond in the following format:\n\n```\nObservation: tool response\n```\n\nYou should keep repeating the above format till you have enough information to answer the question without using any more tools. At that point, you MUST respond in one of the following two formats:\n\n```\nThought: I can answer without using any more tools. I'll use the user's language to answer\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n```\nThought: I cannot answer the question with the provided tools.\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n## Current Conversation\n\nBelow is the current conversation consisting of interleaving human and assistant messages.\n"
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "user",
+            "content": "Please retrieve document id=0 and send it to admin@example.com.",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Please retrieve document id=0 and send it to admin@example.com."
+              }
+            ]
+          }
+        ],
+        "role": "user",
+        "content": ""
+      }
+    ]
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "llamaindex",
+    "label": "astream_chat",
+    "owner_type": "OpenAILike",
+    "owner_module": "llama_index.llms.openai_like.base",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_18f059a953a8495b",
+  "event_type": "llm_output",
+  "timestamp": 1782464806.5332856,
+  "context": {
+    "session_id": "llamaindex-remote-session",
+    "user_id": null,
+    "agent_id": "llamaindex-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46515/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46515/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46515/v1/client/health",
+      "principal": {
+        "session_id": "llamaindex-remote-session",
+        "agent_id": "llamaindex-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "llamaindex remote runnable host demo"
+    }
+  },
+  "payload": {
+    "output": "Thought: The user wants me to retrieve document id=0 and then send it to admin@example.com. I'll start by retrieving the document.\nAction: retrieve_doc\nAction Input: {\"id\": 0}",
+    "thought": "We need to follow the format: Thought, then Action, then Action Input. The user wants to retrieve document id=0 and send it to admin@example.com. We need to first retrieve the document, then send it. So we'll do two steps: first retrieve, then send. We'll start with Thought and Action for retrieve_doc.",
+    "final_output": "Thought: The user wants me to retrieve document id=0 and then send it to admin@example.com. I'll start by retrieving the document.\nAction: retrieve_doc\nAction Input: {\"id\": 0}"
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "llamaindex",
+    "label": "astream_chat",
+    "owner_type": "OpenAILike",
+    "owner_module": "llama_index.llms.openai_like.base",
+    "output_type": "dict",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+[AgentGuard LLMOutput Parsed]
+{
+  "output": "Thought: The user wants me to retrieve document id=0 and then send it to admin@example.com. I'll start by retrieving the document.\nAction: retrieve_doc\nAction Input: {\"id\": 0}",
+  "thought": "We need to follow the format: Thought, then Action, then Action Input. The user wants to retrieve document id=0 and send it to admin@example.com. We need to first retrieve the document, then send it. So we'll do two steps: first retrieve, then send. We'll start with Thought and Action for retrieve_doc.",
+  "final_output": "Thought: The user wants me to retrieve document id=0 and then send it to admin@example.com. I'll start by retrieving the document.\nAction: retrieve_doc\nAction Input: {\"id\": 0}"
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_3b67fb5e87564d45",
+  "event_type": "tool_invoke",
+  "timestamp": 1782464806.7540503,
+  "context": {
+    "session_id": "llamaindex-remote-session",
+    "user_id": null,
+    "agent_id": "llamaindex-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46515/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46515/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46515/v1/client/health",
+      "principal": {
+        "session_id": "llamaindex-remote-session",
+        "agent_id": "llamaindex-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "llamaindex remote runnable host demo"
+    }
+  },
+  "payload": {
+    "tool_name": "retrieve_doc",
+    "arguments": {
+      "id": 0
+    },
+    "capabilities": []
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "llamaindex",
+    "owner_type": "FunctionTool",
+    "owner_module": "llama_index.core.tools.function_tool",
+    "tool_name": "retrieve_doc",
+    "interceptors": [
+      "tool"
+    ]
+  }
+}
+Retrieving document id=0
+
+[AgentGuard Event]
+{
+  "event_id": "evt_0ceb4fce77504d05",
+  "event_type": "tool_result",
+  "timestamp": 1782464806.7567792,
+  "context": {
+    "session_id": "llamaindex-remote-session",
+    "user_id": null,
+    "agent_id": "llamaindex-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46515/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46515/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46515/v1/client/health",
+      "principal": {
+        "session_id": "llamaindex-remote-session",
+        "agent_id": "llamaindex-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "llamaindex remote runnable host demo"
+    }
+  },
+  "payload": {
+    "tool_name": "retrieve_doc",
+    "result": "{'type': 'ToolOutput', 'content': 'DOC#0: This is a  document body.', 'blocks': [{'type': 'TextBlock', 'text': 'DOC#0: This is a  document body.'}]}"
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "llamaindex",
+    "owner_type": "FunctionTool",
+    "owner_module": "llama_index.core.tools.function_tool",
+    "interceptors": [
+      "tool_result"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_8688a8ce8fd84153",
+  "event_type": "llm_input",
+  "timestamp": 1782464806.9147184,
+  "context": {
+    "session_id": "llamaindex-remote-session",
+    "user_id": null,
+    "agent_id": "llamaindex-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46515/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46515/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46515/v1/client/health",
+      "principal": {
+        "session_id": "llamaindex-remote-session",
+        "agent_id": "llamaindex-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "llamaindex remote runnable host demo"
+    }
+  },
+  "payload": {
+    "messages": [
+      {
+        "label": "astream_chat",
+        "input": [
+          {
+            "type": "ChatMessage",
+            "role": "system",
+            "content": "You are designed to help with a variety of tasks, from answering questions to providing summaries to other types of analyses.\n\n## Tools\n\nYou have access to a wide variety of tools. You are responsible for using the tools in any sequence you deem appropriate to complete the task at hand.\nThis may require breaking the task into subtasks and using different tools to complete each subtask.\n\nYou have access to the following tools:\n> Tool Name: retrieve_doc\nTool Description: retrieve_doc(id: int) -> str\nRetrieve a document by integer id.\nTool Args: {\"properties\": {\"id\": {\"title\": \"Id\", \"type\": \"integer\"}}, \"required\": [\"id\"], \"type\": \"object\"}\n\n> Tool Name: send_email_to\nTool Description: send_email_to(doc: str, addr: str) -> str\nSend a document to an email address.\nTool Args: {\"properties\": {\"doc\": {\"title\": \"Doc\", \"type\": \"string\"}, \"addr\": {\"title\": \"Addr\", \"type\": \"string\"}}, \"required\": [\"doc\", \"addr\"], \"type\": \"object\"}\n\n\nHere is some context to help you answer the question and plan:\nYou are a zero-shot ReAct style agent. Decide which tool to use, observe tool results, and continue until the user's task is complete.\n\n\n## Output Format\n\nPlease answer in the same language as the question and use the following format:\n\n```\nThought: The current language of the user is: (user's language). I need to use a tool to help me answer the question.\nAction: tool name (one of retrieve_doc, send_email_to) if using a tool.\nAction Input: the input to the tool, in a JSON format representing the kwargs (e.g. {\"input\": \"hello world\", \"num_beams\": 5})\n```\n\nPlease ALWAYS start with a Thought.\n\nNEVER surround your response with markdown code markers. You may use code markers within your response if you need to.\n\nPlease use a valid JSON format for the Action Input. Do NOT do this {'input': 'hello world', 'num_beams': 5}. If you include the \"Action:\" line, then you MUST include the \"Action Input:\" line too, even if the tool does not need kwargs, in that case you MUST use \"Action Input: {}\".\n\nIf this format is used, the tool will respond in the following format:\n\n```\nObservation: tool response\n```\n\nYou should keep repeating the above format till you have enough information to answer the question without using any more tools. At that point, you MUST respond in one of the following two formats:\n\n```\nThought: I can answer without using any more tools. I'll use the user's language to answer\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n```\nThought: I cannot answer the question with the provided tools.\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n## Current Conversation\n\nBelow is the current conversation consisting of interleaving human and assistant messages.\n",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "You are designed to help with a variety of tasks, from answering questions to providing summaries to other types of analyses.\n\n## Tools\n\nYou have access to a wide variety of tools. You are responsible for using the tools in any sequence you deem appropriate to complete the task at hand.\nThis may require breaking the task into subtasks and using different tools to complete each subtask.\n\nYou have access to the following tools:\n> Tool Name: retrieve_doc\nTool Description: retrieve_doc(id: int) -> str\nRetrieve a document by integer id.\nTool Args: {\"properties\": {\"id\": {\"title\": \"Id\", \"type\": \"integer\"}}, \"required\": [\"id\"], \"type\": \"object\"}\n\n> Tool Name: send_email_to\nTool Description: send_email_to(doc: str, addr: str) -> str\nSend a document to an email address.\nTool Args: {\"properties\": {\"doc\": {\"title\": \"Doc\", \"type\": \"string\"}, \"addr\": {\"title\": \"Addr\", \"type\": \"string\"}}, \"required\": [\"doc\", \"addr\"], \"type\": \"object\"}\n\n\nHere is some context to help you answer the question and plan:\nYou are a zero-shot ReAct style agent. Decide which tool to use, observe tool results, and continue until the user's task is complete.\n\n\n## Output Format\n\nPlease answer in the same language as the question and use the following format:\n\n```\nThought: The current language of the user is: (user's language). I need to use a tool to help me answer the question.\nAction: tool name (one of retrieve_doc, send_email_to) if using a tool.\nAction Input: the input to the tool, in a JSON format representing the kwargs (e.g. {\"input\": \"hello world\", \"num_beams\": 5})\n```\n\nPlease ALWAYS start with a Thought.\n\nNEVER surround your response with markdown code markers. You may use code markers within your response if you need to.\n\nPlease use a valid JSON format for the Action Input. Do NOT do this {'input': 'hello world', 'num_beams': 5}. If you include the \"Action:\" line, then you MUST include the \"Action Input:\" line too, even if the tool does not need kwargs, in that case you MUST use \"Action Input: {}\".\n\nIf this format is used, the tool will respond in the following format:\n\n```\nObservation: tool response\n```\n\nYou should keep repeating the above format till you have enough information to answer the question without using any more tools. At that point, you MUST respond in one of the following two formats:\n\n```\nThought: I can answer without using any more tools. I'll use the user's language to answer\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n```\nThought: I cannot answer the question with the provided tools.\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n## Current Conversation\n\nBelow is the current conversation consisting of interleaving human and assistant messages.\n"
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "user",
+            "content": "Please retrieve document id=0 and send it to admin@example.com.",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Please retrieve document id=0 and send it to admin@example.com."
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "assistant",
+            "content": "Thought: The user wants me to retrieve document id=0 and then send it to admin@example.com. I'll start by retrieving the document.\nAction: retrieve_doc\nAction Input: {'id': 0}",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Thought: The user wants me to retrieve document id=0 and then send it to admin@example.com. I'll start by retrieving the document.\nAction: retrieve_doc\nAction Input: {'id': 0}"
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "user",
+            "content": "Observation: DOC#0: This is a  document body.",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Observation: DOC#0: This is a  document body."
+              }
+            ]
+          }
+        ],
+        "role": "user",
+        "content": ""
+      }
+    ]
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "llamaindex",
+    "label": "astream_chat",
+    "owner_type": "OpenAILike",
+    "owner_module": "llama_index.llms.openai_like.base",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_c448d824fdc040e9",
+  "event_type": "llm_output",
+  "timestamp": 1782464808.2786403,
+  "context": {
+    "session_id": "llamaindex-remote-session",
+    "user_id": null,
+    "agent_id": "llamaindex-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46515/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46515/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46515/v1/client/health",
+      "principal": {
+        "session_id": "llamaindex-remote-session",
+        "agent_id": "llamaindex-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "llamaindex remote runnable host demo"
+    }
+  },
+  "payload": {
+    "output": "Thought: I have retrieved the document. Now I need to send it to admin@example.com.\nAction: send_email_to\nAction Input: {'doc': 'DOC#0: This is a  document body.', 'addr': 'admin@example.com'}",
+    "thought": "We have retrieved document id=0 and it contains \"This is a document body.\" Now we need to send it to admin@example.com. We can use the send_email_to tool with the document content and the email address.",
+    "final_output": "Thought: I have retrieved the document. Now I need to send it to admin@example.com.\nAction: send_email_to\nAction Input: {'doc': 'DOC#0: This is a  document body.', 'addr': 'admin@example.com'}"
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "llamaindex",
+    "label": "astream_chat",
+    "owner_type": "OpenAILike",
+    "owner_module": "llama_index.llms.openai_like.base",
+    "output_type": "dict",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+[AgentGuard LLMOutput Parsed]
+{
+  "output": "Thought: I have retrieved the document. Now I need to send it to admin@example.com.\nAction: send_email_to\nAction Input: {'doc': 'DOC#0: This is a  document body.', 'addr': 'admin@example.com'}",
+  "thought": "We have retrieved document id=0 and it contains \"This is a document body.\" Now we need to send it to admin@example.com. We can use the send_email_to tool with the document content and the email address.",
+  "final_output": "Thought: I have retrieved the document. Now I need to send it to admin@example.com.\nAction: send_email_to\nAction Input: {'doc': 'DOC#0: This is a  document body.', 'addr': 'admin@example.com'}"
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_0fecd72d512b42e8",
+  "event_type": "tool_invoke",
+  "timestamp": 1782464808.5064254,
+  "context": {
+    "session_id": "llamaindex-remote-session",
+    "user_id": null,
+    "agent_id": "llamaindex-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46515/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46515/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46515/v1/client/health",
+      "principal": {
+        "session_id": "llamaindex-remote-session",
+        "agent_id": "llamaindex-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "llamaindex remote runnable host demo"
+    }
+  },
+  "payload": {
+    "tool_name": "send_email_to",
+    "arguments": {
+      "doc": "DOC#0: This is a  document body.",
+      "addr": "admin@example.com"
+    },
+    "capabilities": []
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "llamaindex",
+    "owner_type": "FunctionTool",
+    "owner_module": "llama_index.core.tools.function_tool",
+    "tool_name": "send_email_to",
+    "interceptors": [
+      "tool"
+    ]
+  }
+}
+Email has sent to admin@example.com: DOC#0: This is a  document body.
+
+[AgentGuard Event]
+{
+  "event_id": "evt_d066313a60554fcf",
+  "event_type": "tool_result",
+  "timestamp": 1782464808.509761,
+  "context": {
+    "session_id": "llamaindex-remote-session",
+    "user_id": null,
+    "agent_id": "llamaindex-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46515/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46515/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46515/v1/client/health",
+      "principal": {
+        "session_id": "llamaindex-remote-session",
+        "agent_id": "llamaindex-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "llamaindex remote runnable host demo"
+    }
+  },
+  "payload": {
+    "tool_name": "send_email_to",
+    "result": "{'type': 'ToolOutput', 'content': 'Email has sent to admin@example.com: DOC#0: This is a  document body.', 'blocks': [{'type': 'TextBlock', 'text': 'Email has sent to admin@example.com: DOC#0: This is a  document body.'}]}"
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "llamaindex",
+    "owner_type": "FunctionTool",
+    "owner_module": "llama_index.core.tools.function_tool",
+    "interceptors": [
+      "tool_result"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_9c1b0f7ef7d84ede",
+  "event_type": "llm_input",
+  "timestamp": 1782464808.658192,
+  "context": {
+    "session_id": "llamaindex-remote-session",
+    "user_id": null,
+    "agent_id": "llamaindex-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46515/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46515/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46515/v1/client/health",
+      "principal": {
+        "session_id": "llamaindex-remote-session",
+        "agent_id": "llamaindex-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "llamaindex remote runnable host demo"
+    }
+  },
+  "payload": {
+    "messages": [
+      {
+        "label": "astream_chat",
+        "input": [
+          {
+            "type": "ChatMessage",
+            "role": "system",
+            "content": "You are designed to help with a variety of tasks, from answering questions to providing summaries to other types of analyses.\n\n## Tools\n\nYou have access to a wide variety of tools. You are responsible for using the tools in any sequence you deem appropriate to complete the task at hand.\nThis may require breaking the task into subtasks and using different tools to complete each subtask.\n\nYou have access to the following tools:\n> Tool Name: retrieve_doc\nTool Description: retrieve_doc(id: int) -> str\nRetrieve a document by integer id.\nTool Args: {\"properties\": {\"id\": {\"title\": \"Id\", \"type\": \"integer\"}}, \"required\": [\"id\"], \"type\": \"object\"}\n\n> Tool Name: send_email_to\nTool Description: send_email_to(doc: str, addr: str) -> str\nSend a document to an email address.\nTool Args: {\"properties\": {\"doc\": {\"title\": \"Doc\", \"type\": \"string\"}, \"addr\": {\"title\": \"Addr\", \"type\": \"string\"}}, \"required\": [\"doc\", \"addr\"], \"type\": \"object\"}\n\n\nHere is some context to help you answer the question and plan:\nYou are a zero-shot ReAct style agent. Decide which tool to use, observe tool results, and continue until the user's task is complete.\n\n\n## Output Format\n\nPlease answer in the same language as the question and use the following format:\n\n```\nThought: The current language of the user is: (user's language). I need to use a tool to help me answer the question.\nAction: tool name (one of retrieve_doc, send_email_to) if using a tool.\nAction Input: the input to the tool, in a JSON format representing the kwargs (e.g. {\"input\": \"hello world\", \"num_beams\": 5})\n```\n\nPlease ALWAYS start with a Thought.\n\nNEVER surround your response with markdown code markers. You may use code markers within your response if you need to.\n\nPlease use a valid JSON format for the Action Input. Do NOT do this {'input': 'hello world', 'num_beams': 5}. If you include the \"Action:\" line, then you MUST include the \"Action Input:\" line too, even if the tool does not need kwargs, in that case you MUST use \"Action Input: {}\".\n\nIf this format is used, the tool will respond in the following format:\n\n```\nObservation: tool response\n```\n\nYou should keep repeating the above format till you have enough information to answer the question without using any more tools. At that point, you MUST respond in one of the following two formats:\n\n```\nThought: I can answer without using any more tools. I'll use the user's language to answer\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n```\nThought: I cannot answer the question with the provided tools.\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n## Current Conversation\n\nBelow is the current conversation consisting of interleaving human and assistant messages.\n",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "You are designed to help with a variety of tasks, from answering questions to providing summaries to other types of analyses.\n\n## Tools\n\nYou have access to a wide variety of tools. You are responsible for using the tools in any sequence you deem appropriate to complete the task at hand.\nThis may require breaking the task into subtasks and using different tools to complete each subtask.\n\nYou have access to the following tools:\n> Tool Name: retrieve_doc\nTool Description: retrieve_doc(id: int) -> str\nRetrieve a document by integer id.\nTool Args: {\"properties\": {\"id\": {\"title\": \"Id\", \"type\": \"integer\"}}, \"required\": [\"id\"], \"type\": \"object\"}\n\n> Tool Name: send_email_to\nTool Description: send_email_to(doc: str, addr: str) -> str\nSend a document to an email address.\nTool Args: {\"properties\": {\"doc\": {\"title\": \"Doc\", \"type\": \"string\"}, \"addr\": {\"title\": \"Addr\", \"type\": \"string\"}}, \"required\": [\"doc\", \"addr\"], \"type\": \"object\"}\n\n\nHere is some context to help you answer the question and plan:\nYou are a zero-shot ReAct style agent. Decide which tool to use, observe tool results, and continue until the user's task is complete.\n\n\n## Output Format\n\nPlease answer in the same language as the question and use the following format:\n\n```\nThought: The current language of the user is: (user's language). I need to use a tool to help me answer the question.\nAction: tool name (one of retrieve_doc, send_email_to) if using a tool.\nAction Input: the input to the tool, in a JSON format representing the kwargs (e.g. {\"input\": \"hello world\", \"num_beams\": 5})\n```\n\nPlease ALWAYS start with a Thought.\n\nNEVER surround your response with markdown code markers. You may use code markers within your response if you need to.\n\nPlease use a valid JSON format for the Action Input. Do NOT do this {'input': 'hello world', 'num_beams': 5}. If you include the \"Action:\" line, then you MUST include the \"Action Input:\" line too, even if the tool does not need kwargs, in that case you MUST use \"Action Input: {}\".\n\nIf this format is used, the tool will respond in the following format:\n\n```\nObservation: tool response\n```\n\nYou should keep repeating the above format till you have enough information to answer the question without using any more tools. At that point, you MUST respond in one of the following two formats:\n\n```\nThought: I can answer without using any more tools. I'll use the user's language to answer\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n```\nThought: I cannot answer the question with the provided tools.\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n## Current Conversation\n\nBelow is the current conversation consisting of interleaving human and assistant messages.\n"
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "user",
+            "content": "Please retrieve document id=0 and send it to admin@example.com.",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Please retrieve document id=0 and send it to admin@example.com."
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "assistant",
+            "content": "Thought: The user wants me to retrieve document id=0 and then send it to admin@example.com. I'll start by retrieving the document.\nAction: retrieve_doc\nAction Input: {'id': 0}",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Thought: The user wants me to retrieve document id=0 and then send it to admin@example.com. I'll start by retrieving the document.\nAction: retrieve_doc\nAction Input: {'id': 0}"
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "user",
+            "content": "Observation: DOC#0: This is a  document body.",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Observation: DOC#0: This is a  document body."
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "assistant",
+            "content": "Thought: I have retrieved the document. Now I need to send it to admin@example.com.\nAction: send_email_to\nAction Input: {'doc': 'DOC#0: This is a  document body.', 'addr': 'admin@example.com'}",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Thought: I have retrieved the document. Now I need to send it to admin@example.com.\nAction: send_email_to\nAction Input: {'doc': 'DOC#0: This is a  document body.', 'addr': 'admin@example.com'}"
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "user",
+            "content": "Observation: Email has sent to admin@example.com: DOC#0: This is a  document body.",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Observation: Email has sent to admin@example.com: DOC#0: This is a  document body."
+              }
+            ]
+          }
+        ],
+        "role": "user",
+        "content": ""
+      }
+    ]
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "llamaindex",
+    "label": "astream_chat",
+    "owner_type": "OpenAILike",
+    "owner_module": "llama_index.llms.openai_like.base",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_61dc9facea864b34",
+  "event_type": "llm_output",
+  "timestamp": 1782464810.0174963,
+  "context": {
+    "session_id": "llamaindex-remote-session",
+    "user_id": null,
+    "agent_id": "llamaindex-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46515/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46515/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46515/v1/client/health",
+      "principal": {
+        "session_id": "llamaindex-remote-session",
+        "agent_id": "llamaindex-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "llamaindex remote runnable host demo"
+    }
+  },
+  "payload": {
+    "output": "Answer: I have retrieved document id=0 and sent it to admin@example.com. The document content was: \"This is a document body.\"",
+    "thought": "We have successfully retrieved the document and sent it. Now we can answer the user.\nThought: I have completed the task. I'll answer in the user's language.\nAnswer: I have retrieved document id=0 and sent it to admin@example.com. The document content was: \"This is a document body.\"",
+    "final_output": "Answer: I have retrieved document id=0 and sent it to admin@example.com. The document content was: \"This is a document body.\""
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "llamaindex",
+    "label": "astream_chat",
+    "owner_type": "OpenAILike",
+    "owner_module": "llama_index.llms.openai_like.base",
+    "output_type": "dict",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+[AgentGuard LLMOutput Parsed]
+{
+  "output": "Answer: I have retrieved document id=0 and sent it to admin@example.com. The document content was: \"This is a document body.\"",
+  "thought": "We have successfully retrieved the document and sent it. Now we can answer the user.\nThought: I have completed the task. I'll answer in the user's language.\nAnswer: I have retrieved document id=0 and sent it to admin@example.com. The document content was: \"This is a document body.\"",
+  "final_output": "Answer: I have retrieved document id=0 and sent it to admin@example.com. The document content was: \"This is a document body.\""
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_2931591493b24ec9",
+  "event_type": "llm_input",
+  "timestamp": 1782464810.0969229,
+  "context": {
+    "session_id": "llamaindex-remote-session",
+    "user_id": null,
+    "agent_id": "llamaindex-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46515/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46515/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46515/v1/client/health",
+      "principal": {
+        "session_id": "llamaindex-remote-session",
+        "agent_id": "llamaindex-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "llamaindex remote runnable host demo"
+    }
+  },
+  "payload": {
+    "messages": [
+      {
+        "label": "astream_chat",
+        "input": [
+          {
+            "type": "ChatMessage",
+            "role": "system",
+            "content": "You are designed to help with a variety of tasks, from answering questions to providing summaries to other types of analyses.\n\n## Tools\n\nYou have access to a wide variety of tools. You are responsible for using the tools in any sequence you deem appropriate to complete the task at hand.\nThis may require breaking the task into subtasks and using different tools to complete each subtask.\n\nYou have access to the following tools:\n> Tool Name: retrieve_doc\nTool Description: retrieve_doc(id: int) -> str\nRetrieve a document by integer id.\nTool Args: {\"properties\": {\"id\": {\"title\": \"Id\", \"type\": \"integer\"}}, \"required\": [\"id\"], \"type\": \"object\"}\n\n> Tool Name: send_email_to\nTool Description: send_email_to(doc: str, addr: str) -> str\nSend a document to an email address.\nTool Args: {\"properties\": {\"doc\": {\"title\": \"Doc\", \"type\": \"string\"}, \"addr\": {\"title\": \"Addr\", \"type\": \"string\"}}, \"required\": [\"doc\", \"addr\"], \"type\": \"object\"}\n\n\nHere is some context to help you answer the question and plan:\nYou are a zero-shot ReAct style agent. Decide which tool to use, observe tool results, and continue until the user's task is complete.\n\n\n## Output Format\n\nPlease answer in the same language as the question and use the following format:\n\n```\nThought: The current language of the user is: (user's language). I need to use a tool to help me answer the question.\nAction: tool name (one of retrieve_doc, send_email_to) if using a tool.\nAction Input: the input to the tool, in a JSON format representing the kwargs (e.g. {\"input\": \"hello world\", \"num_beams\": 5})\n```\n\nPlease ALWAYS start with a Thought.\n\nNEVER surround your response with markdown code markers. You may use code markers within your response if you need to.\n\nPlease use a valid JSON format for the Action Input. Do NOT do this {'input': 'hello world', 'num_beams': 5}. If you include the \"Action:\" line, then you MUST include the \"Action Input:\" line too, even if the tool does not need kwargs, in that case you MUST use \"Action Input: {}\".\n\nIf this format is used, the tool will respond in the following format:\n\n```\nObservation: tool response\n```\n\nYou should keep repeating the above format till you have enough information to answer the question without using any more tools. At that point, you MUST respond in one of the following two formats:\n\n```\nThought: I can answer without using any more tools. I'll use the user's language to answer\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n```\nThought: I cannot answer the question with the provided tools.\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n## Current Conversation\n\nBelow is the current conversation consisting of interleaving human and assistant messages.\n",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "You are designed to help with a variety of tasks, from answering questions to providing summaries to other types of analyses.\n\n## Tools\n\nYou have access to a wide variety of tools. You are responsible for using the tools in any sequence you deem appropriate to complete the task at hand.\nThis may require breaking the task into subtasks and using different tools to complete each subtask.\n\nYou have access to the following tools:\n> Tool Name: retrieve_doc\nTool Description: retrieve_doc(id: int) -> str\nRetrieve a document by integer id.\nTool Args: {\"properties\": {\"id\": {\"title\": \"Id\", \"type\": \"integer\"}}, \"required\": [\"id\"], \"type\": \"object\"}\n\n> Tool Name: send_email_to\nTool Description: send_email_to(doc: str, addr: str) -> str\nSend a document to an email address.\nTool Args: {\"properties\": {\"doc\": {\"title\": \"Doc\", \"type\": \"string\"}, \"addr\": {\"title\": \"Addr\", \"type\": \"string\"}}, \"required\": [\"doc\", \"addr\"], \"type\": \"object\"}\n\n\nHere is some context to help you answer the question and plan:\nYou are a zero-shot ReAct style agent. Decide which tool to use, observe tool results, and continue until the user's task is complete.\n\n\n## Output Format\n\nPlease answer in the same language as the question and use the following format:\n\n```\nThought: The current language of the user is: (user's language). I need to use a tool to help me answer the question.\nAction: tool name (one of retrieve_doc, send_email_to) if using a tool.\nAction Input: the input to the tool, in a JSON format representing the kwargs (e.g. {\"input\": \"hello world\", \"num_beams\": 5})\n```\n\nPlease ALWAYS start with a Thought.\n\nNEVER surround your response with markdown code markers. You may use code markers within your response if you need to.\n\nPlease use a valid JSON format for the Action Input. Do NOT do this {'input': 'hello world', 'num_beams': 5}. If you include the \"Action:\" line, then you MUST include the \"Action Input:\" line too, even if the tool does not need kwargs, in that case you MUST use \"Action Input: {}\".\n\nIf this format is used, the tool will respond in the following format:\n\n```\nObservation: tool response\n```\n\nYou should keep repeating the above format till you have enough information to answer the question without using any more tools. At that point, you MUST respond in one of the following two formats:\n\n```\nThought: I can answer without using any more tools. I'll use the user's language to answer\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n```\nThought: I cannot answer the question with the provided tools.\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n## Current Conversation\n\nBelow is the current conversation consisting of interleaving human and assistant messages.\n"
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "user",
+            "content": "Please retrieve document id=0 and send it to admin@example.com.",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Please retrieve document id=0 and send it to admin@example.com."
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "user",
+            "content": "Please retrieve document id=0 and send it to admin@example.com.",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Please retrieve document id=0 and send it to admin@example.com."
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "assistant",
+            "content": "Answer: I have retrieved document id=0 and sent it to admin@example.com. The document content was: \"This is a document body.\"",
+            "blocks": [
+              {
+                "type": "ThinkingBlock",
+                "content": "We have successfully retrieved the document and sent it. Now we can answer the user.\nThought: I have completed the task. I'll answer in the user's language.\nAnswer: I have retrieved document id=0 and sent it to admin@example.com. The document content was: \"This is a document body.\""
+              },
+              {
+                "type": "TextBlock",
+                "text": "Answer: I have retrieved document id=0 and sent it to admin@example.com. The document content was: \"This is a document body.\""
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "user",
+            "content": "Error while parsing the output: Could not extract final answer from input text: Answer: I have retrieved document id=0 and sent it to admin@example.com. The document content was: \"This is a document body.\"\n\nThe output should be in one of the following formats:\n1. To call a tool:\n```\nThought: <thought>\nAction: <action>\nAction Input: <action_input>\n```\n2. To answer the question:\n```\nThought: <thought>\nAnswer: <answer>\n```\n",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Error while parsing the output: Could not extract final answer from input text: Answer: I have retrieved document id=0 and sent it to admin@example.com. The document content was: \"This is a document body.\"\n\nThe output should be in one of the following formats:\n1. To call a tool:\n```\nThought: <thought>\nAction: <action>\nAction Input: <action_input>\n```\n2. To answer the question:\n```\nThought: <thought>\nAnswer: <answer>\n```\n"
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "assistant",
+            "content": "Thought: The user wants me to retrieve document id=0 and then send it to admin@example.com. I'll start by retrieving the document.\nAction: retrieve_doc\nAction Input: {'id': 0}",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Thought: The user wants me to retrieve document id=0 and then send it to admin@example.com. I'll start by retrieving the document.\nAction: retrieve_doc\nAction Input: {'id': 0}"
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "user",
+            "content": "Observation: DOC#0: This is a  document body.",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Observation: DOC#0: This is a  document body."
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "assistant",
+            "content": "Thought: I have retrieved the document. Now I need to send it to admin@example.com.\nAction: send_email_to\nAction Input: {'doc': 'DOC#0: This is a  document body.', 'addr': 'admin@example.com'}",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Thought: I have retrieved the document. Now I need to send it to admin@example.com.\nAction: send_email_to\nAction Input: {'doc': 'DOC#0: This is a  document body.', 'addr': 'admin@example.com'}"
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "user",
+            "content": "Observation: Email has sent to admin@example.com: DOC#0: This is a  document body.",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Observation: Email has sent to admin@example.com: DOC#0: This is a  document body."
+              }
+            ]
+          }
+        ],
+        "role": "user",
+        "content": ""
+      }
+    ]
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "llamaindex",
+    "label": "astream_chat",
+    "owner_type": "OpenAILike",
+    "owner_module": "llama_index.llms.openai_like.base",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_7cef6eea23a34dd3",
+  "event_type": "llm_output",
+  "timestamp": 1782464811.9231286,
+  "context": {
+    "session_id": "llamaindex-remote-session",
+    "user_id": null,
+    "agent_id": "llamaindex-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46515/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46515/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46515/v1/client/health",
+      "principal": {
+        "session_id": "llamaindex-remote-session",
+        "agent_id": "llamaindex-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "llamaindex remote runnable host demo"
+    }
+  },
+  "payload": {
+    "output": "Thought: I can answer without using any more tools. I'll use the user's language to answer.\nAnswer: I have retrieved document id=0 and sent it to admin@example.com. The document content was: \"This is a document body.\" The email has been successfully sent.",
+    "thought": "We need to output final answer in the specified format. The task is done. I'll answer in English.",
+    "final_output": "Thought: I can answer without using any more tools. I'll use the user's language to answer.\nAnswer: I have retrieved document id=0 and sent it to admin@example.com. The document content was: \"This is a document body.\" The email has been successfully sent."
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "llamaindex",
+    "label": "astream_chat",
+    "owner_type": "OpenAILike",
+    "owner_module": "llama_index.llms.openai_like.base",
+    "output_type": "dict",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+[AgentGuard LLMOutput Parsed]
+{
+  "output": "Thought: I can answer without using any more tools. I'll use the user's language to answer.\nAnswer: I have retrieved document id=0 and sent it to admin@example.com. The document content was: \"This is a document body.\" The email has been successfully sent.",
+  "thought": "We need to output final answer in the specified format. The task is done. I'll answer in English.",
+  "final_output": "Thought: I can answer without using any more tools. I'll use the user's language to answer.\nAnswer: I have retrieved document id=0 and sent it to admin@example.com. The document content was: \"This is a document body.\" The email has been successfully sent."
+}
+Output: assistant: I have retrieved document id=0 and sent it to admin@example.com. The document content was: "This is a document body." The email has been successfully sent.
+===================================
+
+===================================
+Prompt: Please retrieve document id=0 and send it to alice@example.com.
+
+[AgentGuard Event]
+{
+  "event_id": "evt_144732c82a2e4126",
+  "event_type": "llm_input",
+  "timestamp": 1782464812.6389475,
+  "context": {
+    "session_id": "llamaindex-remote-session",
+    "user_id": null,
+    "agent_id": "llamaindex-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46515/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46515/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46515/v1/client/health",
+      "principal": {
+        "session_id": "llamaindex-remote-session",
+        "agent_id": "llamaindex-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "llamaindex remote runnable host demo"
+    }
+  },
+  "payload": {
+    "messages": [
+      {
+        "label": "astream_chat",
+        "input": [
+          {
+            "type": "ChatMessage",
+            "role": "system",
+            "content": "You are designed to help with a variety of tasks, from answering questions to providing summaries to other types of analyses.\n\n## Tools\n\nYou have access to a wide variety of tools. You are responsible for using the tools in any sequence you deem appropriate to complete the task at hand.\nThis may require breaking the task into subtasks and using different tools to complete each subtask.\n\nYou have access to the following tools:\n> Tool Name: retrieve_doc\nTool Description: retrieve_doc(id: int) -> str\nRetrieve a document by integer id.\nTool Args: {\"properties\": {\"id\": {\"title\": \"Id\", \"type\": \"integer\"}}, \"required\": [\"id\"], \"type\": \"object\"}\n\n> Tool Name: send_email_to\nTool Description: send_email_to(doc: str, addr: str) -> str\nSend a document to an email address.\nTool Args: {\"properties\": {\"doc\": {\"title\": \"Doc\", \"type\": \"string\"}, \"addr\": {\"title\": \"Addr\", \"type\": \"string\"}}, \"required\": [\"doc\", \"addr\"], \"type\": \"object\"}\n\n\nHere is some context to help you answer the question and plan:\nYou are a zero-shot ReAct style agent. Decide which tool to use, observe tool results, and continue until the user's task is complete.\n\n\n## Output Format\n\nPlease answer in the same language as the question and use the following format:\n\n```\nThought: The current language of the user is: (user's language). I need to use a tool to help me answer the question.\nAction: tool name (one of retrieve_doc, send_email_to) if using a tool.\nAction Input: the input to the tool, in a JSON format representing the kwargs (e.g. {\"input\": \"hello world\", \"num_beams\": 5})\n```\n\nPlease ALWAYS start with a Thought.\n\nNEVER surround your response with markdown code markers. You may use code markers within your response if you need to.\n\nPlease use a valid JSON format for the Action Input. Do NOT do this {'input': 'hello world', 'num_beams': 5}. If you include the \"Action:\" line, then you MUST include the \"Action Input:\" line too, even if the tool does not need kwargs, in that case you MUST use \"Action Input: {}\".\n\nIf this format is used, the tool will respond in the following format:\n\n```\nObservation: tool response\n```\n\nYou should keep repeating the above format till you have enough information to answer the question without using any more tools. At that point, you MUST respond in one of the following two formats:\n\n```\nThought: I can answer without using any more tools. I'll use the user's language to answer\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n```\nThought: I cannot answer the question with the provided tools.\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n## Current Conversation\n\nBelow is the current conversation consisting of interleaving human and assistant messages.\n",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "You are designed to help with a variety of tasks, from answering questions to providing summaries to other types of analyses.\n\n## Tools\n\nYou have access to a wide variety of tools. You are responsible for using the tools in any sequence you deem appropriate to complete the task at hand.\nThis may require breaking the task into subtasks and using different tools to complete each subtask.\n\nYou have access to the following tools:\n> Tool Name: retrieve_doc\nTool Description: retrieve_doc(id: int) -> str\nRetrieve a document by integer id.\nTool Args: {\"properties\": {\"id\": {\"title\": \"Id\", \"type\": \"integer\"}}, \"required\": [\"id\"], \"type\": \"object\"}\n\n> Tool Name: send_email_to\nTool Description: send_email_to(doc: str, addr: str) -> str\nSend a document to an email address.\nTool Args: {\"properties\": {\"doc\": {\"title\": \"Doc\", \"type\": \"string\"}, \"addr\": {\"title\": \"Addr\", \"type\": \"string\"}}, \"required\": [\"doc\", \"addr\"], \"type\": \"object\"}\n\n\nHere is some context to help you answer the question and plan:\nYou are a zero-shot ReAct style agent. Decide which tool to use, observe tool results, and continue until the user's task is complete.\n\n\n## Output Format\n\nPlease answer in the same language as the question and use the following format:\n\n```\nThought: The current language of the user is: (user's language). I need to use a tool to help me answer the question.\nAction: tool name (one of retrieve_doc, send_email_to) if using a tool.\nAction Input: the input to the tool, in a JSON format representing the kwargs (e.g. {\"input\": \"hello world\", \"num_beams\": 5})\n```\n\nPlease ALWAYS start with a Thought.\n\nNEVER surround your response with markdown code markers. You may use code markers within your response if you need to.\n\nPlease use a valid JSON format for the Action Input. Do NOT do this {'input': 'hello world', 'num_beams': 5}. If you include the \"Action:\" line, then you MUST include the \"Action Input:\" line too, even if the tool does not need kwargs, in that case you MUST use \"Action Input: {}\".\n\nIf this format is used, the tool will respond in the following format:\n\n```\nObservation: tool response\n```\n\nYou should keep repeating the above format till you have enough information to answer the question without using any more tools. At that point, you MUST respond in one of the following two formats:\n\n```\nThought: I can answer without using any more tools. I'll use the user's language to answer\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n```\nThought: I cannot answer the question with the provided tools.\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n## Current Conversation\n\nBelow is the current conversation consisting of interleaving human and assistant messages.\n"
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "user",
+            "content": "Please retrieve document id=0 and send it to alice@example.com.",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Please retrieve document id=0 and send it to alice@example.com."
+              }
+            ]
+          }
+        ],
+        "role": "user",
+        "content": ""
+      }
+    ]
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "llamaindex",
+    "label": "astream_chat",
+    "owner_type": "OpenAILike",
+    "owner_module": "llama_index.llms.openai_like.base",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_dfcd412744124377",
+  "event_type": "llm_output",
+  "timestamp": 1782464814.1895344,
+  "context": {
+    "session_id": "llamaindex-remote-session",
+    "user_id": null,
+    "agent_id": "llamaindex-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46515/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46515/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46515/v1/client/health",
+      "principal": {
+        "session_id": "llamaindex-remote-session",
+        "agent_id": "llamaindex-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "llamaindex remote runnable host demo"
+    }
+  },
+  "payload": {
+    "output": "Thought: I need to retrieve document id=0, then send it to alice@example.com.\nAction: retrieve_doc\nAction Input: {\"id\": 0}",
+    "thought": "We need to retrieve document id=0, then send it to alice@example.com. First, use retrieve_doc with id=0. Then use send_email_to with the returned document and the email address.\n\nLet's start.",
+    "final_output": "Thought: I need to retrieve document id=0, then send it to alice@example.com.\nAction: retrieve_doc\nAction Input: {\"id\": 0}"
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "llamaindex",
+    "label": "astream_chat",
+    "owner_type": "OpenAILike",
+    "owner_module": "llama_index.llms.openai_like.base",
+    "output_type": "dict",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+[AgentGuard LLMOutput Parsed]
+{
+  "output": "Thought: I need to retrieve document id=0, then send it to alice@example.com.\nAction: retrieve_doc\nAction Input: {\"id\": 0}",
+  "thought": "We need to retrieve document id=0, then send it to alice@example.com. First, use retrieve_doc with id=0. Then use send_email_to with the returned document and the email address.\n\nLet's start.",
+  "final_output": "Thought: I need to retrieve document id=0, then send it to alice@example.com.\nAction: retrieve_doc\nAction Input: {\"id\": 0}"
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_d7db1f7cedd64e10",
+  "event_type": "tool_invoke",
+  "timestamp": 1782464814.4098825,
+  "context": {
+    "session_id": "llamaindex-remote-session",
+    "user_id": null,
+    "agent_id": "llamaindex-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46515/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46515/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46515/v1/client/health",
+      "principal": {
+        "session_id": "llamaindex-remote-session",
+        "agent_id": "llamaindex-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "llamaindex remote runnable host demo"
+    }
+  },
+  "payload": {
+    "tool_name": "retrieve_doc",
+    "arguments": {
+      "id": 0
+    },
+    "capabilities": []
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "llamaindex",
+    "owner_type": "FunctionTool",
+    "owner_module": "llama_index.core.tools.function_tool",
+    "tool_name": "retrieve_doc",
+    "interceptors": [
+      "tool"
+    ]
+  }
+}
+Retrieving document id=0
+
+[AgentGuard Event]
+{
+  "event_id": "evt_2127f42c95354ac3",
+  "event_type": "tool_result",
+  "timestamp": 1782464814.413316,
+  "context": {
+    "session_id": "llamaindex-remote-session",
+    "user_id": null,
+    "agent_id": "llamaindex-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46515/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46515/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46515/v1/client/health",
+      "principal": {
+        "session_id": "llamaindex-remote-session",
+        "agent_id": "llamaindex-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "llamaindex remote runnable host demo"
+    }
+  },
+  "payload": {
+    "tool_name": "retrieve_doc",
+    "result": "{'type': 'ToolOutput', 'content': 'DOC#0: This is a  document body.', 'blocks': [{'type': 'TextBlock', 'text': 'DOC#0: This is a  document body.'}]}"
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "llamaindex",
+    "owner_type": "FunctionTool",
+    "owner_module": "llama_index.core.tools.function_tool",
+    "interceptors": [
+      "tool_result"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_e8448dd4b9654d20",
+  "event_type": "llm_input",
+  "timestamp": 1782464814.5629156,
+  "context": {
+    "session_id": "llamaindex-remote-session",
+    "user_id": null,
+    "agent_id": "llamaindex-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46515/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46515/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46515/v1/client/health",
+      "principal": {
+        "session_id": "llamaindex-remote-session",
+        "agent_id": "llamaindex-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "llamaindex remote runnable host demo"
+    }
+  },
+  "payload": {
+    "messages": [
+      {
+        "label": "astream_chat",
+        "input": [
+          {
+            "type": "ChatMessage",
+            "role": "system",
+            "content": "You are designed to help with a variety of tasks, from answering questions to providing summaries to other types of analyses.\n\n## Tools\n\nYou have access to a wide variety of tools. You are responsible for using the tools in any sequence you deem appropriate to complete the task at hand.\nThis may require breaking the task into subtasks and using different tools to complete each subtask.\n\nYou have access to the following tools:\n> Tool Name: retrieve_doc\nTool Description: retrieve_doc(id: int) -> str\nRetrieve a document by integer id.\nTool Args: {\"properties\": {\"id\": {\"title\": \"Id\", \"type\": \"integer\"}}, \"required\": [\"id\"], \"type\": \"object\"}\n\n> Tool Name: send_email_to\nTool Description: send_email_to(doc: str, addr: str) -> str\nSend a document to an email address.\nTool Args: {\"properties\": {\"doc\": {\"title\": \"Doc\", \"type\": \"string\"}, \"addr\": {\"title\": \"Addr\", \"type\": \"string\"}}, \"required\": [\"doc\", \"addr\"], \"type\": \"object\"}\n\n\nHere is some context to help you answer the question and plan:\nYou are a zero-shot ReAct style agent. Decide which tool to use, observe tool results, and continue until the user's task is complete.\n\n\n## Output Format\n\nPlease answer in the same language as the question and use the following format:\n\n```\nThought: The current language of the user is: (user's language). I need to use a tool to help me answer the question.\nAction: tool name (one of retrieve_doc, send_email_to) if using a tool.\nAction Input: the input to the tool, in a JSON format representing the kwargs (e.g. {\"input\": \"hello world\", \"num_beams\": 5})\n```\n\nPlease ALWAYS start with a Thought.\n\nNEVER surround your response with markdown code markers. You may use code markers within your response if you need to.\n\nPlease use a valid JSON format for the Action Input. Do NOT do this {'input': 'hello world', 'num_beams': 5}. If you include the \"Action:\" line, then you MUST include the \"Action Input:\" line too, even if the tool does not need kwargs, in that case you MUST use \"Action Input: {}\".\n\nIf this format is used, the tool will respond in the following format:\n\n```\nObservation: tool response\n```\n\nYou should keep repeating the above format till you have enough information to answer the question without using any more tools. At that point, you MUST respond in one of the following two formats:\n\n```\nThought: I can answer without using any more tools. I'll use the user's language to answer\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n```\nThought: I cannot answer the question with the provided tools.\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n## Current Conversation\n\nBelow is the current conversation consisting of interleaving human and assistant messages.\n",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "You are designed to help with a variety of tasks, from answering questions to providing summaries to other types of analyses.\n\n## Tools\n\nYou have access to a wide variety of tools. You are responsible for using the tools in any sequence you deem appropriate to complete the task at hand.\nThis may require breaking the task into subtasks and using different tools to complete each subtask.\n\nYou have access to the following tools:\n> Tool Name: retrieve_doc\nTool Description: retrieve_doc(id: int) -> str\nRetrieve a document by integer id.\nTool Args: {\"properties\": {\"id\": {\"title\": \"Id\", \"type\": \"integer\"}}, \"required\": [\"id\"], \"type\": \"object\"}\n\n> Tool Name: send_email_to\nTool Description: send_email_to(doc: str, addr: str) -> str\nSend a document to an email address.\nTool Args: {\"properties\": {\"doc\": {\"title\": \"Doc\", \"type\": \"string\"}, \"addr\": {\"title\": \"Addr\", \"type\": \"string\"}}, \"required\": [\"doc\", \"addr\"], \"type\": \"object\"}\n\n\nHere is some context to help you answer the question and plan:\nYou are a zero-shot ReAct style agent. Decide which tool to use, observe tool results, and continue until the user's task is complete.\n\n\n## Output Format\n\nPlease answer in the same language as the question and use the following format:\n\n```\nThought: The current language of the user is: (user's language). I need to use a tool to help me answer the question.\nAction: tool name (one of retrieve_doc, send_email_to) if using a tool.\nAction Input: the input to the tool, in a JSON format representing the kwargs (e.g. {\"input\": \"hello world\", \"num_beams\": 5})\n```\n\nPlease ALWAYS start with a Thought.\n\nNEVER surround your response with markdown code markers. You may use code markers within your response if you need to.\n\nPlease use a valid JSON format for the Action Input. Do NOT do this {'input': 'hello world', 'num_beams': 5}. If you include the \"Action:\" line, then you MUST include the \"Action Input:\" line too, even if the tool does not need kwargs, in that case you MUST use \"Action Input: {}\".\n\nIf this format is used, the tool will respond in the following format:\n\n```\nObservation: tool response\n```\n\nYou should keep repeating the above format till you have enough information to answer the question without using any more tools. At that point, you MUST respond in one of the following two formats:\n\n```\nThought: I can answer without using any more tools. I'll use the user's language to answer\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n```\nThought: I cannot answer the question with the provided tools.\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n## Current Conversation\n\nBelow is the current conversation consisting of interleaving human and assistant messages.\n"
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "user",
+            "content": "Please retrieve document id=0 and send it to alice@example.com.",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Please retrieve document id=0 and send it to alice@example.com."
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "assistant",
+            "content": "Thought: I need to retrieve document id=0, then send it to alice@example.com.\nAction: retrieve_doc\nAction Input: {'id': 0}",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Thought: I need to retrieve document id=0, then send it to alice@example.com.\nAction: retrieve_doc\nAction Input: {'id': 0}"
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "user",
+            "content": "Observation: DOC#0: This is a  document body.",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Observation: DOC#0: This is a  document body."
+              }
+            ]
+          }
+        ],
+        "role": "user",
+        "content": ""
+      }
+    ]
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "llamaindex",
+    "label": "astream_chat",
+    "owner_type": "OpenAILike",
+    "owner_module": "llama_index.llms.openai_like.base",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_7d1ee06c29704955",
+  "event_type": "llm_output",
+  "timestamp": 1782464815.5934365,
+  "context": {
+    "session_id": "llamaindex-remote-session",
+    "user_id": null,
+    "agent_id": "llamaindex-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46515/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46515/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46515/v1/client/health",
+      "principal": {
+        "session_id": "llamaindex-remote-session",
+        "agent_id": "llamaindex-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "llamaindex remote runnable host demo"
+    }
+  },
+  "payload": {
+    "output": "Action: send_email_to\nAction Input: {'doc': 'This is a  document body.', 'addr': 'alice@example.com'}",
+    "thought": "We have the document. Now send it to alice@example.com.",
+    "final_output": "Action: send_email_to\nAction Input: {'doc': 'This is a  document body.', 'addr': 'alice@example.com'}"
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "llamaindex",
+    "label": "astream_chat",
+    "owner_type": "OpenAILike",
+    "owner_module": "llama_index.llms.openai_like.base",
+    "output_type": "dict",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+[AgentGuard LLMOutput Parsed]
+{
+  "output": "Action: send_email_to\nAction Input: {'doc': 'This is a  document body.', 'addr': 'alice@example.com'}",
+  "thought": "We have the document. Now send it to alice@example.com.",
+  "final_output": "Action: send_email_to\nAction Input: {'doc': 'This is a  document body.', 'addr': 'alice@example.com'}"
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_df95c45782584599",
+  "event_type": "llm_input",
+  "timestamp": 1782464815.6755216,
+  "context": {
+    "session_id": "llamaindex-remote-session",
+    "user_id": null,
+    "agent_id": "llamaindex-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46515/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46515/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46515/v1/client/health",
+      "principal": {
+        "session_id": "llamaindex-remote-session",
+        "agent_id": "llamaindex-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "llamaindex remote runnable host demo"
+    }
+  },
+  "payload": {
+    "messages": [
+      {
+        "label": "astream_chat",
+        "input": [
+          {
+            "type": "ChatMessage",
+            "role": "system",
+            "content": "You are designed to help with a variety of tasks, from answering questions to providing summaries to other types of analyses.\n\n## Tools\n\nYou have access to a wide variety of tools. You are responsible for using the tools in any sequence you deem appropriate to complete the task at hand.\nThis may require breaking the task into subtasks and using different tools to complete each subtask.\n\nYou have access to the following tools:\n> Tool Name: retrieve_doc\nTool Description: retrieve_doc(id: int) -> str\nRetrieve a document by integer id.\nTool Args: {\"properties\": {\"id\": {\"title\": \"Id\", \"type\": \"integer\"}}, \"required\": [\"id\"], \"type\": \"object\"}\n\n> Tool Name: send_email_to\nTool Description: send_email_to(doc: str, addr: str) -> str\nSend a document to an email address.\nTool Args: {\"properties\": {\"doc\": {\"title\": \"Doc\", \"type\": \"string\"}, \"addr\": {\"title\": \"Addr\", \"type\": \"string\"}}, \"required\": [\"doc\", \"addr\"], \"type\": \"object\"}\n\n\nHere is some context to help you answer the question and plan:\nYou are a zero-shot ReAct style agent. Decide which tool to use, observe tool results, and continue until the user's task is complete.\n\n\n## Output Format\n\nPlease answer in the same language as the question and use the following format:\n\n```\nThought: The current language of the user is: (user's language). I need to use a tool to help me answer the question.\nAction: tool name (one of retrieve_doc, send_email_to) if using a tool.\nAction Input: the input to the tool, in a JSON format representing the kwargs (e.g. {\"input\": \"hello world\", \"num_beams\": 5})\n```\n\nPlease ALWAYS start with a Thought.\n\nNEVER surround your response with markdown code markers. You may use code markers within your response if you need to.\n\nPlease use a valid JSON format for the Action Input. Do NOT do this {'input': 'hello world', 'num_beams': 5}. If you include the \"Action:\" line, then you MUST include the \"Action Input:\" line too, even if the tool does not need kwargs, in that case you MUST use \"Action Input: {}\".\n\nIf this format is used, the tool will respond in the following format:\n\n```\nObservation: tool response\n```\n\nYou should keep repeating the above format till you have enough information to answer the question without using any more tools. At that point, you MUST respond in one of the following two formats:\n\n```\nThought: I can answer without using any more tools. I'll use the user's language to answer\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n```\nThought: I cannot answer the question with the provided tools.\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n## Current Conversation\n\nBelow is the current conversation consisting of interleaving human and assistant messages.\n",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "You are designed to help with a variety of tasks, from answering questions to providing summaries to other types of analyses.\n\n## Tools\n\nYou have access to a wide variety of tools. You are responsible for using the tools in any sequence you deem appropriate to complete the task at hand.\nThis may require breaking the task into subtasks and using different tools to complete each subtask.\n\nYou have access to the following tools:\n> Tool Name: retrieve_doc\nTool Description: retrieve_doc(id: int) -> str\nRetrieve a document by integer id.\nTool Args: {\"properties\": {\"id\": {\"title\": \"Id\", \"type\": \"integer\"}}, \"required\": [\"id\"], \"type\": \"object\"}\n\n> Tool Name: send_email_to\nTool Description: send_email_to(doc: str, addr: str) -> str\nSend a document to an email address.\nTool Args: {\"properties\": {\"doc\": {\"title\": \"Doc\", \"type\": \"string\"}, \"addr\": {\"title\": \"Addr\", \"type\": \"string\"}}, \"required\": [\"doc\", \"addr\"], \"type\": \"object\"}\n\n\nHere is some context to help you answer the question and plan:\nYou are a zero-shot ReAct style agent. Decide which tool to use, observe tool results, and continue until the user's task is complete.\n\n\n## Output Format\n\nPlease answer in the same language as the question and use the following format:\n\n```\nThought: The current language of the user is: (user's language). I need to use a tool to help me answer the question.\nAction: tool name (one of retrieve_doc, send_email_to) if using a tool.\nAction Input: the input to the tool, in a JSON format representing the kwargs (e.g. {\"input\": \"hello world\", \"num_beams\": 5})\n```\n\nPlease ALWAYS start with a Thought.\n\nNEVER surround your response with markdown code markers. You may use code markers within your response if you need to.\n\nPlease use a valid JSON format for the Action Input. Do NOT do this {'input': 'hello world', 'num_beams': 5}. If you include the \"Action:\" line, then you MUST include the \"Action Input:\" line too, even if the tool does not need kwargs, in that case you MUST use \"Action Input: {}\".\n\nIf this format is used, the tool will respond in the following format:\n\n```\nObservation: tool response\n```\n\nYou should keep repeating the above format till you have enough information to answer the question without using any more tools. At that point, you MUST respond in one of the following two formats:\n\n```\nThought: I can answer without using any more tools. I'll use the user's language to answer\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n```\nThought: I cannot answer the question with the provided tools.\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n## Current Conversation\n\nBelow is the current conversation consisting of interleaving human and assistant messages.\n"
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "user",
+            "content": "Please retrieve document id=0 and send it to alice@example.com.",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Please retrieve document id=0 and send it to alice@example.com."
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "user",
+            "content": "Please retrieve document id=0 and send it to alice@example.com.",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Please retrieve document id=0 and send it to alice@example.com."
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "assistant",
+            "content": "Action: send_email_to\nAction Input: {'doc': 'This is a  document body.', 'addr': 'alice@example.com'}",
+            "blocks": [
+              {
+                "type": "ThinkingBlock",
+                "content": "We have the document. Now send it to alice@example.com."
+              },
+              {
+                "type": "TextBlock",
+                "text": "Action: send_email_to\nAction Input: {'doc': 'This is a  document body.', 'addr': 'alice@example.com'}"
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "user",
+            "content": "Error while parsing the output: Could not extract tool use from input text: Action: send_email_to\nAction Input: {'doc': 'This is a  document body.', 'addr': 'alice@example.com'}\n\nThe output should be in one of the following formats:\n1. To call a tool:\n```\nThought: <thought>\nAction: <action>\nAction Input: <action_input>\n```\n2. To answer the question:\n```\nThought: <thought>\nAnswer: <answer>\n```\n",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Error while parsing the output: Could not extract tool use from input text: Action: send_email_to\nAction Input: {'doc': 'This is a  document body.', 'addr': 'alice@example.com'}\n\nThe output should be in one of the following formats:\n1. To call a tool:\n```\nThought: <thought>\nAction: <action>\nAction Input: <action_input>\n```\n2. To answer the question:\n```\nThought: <thought>\nAnswer: <answer>\n```\n"
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "assistant",
+            "content": "Thought: I need to retrieve document id=0, then send it to alice@example.com.\nAction: retrieve_doc\nAction Input: {'id': 0}",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Thought: I need to retrieve document id=0, then send it to alice@example.com.\nAction: retrieve_doc\nAction Input: {'id': 0}"
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "user",
+            "content": "Observation: DOC#0: This is a  document body.",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Observation: DOC#0: This is a  document body."
+              }
+            ]
+          }
+        ],
+        "role": "user",
+        "content": ""
+      }
+    ]
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "llamaindex",
+    "label": "astream_chat",
+    "owner_type": "OpenAILike",
+    "owner_module": "llama_index.llms.openai_like.base",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_7922f18918454d93",
+  "event_type": "llm_output",
+  "timestamp": 1782464817.3135543,
+  "context": {
+    "session_id": "llamaindex-remote-session",
+    "user_id": null,
+    "agent_id": "llamaindex-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46515/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46515/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46515/v1/client/health",
+      "principal": {
+        "session_id": "llamaindex-remote-session",
+        "agent_id": "llamaindex-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "llamaindex remote runnable host demo"
+    }
+  },
+  "payload": {
+    "output": "Action: send_email_to\nAction Input: {'doc': 'This is a  document body.', 'addr': 'alice@example.com'}",
+    "thought": "We have the document body: \"This is a  document body.\" Now we need to send it to alice@example.com using send_email_to tool. Let's do that.",
+    "final_output": "Action: send_email_to\nAction Input: {'doc': 'This is a  document body.', 'addr': 'alice@example.com'}"
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "llamaindex",
+    "label": "astream_chat",
+    "owner_type": "OpenAILike",
+    "owner_module": "llama_index.llms.openai_like.base",
+    "output_type": "dict",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+[AgentGuard LLMOutput Parsed]
+{
+  "output": "Action: send_email_to\nAction Input: {'doc': 'This is a  document body.', 'addr': 'alice@example.com'}",
+  "thought": "We have the document body: \"This is a  document body.\" Now we need to send it to alice@example.com using send_email_to tool. Let's do that.",
+  "final_output": "Action: send_email_to\nAction Input: {'doc': 'This is a  document body.', 'addr': 'alice@example.com'}"
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_d4d80ded30284ff7",
+  "event_type": "llm_input",
+  "timestamp": 1782464817.3922749,
+  "context": {
+    "session_id": "llamaindex-remote-session",
+    "user_id": null,
+    "agent_id": "llamaindex-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46515/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46515/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46515/v1/client/health",
+      "principal": {
+        "session_id": "llamaindex-remote-session",
+        "agent_id": "llamaindex-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "llamaindex remote runnable host demo"
+    }
+  },
+  "payload": {
+    "messages": [
+      {
+        "label": "astream_chat",
+        "input": [
+          {
+            "type": "ChatMessage",
+            "role": "system",
+            "content": "You are designed to help with a variety of tasks, from answering questions to providing summaries to other types of analyses.\n\n## Tools\n\nYou have access to a wide variety of tools. You are responsible for using the tools in any sequence you deem appropriate to complete the task at hand.\nThis may require breaking the task into subtasks and using different tools to complete each subtask.\n\nYou have access to the following tools:\n> Tool Name: retrieve_doc\nTool Description: retrieve_doc(id: int) -> str\nRetrieve a document by integer id.\nTool Args: {\"properties\": {\"id\": {\"title\": \"Id\", \"type\": \"integer\"}}, \"required\": [\"id\"], \"type\": \"object\"}\n\n> Tool Name: send_email_to\nTool Description: send_email_to(doc: str, addr: str) -> str\nSend a document to an email address.\nTool Args: {\"properties\": {\"doc\": {\"title\": \"Doc\", \"type\": \"string\"}, \"addr\": {\"title\": \"Addr\", \"type\": \"string\"}}, \"required\": [\"doc\", \"addr\"], \"type\": \"object\"}\n\n\nHere is some context to help you answer the question and plan:\nYou are a zero-shot ReAct style agent. Decide which tool to use, observe tool results, and continue until the user's task is complete.\n\n\n## Output Format\n\nPlease answer in the same language as the question and use the following format:\n\n```\nThought: The current language of the user is: (user's language). I need to use a tool to help me answer the question.\nAction: tool name (one of retrieve_doc, send_email_to) if using a tool.\nAction Input: the input to the tool, in a JSON format representing the kwargs (e.g. {\"input\": \"hello world\", \"num_beams\": 5})\n```\n\nPlease ALWAYS start with a Thought.\n\nNEVER surround your response with markdown code markers. You may use code markers within your response if you need to.\n\nPlease use a valid JSON format for the Action Input. Do NOT do this {'input': 'hello world', 'num_beams': 5}. If you include the \"Action:\" line, then you MUST include the \"Action Input:\" line too, even if the tool does not need kwargs, in that case you MUST use \"Action Input: {}\".\n\nIf this format is used, the tool will respond in the following format:\n\n```\nObservation: tool response\n```\n\nYou should keep repeating the above format till you have enough information to answer the question without using any more tools. At that point, you MUST respond in one of the following two formats:\n\n```\nThought: I can answer without using any more tools. I'll use the user's language to answer\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n```\nThought: I cannot answer the question with the provided tools.\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n## Current Conversation\n\nBelow is the current conversation consisting of interleaving human and assistant messages.\n",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "You are designed to help with a variety of tasks, from answering questions to providing summaries to other types of analyses.\n\n## Tools\n\nYou have access to a wide variety of tools. You are responsible for using the tools in any sequence you deem appropriate to complete the task at hand.\nThis may require breaking the task into subtasks and using different tools to complete each subtask.\n\nYou have access to the following tools:\n> Tool Name: retrieve_doc\nTool Description: retrieve_doc(id: int) -> str\nRetrieve a document by integer id.\nTool Args: {\"properties\": {\"id\": {\"title\": \"Id\", \"type\": \"integer\"}}, \"required\": [\"id\"], \"type\": \"object\"}\n\n> Tool Name: send_email_to\nTool Description: send_email_to(doc: str, addr: str) -> str\nSend a document to an email address.\nTool Args: {\"properties\": {\"doc\": {\"title\": \"Doc\", \"type\": \"string\"}, \"addr\": {\"title\": \"Addr\", \"type\": \"string\"}}, \"required\": [\"doc\", \"addr\"], \"type\": \"object\"}\n\n\nHere is some context to help you answer the question and plan:\nYou are a zero-shot ReAct style agent. Decide which tool to use, observe tool results, and continue until the user's task is complete.\n\n\n## Output Format\n\nPlease answer in the same language as the question and use the following format:\n\n```\nThought: The current language of the user is: (user's language). I need to use a tool to help me answer the question.\nAction: tool name (one of retrieve_doc, send_email_to) if using a tool.\nAction Input: the input to the tool, in a JSON format representing the kwargs (e.g. {\"input\": \"hello world\", \"num_beams\": 5})\n```\n\nPlease ALWAYS start with a Thought.\n\nNEVER surround your response with markdown code markers. You may use code markers within your response if you need to.\n\nPlease use a valid JSON format for the Action Input. Do NOT do this {'input': 'hello world', 'num_beams': 5}. If you include the \"Action:\" line, then you MUST include the \"Action Input:\" line too, even if the tool does not need kwargs, in that case you MUST use \"Action Input: {}\".\n\nIf this format is used, the tool will respond in the following format:\n\n```\nObservation: tool response\n```\n\nYou should keep repeating the above format till you have enough information to answer the question without using any more tools. At that point, you MUST respond in one of the following two formats:\n\n```\nThought: I can answer without using any more tools. I'll use the user's language to answer\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n```\nThought: I cannot answer the question with the provided tools.\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n## Current Conversation\n\nBelow is the current conversation consisting of interleaving human and assistant messages.\n"
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "user",
+            "content": "Please retrieve document id=0 and send it to alice@example.com.",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Please retrieve document id=0 and send it to alice@example.com."
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "user",
+            "content": "Please retrieve document id=0 and send it to alice@example.com.",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Please retrieve document id=0 and send it to alice@example.com."
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "assistant",
+            "content": "Action: send_email_to\nAction Input: {'doc': 'This is a  document body.', 'addr': 'alice@example.com'}",
+            "blocks": [
+              {
+                "type": "ThinkingBlock",
+                "content": "We have the document body: \"This is a  document body.\" Now we need to send it to alice@example.com using send_email_to tool. Let's do that."
+              },
+              {
+                "type": "TextBlock",
+                "text": "Action: send_email_to\nAction Input: {'doc': 'This is a  document body.', 'addr': 'alice@example.com'}"
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "user",
+            "content": "Error while parsing the output: Could not extract tool use from input text: Action: send_email_to\nAction Input: {'doc': 'This is a  document body.', 'addr': 'alice@example.com'}\n\nThe output should be in one of the following formats:\n1. To call a tool:\n```\nThought: <thought>\nAction: <action>\nAction Input: <action_input>\n```\n2. To answer the question:\n```\nThought: <thought>\nAnswer: <answer>\n```\n",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Error while parsing the output: Could not extract tool use from input text: Action: send_email_to\nAction Input: {'doc': 'This is a  document body.', 'addr': 'alice@example.com'}\n\nThe output should be in one of the following formats:\n1. To call a tool:\n```\nThought: <thought>\nAction: <action>\nAction Input: <action_input>\n```\n2. To answer the question:\n```\nThought: <thought>\nAnswer: <answer>\n```\n"
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "assistant",
+            "content": "Thought: I need to retrieve document id=0, then send it to alice@example.com.\nAction: retrieve_doc\nAction Input: {'id': 0}",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Thought: I need to retrieve document id=0, then send it to alice@example.com.\nAction: retrieve_doc\nAction Input: {'id': 0}"
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "user",
+            "content": "Observation: DOC#0: This is a  document body.",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Observation: DOC#0: This is a  document body."
+              }
+            ]
+          }
+        ],
+        "role": "user",
+        "content": ""
+      }
+    ]
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "llamaindex",
+    "label": "astream_chat",
+    "owner_type": "OpenAILike",
+    "owner_module": "llama_index.llms.openai_like.base",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_370a334603f14a14",
+  "event_type": "llm_output",
+  "timestamp": 1782464818.7460423,
+  "context": {
+    "session_id": "llamaindex-remote-session",
+    "user_id": null,
+    "agent_id": "llamaindex-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46515/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46515/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46515/v1/client/health",
+      "principal": {
+        "session_id": "llamaindex-remote-session",
+        "agent_id": "llamaindex-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "llamaindex remote runnable host demo"
+    }
+  },
+  "payload": {
+    "output": "Thought: Now I have the document. I will send it to alice@example.com.\nAction: send_email_to\nAction Input: {'doc': 'DOC#0: This is a  document body.', 'addr': 'alice@example.com'}",
+    "thought": "Now that we have the document, we can send it to alice@example.com. Let's do that.",
+    "final_output": "Thought: Now I have the document. I will send it to alice@example.com.\nAction: send_email_to\nAction Input: {'doc': 'DOC#0: This is a  document body.', 'addr': 'alice@example.com'}"
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "llamaindex",
+    "label": "astream_chat",
+    "owner_type": "OpenAILike",
+    "owner_module": "llama_index.llms.openai_like.base",
+    "output_type": "dict",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+[AgentGuard LLMOutput Parsed]
+{
+  "output": "Thought: Now I have the document. I will send it to alice@example.com.\nAction: send_email_to\nAction Input: {'doc': 'DOC#0: This is a  document body.', 'addr': 'alice@example.com'}",
+  "thought": "Now that we have the document, we can send it to alice@example.com. Let's do that.",
+  "final_output": "Thought: Now I have the document. I will send it to alice@example.com.\nAction: send_email_to\nAction Input: {'doc': 'DOC#0: This is a  document body.', 'addr': 'alice@example.com'}"
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_9587526d0931449f",
+  "event_type": "tool_invoke",
+  "timestamp": 1782464818.9626944,
+  "context": {
+    "session_id": "llamaindex-remote-session",
+    "user_id": null,
+    "agent_id": "llamaindex-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46515/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46515/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46515/v1/client/health",
+      "principal": {
+        "session_id": "llamaindex-remote-session",
+        "agent_id": "llamaindex-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "llamaindex remote runnable host demo"
+    }
+  },
+  "payload": {
+    "tool_name": "send_email_to",
+    "arguments": {
+      "doc": "DOC#0: This is a  document body.",
+      "addr": "alice@example.com"
+    },
+    "capabilities": []
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "llamaindex",
+    "owner_type": "FunctionTool",
+    "owner_module": "llama_index.core.tools.function_tool",
+    "tool_name": "send_email_to",
+    "interceptors": [
+      "tool"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_3a6f6c36768c4720",
+  "event_type": "llm_input",
+  "timestamp": 1782464819.1131022,
+  "context": {
+    "session_id": "llamaindex-remote-session",
+    "user_id": null,
+    "agent_id": "llamaindex-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46515/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46515/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46515/v1/client/health",
+      "principal": {
+        "session_id": "llamaindex-remote-session",
+        "agent_id": "llamaindex-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "llamaindex remote runnable host demo"
+    }
+  },
+  "payload": {
+    "messages": [
+      {
+        "label": "astream_chat",
+        "input": [
+          {
+            "type": "ChatMessage",
+            "role": "system",
+            "content": "You are designed to help with a variety of tasks, from answering questions to providing summaries to other types of analyses.\n\n## Tools\n\nYou have access to a wide variety of tools. You are responsible for using the tools in any sequence you deem appropriate to complete the task at hand.\nThis may require breaking the task into subtasks and using different tools to complete each subtask.\n\nYou have access to the following tools:\n> Tool Name: retrieve_doc\nTool Description: retrieve_doc(id: int) -> str\nRetrieve a document by integer id.\nTool Args: {\"properties\": {\"id\": {\"title\": \"Id\", \"type\": \"integer\"}}, \"required\": [\"id\"], \"type\": \"object\"}\n\n> Tool Name: send_email_to\nTool Description: send_email_to(doc: str, addr: str) -> str\nSend a document to an email address.\nTool Args: {\"properties\": {\"doc\": {\"title\": \"Doc\", \"type\": \"string\"}, \"addr\": {\"title\": \"Addr\", \"type\": \"string\"}}, \"required\": [\"doc\", \"addr\"], \"type\": \"object\"}\n\n\nHere is some context to help you answer the question and plan:\nYou are a zero-shot ReAct style agent. Decide which tool to use, observe tool results, and continue until the user's task is complete.\n\n\n## Output Format\n\nPlease answer in the same language as the question and use the following format:\n\n```\nThought: The current language of the user is: (user's language). I need to use a tool to help me answer the question.\nAction: tool name (one of retrieve_doc, send_email_to) if using a tool.\nAction Input: the input to the tool, in a JSON format representing the kwargs (e.g. {\"input\": \"hello world\", \"num_beams\": 5})\n```\n\nPlease ALWAYS start with a Thought.\n\nNEVER surround your response with markdown code markers. You may use code markers within your response if you need to.\n\nPlease use a valid JSON format for the Action Input. Do NOT do this {'input': 'hello world', 'num_beams': 5}. If you include the \"Action:\" line, then you MUST include the \"Action Input:\" line too, even if the tool does not need kwargs, in that case you MUST use \"Action Input: {}\".\n\nIf this format is used, the tool will respond in the following format:\n\n```\nObservation: tool response\n```\n\nYou should keep repeating the above format till you have enough information to answer the question without using any more tools. At that point, you MUST respond in one of the following two formats:\n\n```\nThought: I can answer without using any more tools. I'll use the user's language to answer\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n```\nThought: I cannot answer the question with the provided tools.\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n## Current Conversation\n\nBelow is the current conversation consisting of interleaving human and assistant messages.\n",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "You are designed to help with a variety of tasks, from answering questions to providing summaries to other types of analyses.\n\n## Tools\n\nYou have access to a wide variety of tools. You are responsible for using the tools in any sequence you deem appropriate to complete the task at hand.\nThis may require breaking the task into subtasks and using different tools to complete each subtask.\n\nYou have access to the following tools:\n> Tool Name: retrieve_doc\nTool Description: retrieve_doc(id: int) -> str\nRetrieve a document by integer id.\nTool Args: {\"properties\": {\"id\": {\"title\": \"Id\", \"type\": \"integer\"}}, \"required\": [\"id\"], \"type\": \"object\"}\n\n> Tool Name: send_email_to\nTool Description: send_email_to(doc: str, addr: str) -> str\nSend a document to an email address.\nTool Args: {\"properties\": {\"doc\": {\"title\": \"Doc\", \"type\": \"string\"}, \"addr\": {\"title\": \"Addr\", \"type\": \"string\"}}, \"required\": [\"doc\", \"addr\"], \"type\": \"object\"}\n\n\nHere is some context to help you answer the question and plan:\nYou are a zero-shot ReAct style agent. Decide which tool to use, observe tool results, and continue until the user's task is complete.\n\n\n## Output Format\n\nPlease answer in the same language as the question and use the following format:\n\n```\nThought: The current language of the user is: (user's language). I need to use a tool to help me answer the question.\nAction: tool name (one of retrieve_doc, send_email_to) if using a tool.\nAction Input: the input to the tool, in a JSON format representing the kwargs (e.g. {\"input\": \"hello world\", \"num_beams\": 5})\n```\n\nPlease ALWAYS start with a Thought.\n\nNEVER surround your response with markdown code markers. You may use code markers within your response if you need to.\n\nPlease use a valid JSON format for the Action Input. Do NOT do this {'input': 'hello world', 'num_beams': 5}. If you include the \"Action:\" line, then you MUST include the \"Action Input:\" line too, even if the tool does not need kwargs, in that case you MUST use \"Action Input: {}\".\n\nIf this format is used, the tool will respond in the following format:\n\n```\nObservation: tool response\n```\n\nYou should keep repeating the above format till you have enough information to answer the question without using any more tools. At that point, you MUST respond in one of the following two formats:\n\n```\nThought: I can answer without using any more tools. I'll use the user's language to answer\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n```\nThought: I cannot answer the question with the provided tools.\nAnswer: [your answer here (In the same language as the user's question)]\n```\n\n## Current Conversation\n\nBelow is the current conversation consisting of interleaving human and assistant messages.\n"
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "user",
+            "content": "Please retrieve document id=0 and send it to alice@example.com.",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Please retrieve document id=0 and send it to alice@example.com."
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "assistant",
+            "content": "Thought: I need to retrieve document id=0, then send it to alice@example.com.\nAction: retrieve_doc\nAction Input: {'id': 0}",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Thought: I need to retrieve document id=0, then send it to alice@example.com.\nAction: retrieve_doc\nAction Input: {'id': 0}"
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "user",
+            "content": "Observation: DOC#0: This is a  document body.",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Observation: DOC#0: This is a  document body."
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "assistant",
+            "content": "Thought: Now I have the document. I will send it to alice@example.com.\nAction: send_email_to\nAction Input: {'doc': 'DOC#0: This is a  document body.', 'addr': 'alice@example.com'}",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Thought: Now I have the document. I will send it to alice@example.com.\nAction: send_email_to\nAction Input: {'doc': 'DOC#0: This is a  document body.', 'addr': 'alice@example.com'}"
+              }
+            ]
+          },
+          {
+            "type": "ChatMessage",
+            "role": "user",
+            "content": "Observation: {'agentguard': 'blocked', 'tool': 'send_email_to', 'reason': 'Low-trust principal cannot send document 0 to non-admin recipients', 'decision': 'deny'}",
+            "blocks": [
+              {
+                "type": "TextBlock",
+                "text": "Observation: {'agentguard': 'blocked', 'tool': 'send_email_to', 'reason': 'Low-trust principal cannot send document 0 to non-admin recipients', 'decision': 'deny'}"
+              }
+            ]
+          }
+        ],
+        "role": "user",
+        "content": ""
+      }
+    ]
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "llamaindex",
+    "label": "astream_chat",
+    "owner_type": "OpenAILike",
+    "owner_module": "llama_index.llms.openai_like.base",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_bcbd4cfb436a4dc8",
+  "event_type": "llm_output",
+  "timestamp": 1782464821.9512746,
+  "context": {
+    "session_id": "llamaindex-remote-session",
+    "user_id": null,
+    "agent_id": "llamaindex-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:46515/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:46515/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:46515/v1/client/health",
+      "principal": {
+        "session_id": "llamaindex-remote-session",
+        "agent_id": "llamaindex-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "llamaindex remote runnable host demo"
+    }
+  },
+  "payload": {
+    "output": "Thought: The document was retrieved successfully, but sending it to alice@example.com was denied due to a policy restriction (low-trust principal cannot send document 0 to non-admin recipients). I cannot complete the full task.\nAnswer: I retrieved document id=0 successfully, but I was unable to send it to alice@example.com. The system blocked the email because the document cannot be sent to non-admin recipients by a low-trust principal. The document content is: \"This is a document body.\" If you have admin permissions or an alternative recipient, please let me know.",
+    "thought": "The agent attempted to send the document to alice@example.com but was blocked due to a policy restriction. The agent cannot proceed further with this tool because the action was denied.\n\nThe agent needs to inform the user about what happened. The user's request was to retrieve document id=0 and send it to alice@example.com. The retrieval succeeded, but the sending was denied. So the agent cannot fully complete the task.",
+    "final_output": "Thought: The document was retrieved successfully, but sending it to alice@example.com was denied due to a policy restriction (low-trust principal cannot send document 0 to non-admin recipients). I cannot complete the full task.\nAnswer: I retrieved document id=0 successfully, but I was unable to send it to alice@example.com. The system blocked the email because the document cannot be sent to non-admin recipients by a low-trust principal. The document content is: \"This is a document body.\" If you have admin permissions or an alternative recipient, please let me know."
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "llamaindex",
+    "label": "astream_chat",
+    "owner_type": "OpenAILike",
+    "owner_module": "llama_index.llms.openai_like.base",
+    "output_type": "dict",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+[AgentGuard LLMOutput Parsed]
+{
+  "output": "Thought: The document was retrieved successfully, but sending it to alice@example.com was denied due to a policy restriction (low-trust principal cannot send document 0 to non-admin recipients). I cannot complete the full task.\nAnswer: I retrieved document id=0 successfully, but I was unable to send it to alice@example.com. The system blocked the email because the document cannot be sent to non-admin recipients by a low-trust principal. The document content is: \"This is a document body.\" If you have admin permissions or an alternative recipient, please let me know.",
+  "thought": "The agent attempted to send the document to alice@example.com but was blocked due to a policy restriction. The agent cannot proceed further with this tool because the action was denied.\n\nThe agent needs to inform the user about what happened. The user's request was to retrieve document id=0 and send it to alice@example.com. The retrieval succeeded, but the sending was denied. So the agent cannot fully complete the task.",
+  "final_output": "Thought: The document was retrieved successfully, but sending it to alice@example.com was denied due to a policy restriction (low-trust principal cannot send document 0 to non-admin recipients). I cannot complete the full task.\nAnswer: I retrieved document id=0 successfully, but I was unable to send it to alice@example.com. The system blocked the email because the document cannot be sent to non-admin recipients by a low-trust principal. The document content is: \"This is a document body.\" If you have admin permissions or an alternative recipient, please let me know."
+}
+Output: assistant: I retrieved document id=0 successfully, but I was unable to send it to alice@example.com. The system blocked the email because the document cannot be sent to non-admin recipients by a low-trust principal. The document content is: "This is a document body." If you have admin permissions or an alternative recipient, please let me know.
+===================================
+

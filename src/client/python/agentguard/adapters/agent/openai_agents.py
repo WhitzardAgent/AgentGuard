@@ -7,11 +7,13 @@ import dataclasses
 import functools
 import inspect
 import json
+import re
 import sys
 import threading
 from typing import Any
 
 from agentguard.adapters.agent.base import BaseAgentAdapter, LLMBinding, ToolBinding
+from agentguard.adapters.agent.normalization import LLMOutputNormalization
 from agentguard.adapters.agent.patching import (
     guard_tool_after,
     guard_tool_before,
@@ -144,7 +146,244 @@ class OpenAIAgentsAdapter(BaseAgentAdapter):
                 bindings.append(runner_binding)
         return bindings
 
+    def normalize_llm_output(
+        self,
+        *,
+        label: str,
+        output: Any,
+        fn: Any = None,
+        owner: Any = None,
+    ) -> LLMOutputNormalization:
+        _ = fn
+        return LLMOutputNormalization(
+            payload=_normalize_openai_agents_llm_output(output),
+            metadata=self._metadata(label=label, owner=owner),
+        )
+
 _UNRESOLVED = object()
+
+
+def _normalize_openai_agents_llm_output(value: Any) -> Any:
+    normalized = _normalize_openai_agents_value(value)
+    extracted = _extract_openai_agents_llm_output_fields(normalized)
+    return extracted if extracted is not None else normalized
+
+
+def _extract_openai_agents_llm_output_fields(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+
+    candidate = value
+    for nested_key in ("message", "chat_message"):
+        nested = value.get(nested_key)
+        if isinstance(nested, dict):
+            candidate = nested
+            break
+
+    if _is_openai_agents_tool_call_only(candidate):
+        return {"output": "", "final_output": None}
+    if candidate is not value and _is_openai_agents_tool_call_only(value):
+        return {"output": "", "final_output": None}
+
+    thought = _extract_openai_agents_thought(candidate)
+    if thought is None and candidate is not value:
+        thought = _extract_openai_agents_thought(value)
+
+    visible = _extract_openai_agents_visible_text(candidate)
+    if visible is None and candidate is not value:
+        visible = _extract_openai_agents_visible_text(value)
+    if visible is None:
+        return None
+
+    final_output = visible
+    if thought is None:
+        parsed = _parse_tagged_openai_agents_output(visible)
+        thought = parsed.thought
+        final_output = parsed.final_output
+
+    payload = dict(value)
+    payload["output"] = visible
+    payload["final_output"] = final_output
+    if thought is not None:
+        payload["thought"] = thought
+    return payload
+
+
+def _normalize_openai_agents_value(value: Any) -> Any:
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, dict):
+        return {str(key): _normalize_openai_agents_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_normalize_openai_agents_value(item) for item in value]
+    if dataclasses.is_dataclass(value):
+        try:
+            return _normalize_openai_agents_value(dataclasses.asdict(value))
+        except Exception:
+            pass
+
+    for attr in ("model_dump", "to_dict", "dict"):
+        dumper = getattr(value, attr, None)
+        if callable(dumper):
+            try:
+                dumped = dumper()
+            except Exception:
+                continue
+            return _normalize_openai_agents_value(dumped)
+
+    attrs = {}
+    for key in (
+        "output",
+        "content",
+        "text",
+        "message",
+        "messages",
+        "thought",
+        "summary",
+        "role",
+        "type",
+        "name",
+        "arguments",
+        "call_id",
+        "status",
+        "usage",
+        "response_id",
+        "request_id",
+    ):
+        attr_value = getattr(value, key, None)
+        if attr_value is not None:
+            attrs[key] = _normalize_openai_agents_value(attr_value)
+    if attrs:
+        return attrs
+
+    return str(value)
+
+
+def _extract_openai_agents_visible_text(value: dict[str, Any]) -> str | None:
+    direct = _coerce_openai_agents_text(
+        value.get("content") or value.get("text") or value.get("output") or value.get("message")
+    )
+    if direct:
+        return direct
+
+    output_items = value.get("output")
+    if isinstance(output_items, list):
+        texts = [_extract_openai_agents_text_from_output_item(item) for item in output_items]
+        visible_parts = [text for text in texts if text]
+        if visible_parts:
+            return "\n\n".join(visible_parts)
+    return None
+
+
+def _extract_openai_agents_text_from_output_item(item: Any) -> str | None:
+    if not isinstance(item, dict):
+        return None
+
+    item_type = str(item.get("type") or "").lower()
+    if item_type == "function_call":
+        return None
+
+    content = item.get("content")
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            block_type = str(block.get("type") or "").lower()
+            if block_type in {"output_text", "text"}:
+                text = _coerce_openai_agents_text(block.get("text") or block.get("content"))
+                if text:
+                    parts.append(text)
+        if parts:
+            return "\n\n".join(parts)
+
+    return _coerce_openai_agents_text(item.get("text") or item.get("content"))
+
+
+def _extract_openai_agents_thought(value: dict[str, Any]) -> str | None:
+    for key in ("thought", "summary"):
+        text = _coerce_openai_agents_text(value.get(key))
+        if text is not None:
+            return text
+
+    metadata = value.get("metadata")
+    if isinstance(metadata, dict):
+        for key in ("thought", "summary", "reasoning_content"):
+            text = _coerce_openai_agents_text(metadata.get(key))
+            if text is not None:
+                return text
+    return None
+
+
+def _is_openai_agents_tool_call_only(value: dict[str, Any]) -> bool:
+    if isinstance(value.get("tool_calls"), list):
+        return True
+    if isinstance(value.get("function_call"), dict):
+        return True
+
+    output_items = value.get("output")
+    if not isinstance(output_items, list) or not output_items:
+        return False
+
+    saw_function_call = False
+    for item in output_items:
+        if not isinstance(item, dict):
+            return False
+        item_type = str(item.get("type") or "").lower()
+        if item_type == "function_call":
+            saw_function_call = True
+            continue
+        if _extract_openai_agents_text_from_output_item(item):
+            return False
+        return False
+    return saw_function_call
+
+
+def _coerce_openai_agents_text(value: Any) -> str | None:
+    if isinstance(value, str) and value:
+        return value
+    if isinstance(value, list):
+        parts = [item for item in value if isinstance(item, str) and item]
+        if parts:
+            return "\n\n".join(parts)
+    return None
+
+
+@dataclasses.dataclass(frozen=True)
+class _ParsedOpenAIAgentsOutput:
+    thought: str | None
+    final_output: str
+
+
+_OPENAI_AGENTS_THOUGHT_TAG_RE = re.compile(
+    r"<(?P<tag>think|thought|reason|reasoning)\b[^>]*>(?P<body>.*?)</(?P=tag)>",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+_OPENAI_AGENTS_FINAL_TAG_RE = re.compile(
+    r"<(?P<tag>answer|final|final_output)\b[^>]*>(?P<body>.*?)</(?P=tag)>",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+
+
+def _parse_tagged_openai_agents_output(output: str) -> _ParsedOpenAIAgentsOutput:
+    thought_matches = list(_OPENAI_AGENTS_THOUGHT_TAG_RE.finditer(output))
+    if not thought_matches:
+        return _ParsedOpenAIAgentsOutput(thought=None, final_output=output)
+
+    thought_parts = [match.group("body").strip() for match in thought_matches]
+    thought = "\n\n".join(part for part in thought_parts if part) or None
+    remainder = _OPENAI_AGENTS_THOUGHT_TAG_RE.sub("", output).strip()
+
+    final_matches = list(_OPENAI_AGENTS_FINAL_TAG_RE.finditer(remainder))
+    if final_matches:
+        final_parts = [match.group("body").strip() for match in final_matches]
+        final_output = "\n\n".join(part for part in final_parts if part)
+    else:
+        final_output = remainder
+
+    return _ParsedOpenAIAgentsOutput(thought=thought, final_output=final_output)
 
 
 def _resolve_openai_agent_tools(agent: Any) -> Any:

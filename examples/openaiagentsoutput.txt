@@ -1,0 +1,1212 @@
+===================================
+Prompt: Please retrieve document id=0 and send it to admin@example.com.
+
+[AgentGuard Event]
+{
+  "event_id": "evt_230fcb9b2d324f0a",
+  "event_type": "llm_input",
+  "timestamp": 1782467669.3823216,
+  "context": {
+    "session_id": "openai-agents-remote-session",
+    "user_id": null,
+    "agent_id": "openai-agents-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:36343/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:36343/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:36343/v1/client/health",
+      "principal": {
+        "session_id": "openai-agents-remote-session",
+        "agent_id": "openai-agents-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "openai agents remote runnable host demo"
+    }
+  },
+  "payload": {
+    "messages": [
+      {
+        "label": "get_response",
+        "args": [],
+        "kwargs": {
+          "system_instructions": "You are a zero-shot ReAct style agent. Decide which tool to use, observe tool results, and continue until the user's task is complete.",
+          "input": [
+            {
+              "content": "Please retrieve document id=0 and send it to admin@example.com.",
+              "role": "user"
+            }
+          ],
+          "model_settings": "ModelSettings(temperature=None, top_p=None, frequency_penalty=None, presence_penalty=None, tool_choice=None, parallel_tool_calls=None, truncation=None, max_tokens=None, reasoning=Reasoning(context=None, effort='none', generate_summary=None, summary=None), verbosity='low', metadata=None, store=None, prompt_cache_retention=None, include_usage=None, response_include=None, top_logprobs=None, extra_query=None, extra_body=None, extra_headers=None, extra_args=None, retry=None, context_management=None)",
+          "tools": [
+            "FunctionTool(name='retrieve_doc', description='Retrieve a document by integer id.', params_json_schema={'properties': {'id': {'title': 'Id', 'type': 'integer'}}, 'required': ['id'], 'title': 'retrieve_doc_args', 'type': 'object', 'additionalProperties': False}, on_invoke_tool=<function _install_openai_tool_binding.<locals>.guarded_invoke at 0x7fb7344a1b20>, strict_json_schema=True, is_enabled=True, tool_input_guardrails=None, tool_output_guardrails=None, needs_approval=False, timeout_seconds=None, timeout_behavior='error_as_result', timeout_error_function=None, defer_loading=False)",
+            "FunctionTool(name='send_email_to', description='Send a document to an email address.', params_json_schema={'properties': {'doc': {'title': 'Doc', 'type': 'string'}, 'addr': {'title': 'Addr', 'type': 'string'}}, 'required': ['doc', 'addr'], 'title': 'send_email_to_args', 'type': 'object', 'additionalProperties': False}, on_invoke_tool=<function _install_openai_tool_binding.<locals>.guarded_invoke at 0x7fb7344a1d00>, strict_json_schema=True, is_enabled=True, tool_input_guardrails=None, tool_output_guardrails=None, needs_approval=False, timeout_seconds=None, timeout_behavior='error_as_result', timeout_error_function=None, defer_loading=False)"
+          ],
+          "output_schema": null,
+          "handoffs": [],
+          "tracing": "ModelTracing.ENABLED",
+          "previous_response_id": null,
+          "conversation_id": null,
+          "prompt": null
+        },
+        "role": "user",
+        "content": ""
+      }
+    ]
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "openai_agents",
+    "label": "get_response",
+    "owner_type": "OpenAIResponsesModel",
+    "owner_module": "agents.models.openai_responses",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_bf079675f30f42c1",
+  "event_type": "llm_output",
+  "timestamp": 1782467671.5786254,
+  "context": {
+    "session_id": "openai-agents-remote-session",
+    "user_id": null,
+    "agent_id": "openai-agents-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:36343/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:36343/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:36343/v1/client/health",
+      "principal": {
+        "session_id": "openai-agents-remote-session",
+        "agent_id": "openai-agents-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "openai agents remote runnable host demo"
+    }
+  },
+  "payload": {
+    "output": "",
+    "thought": null,
+    "final_output": null
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "openai_agents",
+    "label": "get_response",
+    "owner_type": "OpenAIResponsesModel",
+    "owner_module": "agents.models.openai_responses",
+    "output_type": "dict",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+[AgentGuard LLMOutput Parsed]
+{
+  "output": "",
+  "thought": null,
+  "final_output": null
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_f9009b3fb42646a2",
+  "event_type": "tool_invoke",
+  "timestamp": 1782467671.5819352,
+  "context": {
+    "session_id": "openai-agents-remote-session",
+    "user_id": null,
+    "agent_id": "openai-agents-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:36343/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:36343/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:36343/v1/client/health",
+      "principal": {
+        "session_id": "openai-agents-remote-session",
+        "agent_id": "openai-agents-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "openai agents remote runnable host demo"
+    }
+  },
+  "payload": {
+    "tool_name": "retrieve_doc",
+    "arguments": {
+      "id": 0
+    },
+    "capabilities": []
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "openai_agents",
+    "owner_type": "FunctionTool",
+    "owner_module": "agents.tool",
+    "tool_name": "retrieve_doc",
+    "interceptors": [
+      "tool"
+    ]
+  }
+}
+Retrieving document id=0
+
+[AgentGuard Event]
+{
+  "event_id": "evt_537e9c8dd6b94f3f",
+  "event_type": "tool_result",
+  "timestamp": 1782467671.5843284,
+  "context": {
+    "session_id": "openai-agents-remote-session",
+    "user_id": null,
+    "agent_id": "openai-agents-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:36343/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:36343/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:36343/v1/client/health",
+      "principal": {
+        "session_id": "openai-agents-remote-session",
+        "agent_id": "openai-agents-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "openai agents remote runnable host demo"
+    }
+  },
+  "payload": {
+    "tool_name": "retrieve_doc",
+    "result": "DOC#0: This is a document."
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "openai_agents",
+    "owner_type": "FunctionTool",
+    "owner_module": "agents.tool",
+    "interceptors": [
+      "tool_result"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_3f3362ee9b08437c",
+  "event_type": "llm_input",
+  "timestamp": 1782467671.5876956,
+  "context": {
+    "session_id": "openai-agents-remote-session",
+    "user_id": null,
+    "agent_id": "openai-agents-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:36343/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:36343/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:36343/v1/client/health",
+      "principal": {
+        "session_id": "openai-agents-remote-session",
+        "agent_id": "openai-agents-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "openai agents remote runnable host demo"
+    }
+  },
+  "payload": {
+    "messages": [
+      {
+        "label": "get_response",
+        "args": [],
+        "kwargs": {
+          "system_instructions": "You are a zero-shot ReAct style agent. Decide which tool to use, observe tool results, and continue until the user's task is complete.",
+          "input": [
+            {
+              "content": "Please retrieve document id=0 and send it to admin@example.com.",
+              "role": "user"
+            },
+            {
+              "arguments": "{\"id\":0}",
+              "call_id": "call_L0268UWparGMX0rX9K26rleR",
+              "name": "retrieve_doc",
+              "type": "function_call"
+            },
+            {
+              "call_id": "call_L0268UWparGMX0rX9K26rleR",
+              "output": "DOC#0: This is a document.",
+              "type": "function_call_output"
+            }
+          ],
+          "model_settings": "ModelSettings(temperature=None, top_p=None, frequency_penalty=None, presence_penalty=None, tool_choice=None, parallel_tool_calls=None, truncation=None, max_tokens=None, reasoning=Reasoning(context=None, effort='none', generate_summary=None, summary=None), verbosity='low', metadata=None, store=None, prompt_cache_retention=None, include_usage=None, response_include=None, top_logprobs=None, extra_query=None, extra_body=None, extra_headers=None, extra_args=None, retry=None, context_management=None)",
+          "tools": [
+            "FunctionTool(name='retrieve_doc', description='Retrieve a document by integer id.', params_json_schema={'properties': {'id': {'title': 'Id', 'type': 'integer'}}, 'required': ['id'], 'title': 'retrieve_doc_args', 'type': 'object', 'additionalProperties': False}, on_invoke_tool=<function _install_openai_tool_binding.<locals>.guarded_invoke at 0x7fb7344a1b20>, strict_json_schema=True, is_enabled=True, tool_input_guardrails=None, tool_output_guardrails=None, needs_approval=False, timeout_seconds=None, timeout_behavior='error_as_result', timeout_error_function=None, defer_loading=False)",
+            "FunctionTool(name='send_email_to', description='Send a document to an email address.', params_json_schema={'properties': {'doc': {'title': 'Doc', 'type': 'string'}, 'addr': {'title': 'Addr', 'type': 'string'}}, 'required': ['doc', 'addr'], 'title': 'send_email_to_args', 'type': 'object', 'additionalProperties': False}, on_invoke_tool=<function _install_openai_tool_binding.<locals>.guarded_invoke at 0x7fb7344a1d00>, strict_json_schema=True, is_enabled=True, tool_input_guardrails=None, tool_output_guardrails=None, needs_approval=False, timeout_seconds=None, timeout_behavior='error_as_result', timeout_error_function=None, defer_loading=False)"
+          ],
+          "output_schema": null,
+          "handoffs": [],
+          "tracing": "ModelTracing.ENABLED",
+          "previous_response_id": null,
+          "conversation_id": null,
+          "prompt": null
+        },
+        "role": "user",
+        "content": ""
+      }
+    ]
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "openai_agents",
+    "label": "get_response",
+    "owner_type": "OpenAIResponsesModel",
+    "owner_module": "agents.models.openai_responses",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_ba88109d2037413b",
+  "event_type": "llm_output",
+  "timestamp": 1782467673.3629968,
+  "context": {
+    "session_id": "openai-agents-remote-session",
+    "user_id": null,
+    "agent_id": "openai-agents-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:36343/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:36343/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:36343/v1/client/health",
+      "principal": {
+        "session_id": "openai-agents-remote-session",
+        "agent_id": "openai-agents-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "openai agents remote runnable host demo"
+    }
+  },
+  "payload": {
+    "output": "",
+    "thought": null,
+    "final_output": null
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "openai_agents",
+    "label": "get_response",
+    "owner_type": "OpenAIResponsesModel",
+    "owner_module": "agents.models.openai_responses",
+    "output_type": "dict",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+[AgentGuard LLMOutput Parsed]
+{
+  "output": "",
+  "thought": null,
+  "final_output": null
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_aa0e25f413af4df6",
+  "event_type": "tool_invoke",
+  "timestamp": 1782467673.366135,
+  "context": {
+    "session_id": "openai-agents-remote-session",
+    "user_id": null,
+    "agent_id": "openai-agents-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:36343/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:36343/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:36343/v1/client/health",
+      "principal": {
+        "session_id": "openai-agents-remote-session",
+        "agent_id": "openai-agents-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "openai agents remote runnable host demo"
+    }
+  },
+  "payload": {
+    "tool_name": "send_email_to",
+    "arguments": {
+      "addr": "admin@example.com",
+      "doc": "DOC#0: This is a document."
+    },
+    "capabilities": []
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "openai_agents",
+    "owner_type": "FunctionTool",
+    "owner_module": "agents.tool",
+    "tool_name": "send_email_to",
+    "interceptors": [
+      "tool"
+    ]
+  }
+}
+Email has sent to admin@example.com: DOC#0: This is a document.
+
+[AgentGuard Event]
+{
+  "event_id": "evt_1ba595abc6d04d26",
+  "event_type": "tool_result",
+  "timestamp": 1782467673.3689802,
+  "context": {
+    "session_id": "openai-agents-remote-session",
+    "user_id": null,
+    "agent_id": "openai-agents-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:36343/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:36343/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:36343/v1/client/health",
+      "principal": {
+        "session_id": "openai-agents-remote-session",
+        "agent_id": "openai-agents-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "openai agents remote runnable host demo"
+    }
+  },
+  "payload": {
+    "tool_name": "send_email_to",
+    "result": "Email has sent to admin@example.com: DOC#0: This is a document."
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "openai_agents",
+    "owner_type": "FunctionTool",
+    "owner_module": "agents.tool",
+    "interceptors": [
+      "tool_result"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_fa513c5824bb4299",
+  "event_type": "llm_input",
+  "timestamp": 1782467673.3719356,
+  "context": {
+    "session_id": "openai-agents-remote-session",
+    "user_id": null,
+    "agent_id": "openai-agents-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:36343/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:36343/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:36343/v1/client/health",
+      "principal": {
+        "session_id": "openai-agents-remote-session",
+        "agent_id": "openai-agents-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "openai agents remote runnable host demo"
+    }
+  },
+  "payload": {
+    "messages": [
+      {
+        "label": "get_response",
+        "args": [],
+        "kwargs": {
+          "system_instructions": "You are a zero-shot ReAct style agent. Decide which tool to use, observe tool results, and continue until the user's task is complete.",
+          "input": [
+            {
+              "content": "Please retrieve document id=0 and send it to admin@example.com.",
+              "role": "user"
+            },
+            {
+              "arguments": "{\"id\":0}",
+              "call_id": "call_L0268UWparGMX0rX9K26rleR",
+              "name": "retrieve_doc",
+              "type": "function_call"
+            },
+            {
+              "call_id": "call_L0268UWparGMX0rX9K26rleR",
+              "output": "DOC#0: This is a document.",
+              "type": "function_call_output"
+            },
+            {
+              "arguments": "{\"addr\":\"admin@example.com\",\"doc\":\"DOC#0: This is a document.\"}",
+              "call_id": "call_YkrJC9Nq48JzpLxJgOC1BWu0",
+              "name": "send_email_to",
+              "type": "function_call"
+            },
+            {
+              "call_id": "call_YkrJC9Nq48JzpLxJgOC1BWu0",
+              "output": "Email has sent to admin@example.com: DOC#0: This is a document.",
+              "type": "function_call_output"
+            }
+          ],
+          "model_settings": "ModelSettings(temperature=None, top_p=None, frequency_penalty=None, presence_penalty=None, tool_choice=None, parallel_tool_calls=None, truncation=None, max_tokens=None, reasoning=Reasoning(context=None, effort='none', generate_summary=None, summary=None), verbosity='low', metadata=None, store=None, prompt_cache_retention=None, include_usage=None, response_include=None, top_logprobs=None, extra_query=None, extra_body=None, extra_headers=None, extra_args=None, retry=None, context_management=None)",
+          "tools": [
+            "FunctionTool(name='retrieve_doc', description='Retrieve a document by integer id.', params_json_schema={'properties': {'id': {'title': 'Id', 'type': 'integer'}}, 'required': ['id'], 'title': 'retrieve_doc_args', 'type': 'object', 'additionalProperties': False}, on_invoke_tool=<function _install_openai_tool_binding.<locals>.guarded_invoke at 0x7fb7344a1b20>, strict_json_schema=True, is_enabled=True, tool_input_guardrails=None, tool_output_guardrails=None, needs_approval=False, timeout_seconds=None, timeout_behavior='error_as_result', timeout_error_function=None, defer_loading=False)",
+            "FunctionTool(name='send_email_to', description='Send a document to an email address.', params_json_schema={'properties': {'doc': {'title': 'Doc', 'type': 'string'}, 'addr': {'title': 'Addr', 'type': 'string'}}, 'required': ['doc', 'addr'], 'title': 'send_email_to_args', 'type': 'object', 'additionalProperties': False}, on_invoke_tool=<function _install_openai_tool_binding.<locals>.guarded_invoke at 0x7fb7344a1d00>, strict_json_schema=True, is_enabled=True, tool_input_guardrails=None, tool_output_guardrails=None, needs_approval=False, timeout_seconds=None, timeout_behavior='error_as_result', timeout_error_function=None, defer_loading=False)"
+          ],
+          "output_schema": null,
+          "handoffs": [],
+          "tracing": "ModelTracing.ENABLED",
+          "previous_response_id": null,
+          "conversation_id": null,
+          "prompt": null
+        },
+        "role": "user",
+        "content": ""
+      }
+    ]
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "openai_agents",
+    "label": "get_response",
+    "owner_type": "OpenAIResponsesModel",
+    "owner_module": "agents.models.openai_responses",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_03a90701a308435d",
+  "event_type": "llm_output",
+  "timestamp": 1782467674.6208632,
+  "context": {
+    "session_id": "openai-agents-remote-session",
+    "user_id": null,
+    "agent_id": "openai-agents-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:36343/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:36343/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:36343/v1/client/health",
+      "principal": {
+        "session_id": "openai-agents-remote-session",
+        "agent_id": "openai-agents-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "openai agents remote runnable host demo"
+    }
+  },
+  "payload": {
+    "output": "Done.",
+    "thought": null,
+    "final_output": "Done."
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "openai_agents",
+    "label": "get_response",
+    "owner_type": "OpenAIResponsesModel",
+    "owner_module": "agents.models.openai_responses",
+    "output_type": "dict",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+[AgentGuard LLMOutput Parsed]
+{
+  "output": "Done.",
+  "thought": null,
+  "final_output": "Done."
+}
+Output: Done.
+===================================
+
+===================================
+Prompt: Please retrieve document id=0 and send it to alice@example.com.
+
+[AgentGuard Event]
+{
+  "event_id": "evt_f3f196bd733443c2",
+  "event_type": "llm_input",
+  "timestamp": 1782467674.6247573,
+  "context": {
+    "session_id": "openai-agents-remote-session",
+    "user_id": null,
+    "agent_id": "openai-agents-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:36343/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:36343/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:36343/v1/client/health",
+      "principal": {
+        "session_id": "openai-agents-remote-session",
+        "agent_id": "openai-agents-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "openai agents remote runnable host demo"
+    }
+  },
+  "payload": {
+    "messages": [
+      {
+        "label": "get_response",
+        "args": [],
+        "kwargs": {
+          "system_instructions": "You are a zero-shot ReAct style agent. Decide which tool to use, observe tool results, and continue until the user's task is complete.",
+          "input": [
+            {
+              "content": "Please retrieve document id=0 and send it to alice@example.com.",
+              "role": "user"
+            }
+          ],
+          "model_settings": "ModelSettings(temperature=None, top_p=None, frequency_penalty=None, presence_penalty=None, tool_choice=None, parallel_tool_calls=None, truncation=None, max_tokens=None, reasoning=Reasoning(context=None, effort='none', generate_summary=None, summary=None), verbosity='low', metadata=None, store=None, prompt_cache_retention=None, include_usage=None, response_include=None, top_logprobs=None, extra_query=None, extra_body=None, extra_headers=None, extra_args=None, retry=None, context_management=None)",
+          "tools": [
+            "FunctionTool(name='retrieve_doc', description='Retrieve a document by integer id.', params_json_schema={'properties': {'id': {'title': 'Id', 'type': 'integer'}}, 'required': ['id'], 'title': 'retrieve_doc_args', 'type': 'object', 'additionalProperties': False}, on_invoke_tool=<function _install_openai_tool_binding.<locals>.guarded_invoke at 0x7fb7344a1b20>, strict_json_schema=True, is_enabled=True, tool_input_guardrails=None, tool_output_guardrails=None, needs_approval=False, timeout_seconds=None, timeout_behavior='error_as_result', timeout_error_function=None, defer_loading=False)",
+            "FunctionTool(name='send_email_to', description='Send a document to an email address.', params_json_schema={'properties': {'doc': {'title': 'Doc', 'type': 'string'}, 'addr': {'title': 'Addr', 'type': 'string'}}, 'required': ['doc', 'addr'], 'title': 'send_email_to_args', 'type': 'object', 'additionalProperties': False}, on_invoke_tool=<function _install_openai_tool_binding.<locals>.guarded_invoke at 0x7fb7344a1d00>, strict_json_schema=True, is_enabled=True, tool_input_guardrails=None, tool_output_guardrails=None, needs_approval=False, timeout_seconds=None, timeout_behavior='error_as_result', timeout_error_function=None, defer_loading=False)"
+          ],
+          "output_schema": null,
+          "handoffs": [],
+          "tracing": "ModelTracing.ENABLED",
+          "previous_response_id": null,
+          "conversation_id": null,
+          "prompt": null
+        },
+        "role": "user",
+        "content": ""
+      }
+    ]
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "openai_agents",
+    "label": "get_response",
+    "owner_type": "OpenAIResponsesModel",
+    "owner_module": "agents.models.openai_responses",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_65c0ba1b05fd409e",
+  "event_type": "llm_output",
+  "timestamp": 1782467676.1368465,
+  "context": {
+    "session_id": "openai-agents-remote-session",
+    "user_id": null,
+    "agent_id": "openai-agents-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:36343/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:36343/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:36343/v1/client/health",
+      "principal": {
+        "session_id": "openai-agents-remote-session",
+        "agent_id": "openai-agents-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "openai agents remote runnable host demo"
+    }
+  },
+  "payload": {
+    "output": "",
+    "thought": null,
+    "final_output": null
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "openai_agents",
+    "label": "get_response",
+    "owner_type": "OpenAIResponsesModel",
+    "owner_module": "agents.models.openai_responses",
+    "output_type": "dict",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+[AgentGuard LLMOutput Parsed]
+{
+  "output": "",
+  "thought": null,
+  "final_output": null
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_1a9c20eee8fd4b7f",
+  "event_type": "tool_invoke",
+  "timestamp": 1782467676.1398823,
+  "context": {
+    "session_id": "openai-agents-remote-session",
+    "user_id": null,
+    "agent_id": "openai-agents-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:36343/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:36343/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:36343/v1/client/health",
+      "principal": {
+        "session_id": "openai-agents-remote-session",
+        "agent_id": "openai-agents-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "openai agents remote runnable host demo"
+    }
+  },
+  "payload": {
+    "tool_name": "retrieve_doc",
+    "arguments": {
+      "id": 0
+    },
+    "capabilities": []
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "openai_agents",
+    "owner_type": "FunctionTool",
+    "owner_module": "agents.tool",
+    "tool_name": "retrieve_doc",
+    "interceptors": [
+      "tool"
+    ]
+  }
+}
+Retrieving document id=0
+
+[AgentGuard Event]
+{
+  "event_id": "evt_a6804d4439e54dfe",
+  "event_type": "tool_result",
+  "timestamp": 1782467676.1428244,
+  "context": {
+    "session_id": "openai-agents-remote-session",
+    "user_id": null,
+    "agent_id": "openai-agents-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:36343/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:36343/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:36343/v1/client/health",
+      "principal": {
+        "session_id": "openai-agents-remote-session",
+        "agent_id": "openai-agents-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "openai agents remote runnable host demo"
+    }
+  },
+  "payload": {
+    "tool_name": "retrieve_doc",
+    "result": "DOC#0: This is a document."
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "openai_agents",
+    "owner_type": "FunctionTool",
+    "owner_module": "agents.tool",
+    "interceptors": [
+      "tool_result"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_baca2ae2131e402e",
+  "event_type": "llm_input",
+  "timestamp": 1782467676.145682,
+  "context": {
+    "session_id": "openai-agents-remote-session",
+    "user_id": null,
+    "agent_id": "openai-agents-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:36343/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:36343/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:36343/v1/client/health",
+      "principal": {
+        "session_id": "openai-agents-remote-session",
+        "agent_id": "openai-agents-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "openai agents remote runnable host demo"
+    }
+  },
+  "payload": {
+    "messages": [
+      {
+        "label": "get_response",
+        "args": [],
+        "kwargs": {
+          "system_instructions": "You are a zero-shot ReAct style agent. Decide which tool to use, observe tool results, and continue until the user's task is complete.",
+          "input": [
+            {
+              "content": "Please retrieve document id=0 and send it to alice@example.com.",
+              "role": "user"
+            },
+            {
+              "arguments": "{\"id\":0}",
+              "call_id": "call_teOHum0VDf5kQleMPgoMOaUL",
+              "name": "retrieve_doc",
+              "type": "function_call"
+            },
+            {
+              "call_id": "call_teOHum0VDf5kQleMPgoMOaUL",
+              "output": "DOC#0: This is a document.",
+              "type": "function_call_output"
+            }
+          ],
+          "model_settings": "ModelSettings(temperature=None, top_p=None, frequency_penalty=None, presence_penalty=None, tool_choice=None, parallel_tool_calls=None, truncation=None, max_tokens=None, reasoning=Reasoning(context=None, effort='none', generate_summary=None, summary=None), verbosity='low', metadata=None, store=None, prompt_cache_retention=None, include_usage=None, response_include=None, top_logprobs=None, extra_query=None, extra_body=None, extra_headers=None, extra_args=None, retry=None, context_management=None)",
+          "tools": [
+            "FunctionTool(name='retrieve_doc', description='Retrieve a document by integer id.', params_json_schema={'properties': {'id': {'title': 'Id', 'type': 'integer'}}, 'required': ['id'], 'title': 'retrieve_doc_args', 'type': 'object', 'additionalProperties': False}, on_invoke_tool=<function _install_openai_tool_binding.<locals>.guarded_invoke at 0x7fb7344a1b20>, strict_json_schema=True, is_enabled=True, tool_input_guardrails=None, tool_output_guardrails=None, needs_approval=False, timeout_seconds=None, timeout_behavior='error_as_result', timeout_error_function=None, defer_loading=False)",
+            "FunctionTool(name='send_email_to', description='Send a document to an email address.', params_json_schema={'properties': {'doc': {'title': 'Doc', 'type': 'string'}, 'addr': {'title': 'Addr', 'type': 'string'}}, 'required': ['doc', 'addr'], 'title': 'send_email_to_args', 'type': 'object', 'additionalProperties': False}, on_invoke_tool=<function _install_openai_tool_binding.<locals>.guarded_invoke at 0x7fb7344a1d00>, strict_json_schema=True, is_enabled=True, tool_input_guardrails=None, tool_output_guardrails=None, needs_approval=False, timeout_seconds=None, timeout_behavior='error_as_result', timeout_error_function=None, defer_loading=False)"
+          ],
+          "output_schema": null,
+          "handoffs": [],
+          "tracing": "ModelTracing.ENABLED",
+          "previous_response_id": null,
+          "conversation_id": null,
+          "prompt": null
+        },
+        "role": "user",
+        "content": ""
+      }
+    ]
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "openai_agents",
+    "label": "get_response",
+    "owner_type": "OpenAIResponsesModel",
+    "owner_module": "agents.models.openai_responses",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_d52b80acaf374c88",
+  "event_type": "llm_output",
+  "timestamp": 1782467677.7402506,
+  "context": {
+    "session_id": "openai-agents-remote-session",
+    "user_id": null,
+    "agent_id": "openai-agents-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:36343/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:36343/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:36343/v1/client/health",
+      "principal": {
+        "session_id": "openai-agents-remote-session",
+        "agent_id": "openai-agents-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "openai agents remote runnable host demo"
+    }
+  },
+  "payload": {
+    "output": "",
+    "thought": null,
+    "final_output": null
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "openai_agents",
+    "label": "get_response",
+    "owner_type": "OpenAIResponsesModel",
+    "owner_module": "agents.models.openai_responses",
+    "output_type": "dict",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+[AgentGuard LLMOutput Parsed]
+{
+  "output": "",
+  "thought": null,
+  "final_output": null
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_9880cb7c5f9e44da",
+  "event_type": "tool_invoke",
+  "timestamp": 1782467677.743225,
+  "context": {
+    "session_id": "openai-agents-remote-session",
+    "user_id": null,
+    "agent_id": "openai-agents-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:36343/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:36343/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:36343/v1/client/health",
+      "principal": {
+        "session_id": "openai-agents-remote-session",
+        "agent_id": "openai-agents-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "openai agents remote runnable host demo"
+    }
+  },
+  "payload": {
+    "tool_name": "send_email_to",
+    "arguments": {
+      "addr": "alice@example.com",
+      "doc": "DOC#0: This is a document."
+    },
+    "capabilities": []
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "openai_agents",
+    "owner_type": "FunctionTool",
+    "owner_module": "agents.tool",
+    "tool_name": "send_email_to",
+    "interceptors": [
+      "tool"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_faa014455c684eaf",
+  "event_type": "llm_input",
+  "timestamp": 1782467677.7468324,
+  "context": {
+    "session_id": "openai-agents-remote-session",
+    "user_id": null,
+    "agent_id": "openai-agents-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:36343/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:36343/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:36343/v1/client/health",
+      "principal": {
+        "session_id": "openai-agents-remote-session",
+        "agent_id": "openai-agents-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "openai agents remote runnable host demo"
+    }
+  },
+  "payload": {
+    "messages": [
+      {
+        "label": "get_response",
+        "args": [],
+        "kwargs": {
+          "system_instructions": "You are a zero-shot ReAct style agent. Decide which tool to use, observe tool results, and continue until the user's task is complete.",
+          "input": [
+            {
+              "content": "Please retrieve document id=0 and send it to alice@example.com.",
+              "role": "user"
+            },
+            {
+              "arguments": "{\"id\":0}",
+              "call_id": "call_teOHum0VDf5kQleMPgoMOaUL",
+              "name": "retrieve_doc",
+              "type": "function_call"
+            },
+            {
+              "call_id": "call_teOHum0VDf5kQleMPgoMOaUL",
+              "output": "DOC#0: This is a document.",
+              "type": "function_call_output"
+            },
+            {
+              "arguments": "{\"addr\":\"alice@example.com\",\"doc\":\"DOC#0: This is a document.\"}",
+              "call_id": "call_jUDQdO9KBpTmdRMWNyZW7BtL",
+              "name": "send_email_to",
+              "type": "function_call"
+            },
+            {
+              "call_id": "call_jUDQdO9KBpTmdRMWNyZW7BtL",
+              "output": "{\"agentguard\": \"blocked\", \"reason\": \"Low-trust principal cannot send document 0 to non-admin recipients\"}",
+              "type": "function_call_output"
+            }
+          ],
+          "model_settings": "ModelSettings(temperature=None, top_p=None, frequency_penalty=None, presence_penalty=None, tool_choice=None, parallel_tool_calls=None, truncation=None, max_tokens=None, reasoning=Reasoning(context=None, effort='none', generate_summary=None, summary=None), verbosity='low', metadata=None, store=None, prompt_cache_retention=None, include_usage=None, response_include=None, top_logprobs=None, extra_query=None, extra_body=None, extra_headers=None, extra_args=None, retry=None, context_management=None)",
+          "tools": [
+            "FunctionTool(name='retrieve_doc', description='Retrieve a document by integer id.', params_json_schema={'properties': {'id': {'title': 'Id', 'type': 'integer'}}, 'required': ['id'], 'title': 'retrieve_doc_args', 'type': 'object', 'additionalProperties': False}, on_invoke_tool=<function _install_openai_tool_binding.<locals>.guarded_invoke at 0x7fb7344a1b20>, strict_json_schema=True, is_enabled=True, tool_input_guardrails=None, tool_output_guardrails=None, needs_approval=False, timeout_seconds=None, timeout_behavior='error_as_result', timeout_error_function=None, defer_loading=False)",
+            "FunctionTool(name='send_email_to', description='Send a document to an email address.', params_json_schema={'properties': {'doc': {'title': 'Doc', 'type': 'string'}, 'addr': {'title': 'Addr', 'type': 'string'}}, 'required': ['doc', 'addr'], 'title': 'send_email_to_args', 'type': 'object', 'additionalProperties': False}, on_invoke_tool=<function _install_openai_tool_binding.<locals>.guarded_invoke at 0x7fb7344a1d00>, strict_json_schema=True, is_enabled=True, tool_input_guardrails=None, tool_output_guardrails=None, needs_approval=False, timeout_seconds=None, timeout_behavior='error_as_result', timeout_error_function=None, defer_loading=False)"
+          ],
+          "output_schema": null,
+          "handoffs": [],
+          "tracing": "ModelTracing.ENABLED",
+          "previous_response_id": null,
+          "conversation_id": null,
+          "prompt": null
+        },
+        "role": "user",
+        "content": ""
+      }
+    ]
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "openai_agents",
+    "label": "get_response",
+    "owner_type": "OpenAIResponsesModel",
+    "owner_module": "agents.models.openai_responses",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_6009e6493797498d",
+  "event_type": "llm_output",
+  "timestamp": 1782467679.744641,
+  "context": {
+    "session_id": "openai-agents-remote-session",
+    "user_id": null,
+    "agent_id": "openai-agents-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:36343/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:36343/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:36343/v1/client/health",
+      "principal": {
+        "session_id": "openai-agents-remote-session",
+        "agent_id": "openai-agents-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "openai agents remote runnable host demo"
+    }
+  },
+  "payload": {
+    "output": "I retrieved document 0, but sending was blocked:\n\n- Reason: Low-trust principal cannot send document 0 to non-admin recipients\n\nIf you want, I can help with an alternative recipient or next step.",
+    "thought": null,
+    "final_output": "I retrieved document 0, but sending was blocked:\n\n- Reason: Low-trust principal cannot send document 0 to non-admin recipients\n\nIf you want, I can help with an alternative recipient or next step."
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "openai_agents",
+    "label": "get_response",
+    "owner_type": "OpenAIResponsesModel",
+    "owner_module": "agents.models.openai_responses",
+    "output_type": "dict",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+[AgentGuard LLMOutput Parsed]
+{
+  "output": "I retrieved document 0, but sending was blocked:\n\n- Reason: Low-trust principal cannot send document 0 to non-admin recipients\n\nIf you want, I can help with an alternative recipient or next step.",
+  "thought": null,
+  "final_output": "I retrieved document 0, but sending was blocked:\n\n- Reason: Low-trust principal cannot send document 0 to non-admin recipients\n\nIf you want, I can help with an alternative recipient or next step."
+}
+Output: I retrieved document 0, but sending was blocked:
+
+- Reason: Low-trust principal cannot send document 0 to non-admin recipients
+
+If you want, I can help with an alternative recipient or next step.
+===================================
+
+
+[Audit Summary]
+{'event_type': 'llm_input', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_output', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'tool_invoke', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'rule_based_plugin': {'matched': False, 'rule_id': None, 'effect': None, 'reason': '', 'matched_rule_ids': []}, 'policy_version': './rules/block_email_send.json', 'plugin_outcomes': [{'plugin': 'rule_based_plugin', 'decision_candidate': None, 'risk_signals': [], 'is_final': True, 'metadata': {'rule_based_plugin': {'matched': False, 'rule_id': None, 'effect': None, 'reason': '', 'matched_rule_ids': []}, 'policy_version': './rules/block_email_send.json'}}]}}
+{'event_type': 'tool_result', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_input', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_output', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'tool_invoke', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'rule_based_plugin': {'matched': False, 'rule_id': None, 'effect': None, 'reason': '', 'matched_rule_ids': []}, 'policy_version': './rules/block_email_send.json', 'plugin_outcomes': [{'plugin': 'rule_based_plugin', 'decision_candidate': None, 'risk_signals': [], 'is_final': True, 'metadata': {'rule_based_plugin': {'matched': False, 'rule_id': None, 'effect': None, 'reason': '', 'matched_rule_ids': []}, 'policy_version': './rules/block_email_send.json'}}]}}
+{'event_type': 'tool_result', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_input', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_output', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_input', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_output', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'tool_invoke', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'rule_based_plugin': {'matched': False, 'rule_id': None, 'effect': None, 'reason': '', 'matched_rule_ids': []}, 'policy_version': './rules/block_email_send.json', 'plugin_outcomes': [{'plugin': 'rule_based_plugin', 'decision_candidate': None, 'risk_signals': [], 'is_final': True, 'metadata': {'rule_based_plugin': {'matched': False, 'rule_id': None, 'effect': None, 'reason': '', 'matched_rule_ids': []}, 'policy_version': './rules/block_email_send.json'}}]}}
+{'event_type': 'tool_result', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_input', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_output', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'tool_invoke', 'decision_type': 'deny', 'policy_id': 'server:deny_doc0_send_to_non_admin_for_low_trust', 'reason': 'Low-trust principal cannot send document 0 to non-admin recipients', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'rule_based_plugin': {'matched': True, 'rule_id': 'deny_doc0_send_to_non_admin_for_low_trust', 'effect': 'deny', 'reason': 'Low-trust principal cannot send document 0 to non-admin recipients', 'matched_rule_ids': ['deny_doc0_send_to_non_admin_for_low_trust']}, 'policy_version': './rules/block_email_send.json', 'plugin_outcomes': [{'plugin': 'rule_based_plugin', 'decision_candidate': {'decision_type': 'deny', 'reason': 'Low-trust principal cannot send document 0 to non-admin recipients', 'policy_id': 'server:deny_doc0_send_to_non_admin_for_low_trust', 'confidence': None, 'risk_signals': [], 'metadata': {'explanation': "rule 'deny_doc0_send_to_non_admin_for_low_trust' (deny) won among ['deny_doc0_send_to_non_admin_for_low_trust']", 'matched_rule_ids': ['deny_doc0_send_to_non_admin_for_low_trust'], 'policy_version': './rules/block_email_send.json', 'plugin_outcomes': [{'plugin': 'rule_based_plugin', 'decision_candidate': {'decision_type': 'deny', 'reason': 'Low-trust principal cannot send document 0 to non-admin recipients', 'policy_id': 'server:deny_doc0_send_to_non_admin_for_low_trust', 'confidence': None, 'risk_signals': [], 'metadata': {'explanation': "rule 'deny_doc0_send_to_non_admin_for_low_trust' (deny) won among ['deny_doc0_send_to_non_admin_for_low_trust']", 'matched_rule_ids': ['deny_doc0_send_to_non_admin_for_low_trust'], 'policy_version': './rules/block_email_send.json'}}, 'risk_signals': [], 'is_final': True, 'metadata': {'rule_based_plugin': {'matched': True, 'rule_id': 'deny_doc0_send_to_non_admin_for_low_trust', 'effect': 'deny', 'reason': 'Low-trust principal cannot send document 0 to non-admin recipients', 'matched_rule_ids': ['deny_doc0_send_to_non_admin_for_low_trust']}, 'policy_version': './rules/block_email_send.json'}}]}}, 'risk_signals': [], 'is_final': True, 'metadata': {'rule_based_plugin': {'matched': True, 'rule_id': 'deny_doc0_send_to_non_admin_for_low_trust', 'effect': 'deny', 'reason': 'Low-trust principal cannot send document 0 to non-admin recipients', 'matched_rule_ids': ['deny_doc0_send_to_non_admin_for_low_trust']}, 'policy_version': './rules/block_email_send.json'}}], 'selected_outcome_index': 0}}
+{'event_type': 'llm_input', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_output', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}

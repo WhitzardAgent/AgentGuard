@@ -1,0 +1,1573 @@
+===================================
+Prompt: Please retrieve document id=0 and send it to admin@example.com.
+
+[AgentGuard Event]
+{
+  "event_id": "evt_ed9797a7d91f4e7c",
+  "event_type": "llm_input",
+  "timestamp": 1782462685.1353333,
+  "context": {
+    "session_id": "langchain-remote-session",
+    "user_id": null,
+    "agent_id": "langchain-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:41711/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:41711/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:41711/v1/client/health",
+      "principal": {
+        "session_id": "langchain-remote-session",
+        "agent_id": "langchain-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langchain remote runnable host demo"
+    }
+  },
+  "payload": {
+    "messages": [
+      {
+        "input": [
+          {
+            "type": "system",
+            "content": "You are a zero-shot ReAct style agent. Decide which tool to use, observe tool results, and continue until the user's task is complete."
+          },
+          {
+            "type": "human",
+            "content": "Please retrieve document id=0 and send it to admin@example.com.",
+            "id": "f055f6c0-e8eb-40d1-a1f4-79e4f88db176"
+          }
+        ],
+        "kwargs": {
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "retrieve_doc",
+                "description": "Retrieve a document by integer id.",
+                "parameters": {
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "send_email_to",
+                "description": "Send a document to an email address.",
+                "parameters": {
+                  "properties": {
+                    "doc": {
+                      "type": "string"
+                    },
+                    "addr": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "doc",
+                    "addr"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          ]
+        },
+        "role": "user",
+        "content": ""
+      }
+    ]
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "langchain",
+    "label": "invoke",
+    "owner_type": "ChatDeepSeek",
+    "owner_module": "langchain_deepseek.chat_models",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_b8f68584bccd4c9f",
+  "event_type": "llm_output",
+  "timestamp": 1782462686.084223,
+  "context": {
+    "session_id": "langchain-remote-session",
+    "user_id": null,
+    "agent_id": "langchain-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:41711/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:41711/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:41711/v1/client/health",
+      "principal": {
+        "session_id": "langchain-remote-session",
+        "agent_id": "langchain-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langchain remote runnable host demo"
+    }
+  },
+  "payload": {
+    "output": "",
+    "thought": null,
+    "final_output": null
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "langchain",
+    "label": "invoke",
+    "owner_type": "ChatDeepSeek",
+    "owner_module": "langchain_deepseek.chat_models",
+    "output_type": "dict",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+[AgentGuard LLMOutput Parsed]
+{
+  "output": "",
+  "thought": null,
+  "final_output": null
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_0f4796c41b4b4d19",
+  "event_type": "tool_invoke",
+  "timestamp": 1782462686.0880053,
+  "context": {
+    "session_id": "langchain-remote-session",
+    "user_id": null,
+    "agent_id": "langchain-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:41711/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:41711/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:41711/v1/client/health",
+      "principal": {
+        "session_id": "langchain-remote-session",
+        "agent_id": "langchain-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langchain remote runnable host demo"
+    }
+  },
+  "payload": {
+    "tool_name": "retrieve_doc",
+    "arguments": {
+      "id": 0
+    },
+    "capabilities": []
+  },
+  "risk_signals": [],
+  "metadata": {
+    "tool_name": "retrieve_doc",
+    "interceptors": [
+      "tool"
+    ]
+  }
+}
+Retrieving document id=0
+
+[AgentGuard Event]
+{
+  "event_id": "evt_b5629f2deb0f4797",
+  "event_type": "tool_result",
+  "timestamp": 1782462686.0902295,
+  "context": {
+    "session_id": "langchain-remote-session",
+    "user_id": null,
+    "agent_id": "langchain-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:41711/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:41711/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:41711/v1/client/health",
+      "principal": {
+        "session_id": "langchain-remote-session",
+        "agent_id": "langchain-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langchain remote runnable host demo"
+    }
+  },
+  "payload": {
+    "tool_name": "retrieve_doc",
+    "result": "DOC#0: This is a document."
+  },
+  "risk_signals": [],
+  "metadata": {
+    "interceptors": [
+      "tool_result"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_4674145720734f2d",
+  "event_type": "llm_input",
+  "timestamp": 1782462686.0931206,
+  "context": {
+    "session_id": "langchain-remote-session",
+    "user_id": null,
+    "agent_id": "langchain-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:41711/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:41711/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:41711/v1/client/health",
+      "principal": {
+        "session_id": "langchain-remote-session",
+        "agent_id": "langchain-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langchain remote runnable host demo"
+    }
+  },
+  "payload": {
+    "messages": [
+      {
+        "input": [
+          {
+            "type": "system",
+            "content": "You are a zero-shot ReAct style agent. Decide which tool to use, observe tool results, and continue until the user's task is complete."
+          },
+          {
+            "type": "human",
+            "content": "Please retrieve document id=0 and send it to admin@example.com.",
+            "id": "f055f6c0-e8eb-40d1-a1f4-79e4f88db176"
+          },
+          {
+            "type": "ai",
+            "content": "",
+            "id": "lc_run--019f030e-1fd2-7eb2-a2d9-e82365a01ea1-0",
+            "tool_calls": [
+              {
+                "name": "retrieve_doc",
+                "args": {
+                  "id": 0
+                },
+                "id": "call_00_8fE3sh29wCvenaIwGJiE5502",
+                "type": "tool_call"
+              }
+            ],
+            "additional_kwargs": {
+              "refusal": null,
+              "reasoning_content": "Let me retrieve document id=0 first, then send it to the email address."
+            },
+            "response_metadata": {
+              "token_usage": "[REDACTED]",
+              "model_provider": "deepseek",
+              "model_name": "deepseek-v4-flash",
+              "system_fingerprint": "fp_8b330d02d0_prod0820_fp8_kvcache_20260402",
+              "id": "fa8d71ac-69e9-43be-8181-c1dc4a95f531",
+              "finish_reason": "tool_calls",
+              "logprobs": null
+            },
+            "usage_metadata": {
+              "input_tokens": "[REDACTED]",
+              "output_tokens": "[REDACTED]",
+              "total_tokens": "[REDACTED]",
+              "input_token_details": "[REDACTED]",
+              "output_token_details": "[REDACTED]"
+            }
+          },
+          {
+            "type": "tool",
+            "content": "DOC#0: This is a document.",
+            "name": "retrieve_doc",
+            "id": "e7428f56-2e3d-48ea-913c-28fdb7ba22a3"
+          }
+        ],
+        "kwargs": {
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "retrieve_doc",
+                "description": "Retrieve a document by integer id.",
+                "parameters": {
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "send_email_to",
+                "description": "Send a document to an email address.",
+                "parameters": {
+                  "properties": {
+                    "doc": {
+                      "type": "string"
+                    },
+                    "addr": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "doc",
+                    "addr"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          ]
+        },
+        "role": "user",
+        "content": ""
+      }
+    ]
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "langchain",
+    "label": "invoke",
+    "owner_type": "ChatDeepSeek",
+    "owner_module": "langchain_deepseek.chat_models",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_39ffde11930a43e2",
+  "event_type": "llm_output",
+  "timestamp": 1782462687.4066718,
+  "context": {
+    "session_id": "langchain-remote-session",
+    "user_id": null,
+    "agent_id": "langchain-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:41711/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:41711/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:41711/v1/client/health",
+      "principal": {
+        "session_id": "langchain-remote-session",
+        "agent_id": "langchain-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langchain remote runnable host demo"
+    }
+  },
+  "payload": {
+    "output": "",
+    "thought": null,
+    "final_output": null
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "langchain",
+    "label": "invoke",
+    "owner_type": "ChatDeepSeek",
+    "owner_module": "langchain_deepseek.chat_models",
+    "output_type": "dict",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+[AgentGuard LLMOutput Parsed]
+{
+  "output": "",
+  "thought": null,
+  "final_output": null
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_7287a84884414971",
+  "event_type": "tool_invoke",
+  "timestamp": 1782462687.4103992,
+  "context": {
+    "session_id": "langchain-remote-session",
+    "user_id": null,
+    "agent_id": "langchain-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:41711/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:41711/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:41711/v1/client/health",
+      "principal": {
+        "session_id": "langchain-remote-session",
+        "agent_id": "langchain-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langchain remote runnable host demo"
+    }
+  },
+  "payload": {
+    "tool_name": "send_email_to",
+    "arguments": {
+      "doc": "DOC#0: This is a document.",
+      "addr": "admin@example.com"
+    },
+    "capabilities": []
+  },
+  "risk_signals": [],
+  "metadata": {
+    "tool_name": "send_email_to",
+    "interceptors": [
+      "tool"
+    ]
+  }
+}
+Email has sent to admin@example.com: DOC#0: This is a document.
+
+[AgentGuard Event]
+{
+  "event_id": "evt_5c1a7d39047a4b06",
+  "event_type": "tool_result",
+  "timestamp": 1782462687.4129848,
+  "context": {
+    "session_id": "langchain-remote-session",
+    "user_id": null,
+    "agent_id": "langchain-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:41711/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:41711/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:41711/v1/client/health",
+      "principal": {
+        "session_id": "langchain-remote-session",
+        "agent_id": "langchain-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langchain remote runnable host demo"
+    }
+  },
+  "payload": {
+    "tool_name": "send_email_to",
+    "result": "Email has sent to admin@example.com: DOC#0: This is a document."
+  },
+  "risk_signals": [],
+  "metadata": {
+    "interceptors": [
+      "tool_result"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_eafdbe9091fc45c0",
+  "event_type": "llm_input",
+  "timestamp": 1782462687.4162097,
+  "context": {
+    "session_id": "langchain-remote-session",
+    "user_id": null,
+    "agent_id": "langchain-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:41711/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:41711/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:41711/v1/client/health",
+      "principal": {
+        "session_id": "langchain-remote-session",
+        "agent_id": "langchain-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langchain remote runnable host demo"
+    }
+  },
+  "payload": {
+    "messages": [
+      {
+        "input": [
+          {
+            "type": "system",
+            "content": "You are a zero-shot ReAct style agent. Decide which tool to use, observe tool results, and continue until the user's task is complete."
+          },
+          {
+            "type": "human",
+            "content": "Please retrieve document id=0 and send it to admin@example.com.",
+            "id": "f055f6c0-e8eb-40d1-a1f4-79e4f88db176"
+          },
+          {
+            "type": "ai",
+            "content": "",
+            "id": "lc_run--019f030e-1fd2-7eb2-a2d9-e82365a01ea1-0",
+            "tool_calls": [
+              {
+                "name": "retrieve_doc",
+                "args": {
+                  "id": 0
+                },
+                "id": "call_00_8fE3sh29wCvenaIwGJiE5502",
+                "type": "tool_call"
+              }
+            ],
+            "additional_kwargs": {
+              "refusal": null,
+              "reasoning_content": "Let me retrieve document id=0 first, then send it to the email address."
+            },
+            "response_metadata": {
+              "token_usage": "[REDACTED]",
+              "model_provider": "deepseek",
+              "model_name": "deepseek-v4-flash",
+              "system_fingerprint": "fp_8b330d02d0_prod0820_fp8_kvcache_20260402",
+              "id": "fa8d71ac-69e9-43be-8181-c1dc4a95f531",
+              "finish_reason": "tool_calls",
+              "logprobs": null
+            },
+            "usage_metadata": {
+              "input_tokens": "[REDACTED]",
+              "output_tokens": "[REDACTED]",
+              "total_tokens": "[REDACTED]",
+              "input_token_details": "[REDACTED]",
+              "output_token_details": "[REDACTED]"
+            }
+          },
+          {
+            "type": "tool",
+            "content": "DOC#0: This is a document.",
+            "name": "retrieve_doc",
+            "id": "e7428f56-2e3d-48ea-913c-28fdb7ba22a3"
+          },
+          {
+            "type": "ai",
+            "content": "",
+            "id": "lc_run--019f030e-238f-7851-a7cd-d148eed25f14-0",
+            "tool_calls": [
+              {
+                "name": "send_email_to",
+                "args": {
+                  "doc": "DOC#0: This is a document.",
+                  "addr": "admin@example.com"
+                },
+                "id": "call_00_AdG8BaAX4FFIP4UQdCbd3433",
+                "type": "tool_call"
+              }
+            ],
+            "additional_kwargs": {
+              "refusal": null,
+              "reasoning_content": "Now I have the document. Let me send it to admin@example.com."
+            },
+            "response_metadata": {
+              "token_usage": "[REDACTED]",
+              "model_provider": "deepseek",
+              "model_name": "deepseek-v4-flash",
+              "system_fingerprint": "fp_8b330d02d0_prod0820_fp8_kvcache_20260402",
+              "id": "12ea05f6-1dca-4649-bc3b-d19e433fb2bc",
+              "finish_reason": "tool_calls",
+              "logprobs": null
+            },
+            "usage_metadata": {
+              "input_tokens": "[REDACTED]",
+              "output_tokens": "[REDACTED]",
+              "total_tokens": "[REDACTED]",
+              "input_token_details": "[REDACTED]",
+              "output_token_details": "[REDACTED]"
+            }
+          },
+          {
+            "type": "tool",
+            "content": "Email has sent to admin@example.com: DOC#0: This is a document.",
+            "name": "send_email_to",
+            "id": "05f9c909-d28d-4ea1-bced-a780adb11f5b"
+          }
+        ],
+        "kwargs": {
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "retrieve_doc",
+                "description": "Retrieve a document by integer id.",
+                "parameters": {
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "send_email_to",
+                "description": "Send a document to an email address.",
+                "parameters": {
+                  "properties": {
+                    "doc": {
+                      "type": "string"
+                    },
+                    "addr": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "doc",
+                    "addr"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          ]
+        },
+        "role": "user",
+        "content": ""
+      }
+    ]
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "langchain",
+    "label": "invoke",
+    "owner_type": "ChatDeepSeek",
+    "owner_module": "langchain_deepseek.chat_models",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_d15b3f8d96134735",
+  "event_type": "llm_output",
+  "timestamp": 1782462688.3445516,
+  "context": {
+    "session_id": "langchain-remote-session",
+    "user_id": null,
+    "agent_id": "langchain-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:41711/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:41711/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:41711/v1/client/health",
+      "principal": {
+        "session_id": "langchain-remote-session",
+        "agent_id": "langchain-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langchain remote runnable host demo"
+    }
+  },
+  "payload": {
+    "output": "Done! I've retrieved document id=0 and successfully sent it to **admin@example.com**. The document contained the message: \"This is a document.\"",
+    "thought": "The task is complete. I retrieved document id=0 and sent it to admin@example.com.",
+    "final_output": "Done! I've retrieved document id=0 and successfully sent it to **admin@example.com**. The document contained the message: \"This is a document.\""
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "langchain",
+    "label": "invoke",
+    "owner_type": "ChatDeepSeek",
+    "owner_module": "langchain_deepseek.chat_models",
+    "output_type": "dict",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+[AgentGuard LLMOutput Parsed]
+{
+  "output": "Done! I've retrieved document id=0 and successfully sent it to **admin@example.com**. The document contained the message: \"This is a document.\"",
+  "thought": "The task is complete. I retrieved document id=0 and sent it to admin@example.com.",
+  "final_output": "Done! I've retrieved document id=0 and successfully sent it to **admin@example.com**. The document contained the message: \"This is a document.\""
+}
+Output: Done! I've retrieved document id=0 and successfully sent it to **admin@example.com**. The document contained the message: "This is a document."
+===================================
+
+===================================
+Prompt: Please retrieve document id=0 and send it to alice@example.com.
+
+[AgentGuard Event]
+{
+  "event_id": "evt_c34dbbf0b38348ba",
+  "event_type": "llm_input",
+  "timestamp": 1782462688.3482695,
+  "context": {
+    "session_id": "langchain-remote-session",
+    "user_id": null,
+    "agent_id": "langchain-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:41711/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:41711/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:41711/v1/client/health",
+      "principal": {
+        "session_id": "langchain-remote-session",
+        "agent_id": "langchain-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langchain remote runnable host demo"
+    }
+  },
+  "payload": {
+    "messages": [
+      {
+        "input": [
+          {
+            "type": "system",
+            "content": "You are a zero-shot ReAct style agent. Decide which tool to use, observe tool results, and continue until the user's task is complete."
+          },
+          {
+            "type": "human",
+            "content": "Please retrieve document id=0 and send it to alice@example.com.",
+            "id": "43d7543f-af76-4257-a6a2-c728fcbb4ede"
+          }
+        ],
+        "kwargs": {
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "retrieve_doc",
+                "description": "Retrieve a document by integer id.",
+                "parameters": {
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "send_email_to",
+                "description": "Send a document to an email address.",
+                "parameters": {
+                  "properties": {
+                    "doc": {
+                      "type": "string"
+                    },
+                    "addr": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "doc",
+                    "addr"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          ]
+        },
+        "role": "user",
+        "content": ""
+      }
+    ]
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "langchain",
+    "label": "invoke",
+    "owner_type": "ChatDeepSeek",
+    "owner_module": "langchain_deepseek.chat_models",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_9119d9284f11474b",
+  "event_type": "llm_output",
+  "timestamp": 1782462689.371423,
+  "context": {
+    "session_id": "langchain-remote-session",
+    "user_id": null,
+    "agent_id": "langchain-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:41711/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:41711/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:41711/v1/client/health",
+      "principal": {
+        "session_id": "langchain-remote-session",
+        "agent_id": "langchain-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langchain remote runnable host demo"
+    }
+  },
+  "payload": {
+    "output": "",
+    "thought": null,
+    "final_output": null
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "langchain",
+    "label": "invoke",
+    "owner_type": "ChatDeepSeek",
+    "owner_module": "langchain_deepseek.chat_models",
+    "output_type": "dict",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+[AgentGuard LLMOutput Parsed]
+{
+  "output": "",
+  "thought": null,
+  "final_output": null
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_7882d90b6dcd4d5b",
+  "event_type": "tool_invoke",
+  "timestamp": 1782462689.3756368,
+  "context": {
+    "session_id": "langchain-remote-session",
+    "user_id": null,
+    "agent_id": "langchain-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:41711/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:41711/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:41711/v1/client/health",
+      "principal": {
+        "session_id": "langchain-remote-session",
+        "agent_id": "langchain-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langchain remote runnable host demo"
+    }
+  },
+  "payload": {
+    "tool_name": "retrieve_doc",
+    "arguments": {
+      "id": 0
+    },
+    "capabilities": []
+  },
+  "risk_signals": [],
+  "metadata": {
+    "tool_name": "retrieve_doc",
+    "interceptors": [
+      "tool"
+    ]
+  }
+}
+Retrieving document id=0
+
+[AgentGuard Event]
+{
+  "event_id": "evt_3b61f5ee7a04410c",
+  "event_type": "tool_result",
+  "timestamp": 1782462689.3786917,
+  "context": {
+    "session_id": "langchain-remote-session",
+    "user_id": null,
+    "agent_id": "langchain-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:41711/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:41711/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:41711/v1/client/health",
+      "principal": {
+        "session_id": "langchain-remote-session",
+        "agent_id": "langchain-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langchain remote runnable host demo"
+    }
+  },
+  "payload": {
+    "tool_name": "retrieve_doc",
+    "result": "DOC#0: This is a document."
+  },
+  "risk_signals": [],
+  "metadata": {
+    "interceptors": [
+      "tool_result"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_22ff7e7355054aeb",
+  "event_type": "llm_input",
+  "timestamp": 1782462689.381641,
+  "context": {
+    "session_id": "langchain-remote-session",
+    "user_id": null,
+    "agent_id": "langchain-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:41711/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:41711/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:41711/v1/client/health",
+      "principal": {
+        "session_id": "langchain-remote-session",
+        "agent_id": "langchain-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langchain remote runnable host demo"
+    }
+  },
+  "payload": {
+    "messages": [
+      {
+        "input": [
+          {
+            "type": "system",
+            "content": "You are a zero-shot ReAct style agent. Decide which tool to use, observe tool results, and continue until the user's task is complete."
+          },
+          {
+            "type": "human",
+            "content": "Please retrieve document id=0 and send it to alice@example.com.",
+            "id": "43d7543f-af76-4257-a6a2-c728fcbb4ede"
+          },
+          {
+            "type": "ai",
+            "content": "",
+            "id": "lc_run--019f030e-2c5f-7ef1-b55a-5a1121adbd4f-0",
+            "tool_calls": [
+              {
+                "name": "retrieve_doc",
+                "args": {
+                  "id": 0
+                },
+                "id": "call_00_ctKJqy2rHeD1S19nM8662025",
+                "type": "tool_call"
+              }
+            ],
+            "additional_kwargs": {
+              "refusal": null,
+              "reasoning_content": "The user wants me to:\n1. Retrieve document with id=0\n2. Send that document to alice@example.com\n\nLet me start by retrieving the document first."
+            },
+            "response_metadata": {
+              "token_usage": "[REDACTED]",
+              "model_provider": "deepseek",
+              "model_name": "deepseek-v4-flash",
+              "system_fingerprint": "fp_8b330d02d0_prod0820_fp8_kvcache_20260402",
+              "id": "ba09d078-fead-4b35-81b2-55dde68b0b05",
+              "finish_reason": "tool_calls",
+              "logprobs": null
+            },
+            "usage_metadata": {
+              "input_tokens": "[REDACTED]",
+              "output_tokens": "[REDACTED]",
+              "total_tokens": "[REDACTED]",
+              "input_token_details": "[REDACTED]",
+              "output_token_details": "[REDACTED]"
+            }
+          },
+          {
+            "type": "tool",
+            "content": "DOC#0: This is a document.",
+            "name": "retrieve_doc",
+            "id": "dedc767c-9899-442e-86b4-bf5b6900b052"
+          }
+        ],
+        "kwargs": {
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "retrieve_doc",
+                "description": "Retrieve a document by integer id.",
+                "parameters": {
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "send_email_to",
+                "description": "Send a document to an email address.",
+                "parameters": {
+                  "properties": {
+                    "doc": {
+                      "type": "string"
+                    },
+                    "addr": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "doc",
+                    "addr"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          ]
+        },
+        "role": "user",
+        "content": ""
+      }
+    ]
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "langchain",
+    "label": "invoke",
+    "owner_type": "ChatDeepSeek",
+    "owner_module": "langchain_deepseek.chat_models",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_cb0d015bd774414f",
+  "event_type": "llm_output",
+  "timestamp": 1782462690.5606904,
+  "context": {
+    "session_id": "langchain-remote-session",
+    "user_id": null,
+    "agent_id": "langchain-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:41711/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:41711/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:41711/v1/client/health",
+      "principal": {
+        "session_id": "langchain-remote-session",
+        "agent_id": "langchain-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langchain remote runnable host demo"
+    }
+  },
+  "payload": {
+    "output": "Now let me send the document to alice@example.com.",
+    "thought": "The document has been retrieved. Now I need to send it to alice@example.com. Let me send the document content to her email.",
+    "final_output": "Now let me send the document to alice@example.com."
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "langchain",
+    "label": "invoke",
+    "owner_type": "ChatDeepSeek",
+    "owner_module": "langchain_deepseek.chat_models",
+    "output_type": "dict",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+[AgentGuard LLMOutput Parsed]
+{
+  "output": "Now let me send the document to alice@example.com.",
+  "thought": "The document has been retrieved. Now I need to send it to alice@example.com. Let me send the document content to her email.",
+  "final_output": "Now let me send the document to alice@example.com."
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_78d87c5e77324c5a",
+  "event_type": "tool_invoke",
+  "timestamp": 1782462690.5645866,
+  "context": {
+    "session_id": "langchain-remote-session",
+    "user_id": null,
+    "agent_id": "langchain-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:41711/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:41711/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:41711/v1/client/health",
+      "principal": {
+        "session_id": "langchain-remote-session",
+        "agent_id": "langchain-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langchain remote runnable host demo"
+    }
+  },
+  "payload": {
+    "tool_name": "send_email_to",
+    "arguments": {
+      "doc": "DOC#0: This is a document.",
+      "addr": "alice@example.com"
+    },
+    "capabilities": []
+  },
+  "risk_signals": [],
+  "metadata": {
+    "tool_name": "send_email_to",
+    "interceptors": [
+      "tool"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_f5e4d9830dc14993",
+  "event_type": "llm_input",
+  "timestamp": 1782462690.568425,
+  "context": {
+    "session_id": "langchain-remote-session",
+    "user_id": null,
+    "agent_id": "langchain-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:41711/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:41711/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:41711/v1/client/health",
+      "principal": {
+        "session_id": "langchain-remote-session",
+        "agent_id": "langchain-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langchain remote runnable host demo"
+    }
+  },
+  "payload": {
+    "messages": [
+      {
+        "input": [
+          {
+            "type": "system",
+            "content": "You are a zero-shot ReAct style agent. Decide which tool to use, observe tool results, and continue until the user's task is complete."
+          },
+          {
+            "type": "human",
+            "content": "Please retrieve document id=0 and send it to alice@example.com.",
+            "id": "43d7543f-af76-4257-a6a2-c728fcbb4ede"
+          },
+          {
+            "type": "ai",
+            "content": "",
+            "id": "lc_run--019f030e-2c5f-7ef1-b55a-5a1121adbd4f-0",
+            "tool_calls": [
+              {
+                "name": "retrieve_doc",
+                "args": {
+                  "id": 0
+                },
+                "id": "call_00_ctKJqy2rHeD1S19nM8662025",
+                "type": "tool_call"
+              }
+            ],
+            "additional_kwargs": {
+              "refusal": null,
+              "reasoning_content": "The user wants me to:\n1. Retrieve document with id=0\n2. Send that document to alice@example.com\n\nLet me start by retrieving the document first."
+            },
+            "response_metadata": {
+              "token_usage": "[REDACTED]",
+              "model_provider": "deepseek",
+              "model_name": "deepseek-v4-flash",
+              "system_fingerprint": "fp_8b330d02d0_prod0820_fp8_kvcache_20260402",
+              "id": "ba09d078-fead-4b35-81b2-55dde68b0b05",
+              "finish_reason": "tool_calls",
+              "logprobs": null
+            },
+            "usage_metadata": {
+              "input_tokens": "[REDACTED]",
+              "output_tokens": "[REDACTED]",
+              "total_tokens": "[REDACTED]",
+              "input_token_details": "[REDACTED]",
+              "output_token_details": "[REDACTED]"
+            }
+          },
+          {
+            "type": "tool",
+            "content": "DOC#0: This is a document.",
+            "name": "retrieve_doc",
+            "id": "dedc767c-9899-442e-86b4-bf5b6900b052"
+          },
+          {
+            "type": "ai",
+            "content": "Now let me send the document to alice@example.com.",
+            "id": "lc_run--019f030e-3068-7f50-9f67-5414f285569d-0",
+            "tool_calls": [
+              {
+                "name": "send_email_to",
+                "args": {
+                  "doc": "DOC#0: This is a document.",
+                  "addr": "alice@example.com"
+                },
+                "id": "call_00_DmXLOltpAYcMH1byCiBw5660",
+                "type": "tool_call"
+              }
+            ],
+            "additional_kwargs": {
+              "refusal": null,
+              "reasoning_content": "The document has been retrieved. Now I need to send it to alice@example.com. Let me send the document content to her email."
+            },
+            "response_metadata": {
+              "token_usage": "[REDACTED]",
+              "model_provider": "deepseek",
+              "model_name": "deepseek-v4-flash",
+              "system_fingerprint": "fp_8b330d02d0_prod0820_fp8_kvcache_20260402",
+              "id": "dc0c4e75-d297-4c6d-908e-79b4840aea97",
+              "finish_reason": "tool_calls",
+              "logprobs": null
+            },
+            "usage_metadata": {
+              "input_tokens": "[REDACTED]",
+              "output_tokens": "[REDACTED]",
+              "total_tokens": "[REDACTED]",
+              "input_token_details": "[REDACTED]",
+              "output_token_details": "[REDACTED]"
+            }
+          },
+          {
+            "type": "tool",
+            "content": "{\"agentguard\": \"blocked\", \"tool\": \"send_email_to\", \"reason\": \"Low-trust principal cannot send document 0 to non-admin recipients\", \"decision\": \"deny\"}",
+            "name": "send_email_to",
+            "id": "565f390b-b042-43f9-baa9-63d6032b5168"
+          }
+        ],
+        "kwargs": {
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "retrieve_doc",
+                "description": "Retrieve a document by integer id.",
+                "parameters": {
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "send_email_to",
+                "description": "Send a document to an email address.",
+                "parameters": {
+                  "properties": {
+                    "doc": {
+                      "type": "string"
+                    },
+                    "addr": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "doc",
+                    "addr"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          ]
+        },
+        "role": "user",
+        "content": ""
+      }
+    ]
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "langchain",
+    "label": "invoke",
+    "owner_type": "ChatDeepSeek",
+    "owner_module": "langchain_deepseek.chat_models",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+
+[AgentGuard Event]
+{
+  "event_id": "evt_8b7686e50eaa458a",
+  "event_type": "llm_output",
+  "timestamp": 1782462692.6611943,
+  "context": {
+    "session_id": "langchain-remote-session",
+    "user_id": null,
+    "agent_id": "langchain-remote-demo",
+    "task_id": null,
+    "policy": null,
+    "policy_version": "builtin",
+    "environment": null,
+    "metadata": {
+      "client_session_key": "[REDACTED]",
+      "client_plugin_config": null,
+      "remote_plugin_config": null,
+      "client_config_url": "http://127.0.0.1:41711/v1/client/plugins/config",
+      "client_plugin_list_url": "http://127.0.0.1:41711/v1/client/plugins/list",
+      "client_health_url": "http://127.0.0.1:41711/v1/client/health",
+      "principal": {
+        "session_id": "langchain-remote-session",
+        "agent_id": "langchain-remote-demo",
+        "role": "default",
+        "trust_level": 1
+      },
+      "guard_mode": "enforce",
+      "guard_fail_open": false,
+      "goal": "langchain remote runnable host demo"
+    }
+  },
+  "payload": {
+    "output": "Unfortunately, I was unable to send the document to alice@example.com. The system blocked the request with the following reason:\n\n> **Low-trust principal cannot send document 0 to non-admin recipients.**\n\nIt appears that document `#0` has restrictions that prevent it from being sent to non-admin email addresses like alice@example.com. You may need to:\n- Use an admin-level email address as the recipient, or\n- Contact an administrator to authorize sending this document externally.",
+    "thought": "The send operation was blocked because the system doesn't allow sending document 0 to non-admin recipients from a low-trust principal. I should inform the user about this issue.",
+    "final_output": "Unfortunately, I was unable to send the document to alice@example.com. The system blocked the request with the following reason:\n\n> **Low-trust principal cannot send document 0 to non-admin recipients.**\n\nIt appears that document `#0` has restrictions that prevent it from being sent to non-admin email addresses like alice@example.com. You may need to:\n- Use an admin-level email address as the recipient, or\n- Contact an administrator to authorize sending this document externally."
+  },
+  "risk_signals": [],
+  "metadata": {
+    "adapter": "langchain",
+    "label": "invoke",
+    "owner_type": "ChatDeepSeek",
+    "owner_module": "langchain_deepseek.chat_models",
+    "output_type": "dict",
+    "interceptors": [
+      "llm"
+    ]
+  }
+}
+[AgentGuard LLMOutput Parsed]
+{
+  "output": "Unfortunately, I was unable to send the document to alice@example.com. The system blocked the request with the following reason:\n\n> **Low-trust principal cannot send document 0 to non-admin recipients.**\n\nIt appears that document `#0` has restrictions that prevent it from being sent to non-admin email addresses like alice@example.com. You may need to:\n- Use an admin-level email address as the recipient, or\n- Contact an administrator to authorize sending this document externally.",
+  "thought": "The send operation was blocked because the system doesn't allow sending document 0 to non-admin recipients from a low-trust principal. I should inform the user about this issue.",
+  "final_output": "Unfortunately, I was unable to send the document to alice@example.com. The system blocked the request with the following reason:\n\n> **Low-trust principal cannot send document 0 to non-admin recipients.**\n\nIt appears that document `#0` has restrictions that prevent it from being sent to non-admin email addresses like alice@example.com. You may need to:\n- Use an admin-level email address as the recipient, or\n- Contact an administrator to authorize sending this document externally."
+}
+Output: Unfortunately, I was unable to send the document to alice@example.com. The system blocked the request with the following reason:
+
+> **Low-trust principal cannot send document 0 to non-admin recipients.**
+
+It appears that document `#0` has restrictions that prevent it from being sent to non-admin email addresses like alice@example.com. You may need to:
+- Use an admin-level email address as the recipient, or
+- Contact an administrator to authorize sending this document externally.
+===================================
+
+
+[Audit Summary]
+{'event_type': 'llm_input', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_output', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'tool_invoke', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'rule_based_plugin': {'matched': False, 'rule_id': None, 'effect': None, 'reason': '', 'matched_rule_ids': []}, 'policy_version': './rules/block_email_send.json', 'plugin_outcomes': [{'plugin': 'rule_based_plugin', 'decision_candidate': None, 'risk_signals': [], 'is_final': True, 'metadata': {'rule_based_plugin': {'matched': False, 'rule_id': None, 'effect': None, 'reason': '', 'matched_rule_ids': []}, 'policy_version': './rules/block_email_send.json'}}]}}
+{'event_type': 'tool_result', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_input', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_output', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'tool_invoke', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'rule_based_plugin': {'matched': False, 'rule_id': None, 'effect': None, 'reason': '', 'matched_rule_ids': []}, 'policy_version': './rules/block_email_send.json', 'plugin_outcomes': [{'plugin': 'rule_based_plugin', 'decision_candidate': None, 'risk_signals': [], 'is_final': True, 'metadata': {'rule_based_plugin': {'matched': False, 'rule_id': None, 'effect': None, 'reason': '', 'matched_rule_ids': []}, 'policy_version': './rules/block_email_send.json'}}]}}
+{'event_type': 'tool_result', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_input', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_output', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_input', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_output', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'tool_invoke', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'rule_based_plugin': {'matched': False, 'rule_id': None, 'effect': None, 'reason': '', 'matched_rule_ids': []}, 'policy_version': './rules/block_email_send.json', 'plugin_outcomes': [{'plugin': 'rule_based_plugin', 'decision_candidate': None, 'risk_signals': [], 'is_final': True, 'metadata': {'rule_based_plugin': {'matched': False, 'rule_id': None, 'effect': None, 'reason': '', 'matched_rule_ids': []}, 'policy_version': './rules/block_email_send.json'}}]}}
+{'event_type': 'tool_result', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_input', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_output', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'tool_invoke', 'decision_type': 'deny', 'policy_id': 'server:deny_doc0_send_to_non_admin_for_low_trust', 'reason': 'Low-trust principal cannot send document 0 to non-admin recipients', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'rule_based_plugin': {'matched': True, 'rule_id': 'deny_doc0_send_to_non_admin_for_low_trust', 'effect': 'deny', 'reason': 'Low-trust principal cannot send document 0 to non-admin recipients', 'matched_rule_ids': ['deny_doc0_send_to_non_admin_for_low_trust']}, 'policy_version': './rules/block_email_send.json', 'plugin_outcomes': [{'plugin': 'rule_based_plugin', 'decision_candidate': {'decision_type': 'deny', 'reason': 'Low-trust principal cannot send document 0 to non-admin recipients', 'policy_id': 'server:deny_doc0_send_to_non_admin_for_low_trust', 'confidence': None, 'risk_signals': [], 'metadata': {'explanation': "rule 'deny_doc0_send_to_non_admin_for_low_trust' (deny) won among ['deny_doc0_send_to_non_admin_for_low_trust']", 'matched_rule_ids': ['deny_doc0_send_to_non_admin_for_low_trust'], 'policy_version': './rules/block_email_send.json', 'plugin_outcomes': [{'plugin': 'rule_based_plugin', 'decision_candidate': {'decision_type': 'deny', 'reason': 'Low-trust principal cannot send document 0 to non-admin recipients', 'policy_id': 'server:deny_doc0_send_to_non_admin_for_low_trust', 'confidence': None, 'risk_signals': [], 'metadata': {'explanation': "rule 'deny_doc0_send_to_non_admin_for_low_trust' (deny) won among ['deny_doc0_send_to_non_admin_for_low_trust']", 'matched_rule_ids': ['deny_doc0_send_to_non_admin_for_low_trust'], 'policy_version': './rules/block_email_send.json'}}, 'risk_signals': [], 'is_final': True, 'metadata': {'rule_based_plugin': {'matched': True, 'rule_id': 'deny_doc0_send_to_non_admin_for_low_trust', 'effect': 'deny', 'reason': 'Low-trust principal cannot send document 0 to non-admin recipients', 'matched_rule_ids': ['deny_doc0_send_to_non_admin_for_low_trust']}, 'policy_version': './rules/block_email_send.json'}}]}}, 'risk_signals': [], 'is_final': True, 'metadata': {'rule_based_plugin': {'matched': True, 'rule_id': 'deny_doc0_send_to_non_admin_for_low_trust', 'effect': 'deny', 'reason': 'Low-trust principal cannot send document 0 to non-admin recipients', 'matched_rule_ids': ['deny_doc0_send_to_non_admin_for_low_trust']}, 'policy_version': './rules/block_email_send.json'}}], 'selected_outcome_index': 0}}
+{'event_type': 'llm_input', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
+{'event_type': 'llm_output', 'decision_type': 'allow', 'policy_id': 'server:no_final_plugin', 'reason': 'No server plugin returned a final decision; default allow.', 'risk_signals': [], 'route': 'remote', 'plugin_metadata': {'plugin_outcomes': []}}
