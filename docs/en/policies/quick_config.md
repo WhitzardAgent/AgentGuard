@@ -1,6 +1,6 @@
 # Visual Policy Configuration
 
-This page explains how to configure policies for the built-in `rule_based_plugin` server plugin through the web UI. `rule_based_plugin` evaluates access-control rules, usually in the `tool_before` phase, so AgentGuard can identify and intercept tool-call security risks before the tool executes.
+This page explains how to configure policies for the built-in `rule_based_plugin` server plugin through the web UI. `rule_based_plugin` evaluates access-control rules, usually in the `tool_before` phase, so AgentGuard can identify tool-call security risks before the tool executes. A matched rule can directly return `ALLOW` or `DENY`, or escalate the case to human or LLM review to decide the final allow-or-deny result.
 
 To use these policies, enable the plugin in `config/plugins.json`:
 
@@ -18,7 +18,7 @@ To use these policies, enable the plugin in `config/plugins.json`:
 }
 ```
 
-The easiest way to configure `rule_based_plugin` policies is through the web UI, which provides an interactive, step-by-step interface with dropdowns and form fields to reduce the manual effort of policy writing.
+The easiest way to configure `rule_based_plugin` policies is through the web UI, which provides an interactive, step-by-step interface with dropdowns and form fields to reduce the manual effort of policy writing. If you plan to use `LLM_CHECK`, also make sure the plugin `env` includes reviewer settings such as `llm_backend`, `llm_model`, `llm_base_url`, and `llm_api_key`, and fill those fields with concrete values directly.
 
 Open the UI and select the `Agents` tab to see all agents currently connected to the control server.
 
@@ -30,7 +30,21 @@ In this example, a LangChain agent has connected to the control server, as shown
 
 The system automatically detects that the agent has two built-in tools: `retrieve_doc` and `send_email_to`.
 
-Click the `Rules` tab on the left to enter the policy configuration interface. We want to ensure that the document retrieved by `retrieve_doc` with id 0 (a simulated confidential file) can only be sent to `admin@example.com`. As shown below, the UI guides you through four steps, starting with entering a rule name:
+Click the `Rules` tab on the left to enter the policy configuration interface. This interface supports two ways to create rules: you can ask the LLM to generate a rule for you, or you can write the rule manually through the step-by-step UI.
+
+#### Method 1: Ask the LLM to generate a rule
+
+First, click `Ask AI for help`:
+
+![Ask AI for help](../../figs/llm_rule_generate.png)
+
+This opens the LLM chat interface. After configuring the LLM API settings, you can describe your policy requirements in natural language and let the LLM generate a rule. For a generated rule, you can decide whether to accept it immediately or continue refining it through the conversation. Once you accept a rule, it is applied directly to the current agent's rule set.
+
+![LLM rule generation chat](../../figs/llm_rule_generate2.png)
+
+#### Method 2: Manually author the rule
+
+We want to ensure that the document retrieved by `retrieve_doc` with id 0 (a simulated confidential file) can only be sent to `admin@example.com`. As shown below, the UI guides you through four steps, starting with entering a rule name:
 
 ![Step 1](../../figs/rule_step1.png)
 

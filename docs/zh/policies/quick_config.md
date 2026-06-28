@@ -1,6 +1,6 @@
 # rule_based_plugin 可视化策略配置
 
-本文介绍如何通过 Web UI 为内置的 `rule_based_plugin` server plugin 配置策略。`rule_based_plugin` 用于执行访问控制规则，通常运行在 `tool_before` 阶段，让 AgentGuard 可以在工具真正执行前识别并拦截工具调用中的安全风险。
+本文介绍如何通过 Web UI 为内置的 `rule_based_plugin` server plugin 配置策略。`rule_based_plugin` 用于执行访问控制规则，通常运行在 `tool_before` 阶段，让 AgentGuard 可以在工具真正执行前识别工具调用中的安全风险。命中的规则既可以直接返回 `ALLOW` 或 `DENY`，也可以转交给人工或 LLM 来决定最终是 allow 还是 deny。
 
 要让这些策略在运行时生效，需要先在 `config/plugins.json` 中启用该 plugin：
 
@@ -18,7 +18,7 @@
 }
 ```
 
-对于普通用户来说，最方便快捷的办法是使用我们提供的 UI 界面，通过交互式的方式来配置 `rule_based_plugin` 策略。UI 界面大量采用下拉框选择的方式，减少了用户的策略配置负担。
+对于普通用户来说，最方便快捷的办法是使用我们提供的 UI 界面，通过交互式的方式来配置 `rule_based_plugin` 策略。UI 界面大量采用下拉框选择的方式，减少了用户的策略配置负担。如果你准备使用 `LLM_CHECK`，还要确保 plugin 的 `env` 里补充 reviewer 配置，例如 `llm_backend`、`llm_model`、`llm_base_url` 和 `llm_api_key`，并直接填写具体值。
 
 打开 UI 界面，选择 `Agents` 选项卡，可以看到当前所有连接到中控服务的智能体。
 
@@ -29,7 +29,21 @@
 
 系统能够自动识别到该智能体有两个内置工具，分别为 `retrieve_doc` 和 `send_email_to`。
 
-我们点击左侧的 `Rules` 选项卡，进入交互式策略配置界面。我们希望从 `retrieve_doc` 工具中获取的 id 为 0 的文档内容（模拟机密文件），只能发送到 `admin@example.com` 这个邮箱。从图中我们可以看到，UI 界面将从填写规则名开始，通过四个步骤，一步一步引导用户完成策略配置。
+我们点击左侧的 `Rules` 选项卡，进入交互式策略配置界面。这个界面支持两种配置方式：一种是与 LLM 对话，让它帮助你生成规则；另一种是通过分步式 UI 人工编写规则。
+
+#### 方式一：通过 LLM 对话生成规则
+
+用户首先需要点击 `Ask AI for help`：
+
+![Ask AI for help](../../figs/llm_rule_generate.png)
+
+随后会进入 LLM 对话界面。设置好 LLM API 等相关信息后，即可通过自然语言描述策略需求，让 LLM 帮助生成规则。对于生成出来的规则，用户可以选择直接采用，也可以继续在对话中迭代优化；一旦选择采用，该规则会直接 apply 到当前 agent 的规则库中。
+
+![LLM 对话生成规则](../../figs/llm_rule_generate2.png)
+
+#### 方式二：人工编写规则
+
+我们希望从 `retrieve_doc` 工具中获取的 id 为 0 的文档内容（模拟机密文件），只能发送到 `admin@example.com` 这个邮箱。从图中我们可以看到，UI 界面将从填写规则名开始，通过四个步骤，一步一步引导用户完成策略配置。
 ![第一步](../../figs/rule_step1.png)
 
 填写完规则名后，在第二步我们首先要选择是单工具规则还是链式路径规则，我们的策略针对的是两个工具的组合行为，是一个典型的链式路径规则，因此在 `Formal Match Mode` 中要选择 `Tool Trace`，如图所示：
