@@ -336,6 +336,81 @@ test("before_agent_run blocks a risky prompt before model execution", async () =
   assert.equal(result.message, "This prompt violates policy.");
 });
 
+test("before_agent_run normalizes structured OpenClaw transcript messages into readable text", async () => {
+  class InspectPromptPlugin extends BasePlugin {
+    constructor() {
+      super();
+      this.event_types = [EventType.LLM_INPUT];
+    }
+
+    check(event) {
+      assert.deepEqual(event.payload.messages, [
+        {
+          role: "user",
+          content: "Please retrieve document id=0 and send it to admin@example.com.",
+          timestamp: 1,
+        },
+        {
+          role: "assistant",
+          content: '[toolCall retrieve_doc] {"id":0}',
+          stopReason: "toolUse",
+        },
+        {
+          role: "toolResult",
+          content: "[toolResult retrieve_doc] DOC#0: This is a document.",
+          toolName: "retrieve_doc",
+        },
+      ]);
+      return CheckResult.empty();
+    }
+  }
+
+  const bridge = new AgentGuardOpenClawBridge({
+    pluginConfig: {
+      phases: buildPhases({
+        llm_before: { client: [InspectPromptPlugin], server: [] },
+      }),
+    },
+  });
+
+  const result = await bridge.runBeforeAgentRun({
+    ctx: buildAgentContext(),
+    event: {
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: "Please retrieve document id=0 and send it to admin@example.com.",
+            },
+          ],
+          timestamp: 1,
+        },
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              id: "call-1",
+              name: "retrieve_doc",
+              arguments: { id: 0 },
+            },
+          ],
+          stopReason: "toolUse",
+        },
+        {
+          role: "toolResult",
+          toolName: "retrieve_doc",
+          content: [{ type: "text", text: "DOC#0: This is a document." }],
+        },
+      ],
+    },
+  });
+
+  assert.equal(result, undefined);
+});
+
 test("message_sending sanitizes final outbound text from llm_after decision", async () => {
   class SanitizeOutputPlugin extends BasePlugin {
     constructor() {
@@ -416,6 +491,66 @@ test("message_sending cancels outbound text on blocking llm_after decision", asy
 
   assert.equal(result.cancel, true);
   assert.equal(result.cancelReason, "unsafe answer");
+});
+
+test("agent_end emits llm_output with the final assistant text for CLI runs", async () => {
+  class ObserveOutputPlugin extends BasePlugin {
+    constructor() {
+      super();
+      this.event_types = [EventType.LLM_OUTPUT];
+    }
+
+    check(event) {
+      assert.equal(event.payload.output, "Final answer with real content.");
+      assert.equal(event.payload.final_output, "Final answer with real content.");
+      assert.equal(event.metadata.sourceHook, "agent_end");
+      return CheckResult.empty();
+    }
+  }
+
+  const bridge = new AgentGuardOpenClawBridge({
+    pluginConfig: {
+      phases: buildPhases({
+        llm_after: { client: [ObserveOutputPlugin], server: [] },
+      }),
+    },
+  });
+
+  await bridge.runAgentEnd({
+    ctx: {
+      agentId: "agent-main",
+      sessionKey: "agent:main:session-1",
+      messageProvider: "cli",
+    },
+    event: {
+      success: true,
+      durationMs: 1234,
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: "hello" }],
+        },
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "Final answer with real content." }],
+          stopReason: "stop",
+        },
+      ],
+    },
+  });
+
+  const state = bridge.getState({
+    agentId: "agent-main",
+    sessionId: "agent:main:session-1",
+    sessionKey: "agent:main:session-1",
+    channelId: "cli",
+  });
+  const records = state.audit.flush();
+
+  assert.equal(records.some((record) => record.event_type === "llm_output"), true);
+  const llmOutput = records.findLast((record) => record.event_type === "llm_output");
+  assert.equal(llmOutput.metadata.payload.output, "Final answer with real content.");
+  assert.equal(llmOutput.metadata.payload.final_output, "Final answer with real content.");
 });
 
 test("audit records capture OpenClaw session and route metadata", async () => {

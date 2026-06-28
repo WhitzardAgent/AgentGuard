@@ -2,6 +2,30 @@
   "version": 1,
   "tools": [
     {
+      "name": "retrieve_doc",
+      "description": "Retrieve a document by integer id.",
+      "input_params": ["id"],
+      "capabilities": ["documents"],
+      "metadata": {
+        "boundary": "internal",
+        "sensitivity": "medium",
+        "integrity": "trusted",
+        "tags": ["documents"]
+      }
+    },
+    {
+      "name": "send_email_to",
+      "description": "Send a document to an email address.",
+      "input_params": ["doc", "addr"],
+      "capabilities": ["email"],
+      "metadata": {
+        "boundary": "external",
+        "sensitivity": "medium",
+        "integrity": "trusted",
+        "tags": ["email"]
+      }
+    },
+    {
       "name": "read",
       "description": "Read files from the local workspace.",
       "input_params": ["path", "offset", "limit"]

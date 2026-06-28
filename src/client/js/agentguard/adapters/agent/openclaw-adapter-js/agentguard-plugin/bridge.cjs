@@ -28,6 +28,7 @@ const DEFAULT_TOOL_CATALOG_PATH = path.resolve(
   __dirname,
   "../../../../../../../../config/openclaw-default-tools.json",
 );
+const LLM_OUTPUT_DEDUP_WINDOW_MS = 2 * 60 * 1000;
 
 const PRE_GUARD_PHASES = new Set(["tool_before", "llm_before"]);
 
@@ -187,6 +188,13 @@ function normalizeIdentity(value) {
     agentId: asNonEmptyString(identity.agentId),
     agentIdFrom: asNonEmptyString(identity.agentIdFrom) || "agentId",
     environment: asNonEmptyString(identity.environment),
+    role: asNonEmptyString(identity.role),
+    trustLevel:
+      typeof identity.trustLevel === "number" && Number.isFinite(identity.trustLevel)
+        ? identity.trustLevel
+        : typeof identity.trust_level === "number" && Number.isFinite(identity.trust_level)
+          ? identity.trust_level
+          : undefined,
   };
 }
 
@@ -208,6 +216,14 @@ function asPositiveInteger(value, fallback) {
     return fallback;
   }
   return Math.floor(value);
+}
+
+function safeJSONStringify(value) {
+  try {
+    return JSON.stringify(value);
+  } catch (_) {
+    return String(value);
+  }
 }
 
 function deriveIdentityValue(source, identityContext) {
@@ -256,6 +272,18 @@ function buildRuntimeContext(config, identityContext) {
     policy_version: config.policy,
     environment: config.identity.environment || "openclaw",
     metadata: {
+      ...(config.identity.role ? { role: config.identity.role } : {}),
+      ...(config.identity.trustLevel !== undefined
+        ? { trust_level: config.identity.trustLevel }
+        : {}),
+      principal: {
+        ...(derivedAgentId ? { agent_id: derivedAgentId } : {}),
+        ...(derivedUserId ? { user_id: derivedUserId } : {}),
+        ...(config.identity.role ? { role: config.identity.role } : {}),
+        ...(config.identity.trustLevel !== undefined
+          ? { trust_level: config.identity.trustLevel }
+          : {}),
+      },
       client_session_key: sessionKey,
       client_plugin_config: { phases: config.phases },
       remote_plugin_config: { phases: config.phases },
@@ -397,7 +425,7 @@ function resolveCapabilities(toolCapabilities, event) {
 
 function buildLlmInputMessages(event = {}) {
   if (Array.isArray(event.messages) && event.messages.length) {
-    return event.messages;
+    return event.messages.map(normalizeOpenClawMessage);
   }
   const messages = [];
   if (asNonEmptyString(event.systemPrompt)) {
@@ -410,17 +438,158 @@ function buildLlmInputMessages(event = {}) {
 }
 
 function buildLlmOutputText(event = {}) {
-  if (typeof event.content === "string") {
-    return event.content;
-  }
   if (Array.isArray(event.assistantTexts)) {
-    return event.assistantTexts.filter((item) => typeof item === "string").join("\n");
+    const joined = event.assistantTexts
+      .map((item) => normalizeOpenClawContent(item))
+      .filter(Boolean)
+      .join("\n");
+    if (joined) {
+      return joined;
+    }
   }
-  if (typeof event.text === "string") {
-    return event.text;
+  return normalizeOpenClawContent(
+    event.content ?? event.output ?? event.text ?? event.message ?? event.final_output,
+  );
+}
+
+function formatToolCallBlock(block = {}) {
+  const name =
+    asNonEmptyString(block.name) ||
+    asNonEmptyString(block.toolName) ||
+    asNonEmptyString(block.functionName) ||
+    "unknown_tool";
+  const args = block.arguments ?? block.args ?? block.input ?? block.params;
+  if (args === undefined) {
+    return `[toolCall ${name}]`;
   }
-  if (event.content != null) {
-    return String(event.content);
+  return `[toolCall ${name}] ${safeJSONStringify(args)}`;
+}
+
+function formatToolResultContent(message = {}) {
+  const toolName = asNonEmptyString(message.toolName) || asNonEmptyString(message.name) || "tool";
+  const text =
+    normalizeOpenClawContent(message.content) ||
+    normalizeOpenClawContent(message.details?.text) ||
+    normalizeOpenClawContent(message.details) ||
+    normalizeOpenClawContent(message.result);
+  return text ? `[toolResult ${toolName}] ${text}` : `[toolResult ${toolName}]`;
+}
+
+function normalizeOpenClawContent(value) {
+  if (value == null) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => normalizeOpenClawContent(item))
+      .filter((item) => typeof item === "string" && item.trim())
+      .join("\n");
+  }
+  if (typeof value !== "object") {
+    return String(value);
+  }
+
+  const blockType = asNonEmptyString(value.type);
+  if (blockType === "text" || blockType === "input_text" || blockType === "output_text") {
+    return asNonEmptyString(value.text) || "";
+  }
+  if (blockType === "toolCall" || blockType === "toolUse" || blockType === "functionCall") {
+    return formatToolCallBlock(value);
+  }
+  if (Array.isArray(value.content)) {
+    const nested = normalizeOpenClawContent(value.content);
+    if (nested) {
+      return nested;
+    }
+  }
+  if (typeof value.text === "string") {
+    return value.text;
+  }
+  if (typeof value.output === "string") {
+    return value.output;
+  }
+  if (typeof value.message === "string") {
+    return value.message;
+  }
+  if (value.details && typeof value.details === "object" && typeof value.details.text === "string") {
+    return value.details.text;
+  }
+  return safeJSONStringify(value);
+}
+
+function normalizeOpenClawMessage(message) {
+  const raw =
+    message &&
+    typeof message === "object" &&
+    !Array.isArray(message) &&
+    message.message &&
+    typeof message.message === "object" &&
+    !Array.isArray(message.message)
+      ? message.message
+      : message;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return {
+      role: "user",
+      content: normalizeOpenClawContent(raw),
+    };
+  }
+
+  const role = asNonEmptyString(raw.role) || "user";
+  const normalized = {
+    ...raw,
+    role,
+    content: role === "toolResult"
+      ? formatToolResultContent(raw)
+      : normalizeOpenClawContent(raw.content ?? raw.text ?? raw.output ?? raw.message),
+  };
+  return normalized;
+}
+
+function extractAssistantFinalText(messages) {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return "";
+  }
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const normalized = normalizeOpenClawMessage(messages[index]);
+    if (normalized.role !== "assistant") {
+      continue;
+    }
+    const raw =
+      messages[index] &&
+      typeof messages[index] === "object" &&
+      !Array.isArray(messages[index]) &&
+      messages[index].message &&
+      typeof messages[index].message === "object" &&
+      !Array.isArray(messages[index].message)
+        ? messages[index].message
+        : messages[index];
+    if (raw && typeof raw === "object" && Array.isArray(raw.content)) {
+      const textBlocks = raw.content
+        .filter(
+          (block) =>
+            block &&
+            typeof block === "object" &&
+            !Array.isArray(block) &&
+            (block.type === "text" ||
+              block.type === "input_text" ||
+              block.type === "output_text") &&
+            typeof block.text === "string",
+        )
+        .map((block) => block.text.trim())
+        .filter(Boolean);
+      if (textBlocks.length) {
+        return textBlocks.join("\n");
+      }
+    }
+    if (normalized.content && !normalized.content.startsWith("[toolCall ")) {
+      return normalized.content;
+    }
   }
   return "";
 }
@@ -528,6 +697,7 @@ class AgentGuardOpenClawBridge {
       clientConfigApiStartup: null,
       remoteSessionRegistration: null,
       defaultToolReporting: null,
+      recentLlmOutputs: new Map(),
     };
     this.syncContextMetadata(state);
     this.sessions.set(sessionKey, state);
@@ -726,6 +896,36 @@ class AgentGuardOpenClawBridge {
     }
   }
 
+  pruneRecentLlmOutputs(state) {
+    if (!state || !state.recentLlmOutputs) {
+      return;
+    }
+    const cutoff = Date.now() - LLM_OUTPUT_DEDUP_WINDOW_MS;
+    for (const [fingerprint, seenAt] of state.recentLlmOutputs.entries()) {
+      if (seenAt < cutoff) {
+        state.recentLlmOutputs.delete(fingerprint);
+      }
+    }
+  }
+
+  rememberLlmOutput(state, outputText) {
+    const fingerprint = asNonEmptyString(outputText);
+    if (!fingerprint) {
+      return;
+    }
+    this.pruneRecentLlmOutputs(state);
+    state.recentLlmOutputs.set(fingerprint, Date.now());
+  }
+
+  hasRecentLlmOutput(state, outputText) {
+    const fingerprint = asNonEmptyString(outputText);
+    if (!fingerprint) {
+      return false;
+    }
+    this.pruneRecentLlmOutputs(state);
+    return state.recentLlmOutputs.has(fingerprint);
+  }
+
   async enforce(state, runtimeEvent, options = {}) {
     let result;
     try {
@@ -891,14 +1091,17 @@ class AgentGuardOpenClawBridge {
       conversationId: ctx.conversationId,
       senderId: ctx.senderId,
     });
+    const outputText = buildLlmOutputText(event);
     const runtimeEvent = createRuntimeEvent({
       eventType: EventType.LLM_OUTPUT,
       context: state.context,
       payload: {
-        output: buildLlmOutputText(event),
+        output: outputText,
+        final_output: outputText,
       },
       metadata: {
         phase: "llm_after",
+        sourceHook: "message_sending",
         runId: ctx.runId,
         channelId: ctx.channelId,
         to: event.to,
@@ -915,6 +1118,7 @@ class AgentGuardOpenClawBridge {
       decision.decision_type === DecisionType.LOG_ONLY ||
       isRemoteUnavailableDecision(decision)
     ) {
+      this.rememberLlmOutput(state, outputText);
       return undefined;
     }
     if (
@@ -922,6 +1126,7 @@ class AgentGuardOpenClawBridge {
       decision.decision_type === DecisionType.REWRITE ||
       decision.decision_type === DecisionType.REPAIR
     ) {
+      this.rememberLlmOutput(state, outputText);
       return {
         content: buildReplacementText(decision),
         metadata: {
@@ -938,6 +1143,40 @@ class AgentGuardOpenClawBridge {
       cancelReason: decision.reason || "AgentGuard cancelled outbound message.",
     };
   }
+
+  async runAgentEnd({ ctx, event }) {
+    const state = this.getState({
+      agentId: ctx.agentId,
+      sessionId: ctx.sessionKey,
+      sessionKey: ctx.sessionKey,
+      channelId: ctx.messageProvider || "agent",
+    });
+    const outputText = extractAssistantFinalText(event.messages);
+    if (!outputText || this.hasRecentLlmOutput(state, outputText)) {
+      return;
+    }
+    const runtimeEvent = createRuntimeEvent({
+      eventType: EventType.LLM_OUTPUT,
+      context: state.context,
+      payload: {
+        output: outputText,
+        final_output: outputText,
+      },
+      metadata: {
+        phase: "llm_after",
+        sourceHook: "agent_end",
+        posthoc_only: true,
+        success: event.success,
+        durationMs: event.durationMs,
+        messageProvider: ctx.messageProvider,
+        messageCount: Array.isArray(event.messages) ? event.messages.length : 0,
+        ...(event.error ? { error: event.error } : {}),
+      },
+    });
+    await this.enforce(state, runtimeEvent, { phase: "llm_after" });
+    this.rememberLlmOutput(state, outputText);
+    await this.flushAsync(state);
+  }
 }
 
 module.exports = {
@@ -950,6 +1189,10 @@ module.exports = {
     buildLlmInputMessages,
     buildLlmOutputText,
     buildUserBlockMessage,
+    extractAssistantFinalText,
+    formatToolResultContent,
+    normalizeOpenClawContent,
+    normalizeOpenClawMessage,
     isRemoteUnavailableDecision,
     loadConfigFile,
     loadPluginConfigSource,
