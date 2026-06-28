@@ -3,7 +3,7 @@
 const fs = require("fs");
 const { CheckResult, BasePlugin } = require("./base");
 const { getPluginClass, discoverPlugins } = require("./registry");
-const { LLMInputPlugin } = require("./llm_before/llm_input");
+const { JailbreakCheckPlugin } = require("./llm_before/jailbreak_check");
 const { LLMOutputPlugin } = require("./llm_after/llm_output");
 const { ToolInvokePlugin } = require("./tool_before/tool_invoke");
 const { ToolResultPlugin } = require("./tool_after/tool_result");
@@ -16,7 +16,7 @@ const EVENT_PHASE = {
   tool_result: "tool_after",
 };
 const BUILTIN_PLUGINS = {
-  llm_input: LLMInputPlugin,
+  jailbreak_check: JailbreakCheckPlugin,
   llm_output: LLMOutputPlugin,
   tool_invoke: ToolInvokePlugin,
   tool_result: ToolResultPlugin,

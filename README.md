@@ -54,9 +54,9 @@ AgentGuard is a zero-trust security foundation for AI agents. Compatible with ex
 
 Today, AgentGuard covers several key technical areas highlighted in Anthropic's [Zero Trust for AI Agents](https://claude.com/blog/zero-trust-for-ai-agents), including access control & privilege management, observability & auditing, and behavioral monitoring & response.
 
-![AgentGuard Positioning](./docs/figs/positioning.png)
+![AgentGuard Positioning](./docs/figs/positioning_en.png)
 
-AgentGuard can be integrated into existing agent frameworks without modifying the underlying execution logic. Currently, it supports LangChain, AutoGen, OpenAI Agents SDK, and [OpenClaw](https://github.com/openclaw/openclaw), and we are continuously expanding support for additional agent ecosystems and frameworks. For JavaScript-side integration details, refer to the [OpenClaw adapter document](https://whitzard.tech/AgentGuard/en/how-to-plugin/openclaw_adapter.html).
+AgentGuard can be integrated into existing agent frameworks without modifying the underlying execution logic. Currently, it supports LangChain, AutoGen, OpenAI Agents SDK, Langgraph, Llamaindex, and [OpenClaw](https://github.com/openclaw/openclaw), and we are continuously expanding support for additional agent ecosystems and frameworks. For JavaScript-side integration details, refer to the [OpenClaw adapter document](https://whitzard.tech/AgentGuard/en/how-to-plugin/openclaw_adapter.html).
 
 ## ✨ Features
 
@@ -147,7 +147,7 @@ cat <<EOF > config/plugins.json
 EOF
 ```
 
-This config tells AgentGuard which plugins run in each runtime phase. In this quick start, only `tool_before` enables one server plugin: `rule_based_plugin`. That means the server evaluates access-control rules right before a tool call is executed, while all other phases stay empty. This keeps the first demo simple: the client forwards tool-invocation decisions to the server, and the server uses the built-in rule-based plugin to match your policy rules and return an allow/deny decision.
+This config tells AgentGuard which plugins run in each runtime phase. In this quick start, only `tool_before` enables one server plugin: `rule_based_plugin`. That means the server evaluates access-control rules right before a tool call is executed, while all other phases stay empty. `rule_based_plugin` can either return fixed `ALLOW` / `DENY` decisions directly or escalate a matched case to human or LLM review; this first demo keeps things simple by focusing only on direct allow/deny decisions in the tool-invocation path.
 
 Then create an access control policy:
 

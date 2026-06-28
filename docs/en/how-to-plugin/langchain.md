@@ -4,7 +4,7 @@
 
 Use `Guard.attach_langchain()` to automatically connect a LangChain agent instance to AgentGuard. No modifications to the original LangChain SDK code are required.
 
-The LangChain adapter targets the return value of `create_agent()`, which is a `langgraph.graph.state.CompiledGraph` instance.
+The LangChain adapter targets the return value of `langchain.agents.create_agent()`. In LangChain v1 this object is often implemented as a `langgraph.graph.state.CompiledGraph`, but if you are wiring a native LangGraph graph directly, use `Guard.attach_langgraph()` instead.
 
 ```python
 agent = create_agent(...)
@@ -70,7 +70,7 @@ def run(agent, prompt):
             ]
         }
     )
-    print(f"Output: {result["messages"][-1].content}")
+    print(f"Output: {result['messages'][-1].content}")
     print("===================================\n")
 
 if __name__ == "__main__":

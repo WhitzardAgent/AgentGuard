@@ -16,7 +16,7 @@ AgentGuard can intervene throughout an agent run instead of only checking a sing
 
 ### Modular security strategies
 
-AgentGuard exposes a unified plugin architecture so rule-based and model-based security strategies can be plugged in behind the same interface. The current release includes a built-in server plugin named `rule_based_plugin`, which supports configurable DSL rules for identifying and intercepting security risks in tool calls before they execute.
+AgentGuard exposes a unified plugin architecture so rule-based and model-based security strategies can be plugged in behind the same interface. The current release includes built-in plugins such as the server-side `rule_based_plugin`, which can either return fixed `ALLOW` / `DENY` decisions directly or escalate to `HUMAN_CHECK` / `LLM_CHECK` so a human or LLM can decide the final allow-or-deny outcome based on the matched condition and context, and `jailbreak_check` for prompt-injection detection in `llm_before`.
 
 ### Single-tool and cross-tool protection
 
@@ -33,6 +33,8 @@ AgentGuard sits between the LLM-based planning engine and tools. It does not rep
 Currently supported frameworks include:
 
 - [LangChain](https://github.com/langchain-ai/langchain)
+- [LangGraph](https://github.com/langchain-ai/langgraph)
+- [LlamaIndex](https://github.com/run-llama/llama_index)
 - [AutoGen](https://github.com/microsoft/autogen)
 - [OpenAI Agents SDK](https://github.com/openai/openai-agents-python)
 - Openclaw

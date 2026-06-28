@@ -158,7 +158,7 @@ class CheckResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 ```
 
-- `decision_candidate`：可选的 `GuardDecision` 建议。当 plugin 想返回 `ALLOW`（直接放行）、`DENY`（阻拦执行）、`SANITIZE`（修改输入内容后继续执行）、`HUMAN_CHECK`（进入 pending，直到用户在 server 上决定是否放行）、`LOG_ONLY`（在审计日志中进行标注，但仍然放行）等决策时使用。
+- `decision_candidate`：可选的 `GuardDecision` 建议。当 plugin 想返回 `ALLOW`（直接放行）、`DENY`（阻拦执行）、`LOG_ONLY`（在审计日志中进行标注，但仍然放行）或 `HUMAN_CHECK`（进入 pending，直到用户在 server 上决定是否放行）时使用。
 - `risk_signals`：当前 plugin 检测到的风险标签。manager 会去重并写回 `event.risk_signals`。
 - `is_final`：表示 `decision_candidate` 是否是权威 server 侧决策，默认值为 `True`。如果为 `True`，runtime 可以直接使用这个决策。
 - `metadata`：结构化调试信息或检测细节。manager 会把多个 plugin 的 metadata 合并到最终 plugin result 中。

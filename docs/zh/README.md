@@ -15,7 +15,7 @@
 pip install langchain==1.2.18
 pip install langchain-openai==1.2.1
 ```
-> 本指南以 LangChain 1.2.18 版本为例。AgentGuard 目前已兼容 LangChain、AutoGen、OpenAI Agents SDK 和 Openclaw；这里选择 LangChain 只是因为它更适合作为快速上手示例。
+> 本指南以 LangChain 1.2.18 版本为例。AgentGuard 目前已兼容 LangChain、LangGraph、LlamaIndex、AutoGen、OpenAI Agents SDK 和 Openclaw；这里选择 LangChain 只是因为它更适合作为快速上手示例。
 
 #### 2. 编写智能体代码
 ```python
@@ -67,7 +67,7 @@ def run(agent, prompt):
             ]
         }
     )
-    print(f"Output: {result["messages"][-1].content}")
+    print(f"Output: {result['messages'][-1].content}")
     print("===================================\n")
 
 if __name__ == "__main__":
@@ -89,6 +89,9 @@ pip install -e .
 
 #### 2. 导入访问控制客户端
 下面是基于第 1 步编写的智能体代码，导入我们的访问控制客户端后的完整示例代码，标 🚩 符号的地方是客户端的插入位置：
+
+如果你想先看一页与具体框架无关的总体说明，可以先读 [AgentGuard Client](how-to-plugin/agentguard_client.md)。如果你接入的是其他运行时，可以直接参考对应章节：[LangGraph](how-to-plugin/langgraph.md)、[LlamaIndex](how-to-plugin/llamaindex.md)、[AutoGen](how-to-plugin/autogen.md)、[OpenAI Agents SDK](how-to-plugin/openai_agents_sdk.md) 和 [Openclaw](how-to-plugin/openclaw_adapter.md)。
+
 ```python
 from langchain.agents import create_agent
 from langchain.tools import tool
@@ -141,7 +144,7 @@ def run(agent, prompt):
             ]
         }
     )
-    print(f"Output: {result["messages"][-1].content}")
+    print(f"Output: {result['messages'][-1].content}")
     print("===================================\n")
 
 if __name__ == "__main__":
@@ -179,7 +182,7 @@ if __name__ == "__main__":
 * `Guard()`: 用于定义中控服务器地址、这部分需要与中控服务的配置保持一致，详见下方的中控服务部署部分
 * `Principal()`: 用于定义智能体的身份，包括智能体的 ID、会话 ID、角色、信任级别等。这些信息将被用于访问控制策略编写时面向特定属性构建约束
 * `guard.start()`: 用于启动访问控制会话，将智能体的身份与任务目标关联起来，开始与中控服务进行通信。需要在智能体执行任务前调用
-* `guard.attach_langchain()`: 用于将访问控制客户端与 LangChain 智能体实例关联起来。不同智能体平台需要调用不同的 adapter，针对其他平台的处理方法请参考后续章节
+* `guard.attach_langchain()`: 用于将访问控制客户端与 LangChain 智能体实例关联起来。对于其他内置平台，请按需改用 `guard.attach_langgraph()`、`guard.attach_llamaindex()`、`guard.attach_autogen()` 或 `guard.attach_openai_agents()`。
 * `guard.close()`: 用于关闭访问控制会话，释放资源。需要在智能体执行完所有任务后调用
 
 ### 第 3 步：AgentGuard插件和自定义审计器
@@ -236,7 +239,7 @@ cat <<EOF > config/plugins.json
 EOF
 ```
 
-这份配置的含义是：只有 `tool_before` 阶段启用了一个 server plugin，也就是内置的 `rule_based_plugin`；其他阶段全部留空。换句话说，server 只会在工具真正执行之前，根据你编写的访问控制策略去做规则匹配和 allow / deny 判定。这样可以让 quick start 聚焦在“工具调用前的访问控制”这一条主线，不引入额外的 LLM 阶段或 tool result 阶段 plugin。
+这份配置的含义是：只有 `tool_before` 阶段启用了一个 server plugin，也就是内置的 `rule_based_plugin`；其他阶段全部留空。换句话说，server 只会在工具真正执行之前，根据你编写的访问控制策略去做规则匹配。`rule_based_plugin` 既可以直接返回固定的 `ALLOW` / `DENY`，也可以把命中的情况转交给人工或 LLM 做最终判断；而这个 quick start 先聚焦在“工具调用前的直接访问控制”这条主线，不引入额外的 LLM 阶段或 tool result 阶段 plugin。
 
 #### 2. 为智能体编写一套访问控制策略
 我们刚才编写的智能体包含两个工具：`retrieve_doc` 和 `send_email_to`，分别用于检索特定 id 的文档，以及将文档内容发送到指定的邮箱地址。假设我们希望信任级别小于 2 的智能体在执行任务时，只能将 id 为 0 的机密文件发送给 `admin@example.com` 邮箱，发送到其他地址一律不允许，我们可以创建一个策略文件：

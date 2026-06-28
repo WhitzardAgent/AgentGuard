@@ -1,6 +1,6 @@
 # Policy DSL Structure
 
-This page is for advanced users who need to manually write policies for the built-in `rule_based_plugin` server plugin. `rule_based_plugin` consumes AgentGuard's access-control DSL, evaluates the current runtime event plus recent session context, and uses configured rules to identify and intercept security risks in tool calls.
+This page is for advanced users who need to manually write policies for the built-in `rule_based_plugin` server plugin. `rule_based_plugin` consumes AgentGuard's access-control DSL, evaluates the current runtime event plus recent session context, and uses configured rules to either return fixed `ALLOW` / `DENY` decisions directly or escalate the case to `HUMAN_CHECK` / `LLM_CHECK` for a contextual allow-or-deny judgment.
 
 Enable the plugin in `config/plugins.json` before relying on these rules at runtime:
 
@@ -345,7 +345,7 @@ Allowlists are injected at runtime. Policies can access them via `allowlist.<nam
 | `DENY` | Block the tool call; the original tool is not executed |
 | `ALLOW` | Allow the tool call |
 | `HUMAN_CHECK` | Send to human approval workflow |
-| `LLM_CHECK` | Send to a configured LLM reviewer; falls back to human approval if LLM is not configured or fails |
+| `LLM_CHECK` | Send to a configured LLM reviewer; if you want a real remote reviewer, configure `rule_based_plugin.env.llm_backend`, `llm_model`, `llm_base_url`, and `llm_api_key` |
 
 If no rule matches, the runtime defaults to allowing the tool call. Therefore, to express "block unknown targets" or "block anything not on the allowlist," write `DENY` / `HUMAN_CHECK` conditional rules rather than only a positive `ALLOW` rule.
 

@@ -1,6 +1,6 @@
 # rule_based_plugin 策略 DSL 基本结构
 
-本文面向需要手动编写内置 `rule_based_plugin` server plugin 策略的高级用户。`rule_based_plugin` 会消费 AgentGuard 的访问控制 DSL，结合当前运行时事件和近期 session 上下文进行规则评估，通过配置规则识别并拦截工具调用中的安全风险。
+本文面向需要手动编写内置 `rule_based_plugin` server plugin 策略的高级用户。`rule_based_plugin` 会消费 AgentGuard 的访问控制 DSL，结合当前运行时事件和近期 session 上下文进行规则评估；命中的规则既可以直接返回固定的 `ALLOW` / `DENY`，也可以进入 `HUMAN_CHECK` / `LLM_CHECK`，基于上下文做最终的 allow-or-deny 判断。
 
 要让这些规则在运行时生效，需要先在 `config/plugins.json` 中启用该 plugin：
 
@@ -345,7 +345,7 @@ Allowlist 通常由运行时配置注入，规则中可以用 `allowlist.<name>`
 | `DENY` | 拒绝工具调用，不执行原工具 |
 | `ALLOW` | 允许工具调用 |
 | `HUMAN_CHECK` | 进入人工审批流程 |
-| `LLM_CHECK` | 交给配置的 LLM 审查；未配置 LLM 或审查失败时会退化为人工审批 |
+| `LLM_CHECK` | 交给配置的 LLM 审查；如果你希望它调用真实的远端 reviewer，需要配置 `rule_based_plugin.env.llm_backend`、`llm_model`、`llm_base_url` 和 `llm_api_key` |
 
 如果没有任何规则命中，当前运行时会默认允许工具调用。因此，表达“禁止未知目标”“禁止不在白名单中”的意图时，应写成 `DENY` / `HUMAN_CHECK` 条件规则，而不是只写一条正向 `ALLOW` 规则。
 

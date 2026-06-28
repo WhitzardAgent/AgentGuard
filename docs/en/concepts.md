@@ -4,7 +4,7 @@ This page explains the concepts you will see across AgentGuard docs and configur
 
 ## Agent
 
-An agent is the application or runtime unit that receives a task, plans steps, calls an LLM, and may invoke tools. It can be built with LangChain, AutoGen, OpenAI Agents SDK, Openclaw, or a custom framework.
+An agent is the application or runtime unit that receives a task, plans steps, calls an LLM, and may invoke tools. It can be built with LangChain, LangGraph, LlamaIndex, AutoGen, OpenAI Agents SDK, Openclaw, or a custom framework.
 
 AgentGuard does not replace the agent. The agent still owns task understanding, reasoning, orchestration, and tool selection. AgentGuard adds a security layer around the runtime events produced by that agent.
 
@@ -33,9 +33,9 @@ The client is responsible for:
 
 You can think of it as AgentGuard's runtime probe and enforcement point on the agent side.
 
-## Control Server
+## AgentGuard Server
 
-The control server is AgentGuard's centralized management and decision component.
+The AgentGuard server is AgentGuard's centralized management and decision component.
 
 It typically handles:
 
@@ -134,7 +134,7 @@ Plugin configuration is phase-based. Each phase can define `client` plugins for 
 
 ## Policy
 
-A policy is a user-defined control rule. In the built-in flow, these DSL policies are consumed by the `rule_based_plugin` server plugin to specify when a runtime action should be allowed, denied, or sent to review.
+A policy is a user-defined control rule. In the built-in flow, these DSL policies are consumed by the `rule_based_plugin` server plugin to specify when a runtime action should be allowed, denied, or escalated to human or LLM review so the final allow-or-deny outcome can be decided under that condition.
 
 AgentGuard includes a built-in access-control strategy set and supports policy definitions through DSL rules. Policies commonly express constraints such as:
 
@@ -143,7 +143,7 @@ AgentGuard includes a built-in access-control strategy set and supports policy d
 - access to unknown destinations requires human review
 - a cross-step sequence such as database read followed by external email should be blocked or reviewed
 
-Policies work together with plugins: `rule_based_plugin` evaluates explicit access-control rules, while other plugins can attach risk signals or produce additional decision candidates.
+Policies work together with plugins: `rule_based_plugin` evaluates explicit access-control rules and can either return fixed `ALLOW` / `DENY` decisions or escalate to `HUMAN_CHECK` / `LLM_CHECK`, while other plugins can attach risk signals or produce additional decision candidates.
 
 ## Decision
 

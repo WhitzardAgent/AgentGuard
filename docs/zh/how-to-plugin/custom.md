@@ -2,7 +2,7 @@
 
 如果你的智能体框架还没有内置的 AgentGuard adapter，可以新增一个自定义 adapter，并把它接入到 Guard。
 
-这个章节与 LangChain、AutoGen、OpenAI Agents SDK 的接入方式并列，但它面向的是“如何自己实现一个新的 adapter”。
+这个章节与 LangChain、LangGraph、LlamaIndex、AutoGen、OpenAI Agents SDK 的接入方式并列，但它面向的是“如何自己实现一个新的 adapter”。
 
 ## 这一页在解决什么问题
 

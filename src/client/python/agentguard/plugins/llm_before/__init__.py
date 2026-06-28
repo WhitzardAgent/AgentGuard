@@ -1,6 +1,6 @@
 """LLM-before plugins."""
 from __future__ import annotations
 
-from agentguard.plugins.llm_before.llm_input import LLMInputPlugin
+from agentguard.plugins.llm_before.jailbreak_check import JailbreakCheckPlugin
 
-__all__ = ["LLMInputPlugin"]
+__all__ = ["JailbreakCheckPlugin"]

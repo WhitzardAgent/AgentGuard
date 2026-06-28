@@ -181,13 +181,13 @@ def test_backend_plugin_config_update_changes_server_runtime():
         payload = {
             "config": {
                 "phases": {
-                    "llm_before": {"client": [], "server": ["llm_input"]},
+                    "llm_before": {"client": [], "server": ["jailbreak_check"]},
                 }
             }
         }
         res = _post_json(f"{base_url}/v1/backend/plugins/config", payload)
         assert res["status"] == "ok"
-        assert res["loaded_plugins"] == ["llm_input"]
+        assert res["loaded_plugins"] == ["jailbreak_check"]
 
         decision = manager.decide(
             {
@@ -272,7 +272,7 @@ def test_backend_plugin_config_update_pushes_to_client():
         payload = {
             "config": {
                 "phases": {
-                    "llm_before": {"client": ["llm_input"], "server": []},
+                    "llm_before": {"client": ["jailbreak_check"], "server": []},
                 }
             },
             "client_config_urls": [client_url],
@@ -297,7 +297,7 @@ def test_client_registration_sends_plugin_config_to_server():
     base_url, srv, _ = start_dev_server(manager=manager)
     plugin_config = {
         "phases": {
-            "llm_before": {"client": [], "server": ["llm_input"]},
+            "llm_before": {"client": [], "server": ["jailbreak_check"]},
         }
     }
     guard = AgentGuard(
@@ -337,12 +337,12 @@ def test_backend_plugin_config_update_by_principal_updates_server_and_client():
     )
     server_config = {
         "phases": {
-            "llm_before": {"client": [], "server": ["llm_input"]},
+            "llm_before": {"client": [], "server": ["jailbreak_check"]},
         }
     }
     client_config = {
         "phases": {
-            "llm_before": {"client": ["llm_input"], "server": []},
+            "llm_before": {"client": ["jailbreak_check"], "server": []},
         }
     }
     try:
@@ -403,7 +403,7 @@ def test_backend_session_pool_records_client_metadata_over_http():
     manager = RuntimeManager(
         plugin_config={
             "phases": {
-                "llm_before": {"client": [], "server": ["llm_input"]},
+                "llm_before": {"client": [], "server": ["jailbreak_check"]},
             }
         },
     )

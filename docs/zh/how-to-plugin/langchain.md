@@ -3,7 +3,7 @@
 ## 导入方法
 使用 `Guard.attach_langchain()` 这个 Adapter 方法可以自动将 LangChain 智能体实例与 AgentGuard 关联起来，你不再需要对 LangChain SDK 原本的代码做任何修改。
 
-我们的 LangChain Adapter 关联的智能体实例是 `create_agent()` 的返回值，类型为 `langgraph.graph.state.CompiledGraph`。
+我们的 LangChain Adapter 关联的对象是 `langchain.agents.create_agent()` 的返回值。在 LangChain v1 中，这个对象通常底层也是 `langgraph.graph.state.CompiledGraph`；但如果你接入的是原生 LangGraph graph，请改用 `Guard.attach_langgraph()`。
 
 ```python
 agent = create_agent(...)
@@ -67,7 +67,7 @@ def run(agent, prompt):
             ]
         }
     )
-    print(f"Output: {result["messages"][-1].content}")
+    print(f"Output: {result['messages'][-1].content}")
     print("===================================\n")
 
 if __name__ == "__main__":

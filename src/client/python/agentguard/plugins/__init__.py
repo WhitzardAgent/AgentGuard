@@ -10,7 +10,7 @@ from agentguard.plugins.registry import (
     registered_plugins,
 )
 from agentguard.plugins.llm_after import LLMOutputPlugin
-from agentguard.plugins.llm_before import LLMInputPlugin
+from agentguard.plugins.llm_before import JailbreakCheckPlugin
 from agentguard.plugins.tool_after import ToolResultPlugin
 from agentguard.plugins.tool_before import ToolInvokePlugin
 
@@ -23,7 +23,7 @@ __all__ = [
     "get_plugin_class",
     "registered_plugins",
     "plugin_descriptions",
-    "LLMInputPlugin",
+    "JailbreakCheckPlugin",
     "LLMOutputPlugin",
     "ToolInvokePlugin",
     "ToolResultPlugin",

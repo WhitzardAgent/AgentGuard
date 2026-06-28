@@ -2,15 +2,22 @@
 # source; client code is not required for backend imports.
 FROM python:3.11-slim AS runtime
 
+ARG APT_MIRROR=mirrors.tuna.tsinghua.edu.cn
+ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+ARG PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_INDEX_URL=${PIP_INDEX_URL} \
+    PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST} \
     AGENTGUARD_HOST=0.0.0.0 \
     AGENTGUARD_PORT=38080 \
     PYTHONPATH="/opt/agentguard/src:/opt/agentguard/src/server:/opt/agentguard"
 
-RUN apt-get update \
+RUN sed -i "s|http://deb.debian.org|https://${APT_MIRROR}|g; s|http://security.debian.org|https://${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources \
+ && apt-get update \
  && apt-get install -y --no-install-recommends curl tini \
  && rm -rf /var/lib/apt/lists/*
 

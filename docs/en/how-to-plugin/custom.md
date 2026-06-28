@@ -2,7 +2,7 @@
 
 If your agent framework does not yet have a built-in AgentGuard adapter, you can add a custom adapter and connect it to Guard.
 
-This page sits alongside the LangChain, AutoGen, and OpenAI Agents SDK integration pages, but it focuses on one thing: how to implement a new adapter yourself.
+This page sits alongside the LangChain, LangGraph, LlamaIndex, AutoGen, and OpenAI Agents SDK integration pages, but it focuses on one thing: how to implement a new adapter yourself.
 
 ## What this page is for
 

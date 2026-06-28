@@ -16,7 +16,7 @@ AgentGuard 不只检查单次工具调用，而是可以贯穿智能体运行过
 
 ### 模块化安全策略
 
-AgentGuard 通过统一的 plugin 架构适配规则型和模型型安全策略。当前版本内置了一个名为 `rule_based_plugin` 的 server plugin，支持通过可配置的 DSL 规则识别并拦截工具调用中的安全风险，避免高风险工具调用真正执行。
+AgentGuard 通过统一的 plugin 架构适配规则型和模型型安全策略。当前版本内置了 `rule_based_plugin` 和 `jailbreak_check` 等 plugin：前者是 server 侧的 DSL 工具访问控制插件，既可以在规则命中时直接返回固定的 `ALLOW` / `DENY`，也可以进入 `HUMAN_CHECK` / `LLM_CHECK`，让人工或 LLM 基于命中的条件和上下文决定最终是 allow 还是 deny；后者用于在 `llm_before` 阶段识别 prompt injection。
 
 ### 单工具与跨工具链路保护
 
@@ -33,6 +33,8 @@ AgentGuard 位于大模型规划引擎与工具之间，不替代智能体的规
 当前支持的框架包括：
 
 - [LangChain](https://github.com/langchain-ai/langchain)
+- [LangGraph](https://github.com/langchain-ai/langgraph)
+- [LlamaIndex](https://github.com/run-llama/llama_index)
 - [AutoGen](https://github.com/microsoft/autogen)
 - [OpenAI Agents SDK](https://github.com/openai/openai-agents-python)
 - Openclaw

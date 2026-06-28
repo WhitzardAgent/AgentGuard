@@ -187,7 +187,7 @@ def test_session_pool_requires_exact_composite_key_for_lookup():
 def test_server_plugin_config_loads_only_remote_scope():
     cfg = {
         "phases": {
-            "llm_before": {"client": ["llm_input"], "server": []},
+            "llm_before": {"client": ["jailbreak_check"], "server": []},
             "tool_before": {"client": ["tool_invoke"], "server": ["rule_based_plugin"]},
         }
     }
@@ -301,7 +301,7 @@ def test_manager_returns_plugin_result():
     m = RuntimeManager(
         plugin_config={
             "phases": {
-                "llm_before": {"client": [], "server": ["llm_input"]},
+                "llm_before": {"client": [], "server": ["jailbreak_check"]},
             }
         },
     )
@@ -325,7 +325,7 @@ def test_manager_returns_plugin_result():
 def test_manager_uses_plugin_config_file(tmp_path):
     cfg = {
         "phases": {
-            "llm_before": {"client": ["llm_input"], "server": []},
+            "llm_before": {"client": ["jailbreak_check"], "server": []},
             "llm_after": {"client": ["llm_output"], "server": []},
             "tool_before": {"client": ["tool_invoke"], "server": []},
             "tool_after": {"client": [], "server": ["tool_result"]},
@@ -749,7 +749,7 @@ def test_manager_uses_session_scoped_client_plugin_config():
     m = RuntimeManager(
         plugin_config={
             "phases": {
-                "llm_before": {"client": [], "server": ["llm_input"]},
+                "llm_before": {"client": [], "server": ["jailbreak_check"]},
             }
         },
     )
@@ -801,15 +801,15 @@ def test_update_client_plugin_config_updates_both_server_and_client_views():
 
     updates = m.update_client_plugin_config(
         {"session_id": "principal-match", "agent_id": "agent-1", "user_id": "user-1"},
-        {"phases": {"llm_before": {"client": ["llm_input"], "server": []}}},
-        remote_plugin_config={"phases": {"llm_before": {"client": [], "server": ["llm_input"]}}},
+        {"phases": {"llm_before": {"client": ["jailbreak_check"], "server": []}}},
+        remote_plugin_config={"phases": {"llm_before": {"client": [], "server": ["jailbreak_check"]}}},
     )
 
     assert updates[0]["status"] == "skipped"
     record = m.session_pool.get("principal-match", agent_id="agent-1", user_id="user-1")
     assert record is not None
-    assert record["client_plugin_config"]["phases"]["llm_before"]["client"] == ["llm_input"]
-    assert record["remote_plugin_config"]["phases"]["llm_before"]["server"] == ["llm_input"]
+    assert record["client_plugin_config"]["phases"]["llm_before"]["client"] == ["jailbreak_check"]
+    assert record["remote_plugin_config"]["phases"]["llm_before"]["server"] == ["jailbreak_check"]
 
 
 def test_manager_stops_remote_plugin_chain_on_first_decision():

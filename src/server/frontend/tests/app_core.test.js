@@ -434,13 +434,13 @@ test("shared app core builds multi-plugin config while preserving unrelated phas
   const available = [
     { name: "rule_based_plugin", description: "", event_types: [], phases: ["tool_before"] },
     { name: "tool_invoke", description: "", event_types: ["tool_invoke"], phases: ["tool_before"] },
-    { name: "llm_input", description: "", event_types: ["llm_input"], phases: ["llm_before"] },
+    { name: "jailbreak_check", description: "", event_types: ["llm_input"], phases: ["llm_before"] },
   ];
   const existingConfig = {
     phases: {
       llm_before: {
         client: ["client_llm_guard"],
-        server: ["llm_input"],
+        server: ["jailbreak_check"],
       },
       tool_before: {
         client: ["client_tool_guard"],
@@ -459,7 +459,7 @@ test("shared app core builds multi-plugin config while preserving unrelated phas
     phases: {
       llm_before: {
         client: ["client_llm_guard"],
-        server: ["llm_input"],
+        server: ["jailbreak_check"],
       },
       tool_before: {
         client: ["client_tool_guard"],
@@ -479,7 +479,7 @@ test("shared app core builds multi-plugin config while preserving unrelated phas
     phases: {
       llm_before: {
         client: ["client_llm_guard"],
-        server: ["llm_input"],
+        server: ["jailbreak_check"],
       },
       tool_before: {
         client: ["client_tool_guard"],
@@ -530,7 +530,7 @@ test("shared app core derives active plugin names and primary plugin from config
     agent_id: "agent-a",
     plugin_config: {
       phases: {
-        llm_before: { client: ["client_prompt_guard"], server: ["llm_input"] },
+        llm_before: { client: ["client_prompt_guard"], server: ["jailbreak_check"] },
         tool_before: { client: [], server: ["tool_invoke", "rule_based_plugin"] },
         tool_after: { client: ["client_tool_result_guard"], server: [{ name: "tool_result" }] },
       },
@@ -539,7 +539,7 @@ test("shared app core derives active plugin names and primary plugin from config
 
   assert.deepEqual(
     global.window.AgentGuardData.selectedPluginsFromConfig(configResponse),
-    ["llm_input", "tool_invoke", "rule_based_plugin", "tool_result"],
+    ["jailbreak_check", "tool_invoke", "rule_based_plugin", "tool_result"],
   );
   assert.deepEqual(
     global.window.AgentGuardData.selectedPluginsFromConfig(configResponse, "client"),
@@ -548,7 +548,7 @@ test("shared app core derives active plugin names and primary plugin from config
   assert.deepEqual(
     global.window.AgentGuardData.activePluginsFromConfig(configResponse),
     [
-      "llm_input",
+      "jailbreak_check",
       "tool_invoke",
       "rule_based_plugin",
       "tool_result",
@@ -560,7 +560,7 @@ test("shared app core derives active plugin names and primary plugin from config
     global.window.AgentGuardData.collapsePluginSelection(
       global.window.AgentGuardData.selectedPluginsFromConfig(configResponse),
     ),
-    ["llm_input", "tool_invoke", "rule_based_plugin", "tool_result"],
+    ["jailbreak_check", "tool_invoke", "rule_based_plugin", "tool_result"],
   );
   assert.deepEqual(
     global.window.AgentGuardData.expandPluginSelection(["rule_based_plugin", "tool_result"]),

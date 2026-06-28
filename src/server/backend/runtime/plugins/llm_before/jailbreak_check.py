@@ -9,10 +9,10 @@ from backend.runtime.plugins.registry import register
 
 
 @register(
-    name="llm_input",
+    name="jailbreak_check",
     description="Detect prompt-injection and system-prompt leak attempts in LLM input.",
 )
-class LLMInputPlugin(BasePlugin):
+class JailbreakCheckPlugin(BasePlugin):
     event_types = [EventType.LLM_INPUT]
 
     def check(self, event: RuntimeEvent, context: RuntimeContext) -> CheckResult:
@@ -34,12 +34,11 @@ class LLMInputPlugin(BasePlugin):
         metadata = {"matched_prompt_templates": matched_templates} if matched_templates else {}
         return CheckResult(
             decision_candidate=GuardDecision.deny(
-                "Prompt blocked by local llm_input plugin.",
-                policy_id="local:llm_input:jailbreak_detected",
+                "Prompt blocked by local jailbreak_check plugin.",
+                policy_id="local:jailbreak_check:jailbreak_detected",
                 risk_signals=list(signals),
                 metadata=metadata,
             ),
             risk_signals=signals,
             metadata=metadata,
         )
-

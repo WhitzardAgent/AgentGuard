@@ -38,7 +38,7 @@ function discoverPlugins() {
     return;
   }
   DISCOVERED = true;
-  require("./llm_before/llm_input");
+  require("./llm_before/jailbreak_check");
   require("./llm_after/llm_output");
   require("./llm_after/llm_thought");
   require("./llm_after/final_response");

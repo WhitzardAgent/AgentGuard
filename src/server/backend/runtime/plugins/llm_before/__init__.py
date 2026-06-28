@@ -1,6 +1,6 @@
 """LLM-before server plugins."""
 from __future__ import annotations
 
-from backend.runtime.plugins.llm_before.llm_input import LLMInputPlugin
+from backend.runtime.plugins.llm_before.jailbreak_check import JailbreakCheckPlugin
 
-__all__ = ["LLMInputPlugin"]
+__all__ = ["JailbreakCheckPlugin"]

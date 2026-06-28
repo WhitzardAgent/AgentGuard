@@ -18,7 +18,7 @@ pip install langchain==1.2.18
 pip install langchain-openai==1.2.1
 ```
 
-> This guide uses LangChain 1.2.18. AgentGuard currently supports LangChain, AutoGen, OpenAI Agents SDK, and Openclaw; here we use LangChain only as the quickest walkthrough example.
+> This guide uses LangChain 1.2.18. AgentGuard currently supports LangChain, LangGraph, LlamaIndex, AutoGen, OpenAI Agents SDK, and Openclaw; here we use LangChain only as the quickest walkthrough example.
 
 #### 2. Write the agent code
 
@@ -71,7 +71,7 @@ def run(agent, prompt):
             ]
         }
     )
-    print(f"Output: {result["messages"][-1].content}")
+    print(f"Output: {result['messages'][-1].content}")
     print("===================================\n")
 
 if __name__ == "__main__":
@@ -96,6 +96,8 @@ pip install -e .
 #### 2. Import the client
 
 Below is the complete code after importing the AgentGuard client. Lines marked with 🚩 show where the client is inserted:
+
+If you want a framework-agnostic explanation first, see [AgentGuard Client](how-to-plugin/agentguard_client.md). If you are integrating a different runtime, see the dedicated pages for [LangGraph](how-to-plugin/langgraph.md), [LlamaIndex](how-to-plugin/llamaindex.md), [AutoGen](how-to-plugin/autogen.md), [OpenAI Agents SDK](how-to-plugin/openai_agents_sdk.md), and [Openclaw](how-to-plugin/openclaw_adapter.md).
 
 ```python
 from langchain.agents import create_agent
@@ -149,7 +151,7 @@ def run(agent, prompt):
             ]
         }
     )
-    print(f"Output: {result["messages"][-1].content}")
+    print(f"Output: {result['messages'][-1].content}")
     print("===================================\n")
 
 if __name__ == "__main__":
@@ -187,7 +189,7 @@ if __name__ == "__main__":
 * `Guard()`: configures the control server address. This must match the server's configuration — see the control-server deployment section below.
 * `Principal()`: defines the agent's identity, including agent ID, session ID, role, and trust level. These attributes are used to build constraints in access control policies.
 * `guard.start()`: opens an access-control session, linking the agent's identity and task goal, and starts communicating with the control server. Call this before the agent begins its task.
-* `guard.attach_langchain()`: attaches the client to a LangChain agent instance. Different frameworks use different adapters; see later sections for details.
+* `guard.attach_langchain()`: attaches the client to a LangChain agent instance. For other built-in adapters, use `guard.attach_langgraph()`, `guard.attach_llamaindex()`, `guard.attach_autogen()`, or `guard.attach_openai_agents()` as appropriate.
 * `guard.close()`: closes the session and releases resources. Call this after the agent has finished all tasks.
 
 ### Step 3: AgentGuard Plugins and Custom Auditors
@@ -246,7 +248,7 @@ cat <<EOF > config/plugins.json
 EOF
 ```
 
-This config means: only the `tool_before` phase runs a server plugin, and that plugin is the built-in `rule_based_plugin`. All other phases are empty. In other words, the server will evaluate your policy rules only right before a tool call runs. That keeps the quick start focused on access-control decisions around tool execution, without introducing additional LLM-phase or tool-result plugins yet.
+This config means: only the `tool_before` phase runs a server plugin, and that plugin is the built-in `rule_based_plugin`. All other phases are empty. In other words, the server will evaluate your policy rules only right before a tool call runs. `rule_based_plugin` can either return fixed `ALLOW` / `DENY` decisions directly or escalate a matched case to human or LLM review; in this quick start, we keep the flow focused on direct access-control decisions around tool execution, without introducing additional LLM-phase or tool-result plugins yet.
 
 #### 2. Create an access control policy
 

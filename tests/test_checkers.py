@@ -78,7 +78,7 @@ def test_llm_input_detects_prompt_injection():
     mgr = PluginManager(
         config={
             "phases": {
-                "llm_before": {"client": ["llm_input"], "server": []},
+                "llm_before": {"client": ["jailbreak_check"], "server": []},
             }
         }
     )
@@ -97,7 +97,7 @@ def test_llm_input_detects_system_prompt_leak_template():
     mgr = PluginManager(
         config={
             "phases": {
-                "llm_before": {"client": ["llm_input"], "server": []},
+                "llm_before": {"client": ["jailbreak_check"], "server": []},
             }
         }
     )
@@ -122,13 +122,13 @@ def test_clean_event_has_no_signals():
 def test_client_plugin_config_loads_only_local_scope():
     cfg = {
         "phases": {
-            "llm_before": {"client": ["llm_input"], "server": ["remote_only"]},
+            "llm_before": {"client": ["jailbreak_check"], "server": ["remote_only"]},
             "tool_before": {"client": [], "server": ["tool_invoke"]},
         }
     }
 
     assert load_plugin_config(cfg) == {
-        "llm_before": ["llm_input"],
+        "llm_before": ["jailbreak_check"],
         "tool_before": [],
     }
 
@@ -139,7 +139,7 @@ def test_client_without_plugin_config_loads_no_checkers():
 
 def test_client_rejects_legacy_plugin_config_format():
     with pytest.raises(ValueError, match="phases"):
-        load_plugin_config({"llm_before": ["llm_input"]})
+        load_plugin_config({"llm_before": ["jailbreak_check"]})
 
 
 def test_registered_checker_can_be_loaded_by_name():
@@ -254,7 +254,7 @@ def test_plugin_config_binds_top_level_params_and_env(monkeypatch):
 def test_plugin_config_file_controls_enabled_phases(tmp_path):
     cfg = {
         "phases": {
-            "llm_before": {"client": [], "server": ["llm_input"]},
+            "llm_before": {"client": [], "server": ["jailbreak_check"]},
             "llm_after": {"client": [], "server": ["llm_output"]},
             "tool_before": {"client": [], "server": ["tool_invoke"]},
             "tool_after": {"client": ["tool_result"], "server": []},
@@ -281,7 +281,7 @@ def test_plugin_config_can_be_updated_for_next_event():
         "dynamic-checkers",
         plugin_config={
             "phases": {
-                "llm_before": {"client": [], "server": ["llm_input"]},
+                "llm_before": {"client": [], "server": ["jailbreak_check"]},
                 "llm_after": {"client": [], "server": ["llm_output"]},
                 "tool_before": {"client": [], "server": ["tool_invoke"]},
                 "tool_after": {"client": [], "server": ["tool_result"]},
@@ -298,7 +298,7 @@ def test_plugin_config_can_be_updated_for_next_event():
     guard.update_plugin_config(
         {
             "phases": {
-                "llm_before": {"client": ["llm_input"], "server": []},
+                "llm_before": {"client": ["jailbreak_check"], "server": []},
                 "llm_after": {"client": [], "server": []},
                 "tool_before": {"client": [], "server": []},
                 "tool_after": {"client": [], "server": []},
@@ -318,7 +318,7 @@ def test_plugin_config_can_be_updated_over_local_http_api():
         "dynamic-checkers-http",
         plugin_config={
             "phases": {
-                "llm_before": {"client": [], "server": ["llm_input"]},
+                "llm_before": {"client": [], "server": ["jailbreak_check"]},
                 "llm_after": {"client": [], "server": ["llm_output"]},
                 "tool_before": {"client": [], "server": ["tool_invoke"]},
                 "tool_after": {"client": [], "server": ["tool_result"]},
@@ -332,7 +332,7 @@ def test_plugin_config_can_be_updated_over_local_http_api():
             {
                 "config": {
                     "phases": {
-                        "llm_before": {"client": ["llm_input"], "server": []},
+                        "llm_before": {"client": ["jailbreak_check"], "server": []},
                         "llm_after": {"client": [], "server": []},
                         "tool_before": {"client": [], "server": []},
                         "tool_after": {"client": [], "server": []},
@@ -379,9 +379,9 @@ def test_local_http_api_lists_registered_plugins():
 
         plugins = {item["name"]: item for item in payload["plugins"]}
         assert payload["status"] == "ok"
-        assert "llm_input" in plugins
-        assert "prompt-injection" in plugins["llm_input"]["description"]
-        assert plugins["llm_input"]["event_types"] == ["llm_input"]
+        assert "jailbreak_check" in plugins
+        assert "prompt-injection" in plugins["jailbreak_check"]["description"]
+        assert plugins["jailbreak_check"]["event_types"] == ["llm_input"]
         assert "tool_result" in plugins
         assert plugins["tool_result"]["event_types"] == ["tool_result"]
     finally:
@@ -449,7 +449,7 @@ from agentguard.schemas.events import EventType
     name="uploaded_test_llm_input",
     description="Uploaded test checker.",
 )
-class UploadedTestLLMInputPlugin(BasePlugin):
+class UploadedTestJailbreakCheckPlugin(BasePlugin):
     event_types = [EventType.LLM_INPUT]
 
     def check(self, event, context):

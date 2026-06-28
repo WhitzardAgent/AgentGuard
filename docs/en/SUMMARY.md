@@ -6,7 +6,10 @@
 * Runtime Internals
   * [Runtime Session Lifecycle](runtime/session_lifecycle.md)
 * AgentGuard Client Importing
+  * [AgentGuard Client](how-to-plugin/agentguard_client.md)
   * [LangChain](how-to-plugin/langchain.md)
+  * [LangGraph](how-to-plugin/langgraph.md)
+  * [LlamaIndex](how-to-plugin/llamaindex.md)
   * [AutoGen](how-to-plugin/autogen.md)
   * [OpenAI Agents SDK](how-to-plugin/openai_agents_sdk.md)
   * [Openclaw](how-to-plugin/openclaw_adapter.md)
@@ -16,6 +19,7 @@
     * [rule_based_plugin](plugins/rule_based_plugin.md)
       * [Visual Policy Configuration](policies/quick_config.md)
       * [Policy DSL Structure](policies/dsl_basic_structure.md)
+    * [jailbreak_check](plugins/jailbreak_check.md)
   * [Custom Client Plugins](plugins/custom_client_plugin.md)
   * [Custom Server Plugins](plugins/custom_server_plugin.md)
 * [Custom Auditors](auditors.md)
