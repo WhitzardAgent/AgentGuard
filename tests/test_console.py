@@ -7,7 +7,7 @@ from backend.runtime.plugins.base import BasePlugin, CheckResult
 from backend.runtime.manager import RuntimeManager
 from backend.runtime.plugins.base import BasePlugin, CheckResult
 from shared.schemas.decisions import GuardDecision
-from shared.schemas.events import EventType
+from shared.schemas.events import EventType, RuntimeContext, tool_event
 from shared.schemas.policy import PolicyEffect, PolicyRule, RuleCondition
 
 _DENY_RULE = (
@@ -119,7 +119,14 @@ def test_publish_list_delete_rule():
     managed = [r for r in rules if r["user_managed"]]
     assert any(r["rule_id"] == "block_shell" for r in managed)
     # Published rule is available to the optional rule-based checker.
-    assert any(r.rule_id == "block_shell" for r in con.manager.policy.store.rules())
+    published = next(r for r in con.manager.policy.store.rules() if r.rule_id == "block_shell")
+    assert any(
+        cond.field == "principal.agent_id"
+        and cond.op == "eq"
+        and cond.value == "agent-alpha"
+        for cond in published.conditions
+    )
+    assert published.metadata["agent_scope"] == "agent-alpha"
 
     dup = con.publish_rule("agent-alpha", _DENY_RULE)
     assert dup["ok"] is False  # duplicate id
@@ -127,6 +134,27 @@ def test_publish_list_delete_rule():
     deleted = con.delete_rule("agent-alpha", "block_shell")
     assert deleted["ok"] is True
     assert len(con.list_rules()) == before
+
+
+def test_published_rule_only_matches_owning_agent():
+    con = _console()
+    res = con.publish_rule("agent-alpha", _NO_CONDITION_RULE)
+    assert res["ok"] is True
+
+    published = next(r for r in con.manager.policy.store.rules() if r.rule_id == "allow_safe_read")
+    alpha_event = tool_event(
+        RuntimeContext(session_id="s-alpha", agent_id="agent-alpha", user_id="u1"),
+        "read_file",
+        {},
+    )
+    beta_event = tool_event(
+        RuntimeContext(session_id="s-beta", agent_id="agent-beta", user_id="u1"),
+        "read_file",
+        {},
+    )
+
+    assert published.matches(alpha_event) is True
+    assert published.matches(beta_event) is False
 
 
 def test_observer_records_traffic_audit_and_tickets():

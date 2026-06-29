@@ -13,7 +13,7 @@ from typing import Any
 
 from shared.schemas.decisions import DecisionType, GuardDecision
 from shared.schemas.events import RuntimeEvent
-from shared.schemas.policy import PolicyRule
+from shared.schemas.policy import PolicyRule, RuleCondition
 from shared.rules.llm_dsl_generator import (
     LLMRuleGeneratorWorkflow,
     RuleGenerationRequest,
@@ -199,17 +199,18 @@ class ConsoleState:
         if len(parsed) != 1:
             return {"ok": False, "error": "exactly one RULE block is required."}
         pr: ParsedRule = parsed[0]
+        scoped_rule = self._scope_rule_to_agent(pr.rule, agent_id)
         with self._lock:
             if pr.name in self._console_rules or any(
                 r.rule_id == pr.name for r in self._base_rules
             ):
                 return {"ok": False, "error": f"rule_id '{pr.name}' already exists", "code": 409}
-            pr.rule.metadata["source_text"] = pr.source
-            pr.rule.metadata["pack_id"] = f"agent::{agent_id}"
+            scoped_rule.metadata["source_text"] = pr.source
+            scoped_rule.metadata["pack_id"] = f"agent::{agent_id}"
             self._console_rules[pr.name] = {
                 "agent_id": agent_id,
-                "rule": pr.rule,
-                "console": rule_to_console_dict(pr.rule, user_managed=True),
+                "rule": scoped_rule,
+                "console": rule_to_console_dict(scoped_rule, user_managed=True),
             }
             self._rebuild_policy()
         return {
@@ -253,6 +254,26 @@ class ConsoleState:
     def _rebuild_policy(self) -> None:
         rules = list(self._base_rules) + [e["rule"] for e in self._console_rules.values()]
         self.manager.policy.store.set_rules(rules)
+
+    @staticmethod
+    def _scope_rule_to_agent(rule: PolicyRule, agent_id: str) -> PolicyRule:
+        normalized_agent_id = str(agent_id or "").strip()
+        scoped_rule = PolicyRule.from_dict(rule.to_dict())
+        if not normalized_agent_id:
+            return scoped_rule
+        already_scoped = any(
+            cond.field == "principal.agent_id"
+            and cond.op == "eq"
+            and str(cond.value or "").strip() == normalized_agent_id
+            for cond in scoped_rule.conditions
+        )
+        if not already_scoped:
+            scoped_rule.conditions.append(
+                RuleCondition(field="principal.agent_id", op="eq", value=normalized_agent_id)
+            )
+        scoped_rule.metadata["agent_scope"] = normalized_agent_id
+        scoped_rule.metadata["scope_injected"] = not already_scoped
+        return scoped_rule
 
     @staticmethod
     def _rule_generation_response(session: RuleGenerationSession) -> dict[str, Any]:
