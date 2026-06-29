@@ -50,9 +50,22 @@ AgentGuard 目前内置支持以下框架：
 | LlamaIndex | `guard.attach_llamaindex()` | [LlamaIndex](llamaindex.md) |
 | AutoGen | `guard.attach_autogen()` | [AutoGen](autogen.md) |
 | OpenAI Agents SDK | `guard.attach_openai_agents()` | [OpenAI Agents SDK](openai_agents_sdk.md) |
+| Dify Workflow Agent 节点 | 在 Dify `api`/`worker` 进程启动时调用 `install_dify_adapter()` | [Dify Workflow Agent 节点](dify.md) |
 | Openclaw | JavaScript 侧集成 | [Openclaw](openclaw_adapter.md) |
 
 如果你的框架不在上面的列表里，也可以通过实现自定义 adapter 的方式接入，详见 [Custom Adapter](custom.md)。
+
+### Dify Workflow Agent 节点
+
+Dify 的 Workflow Agent 节点、LLM model 和 tools 都是在 Dify runtime 内部创建的，所以用户手里没有一个可以传给 `guard.attach_xxx()` 的 agent 对象。Dify 场景需要在 Dify `api` 和 `worker` 进程启动时安装一次 runtime adapter：
+
+```python
+from agentguard.adapters.agent.dify import install_dify_adapter
+
+install_dify_adapter()
+```
+
+通过环境变量配置客户端，例如 `AGENTGUARD_ENABLED=true`、`AGENTGUARD_SERVER_URL`、`AGENTGUARD_API_KEY` 和 `AGENTGUARD_POLICY`。当前已验证支持 Dify 1.15 本地部署下 `ENABLE_AGENT_V2=false` 的 legacy Workflow Agent 节点路径，用于观察 Agent 节点内部的 LLM 调用和工具调用。详细步骤见 [Dify Workflow Agent 节点](dify.md)。
 
 ## 最简理解
 

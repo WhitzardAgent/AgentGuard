@@ -48,9 +48,22 @@ AgentGuard currently provides built-in adapters for these frameworks:
 | LlamaIndex | `guard.attach_llamaindex()` | [LlamaIndex](llamaindex.md) |
 | AutoGen | `guard.attach_autogen()` | [AutoGen](autogen.md) |
 | OpenAI Agents SDK | `guard.attach_openai_agents()` | [OpenAI Agents SDK](openai_agents_sdk.md) |
+| Dify Workflow Agent node | `install_dify_adapter()` during Dify `api`/`worker` startup | [Dify Workflow Agent Node](dify.md) |
 | Openclaw | JavaScript-side integration | [Openclaw](openclaw_adapter.md) |
 
 If your framework is not listed here, you can still integrate AgentGuard by implementing a custom adapter. See [Custom Adapter](custom.md).
+
+### Dify Workflow Agent node
+
+Dify creates Workflow Agent nodes, LLM models, and tools inside the Dify runtime, so there is no user-owned agent object to pass to `guard.attach_xxx()`. For Dify, install the runtime adapter once during Dify `api` and `worker` startup:
+
+```python
+from agentguard.adapters.agent.dify import install_dify_adapter
+
+install_dify_adapter()
+```
+
+Configure the client with environment variables such as `AGENTGUARD_ENABLED=true`, `AGENTGUARD_SERVER_URL`, `AGENTGUARD_API_KEY`, and `AGENTGUARD_POLICY`. The validated path is the Dify 1.15 local deployment with `ENABLE_AGENT_V2=false`, covering legacy Workflow Agent nodes and observing LLM/tool calls inside those nodes. See [Dify Workflow Agent Node](dify.md).
 
 ## Minimal mental model
 

@@ -12,6 +12,7 @@
   * [LlamaIndex](how-to-plugin/llamaindex.md)
   * [AutoGen](how-to-plugin/autogen.md)
   * [OpenAI Agents SDK](how-to-plugin/openai_agents_sdk.md)
+  * [Dify Workflow Agent 节点](how-to-plugin/dify.md)
   * [Openclaw](how-to-plugin/openclaw_adapter.md)
   * [Custom Adapter](how-to-plugin/custom.md)
 * [AgentGuard插件](plugins.md)

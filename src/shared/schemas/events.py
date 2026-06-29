@@ -66,15 +66,15 @@ class LLMInput(_PayloadMapping):
 
 @dataclass
 class LLMOutput(_PayloadMapping):
-    output: str = ""
+    output: str | None = None
     thought: str | None = None
     final_output: str | None = None
 
     def __post_init__(self) -> None:
-        self.output = _coerce_text(self.output)
+        self.output = _coerce_optional_text(self.output)
         self.thought = _coerce_optional_text(self.thought)
         self.final_output = _coerce_optional_text(self.final_output)
-        if not self.output:
+        if self.output is None:
             if self.final_output is not None:
                 self.output = self.final_output
             elif self.thought is not None:
@@ -395,7 +395,7 @@ def _coerce_llm_output(value: Any) -> LLMOutput:
     if output is None:
         output = final_output if final_output is not None else thought
     return LLMOutput(
-        output=_coerce_text(output),
+        output=_coerce_optional_text(output),
         thought=_coerce_optional_text(thought),
         final_output=_coerce_optional_text(final_output),
     )
@@ -431,6 +431,6 @@ def _llm_output_fields(value: Any) -> dict[str, Any] | None:
         return None
 
     recognized = ("output", "text", "content", "message", "thought", "final_output")
-    if not any(data.get(key) is not None for key in recognized):
+    if not any(key in data for key in recognized):
         return None
     return data
