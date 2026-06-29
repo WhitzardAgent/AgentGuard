@@ -290,6 +290,49 @@ def test_register_tool_adds_or_updates_console_catalog():
     assert any(item["name"] == "docs.search" for item in scoped)
 
 
+def test_register_skills_stores_skill_record_resource_and_detection_state():
+    con = _console()
+    result = con.register_skills(
+        {
+            "agent_id": "skill-agent",
+            "user_id": "skill-user",
+            "session_id": "skill-session",
+        },
+        [
+            {
+                "name": "demo-skill",
+                "description": "Demo skill",
+                "source_framework": "openclaw_compatible",
+                "object_type": "skill",
+                "root_path": "/tmp/demo",
+                "entry_file": "SKILL.md",
+                "sha256": "a" * 64,
+                "file_count": 2,
+                "total_size": 1234,
+                "extraction": {"level": "directory", "confidence": "high"},
+                "skill_markdown": {"relative_path": "SKILL.md", "content": "# Demo"},
+                "files": [{"relative_path": "SKILL.md", "content": "# Demo"}],
+            }
+        ],
+    )
+
+    assert result is not None
+    assert result["skill_count"] == 1
+
+    scoped = con.skills("skill-agent")
+    assert len(scoped) == 1
+    skill = scoped[0]
+    assert skill["owner_agent_id"] == "skill-agent"
+    assert skill["agent_id"] == "skill-agent"
+    assert skill["user_id"] == "skill-user"
+    assert skill["session_id"] == "skill-session"
+    assert skill["skill_unique_id"] == f"skill-agent:{'a' * 64}"
+    assert skill["detect_result"] is None
+    assert skill["skill_resource"]["skill_markdown"]["content"] == "# Demo"
+    assert skill["descriptor"]["files"][0]["relative_path"] == "SKILL.md"
+    assert "skill-agent" in con.agents()
+
+
 def test_generate_rule_uses_agent_context_and_returns_candidate(monkeypatch):
     con = _console()
     con.register_tool(

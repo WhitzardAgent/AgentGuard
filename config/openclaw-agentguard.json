@@ -8,5 +8,9 @@
   },
   "defaultToolCatalogPath": "./openclaw-default-tools.json",
   "auditPath": "./tmp/openclaw-agentguard-audit.jsonl",
-  "remoteUnavailableMode": "fail_closed"
+  "remoteUnavailableMode": "fail_closed",
+  "skillScan": {
+    "enabled": false,
+    "roots": []
+  }
 }

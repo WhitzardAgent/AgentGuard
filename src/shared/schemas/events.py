@@ -264,6 +264,25 @@ def tool_invoke(
     return _make(EventType.TOOL_INVOKE, context, payload, metadata=meta)
 
 
+def tool_event(
+    context: RuntimeContext,
+    tool_name: str,
+    arguments: dict[str, Any],
+    *,
+    capabilities: list[str] | None = None,
+    **meta: Any,
+) -> RuntimeEvent:
+    """Compatibility alias for callers that still use the old helper name."""
+
+    return tool_invoke(
+        context,
+        tool_name,
+        arguments,
+        capabilities=capabilities,
+        **meta,
+    )
+
+
 def tool_result(
     context: RuntimeContext,
     tool_name: str,

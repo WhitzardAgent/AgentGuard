@@ -11,6 +11,7 @@ import time
 from collections import deque
 from typing import Any
 
+from backend.console.skill_record import SkillRecord
 from shared.schemas.decisions import DecisionType, GuardDecision
 from shared.schemas.events import RuntimeEvent
 from shared.schemas.policy import PolicyRule
@@ -43,6 +44,7 @@ class ConsoleState:
         self._console_rules: dict[str, dict[str, Any]] = {}
 
         self._tools: dict[tuple[str, str], dict[str, Any]] = {}
+        self._skills: dict[tuple[str, str], SkillRecord] = {}
 
         self._traffic: deque[dict[str, Any]] = deque(maxlen=1000)
         self._audit: deque[dict[str, Any]] = deque(maxlen=1000)
@@ -51,7 +53,7 @@ class ConsoleState:
 
     # ---- agents / tools ------------------------------------------------
     def agents(self) -> list[str]:
-        return sorted({owner for owner, _ in self._tools})
+        return sorted({owner for owner, _ in self._tools} | {owner for owner, _ in self._skills})
 
     def tools(self, agent_id: str | None = None) -> list[dict[str, Any]]:
         with self._lock:
@@ -59,6 +61,13 @@ class ConsoleState:
         if agent_id:
             items = [t for t in items if t["owner_agent_id"] == agent_id]
         return [dict(t) for t in items]
+
+    def skills(self, agent_id: str | None = None) -> list[dict[str, Any]]:
+        with self._lock:
+            items = list(self._skills.values())
+        if agent_id:
+            items = [s for s in items if s.agent_id == agent_id]
+        return [s.to_dict() for s in items]
 
     def register_tool(
         self,
@@ -99,6 +108,46 @@ class ConsoleState:
             }
             self._tools[(agent_id, name)] = record
             return dict(record)
+
+    def register_skills(
+        self,
+        context: dict[str, Any] | Any,
+        skills: list[dict[str, Any]],
+        scan: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        if hasattr(context, "to_dict"):
+            context = context.to_dict()
+        ctx = dict(context or {})
+        agent_id = str(ctx.get("agent_id") or "").strip()
+        user_id = _optional_string(ctx.get("user_id"))
+        session_id = _optional_string(ctx.get("session_id"))
+        if not agent_id:
+            return None
+
+        normalized: list[SkillRecord] = []
+        for item in skills:
+            if not isinstance(item, dict):
+                continue
+            record = SkillRecord.from_descriptor(
+                agent_id=agent_id,
+                user_id=user_id,
+                session_id=session_id,
+                descriptor=item,
+            )
+            if record is None:
+                continue
+            normalized.append(record)
+
+        scan_options = dict(scan or {})
+        with self._lock:
+            for record in normalized:
+                self._skills[(agent_id, record.skill_unique_id)] = record
+            return {
+                "owner_agent_id": agent_id,
+                "skill_count": len(normalized),
+                "skills": [item.to_dict() for item in normalized],
+                "scan": scan_options,
+            }
 
     def patch_tool_labels(
         self, agent_id: str, tool_name: str, labels: dict[str, Any]
@@ -479,6 +528,7 @@ class ConsoleState:
             "policy_id": decision.policy_id,
             "plugin_result": plugin_result,
             "plugin_summary": _plugin_summary(plugin_result),
+            "plugin_outcomes": list(decision.metadata.get("plugin_outcomes") or []),
         }
 
     @classmethod
@@ -551,6 +601,13 @@ class ConsoleState:
 
 def _safe_dict(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
+
+
+def _optional_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _plugin_summary(plugin_result: dict[str, Any]) -> list[dict[str, Any]]:

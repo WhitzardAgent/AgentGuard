@@ -64,6 +64,17 @@ def patch_tool_labels(agent_id: str, tool_name: str, body: LabelBody) -> Any:
     return {"ok": True, "tool": tool}
 
 
+# ---- skills ------------------------------------------------------------
+@router.get("/v1/backend/skills")
+def list_skills() -> list[dict[str, Any]]:
+    return get_console().skills()
+
+
+@router.get("/v1/backend/agents/{agent_id}/skills")
+def list_agent_skills(agent_id: str) -> list[dict[str, Any]]:
+    return get_console().skills(agent_id)
+
+
 # ---- rules -------------------------------------------------------------
 @router.get("/v1/backend/rules")
 def list_rules() -> list[dict[str, Any]]:

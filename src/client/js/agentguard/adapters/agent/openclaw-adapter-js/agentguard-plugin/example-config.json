@@ -3,5 +3,9 @@
   "apiKeyEnvVar": "AGENTGUARD_API_KEY",
   "policy": "builtin",
   "auditPath": "./tmp/openclaw-agentguard-audit.jsonl",
-  "remoteUnavailableMode": "fail_closed"
+  "remoteUnavailableMode": "fail_closed",
+  "skillScan": {
+    "enabled": false,
+    "roots": []
+  }
 }

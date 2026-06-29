@@ -48,6 +48,11 @@ function buildAgentContext(overrides = {}) {
   };
 }
 
+function writeFile(filePath, content) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, content);
+}
+
 test("configPath loads AgentGuard config from an external JSON file", async () => {
   const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-openclaw-"));
   const configPath = path.join(configDir, "agentguard-config.json");
@@ -99,6 +104,86 @@ test("configPath loads AgentGuard config from an external JSON file", async () =
       metadata: {},
     },
   ]);
+});
+
+test("skillScan config scans configured skill roots into bridge state", () => {
+  const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-openclaw-skill-scan-"));
+  const configPath = path.join(configDir, "agentguard-config.json");
+  const toolCatalogPath = path.join(configDir, "openclaw-tools.json");
+  const skillDir = path.join(configDir, "skills", "demo-skill");
+  writeFile(
+    path.join(skillDir, "SKILL.md"),
+    [
+      "---",
+      "name: demo-skill",
+      "description: Demo skill from bridge config.",
+      "---",
+      "# Demo Skill",
+      "",
+      "Use this skill for bridge scanner tests.",
+    ].join("\n"),
+  );
+  writeFile(path.join(skillDir, "prompt.md"), "Prompt content.");
+  writeFile(path.join(skillDir, "scripts", "run.py"), "print('hello')\n");
+  writeFile(path.join(skillDir, "assets", "note.txt"), "asset text");
+  fs.writeFileSync(
+    toolCatalogPath,
+    JSON.stringify({
+      tools: [
+        {
+          name: "custom_tool",
+          description: "Custom tool catalog entry.",
+        },
+      ],
+    }),
+  );
+  fs.writeFileSync(
+    configPath,
+    JSON.stringify({
+      phases: buildPhases(),
+      defaultToolCatalogPath: "./openclaw-tools.json",
+      skillScan: {
+        enabled: true,
+        roots: ["./skills"],
+      },
+    }),
+  );
+
+  const bridge = new AgentGuardOpenClawBridge({
+    pluginConfig: { configPath },
+  });
+  const state = bridge.getState(buildToolContext());
+  const descriptor = state.skillScan.skills[0];
+
+  assert.equal(bridge.config.skillScan.enabled, true);
+  assert.deepEqual(bridge.config.skillScan.roots, [path.join(configDir, "skills")]);
+  assert.equal(state.skillScan.summary.skill_count, 1);
+  assert.equal(descriptor.name, "demo-skill");
+  assert.equal(descriptor.description, "Demo skill from bridge config.");
+  assert.match(descriptor.skill_markdown.content, /Use this skill/);
+  assert.equal(descriptor.files.some((file) => file.relative_path === "prompt.md" && file.kind === "prompt"), true);
+  assert.equal(descriptor.files.some((file) => file.relative_path === "scripts/run.py" && file.kind === "script"), true);
+  assert.equal(descriptor.files.some((file) => file.relative_path === "assets/note.txt" && file.kind === "text"), true);
+  assert.equal(state.context.metadata.skill_scan.skill_count, 1);
+  assert.equal(state.context.metadata.skill_scan.skills[0].name, "demo-skill");
+  assert.equal(Object.prototype.hasOwnProperty.call(state.context.metadata.skill_scan.skills[0], "files"), false);
+});
+
+test("skillScan can be enabled without roots and reports a local diagnostic", () => {
+  const bridge = new AgentGuardOpenClawBridge({
+    pluginConfig: {
+      phases: buildPhases(),
+      skillScan: {
+        enabled: true,
+      },
+    },
+  });
+  const state = bridge.getState(buildToolContext());
+
+  assert.equal(state.skillScan.summary.skill_count, 0);
+  assert.equal(state.skillScan.diagnostics[0].reason, "no_skill_scan_roots");
+  assert.equal(state.context.metadata.skill_scan.enabled, true);
+  assert.equal(state.context.metadata.skill_scan.diagnostic_count, 1);
 });
 
 test("remote-enabled sessions auto-register and report default OpenClaw tools", async () => {
@@ -179,14 +264,73 @@ test("remote-enabled sessions auto-register and report default OpenClaw tools", 
   }
 });
 
+test("remote-enabled sessions report configured skill descriptors", async () => {
+  const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-openclaw-skill-report-"));
+  const skillDir = path.join(configDir, "skills", "demo-skill");
+  writeFile(
+    path.join(skillDir, "SKILL.md"),
+    [
+      "---",
+      "name: demo-skill",
+      "description: Demo skill for remote reporting.",
+      "---",
+      "# Demo Skill",
+    ].join("\n"),
+  );
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push({
+      url: String(url),
+      body: options.body ? JSON.parse(options.body) : null,
+    });
+    return {
+      ok: true,
+      async json() {
+        return {};
+      },
+    };
+  };
+
+  let bridge = null;
+  try {
+    bridge = new AgentGuardOpenClawBridge({
+      pluginConfig: {
+        serverUrl: "http://server.test",
+        phases: buildPhases(),
+        skillScan: {
+          enabled: true,
+          roots: [path.join(configDir, "skills")],
+        },
+      },
+    });
+
+    const state = bridge.getState(buildToolContext());
+    await bridge.ensureSkillReports(state);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const skillCalls = calls.filter((call) => call.url.endsWith("/v1/server/skills/report"));
+    assert.equal(skillCalls.length, 1);
+    assert.equal(skillCalls[0].body.context.agent_id, "agent-main");
+    assert.equal(skillCalls[0].body.skills.length, 1);
+    assert.equal(skillCalls[0].body.skills[0].name, "demo-skill");
+    assert.match(skillCalls[0].body.skills[0].skill_markdown.content, /Demo Skill/);
+    assert.equal(skillCalls[0].body.scan.summary.skill_count, 1);
+  } finally {
+    bridge?.clearAll();
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("before_tool_call blocks when remote review is unavailable and fail_closed is enabled", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => {
     throw new Error("network down");
   };
 
+  let bridge = null;
   try {
-    const bridge = new AgentGuardOpenClawBridge({
+    bridge = new AgentGuardOpenClawBridge({
       pluginConfig: {
         serverUrl: "http://127.0.0.1:1",
         phases: buildPhases(),
@@ -204,6 +348,7 @@ test("before_tool_call blocks when remote review is unavailable and fail_closed 
     assert.equal(result.block, true);
     assert.match(result.blockReason, /Remote decision unavailable/i);
   } finally {
+    bridge?.clearAll();
     globalThis.fetch = originalFetch;
   }
 });

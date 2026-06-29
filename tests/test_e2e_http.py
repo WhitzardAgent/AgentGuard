@@ -103,6 +103,55 @@ def test_e2e_skill_run_over_http(server):
     assert "success" in out
 
 
+def test_e2e_skill_report_over_http():
+    manager = RuntimeManager()
+    base_url, srv, _ = start_dev_server(manager=manager)
+    guard = AgentGuard(session_id="skill-report-session", agent_id="skill-report-agent", server_url=base_url)
+    try:
+        payload = {
+            "context": {
+                "session_id": "skill-report-session",
+                "agent_id": "skill-report-agent",
+                "user_id": None,
+            },
+            "skills": [
+                {
+                    "name": "demo-skill",
+                    "description": "Demo skill",
+                    "source_framework": "openclaw_compatible",
+                    "object_type": "skill",
+                    "root_path": "/tmp/demo",
+                    "entry_file": "SKILL.md",
+                    "sha256": "a" * 64,
+                    "file_count": 2,
+                    "total_size": 1234,
+                    "extraction": {"level": "directory", "confidence": "high"},
+                }
+            ],
+            "scan": {"summary": {"skill_count": 1, "diagnostic_count": 0}},
+        }
+        out = _post_json(
+            f"{base_url}/v1/server/skills/report",
+            payload,
+            headers={
+                "X-AgentGuard-Session-Id": guard.context.session_id,
+                "X-AgentGuard-Agent-Id": guard.context.agent_id,
+                "X-AgentGuard-Session-Key": guard.session_key,
+            },
+        )
+        assert out["status"] == "ok"
+        assert out["skill_count"] == 1
+
+        skills = _get_json(f"{base_url}/v1/backend/skills")
+        assert any(item["name"] == "demo-skill" for item in skills)
+        found = next(item for item in skills if item["name"] == "demo-skill")
+        assert found["owner_agent_id"] == "skill-report-agent"
+        assert found["description"] == "Demo skill"
+    finally:
+        guard.close()
+        srv.shutdown()
+
+
 def test_e2e_human_check_waits_for_frontend_approval():
     manager = RuntimeManager(
         plugin_config={

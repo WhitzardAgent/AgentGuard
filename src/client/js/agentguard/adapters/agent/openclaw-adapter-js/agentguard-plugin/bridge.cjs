@@ -4,6 +4,11 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const {
+  DEFAULT_OPTIONS: DEFAULT_SKILL_SCAN_OPTIONS,
+  resolveScanPath,
+  scanSkillRoots,
+} = require("./skill_scanner.cjs");
+const {
   AuditLogger,
   AuditRecorder,
   ClientConfigAPIServer,
@@ -44,6 +49,7 @@ function normalizePluginConfig(raw = {}) {
     toolCapabilities: normalizeToolCapabilities(config.toolCapabilities),
     identity: normalizeIdentity(config.identity),
     defaultTools: resolveDefaultTools(config, configDir),
+    skillScan: normalizeSkillScanConfig(config.skillScan, configDir),
     remoteUnavailableMode:
       asNonEmptyString(config.remoteUnavailableMode) || DEFAULT_REMOTE_UNAVAILABLE_MODE,
     windowSize: asPositiveInteger(config.windowSize, DEFAULT_WINDOW_SIZE),
@@ -123,6 +129,15 @@ function normalizeToolCapabilities(value) {
   );
 }
 
+function normalizeStringArray(value, fallback = []) {
+  if (!Array.isArray(value)) {
+    return [...fallback];
+  }
+  return value
+    .filter((item) => typeof item === "string" && item.trim())
+    .map((item) => item.trim());
+}
+
 function resolveConfigRelativePath(filePath, baseDir) {
   const normalizedPath = asNonEmptyString(filePath);
   if (!normalizedPath) {
@@ -178,6 +193,32 @@ function resolveDefaultTools(config, configDir) {
     label: "OpenClaw default tool catalog",
   });
   return normalizeToolCatalog(catalog.tools);
+}
+
+function normalizeSkillScanConfig(value, configDir) {
+  const input = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const baseDir = configDir || process.cwd();
+  return {
+    enabled: input.enabled === true,
+    roots: normalizeStringArray(input.roots).map((item) => resolveScanPath(item, baseDir)),
+    baseDir,
+    maxFileBytes: asPositiveInteger(input.maxFileBytes, DEFAULT_SKILL_SCAN_OPTIONS.maxFileBytes),
+    maxTotalBytesPerSkill: asPositiveInteger(
+      input.maxTotalBytesPerSkill,
+      DEFAULT_SKILL_SCAN_OPTIONS.maxTotalBytesPerSkill,
+    ),
+    maxFilesPerSkill: asPositiveInteger(
+      input.maxFilesPerSkill,
+      DEFAULT_SKILL_SCAN_OPTIONS.maxFilesPerSkill,
+    ),
+    excludeDirs: normalizeStringArray(input.excludeDirs, DEFAULT_SKILL_SCAN_OPTIONS.excludeDirs),
+    excludeFiles: normalizeStringArray(input.excludeFiles, DEFAULT_SKILL_SCAN_OPTIONS.excludeFiles),
+    textExtensions: normalizeStringArray(
+      input.textExtensions,
+      DEFAULT_SKILL_SCAN_OPTIONS.textExtensions,
+    ),
+    followSymlinks: input.followSymlinks === true,
+  };
 }
 
 function normalizeIdentity(value) {
@@ -598,6 +639,82 @@ function buildPluginConfigPayload(config) {
   return { phases: normalizePhaseConfig(config && config.phases) };
 }
 
+function emptySkillScanResult(config, diagnostics = []) {
+  return {
+    enabled: Boolean(config && config.enabled),
+    skills: [],
+    diagnostics,
+    summary: {
+      roots: config && Array.isArray(config.roots) ? config.roots : [],
+      skill_count: 0,
+      diagnostic_count: diagnostics.length,
+    },
+  };
+}
+
+function scanConfiguredSkills(config, logger = console) {
+  if (!config || !config.enabled) {
+    return emptySkillScanResult(config);
+  }
+  if (!Array.isArray(config.roots) || config.roots.length === 0) {
+    return emptySkillScanResult(config, [
+      {
+        level: "warning",
+        reason: "no_skill_scan_roots",
+        message: "skillScan.enabled is true but skillScan.roots is empty.",
+      },
+    ]);
+  }
+  try {
+    const result = scanSkillRoots({
+      roots: config.roots,
+      baseDir: config.baseDir,
+      maxFileBytes: config.maxFileBytes,
+      maxTotalBytesPerSkill: config.maxTotalBytesPerSkill,
+      maxFilesPerSkill: config.maxFilesPerSkill,
+      excludeDirs: config.excludeDirs,
+      excludeFiles: config.excludeFiles,
+      textExtensions: config.textExtensions,
+      followSymlinks: config.followSymlinks,
+    });
+    return {
+      enabled: true,
+      ...result,
+    };
+  } catch (error) {
+    const message = String(error && error.message ? error.message : error);
+    logger.warn?.("AgentGuard OpenClaw plugin failed to scan configured skills.", error);
+    return emptySkillScanResult(config, [
+      {
+        level: "error",
+        reason: "skill_scan_failed",
+        message,
+      },
+    ]);
+  }
+}
+
+function buildSkillScanMetadata(skillScan) {
+  const summary = skillScan && skillScan.summary ? skillScan.summary : {};
+  return {
+    enabled: Boolean(skillScan && skillScan.enabled),
+    roots: Array.isArray(summary.roots) ? summary.roots : [],
+    skill_count: Number.isFinite(summary.skill_count) ? summary.skill_count : 0,
+    diagnostic_count: Number.isFinite(summary.diagnostic_count) ? summary.diagnostic_count : 0,
+    skills: Array.isArray(skillScan && skillScan.skills)
+      ? skillScan.skills.map((skill) => ({
+        name: asNonEmptyString(skill.name) || "",
+        description: asNonEmptyString(skill.description) || "",
+        root_path: asNonEmptyString(skill.root_path) || "",
+        sha256: asNonEmptyString(skill.sha256) || "",
+        file_count: Number.isFinite(skill.file_count) ? skill.file_count : 0,
+        total_size: Number.isFinite(skill.total_size) ? skill.total_size : 0,
+        extraction: skill.extraction || null,
+      }))
+      : [],
+  };
+}
+
 function buildToolReportPayload(tool) {
   const metadata =
     tool && typeof tool.metadata === "object" && tool.metadata && !Array.isArray(tool.metadata)
@@ -648,7 +765,12 @@ class AgentGuardOpenClawBridge {
     this.pluginId = options.pluginId || "agentguard";
     this.config = normalizePluginConfig(options.pluginConfig || {});
     this.logger = options.logger || console;
+    this.skillScan = scanConfiguredSkills(this.config.skillScan, this.logger);
     this.sessions = new Map();
+  }
+
+  getSkillScanResult() {
+    return this.skillScan;
   }
 
   getState(identityContext) {
@@ -691,6 +813,7 @@ class AgentGuardOpenClawBridge {
       context,
       enforcer,
       audit,
+      skillScan: this.skillScan,
       clientPluginConfig: buildPluginConfigPayload(this.config),
       remotePluginConfig: buildPluginConfigPayload(this.config),
       clientConfigApi: null,
@@ -698,10 +821,12 @@ class AgentGuardOpenClawBridge {
       remoteSessionRegistration: null,
       defaultToolReporting: null,
       recentLlmOutputs: new Map(),
+      skillReporting: null,
     };
     this.syncContextMetadata(state);
     this.sessions.set(sessionKey, state);
     this.ensureDefaultToolReports(state);
+    this.ensureSkillReports(state);
     return state;
   }
 
@@ -725,6 +850,7 @@ class AgentGuardOpenClawBridge {
       ...(state.context.metadata || {}),
       client_plugin_config: state.clientPluginConfig,
       remote_plugin_config: state.remotePluginConfig,
+      skill_scan: buildSkillScanMetadata(state.skillScan),
     };
     if (state.clientConfigApi) {
       state.context.metadata.client_config_url = state.clientConfigApi.plugin_config_url;
@@ -849,6 +975,42 @@ class AgentGuardOpenClawBridge {
         return false;
       });
     return state.defaultToolReporting;
+  }
+
+  ensureSkillReports(state) {
+    const remote = state.enforcer.remote;
+    if (!remote || !remote.enabled) {
+      return Promise.resolve(false);
+    }
+    const skills = Array.isArray(state.skillScan && state.skillScan.skills)
+      ? state.skillScan.skills
+      : [];
+    if (!state.skillScan || !state.skillScan.enabled || skills.length === 0) {
+      return Promise.resolve(false);
+    }
+    if (state.skillReporting) {
+      return state.skillReporting;
+    }
+    state.skillReporting = this.ensureRemoteSessionRegistered(state)
+      .then((registered) => {
+        if (!registered) {
+          return false;
+        }
+        return remote.report_skills(
+          state.context,
+          skills,
+          {
+            source_framework: "openclaw_compatible",
+            summary: state.skillScan.summary || {},
+            diagnostics: state.skillScan.diagnostics || [],
+          },
+        ).then(() => true);
+      })
+      .catch((error) => {
+        this.logger.warn?.("AgentGuard OpenClaw plugin failed to report skills.", error);
+        return false;
+      });
+    return state.skillReporting;
   }
 
   async flushAsync(state, reason = "round_complete") {
@@ -1197,6 +1359,9 @@ module.exports = {
     loadConfigFile,
     loadPluginConfigSource,
     normalizePluginConfig,
+    normalizeSkillScanConfig,
+    buildSkillScanMetadata,
+    scanConfiguredSkills,
     shouldFailClosed,
   },
 };

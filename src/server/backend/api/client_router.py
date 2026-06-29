@@ -9,6 +9,7 @@ from backend.api.schemas import (
     GuardDecideRequest,
     GuardDecideResponse,
     SessionRegisterRequest,
+    SkillReportRequest,
     SkillRunRequest,
     ToolReportRequest,
     TraceUploadRequest,
@@ -71,6 +72,19 @@ def report_tool(req: ToolReportRequest, request: Request) -> dict[str, Any]:
     if tool is None:
         raise HTTPException(status_code=400, detail="agent_id and tool.name are required")
     return {"status": "ok", "tool": tool}
+
+
+@router.post("/v1/server/skills/report")
+def report_skills(req: SkillReportRequest, request: Request) -> dict[str, Any]:
+    _validate_client_session(request)
+    result = _console.register_skills(req.context, req.skills, req.scan)
+    if result is None:
+        raise HTTPException(status_code=400, detail="agent_id is required")
+    return {
+        "status": "ok",
+        "skill_count": result["skill_count"],
+        "skills": result["skills"],
+    }
 
 
 @router.post("/v1/server/session/register")

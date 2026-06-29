@@ -41,7 +41,11 @@ Example AgentGuard config:
   "policy": "builtin",
   "defaultToolCatalogPath": "./openclaw-default-tools.json",
   "auditPath": "./tmp/openclaw-agentguard-audit.jsonl",
-  "remoteUnavailableMode": "fail_closed"
+  "remoteUnavailableMode": "fail_closed",
+  "skillScan": {
+    "enabled": false,
+    "roots": []
+  }
 }
 ```
 
@@ -81,6 +85,13 @@ AgentGuard config file when you use `configPath`.
 `toolCapabilities` remains optional. It should only be used when you have a
 deliberate tool-name-to-capability mapping to supply, not as a partial list of
 OpenClaw defaults.
+
+`skillScan` is optional and disabled by default. Set `skillScan.enabled` to
+`true` and provide local `skillScan.roots` to scan OpenClaw-compatible skill
+directories containing `SKILL.md`; relative roots are resolved against the
+AgentGuard config file directory. The adapter keeps the full skill descriptors
+locally in bridge state for later reporting/scanning integration, while session
+metadata only includes a compact scan summary.
 
 When a remote AgentGuard server is configured, the adapter also auto-registers
 each new session and reports a baseline set of built-in OpenClaw tools so older

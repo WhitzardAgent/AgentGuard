@@ -74,11 +74,16 @@ class _Handler(BaseHTTPRequestHandler):
             })
         elif path == "/v1/backend/tools":
             self._send(200, self.console.tools())
+        elif path == "/v1/backend/skills":
+            self._send(200, self.console.skills())
         elif path == "/v1/backend/approvals":
             self._send(200, self.console.approvals())
         elif path.startswith("/v1/backend/agents/") and path.endswith("/tools"):
             agent_id = path.split("/")[4]
             self._send(200, self.console.tools(agent_id))
+        elif path.startswith("/v1/backend/agents/") and path.endswith("/skills"):
+            agent_id = path.split("/")[4]
+            self._send(200, self.console.skills(agent_id))
         elif path.startswith("/v1/backend/agents/") and path.endswith("/runtime/approvals"):
             agent_id = path.split("/")[4]
             self._send(200, self.console.approvals(agent_id))
@@ -127,6 +132,25 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(400, {"error": "agent_id and tool.name are required"})
             else:
                 self._send(200, {"status": "ok", "tool": tool})
+        elif self.path == "/v1/server/skills/report":
+            if not self._validate_client_session():
+                return
+            result = self.console.register_skills(
+                body.get("context") or {},
+                body.get("skills") or [],
+                body.get("scan") or {},
+            )
+            if result is None:
+                self._send(400, {"error": "agent_id is required"})
+            else:
+                self._send(
+                    200,
+                    {
+                        "status": "ok",
+                        "skill_count": result["skill_count"],
+                        "skills": result["skills"],
+                    },
+                )
         elif self.path == "/v1/server/session/register":
             context = RuntimeContext.from_dict(body.get("context") or {})
             try:
