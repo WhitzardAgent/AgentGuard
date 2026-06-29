@@ -363,7 +363,7 @@ https://github.com/user-attachments/assets/75a17e37-7f51-4c59-96fa-ea449eb79859
 下图展示了 AgentGuard 的高层架构。
 
 <p align="center">
-  <img src="./docs/figs/overview.png" alt="AgentGuard 设计架构图" width="50%" />
+  <img src="./docs/figs/overview.png" alt="AgentGuard 设计架构图" width="70%" />
 </p>
 
 - **客户端**：通过极少量代码修改，客户端可集成进智能体框架中，并能够在 LLM 调用前后、工具调用前后进行拦截。客户端可以先在本地执行轻量级过滤，再将事件发送到服务端，由服务端根据配置的 plugin 进一步检测。

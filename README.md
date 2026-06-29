@@ -366,7 +366,7 @@ As illustrated below, existing tool-call-based defenses address parts of the pro
 The high-level architecture of AgentGuard is shown below.
 
 <p align="center">
-  <img src="./docs/figs/overview.png" alt="AgentGuard architecture" width="50%" />
+  <img src="./docs/figs/overview.png" alt="AgentGuard architecture" width="70%" />
 </p>
 
 - **Client**: With minimal code modifications, the AgentGuard client integrates into agent frameworks and can intercept before and after LLM calls, as well as before and after tool invocations. It can perform lightweight local filtering on the client side and forward events to the server for deeper inspection by configured plugins.
