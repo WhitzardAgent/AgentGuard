@@ -11,6 +11,7 @@ import functools
 import json
 import os
 import re
+import threading
 from collections.abc import AsyncIterator, Generator, Iterable
 from contextlib import asynccontextmanager
 from typing import Any
@@ -48,6 +49,8 @@ _current_metadata: contextvars.ContextVar[dict[str, Any]] = contextvars.ContextV
     "agentguard_dify_metadata",
     default={},
 )
+_reported_tools_lock = threading.Lock()
+_reported_tools: set[tuple[str, str]] = set()
 
 
 def install_dify_adapter() -> dict[str, Any]:
@@ -387,6 +390,14 @@ def _patch_tool_builder(tools_module: Any) -> bool:
                 tool_config,
                 tool_arguments,
             )
+            _report_tool_catalog(
+                tool_name,
+                description=tool_description,
+                capabilities=_tool_capabilities(tool_config),
+                schema=tool_schema,
+                required_args=_required_args_from_schema(tool_schema, merged_arguments),
+                metadata=_tool_metadata(tool_config, "tool_catalog"),
+            )
             decision = _guard_tool_invoke(tool_config, tool_name, merged_arguments)
             blocked = _blocked_tool_value(decision, tool_name)
             if blocked is not None:
@@ -515,6 +526,14 @@ def _guard_legacy_tool_invoke(call: dict[str, Any]) -> GuardDecision:
     guard = _active_guard()
     if guard is None:
         return GuardDecision.allow("AgentGuard Dify legacy adapter inactive.")
+    _report_tool_catalog(
+        call["tool_name"],
+        description=_legacy_tool_description(call.get("tool")),
+        capabilities=_legacy_tool_capabilities(call.get("tool")),
+        schema=_legacy_tool_schema(call),
+        required_args=_legacy_tool_required_args(call),
+        metadata=_legacy_tool_metadata(call, "tool_catalog"),
+    )
     event = ev.tool_invoke(
         guard.context,
         call["tool_name"],
@@ -550,6 +569,14 @@ def _guard_plugin_backwards_tool_invoke(call: dict[str, Any]) -> GuardDecision:
     guard = _active_guard()
     if guard is None:
         return GuardDecision.allow("AgentGuard Dify plugin backwards adapter inactive.")
+    _report_tool_catalog(
+        call["tool_name"],
+        description=_plugin_backwards_tool_description(call),
+        capabilities=_plugin_backwards_tool_capabilities(call),
+        schema=_schema_from_arguments(call.get("tool_parameters")),
+        required_args=sorted((call.get("tool_parameters") or {}).keys()),
+        metadata=_plugin_backwards_tool_metadata(call, "tool_catalog"),
+    )
     event = ev.tool_invoke(
         guard.context,
         call["tool_name"],
@@ -774,6 +801,62 @@ def _tool_capabilities(tool_config: Any) -> list[str]:
     if provider:
         caps.append(provider)
     return caps
+
+
+def _report_tool_catalog(
+    tool_name: str,
+    *,
+    description: str = "",
+    capabilities: list[str] | None = None,
+    schema: dict[str, Any] | None = None,
+    required_args: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    guard = _active_guard()
+    if guard is None or not tool_name:
+        return
+    agent_id = str(getattr(getattr(guard, "context", None), "agent_id", "") or "").strip()
+    if not agent_id:
+        return
+
+    key = (agent_id, tool_name)
+    with _reported_tools_lock:
+        if key in _reported_tools:
+            return
+        _reported_tools.add(key)
+
+    try:
+        from agentguard.tools.metadata import ToolMetadata
+
+        tool_metadata = ToolMetadata(
+            name=tool_name,
+            description=description or tool_name,
+            capabilities=list(capabilities or []),
+            required_args=list(required_args or []),
+            schema=dict(schema or {}),
+            metadata=dict(metadata or {}),
+        )
+        reporter = getattr(guard, "_report_tool_metadata", None)
+        if callable(reporter):
+            reporter(tool_metadata)
+            _print_dify_debug(
+                "reported tool catalog",
+                {"agent_id": agent_id, "tool_name": tool_name, "required_args": tool_metadata.required_args},
+            )
+        else:
+            with _reported_tools_lock:
+                _reported_tools.discard(key)
+            _print_dify_debug(
+                "tool catalog reporter unavailable",
+                {"agent_id": agent_id, "tool_name": tool_name},
+            )
+    except Exception as exc:
+        with _reported_tools_lock:
+            _reported_tools.discard(key)
+        _print_dify_debug(
+            "failed to report tool catalog",
+            {"agent_id": agent_id, "tool_name": tool_name, "error": str(exc)},
+        )
 
 
 def _event_metadata(extra: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -1002,6 +1085,71 @@ def _legacy_tool_capabilities(tool: Any) -> list[str]:
     return caps
 
 
+def _legacy_tool_description(tool: Any) -> str:
+    entity = getattr(tool, "entity", None)
+    description = getattr(entity, "description", None)
+    llm_description = getattr(description, "llm", None)
+    if llm_description:
+        return str(llm_description)
+    normalized = _normalize_value(description)
+    if isinstance(normalized, dict):
+        for key in ("llm", "human", "description"):
+            value = normalized.get(key)
+            if value:
+                return _content_to_text(value)
+    return str(getattr(getattr(entity, "identity", None), "name", "") or "Dify tool")
+
+
+def _legacy_tool_schema(call: dict[str, Any]) -> dict[str, Any]:
+    tool = call.get("tool")
+    for builder_name in ("get_llm_parameters_json_schema", "get_input_schema"):
+        builder = getattr(tool, builder_name, None)
+        if callable(builder):
+            try:
+                schema = builder(
+                    conversation_id=call.get("conversation_id"),
+                    app_id=call.get("app_id"),
+                    message_id=call.get("message_id"),
+                )
+            except TypeError:
+                try:
+                    schema = builder()
+                except Exception:
+                    continue
+            except Exception:
+                continue
+            normalized = _normalize_value(schema)
+            if isinstance(normalized, dict):
+                return normalized
+
+    entity = getattr(tool, "entity", None)
+    parameters = _normalize_value(getattr(entity, "parameters", None))
+    if isinstance(parameters, list) and parameters:
+        properties: dict[str, Any] = {}
+        required: list[str] = []
+        for item in parameters:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            if not name:
+                continue
+            properties[name] = {
+                "type": str(item.get("type") or "string"),
+                "description": str(item.get("llm_description") or item.get("description") or ""),
+            }
+            if item.get("required"):
+                required.append(name)
+        if properties:
+            return {"type": "object", "properties": properties, "required": required}
+
+    return _schema_from_arguments(call.get("tool_parameters"))
+
+
+def _legacy_tool_required_args(call: dict[str, Any]) -> list[str]:
+    schema = _legacy_tool_schema(call)
+    return _required_args_from_schema(schema, call.get("tool_parameters"))
+
+
 def _plugin_backwards_tool_capabilities(call: dict[str, Any]) -> list[str]:
     caps = ["dify_tool", "dify_legacy_tool", "dify_plugin_backwards_tool"]
     provider = _optional_text(call.get("provider"))
@@ -1011,6 +1159,47 @@ def _plugin_backwards_tool_capabilities(call: dict[str, Any]) -> list[str]:
     if tool_type:
         caps.append(tool_type)
     return caps
+
+
+def _plugin_backwards_tool_description(call: dict[str, Any]) -> str:
+    provider = _optional_text(call.get("provider"))
+    tool_name = str(call.get("tool_name") or "tool")
+    return f"{provider}:{tool_name}" if provider else tool_name
+
+
+def _schema_from_arguments(arguments: Any) -> dict[str, Any]:
+    if not isinstance(arguments, dict):
+        return {"type": "object", "properties": {}, "required": []}
+    return {
+        "type": "object",
+        "properties": {
+            str(key): {"type": _json_schema_type(value)}
+            for key, value in arguments.items()
+        },
+        "required": sorted(str(key) for key in arguments),
+    }
+
+
+def _required_args_from_schema(schema: Any, fallback_arguments: Any = None) -> list[str]:
+    if isinstance(schema, dict):
+        required = schema.get("required")
+        if isinstance(required, list):
+            return [str(item) for item in required if str(item).strip()]
+    if isinstance(fallback_arguments, dict):
+        return sorted(str(key) for key in fallback_arguments)
+    return []
+
+
+def _json_schema_type(value: Any) -> str:
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int | float):
+        return "number"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, dict):
+        return "object"
+    return "string"
 
 
 def _legacy_model_provider(model: Any) -> str:
@@ -1155,6 +1344,17 @@ def _print_agentguard_event(event: Any) -> None:
             )
     except Exception:
         pass
+
+
+def _print_dify_debug(message: str, payload: dict[str, Any] | None = None) -> None:
+    if not _env_truthy("AGENTGUARD_DIFY_PRINT_EVENTS"):
+        return
+    print(
+        "[AgentGuard Dify]",
+        message,
+        json.dumps(_redact_for_print(payload or {}), ensure_ascii=False),
+        flush=True,
+    )
 
 
 def _redact_for_print(value: Any, key: str | None = None) -> Any:

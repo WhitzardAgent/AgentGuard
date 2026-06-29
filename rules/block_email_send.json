@@ -24,6 +24,19 @@
         "severity": "high",
         "category": "data_exfiltration"
       }
+    },
+    {
+      "rule_id": "deny_dify_web_search",
+      "effect": "deny",
+      "reason": "AgentGuard policy blocks Dify web_search network access",
+      "priority": 110,
+      "event_types": ["tool_invoke"],
+      "tool_names": ["web_search"],
+      "metadata": {
+        "severity": "high",
+        "category": "network_access",
+        "adapter": "dify"
+      }
     }
   ]
 }

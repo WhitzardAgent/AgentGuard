@@ -453,6 +453,8 @@ def test_dify_runner_llm_and_tool_hooks_emit_events(monkeypatch):
     def make_guard(metadata):
         guard = AgentGuard("runner-test", sandbox="noop")
         guard.context.metadata.update(metadata)
+        guard.reported_tools = []
+        guard._report_tool_metadata = guard.reported_tools.append
         created_guards.append(guard)
         return guard
 
@@ -471,6 +473,7 @@ def test_dify_runner_llm_and_tool_hooks_emit_events(monkeypatch):
         "tool_invoke",
         "tool_result",
     ]
+    assert [tool.name for tool in created_guards[0].reported_tools] == ["web_search"]
 
 
 def test_dify_llm_request_wrapper_emits_before_and_after(monkeypatch):
@@ -528,6 +531,8 @@ def test_dify_tool_wrapper_emits_before_and_after(monkeypatch):
     from agentguard import AgentGuard
 
     guard = AgentGuard("dify-tool-test", sandbox="noop")
+    guard.reported_tools = []
+    guard._report_tool_metadata = guard.reported_tools.append
     token_guard = dify_adapter._current_guard.set(guard)
     token_meta = dify_adapter._current_metadata.set({"dify_agent_run_id": "run-tool"})
     try:
@@ -547,6 +552,9 @@ def test_dify_tool_wrapper_emits_before_and_after(monkeypatch):
     assert invoke.payload.tool_name == "web_search"
     assert invoke.payload.arguments == {"query": "weather"}
     assert invoke.metadata["plugin_id"] == "plugin-1"
+    assert len(guard.reported_tools) == 1
+    assert guard.reported_tools[0].name == "web_search"
+    assert guard.reported_tools[0].schema == {"type": "object"}
 
 
 def test_dify_tool_before_deny_skips_original_tool(monkeypatch):
@@ -623,6 +631,8 @@ def test_legacy_agent_node_llm_and_tool_hooks_emit_events(monkeypatch):
     def make_guard(metadata):
         guard = AgentGuard("legacy-test", sandbox="noop")
         guard.context.metadata.update(metadata)
+        guard.reported_tools = []
+        guard._report_tool_metadata = guard.reported_tools.append
         created_guards.append(guard)
         return guard
 
@@ -641,6 +651,9 @@ def test_legacy_agent_node_llm_and_tool_hooks_emit_events(monkeypatch):
     assert guard.trace.entries[1].event.payload.output == "thinking"
     assert guard.trace.entries[2].event.payload.tool_name == "web_search"
     assert guard.trace.entries[2].event.payload.arguments == {"q": "today news"}
+    assert len(guard.reported_tools) == 1
+    assert guard.reported_tools[0].name == "web_search"
+    assert guard.reported_tools[0].required_args == ["q"]
 
 
 def test_legacy_llm_tool_call_only_output_is_null(monkeypatch):
@@ -749,6 +762,8 @@ def test_legacy_plugin_backwards_tool_creates_guard_and_emits_events(monkeypatch
     def make_guard(metadata):
         guard = AgentGuard("plugin-backwards-tool-test", sandbox="noop")
         guard.context.metadata.update(metadata)
+        guard.reported_tools = []
+        guard._report_tool_metadata = guard.reported_tools.append
         created_guards.append(guard)
         return guard
 
@@ -774,6 +789,9 @@ def test_legacy_plugin_backwards_tool_creates_guard_and_emits_events(monkeypatch
     assert created_guards[0].trace.entries[0].event.payload.tool_name == "web_search"
     assert created_guards[0].trace.entries[0].event.payload.arguments == {"q": "today news"}
     assert created_guards[0].trace.entries[0].event.metadata["dify_runtime"] == "legacy_plugin_backwards"
+    assert len(created_guards[0].reported_tools) == 1
+    assert created_guards[0].reported_tools[0].name == "web_search"
+    assert created_guards[0].reported_tools[0].required_args == ["q"]
 
 
 def test_legacy_tool_before_deny_skips_original_tool(monkeypatch):
