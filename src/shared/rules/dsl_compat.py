@@ -1,17 +1,12 @@
-"""Compatibility parser for legacy `.rules` DSL sources.
-
-Supported non-trace tool-call rules are compiled into executable ``PolicyRule``
-objects. More advanced DSL features remain metadata-only so they can still be
-listed and round-tripped without pretending the current runtime fully enforces
-them.
-"""
+"""Compatibility parser for legacy `.rules` DSL sources."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 import re
 from typing import Any
 
-from shared.schemas.policy import PolicyEffect, PolicyRule, RuleCondition
+from shared.rules.trace_pattern import parse_trace_pattern
+from shared.schemas.policy import PolicyEffect, PolicyRule, RuleCondition, TraceClause
 
 _ACTION_TO_EFFECT = {
     "DENY": PolicyEffect.DENY,
@@ -165,6 +160,8 @@ def _condition_field(path: str) -> str | None:
     normalized = str(path or "").strip()
     if not normalized:
         return None
+    if re.match(r"^[A-Za-z_][A-Za-z0-9_-]*\.", normalized):
+        return normalized
     if normalized.startswith(("principal.", "tool.", "target.", "payload.")):
         return normalized
     return None
@@ -206,12 +203,9 @@ def _supports_runtime(fields: dict[str, str]) -> bool:
     trace = str(fields.get("TRACE", "")).strip()
     condition = str(fields.get("CONDITION", "")).strip()
     on_line = str(fields.get("ON", "")).strip()
-    if trace:
-        return False
     if on_line and "tool_call" not in on_line:
         return False
     unsupported_tokens = (
-        " OR ",
         "history_arg(",
         "history_result(",
         "exists_path(",
@@ -221,12 +215,11 @@ def _supports_runtime(fields: dict[str, str]) -> bool:
     )
     if any(token.lower() in condition.lower() for token in unsupported_tokens):
         return False
-    for part in re.split(r"\s+AND\s+", condition, flags=re.IGNORECASE):
-        expr = part.strip().strip("()")
+    scrubbed = re.sub(r"\b(?:AND|OR|NOT)\b|[()]", " ", condition, flags=re.IGNORECASE)
+    for part in re.split(r"\s{2,}|\n+", scrubbed):
+        expr = part.strip()
         if not expr:
             continue
-        if expr.upper().startswith("NOT "):
-            return False
         if _compile_condition(expr) is None:
             return False
     return True
@@ -242,6 +235,7 @@ def _runtime_rule(fields: dict[str, str], action: str) -> PolicyRule:
         "source": "dsl_runtime",
         "dsl_rule": fields,
         "tool_pattern": tool_pattern,
+        "trace_pattern": fields.get("TRACE", ""),
         "severity": fields.get("Severity", ""),
         "category": fields.get("Category", ""),
         "degrade_profile": _degrade_target(fields.get("POLICY", "")),
@@ -260,7 +254,13 @@ def _runtime_rule(fields: dict[str, str], action: str) -> PolicyRule:
         event_types=_on_event_types(fields.get("ON", "")),
         tool_names=[] if tool_pattern in ("", "*") else [tool_pattern],
         conditions=[condition for condition in conditions if condition is not None],
+        condition_expr=condition_text,
         metadata=metadata,
+        trace_clause=(
+            TraceClause(steps=parse_trace_pattern(fields["TRACE"]))
+            if fields.get("TRACE")
+            else None
+        ),
     )
 
 
@@ -307,43 +307,13 @@ def parse_legacy_rules(source: str) -> tuple[list[PolicyRule], DSLCompatReport]:
             parsed.append(_runtime_rule(fields, action))
             continue
 
-        report.warnings.append(
+        report.errors.append(
             {
                 "message": (
-                    f"Rule block {index} ('{rule_id}') uses DSL features the current runtime "
-                    "does not fully execute; it was loaded as metadata only."
+                    f"Rule block {index} ('{rule_id}') uses unsupported DSL features in the current "
+                    "runtime compiler."
                 )
             }
-        )
-        parsed.append(
-            PolicyRule(
-                rule_id=rule_id,
-                effect=effect,
-                reason=_unquote(fields.get("Reason", "")) or f"{action} for legacy DSL rule",
-                priority=_PRIORITY_BY_ACTION.get(action, 50),
-                event_types=["tool_invoke"],
-                conditions=[
-                    RuleCondition(
-                        field="metadata.__dsl_compat_runtime_enabled__",
-                        op="eq",
-                        value=True,
-                    )
-                ],
-                metadata={
-                    "source": "legacy_dsl_compat",
-                    "dsl_rule": block,
-                    "dsl_on": fields.get("ON", ""),
-                    "dsl_trace": fields.get("TRACE", ""),
-                    "dsl_condition": fields.get("CONDITION", ""),
-                    "dsl_policy": fields.get("POLICY", ""),
-                    "severity": fields.get("Severity", ""),
-                    "category": fields.get("Category", ""),
-                    "parsed_only": True,
-                    "review_kind": "llm_check" if action == "LLM_CHECK" else ("human_check" if action == "HUMAN_CHECK" else ""),
-                    "llm_prompt": _unquote(fields.get("Prompt", "")),
-                    "degrade_profile": _degrade_target(fields.get("POLICY", "")),
-                },
-            )
         )
 
     return parsed, report

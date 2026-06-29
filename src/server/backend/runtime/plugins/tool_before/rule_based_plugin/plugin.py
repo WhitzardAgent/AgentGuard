@@ -97,11 +97,14 @@ class RuleBasedPlugin(BasePlugin):
             return self._policy_version_provider()
         return self._policy_store.version
 
-    def rules(self) -> list[Any]:
+    def rules(self, context: RuntimeContext | None = None) -> list[Any]:
         if self._rules_provider is not None:
             rules = list(self._rules_provider())
         else:
-            rules = self._policy_store.rules()
+            if context is not None and hasattr(self._policy_store, "rules_for_agent"):
+                rules = self._policy_store.rules_for_agent(context.agent_id)
+            else:
+                rules = self._policy_store.rules()
         return rules or _fallback_rules()
 
     def check(
@@ -110,7 +113,7 @@ class RuleBasedPlugin(BasePlugin):
         context: RuntimeContext,
         trajectory_window: list[RuntimeEvent] | None = None,
     ) -> CheckResult:
-        match = match_rules(self.rules(), event, trajectory_window)
+        match = match_rules(self.rules(context), event, trajectory_window)
         metadata = {
             "rule_based_plugin": match.to_dict(),
             "policy_version": self.policy_version,

@@ -374,6 +374,39 @@ class RuntimeManager:
             client_key=current.get("client_key"),
         )
 
+    def _inject_console_tool_labels(self, event: RuntimeEvent, context: RuntimeContext) -> None:
+        if event.event_type.value != "tool_invoke":
+            return
+        tool_name = str(getattr(event.payload, "tool_name", "") or "").strip()
+        agent_id = str(context.agent_id or event.context.agent_id or "").strip()
+        if not agent_id or not tool_name:
+            return
+        from backend.app_state import get_console  # noqa: PLC0415
+
+        record = get_console().tool_record(agent_id, tool_name)
+        if not isinstance(record, dict):
+            return
+        labels = dict(record.get("labels") or {})
+        if not labels:
+            return
+        metadata = dict(event.metadata or {})
+        existing_tool_labels = dict(metadata.get("tool_labels") or {})
+        existing_labels = dict(metadata.get("labels") or {})
+        merged = {**labels, **existing_tool_labels, **existing_labels}
+        metadata["tool_labels"] = merged
+        metadata["labels"] = merged
+        event.metadata = metadata
+
+    def _inject_console_tool_labels_for_window(
+        self,
+        events: list[RuntimeEvent],
+        context: RuntimeContext,
+    ) -> list[RuntimeEvent]:
+        for item in events:
+            bound_context = item.context if getattr(item.context, "agent_id", None) else context
+            self._inject_console_tool_labels(item, bound_context)
+        return events
+
     def decide(self, request: dict[str, Any]) -> dict[str, Any]:
         ctx_dict = request.get("context") or {}
         context = RuntimeContext.from_dict(ctx_dict)
@@ -391,6 +424,7 @@ class RuntimeManager:
         # correct session/agent identity (current_event rarely embeds context).
         if ctx_dict:
             event.context = context
+        self._inject_console_tool_labels(event, context)
         cached_entries = list(request.get("client_cached_entries") or [])
         request_trace_window = _merge_event_window(
             [
@@ -401,6 +435,10 @@ class RuntimeManager:
                     ]
                 )
             ]
+        )
+        request_trace_window = self._inject_console_tool_labels_for_window(
+            request_trace_window,
+            context,
         )
         if cached_entries:
             self.record_uploaded_trace(
@@ -422,6 +460,7 @@ class RuntimeManager:
                 )
             )
         )
+        trace_window = self._inject_console_tool_labels_for_window(trace_window, context)
         request["trajectory_window"] = [e.to_dict() for e in trace_window]
 
         session_cfg = self.session_pool.get(

@@ -20,7 +20,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from shared.schemas.policy import PolicyEffect, PolicyRule, RuleCondition
+from shared.rules.trace_pattern import parse_trace_pattern, trace_steps_to_pattern
+from shared.schemas.policy import PolicyEffect, PolicyRule, RuleCondition, TraceClause
 
 ACTION_TO_EFFECT = {
     "DENY": PolicyEffect.DENY,
@@ -110,8 +111,25 @@ def _normalize_header(block: str) -> str:
 
 
 def _named(block: str, label: str) -> str:
-    m = re.search(rf"^{re.escape(label)}:\s*(.+)$", block, flags=re.MULTILINE)
-    return m.group(1).strip() if m else ""
+    lines = block.splitlines()
+    for index, raw in enumerate(lines):
+        match = re.match(rf"^{re.escape(label)}:\s*(.*)$", raw.strip())
+        if not match:
+            continue
+        values = [match.group(1).strip()]
+        next_index = index + 1
+        while next_index < len(lines):
+            candidate = lines[next_index]
+            stripped = candidate.strip()
+            if not stripped:
+                next_index += 1
+                continue
+            if re.match(r"^[A-Za-z][A-Za-z_ ]*:\s*", stripped):
+                break
+            values.append(stripped)
+            next_index += 1
+        return "\n".join([value for value in values if value]).strip()
+    return ""
 
 
 def _unquote(value: str) -> str:
@@ -157,20 +175,16 @@ def _on_event_types(block: str) -> list[str]:
 
 
 def _parse_conditions(cond_text: str) -> tuple[list[RuleCondition], list[dict[str, Any]]]:
-    """Translate name-based conditions to enforceable RuleConditions.
-
-    Other expressions are preserved verbatim for round-tripping in metadata.
-    """
+    """Translate DSL conditions to runtime conditions and preserve full source."""
     enforce: list[RuleCondition] = []
     raw: list[dict[str, Any]] = []
-    # Split on AND/OR while keeping it simple (treated as conjunction for enforcement).
-    parts = re.split(r"\s+(?:AND|OR)\s+", cond_text)
+    parts = re.split(r"\s+AND\s+", cond_text, flags=re.IGNORECASE)
     for part in parts:
-        expr = part.strip().strip("()")
+        expr = part.strip()
         if not expr:
             continue
         raw.append({"expr": expr})
-        compiled = _compile_condition(expr)
+        compiled = _compile_condition(expr.strip("()"))
         if compiled is not None:
             enforce.append(compiled)
     return enforce, raw
@@ -198,6 +212,8 @@ def _condition_field(path: str) -> str | None:
     normalized = str(path or "").strip()
     if not normalized:
         return None
+    if re.match(r"^[A-Za-z_][A-Za-z0-9_-]*\.", normalized):
+        return normalized
     if normalized.startswith("principal."):
         return normalized
     if normalized == "tool.name":
@@ -296,12 +312,14 @@ def parse_source(source: str) -> tuple[list[ParsedRule], CheckReport]:
         reason = _unquote(_named(normalized, "Reason"))
         prompt = _unquote(_named(normalized, "Prompt"))
         degrade_target = _degrade_target(policy_line)
-        conditions, raw_conditions = _parse_conditions(_named(normalized, "CONDITION"))
+        condition_text = _named(normalized, "CONDITION")
+        conditions, raw_conditions = _parse_conditions(condition_text)
 
         tool_names = [] if tool_pattern in ("", "*") else [tool_pattern]
         metadata = {
             "source": "console",
             "tool_pattern": tool_pattern,
+            "trace_pattern": _named(normalized, "TRACE"),
             "severity": severity,
             "category": category,
             "degrade_profile": degrade_target,
@@ -320,7 +338,13 @@ def parse_source(source: str) -> tuple[list[ParsedRule], CheckReport]:
             event_types=_on_event_types(normalized),
             tool_names=tool_names,
             conditions=conditions,
+            condition_expr=condition_text,
             metadata=metadata,
+            trace_clause=(
+                TraceClause(steps=parse_trace_pattern(_named(normalized, "TRACE")))
+                if _named(normalized, "TRACE")
+                else None
+            ),
         )
         report.hints.append({"message": f"Validated rule block {index} ('{name}')."})
         parsed.append(
@@ -345,7 +369,11 @@ def policy_rule_to_source(rule: PolicyRule) -> str:
     action = EFFECT_TO_ACTION.get(rule.effect, "DENY")
     subtype = "completed" if "tool_result" in (rule.event_types or []) else "requested"
 
-    lines = [f"RULE: {rule.rule_id}", f"ON: tool_call.{subtype}({tool_pattern})"]
+    lines = [f"RULE: {rule.rule_id}"]
+    if tool_pattern or not rule.trace_clause:
+        lines.append(f"ON: tool_call.{subtype}({tool_pattern})")
+    if rule.trace_clause is not None and rule.trace_clause.steps:
+        lines.append(f"TRACE: {trace_steps_to_pattern(rule.trace_clause.steps)}")
     cond = _condition_source(rule, tool_pattern)
     if cond:
         lines.append(f"CONDITION: {cond}")

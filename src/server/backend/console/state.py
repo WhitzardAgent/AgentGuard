@@ -13,7 +13,7 @@ from typing import Any
 
 from shared.schemas.decisions import DecisionType, GuardDecision
 from shared.schemas.events import RuntimeEvent
-from shared.schemas.policy import PolicyRule, RuleCondition
+from shared.schemas.policy import PolicyRule
 from shared.rules.llm_dsl_generator import (
     LLMRuleGeneratorWorkflow,
     RuleGenerationRequest,
@@ -115,6 +115,19 @@ class ConsoleState:
                 cur["tags"] = labels["tags"]
             return dict(tool)
 
+    def tool_record(
+        self,
+        agent_id: str | None,
+        tool_name: str | None,
+    ) -> dict[str, Any] | None:
+        normalized_agent_id = str(agent_id or "").strip()
+        normalized_tool_name = str(tool_name or "").strip()
+        if not normalized_agent_id or not normalized_tool_name:
+            return None
+        with self._lock:
+            record = self._tools.get((normalized_agent_id, normalized_tool_name))
+            return dict(record) if record is not None else None
+
     # ---- rules ---------------------------------------------------------
     def check(self, source: str) -> dict[str, Any]:
         _, report = parse_source(source)
@@ -184,6 +197,8 @@ class ConsoleState:
     def list_rules(self, agent_id: str | None = None) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
         for rule in self._base_rules:
+            if agent_id and str(rule.agent_id or "").strip() not in ("", str(agent_id).strip()):
+                continue
             out.append(rule_to_console_dict(rule, user_managed=False))
         with self._lock:
             for entry in self._console_rules.values():
@@ -261,18 +276,9 @@ class ConsoleState:
         scoped_rule = PolicyRule.from_dict(rule.to_dict())
         if not normalized_agent_id:
             return scoped_rule
-        already_scoped = any(
-            cond.field == "principal.agent_id"
-            and cond.op == "eq"
-            and str(cond.value or "").strip() == normalized_agent_id
-            for cond in scoped_rule.conditions
-        )
-        if not already_scoped:
-            scoped_rule.conditions.append(
-                RuleCondition(field="principal.agent_id", op="eq", value=normalized_agent_id)
-            )
+        scoped_rule.agent_id = normalized_agent_id
         scoped_rule.metadata["agent_scope"] = normalized_agent_id
-        scoped_rule.metadata["scope_injected"] = not already_scoped
+        scoped_rule.metadata["scope_injected"] = False
         return scoped_rule
 
     @staticmethod

@@ -98,6 +98,22 @@ def test_dsl_parse_allows_rule_without_condition():
     assert "CONDITION:" not in source
 
 
+def test_dsl_parse_preserves_multiline_and_boolean_condition_expression():
+    parsed, report = parse_source(
+        "RULE: review_high_sensitivity\n"
+        "TRACE: A -> ... -> C\n"
+        'CONDITION: (A.sensitivity == "high"\n'
+        "  OR principal.trust_level < 2)\n"
+        "POLICY: DENY\n"
+    )
+
+    assert report.ok and len(parsed) == 1
+    rule = parsed[0].rule
+    assert rule.condition_expr == '(A.sensitivity == "high"\nOR principal.trust_level < 2)'
+    assert any(cond.field == "A.sensitivity" for cond in rule.conditions)
+    assert any(cond.field == "principal.trust_level" for cond in rule.conditions)
+
+
 def test_dsl_parse_and_roundtrip_preserves_llm_prompt():
     parsed, report = parse_source(_LLM_RULE)
 
@@ -120,13 +136,9 @@ def test_publish_list_delete_rule():
     assert any(r["rule_id"] == "block_shell" for r in managed)
     # Published rule is available to the optional rule-based checker.
     published = next(r for r in con.manager.policy.store.rules() if r.rule_id == "block_shell")
-    assert any(
-        cond.field == "principal.agent_id"
-        and cond.op == "eq"
-        and cond.value == "agent-alpha"
-        for cond in published.conditions
-    )
+    assert published.agent_id == "agent-alpha"
     assert published.metadata["agent_scope"] == "agent-alpha"
+    assert published.metadata["scope_injected"] is False
 
     dup = con.publish_rule("agent-alpha", _DENY_RULE)
     assert dup["ok"] is False  # duplicate id
@@ -155,6 +167,8 @@ def test_published_rule_only_matches_owning_agent():
 
     assert published.matches(alpha_event) is True
     assert published.matches(beta_event) is False
+    assert [rule.rule_id for rule in con.manager.policy.store.rules_for_agent("agent-alpha") if rule.rule_id == "allow_safe_read"] == ["allow_safe_read"]
+    assert [rule.rule_id for rule in con.manager.policy.store.rules_for_agent("agent-beta") if rule.rule_id == "allow_safe_read"] == []
 
 
 def test_observer_records_traffic_audit_and_tickets():

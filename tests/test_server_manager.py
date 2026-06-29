@@ -1215,6 +1215,96 @@ def test_rule_based_plugin_is_a_checker():
     assert check.metadata["rule_based_plugin"]["rule_id"] == "deny_secret_exfiltration"
 
 
+def test_rule_based_plugin_selects_rules_by_runtime_agent():
+    scoped_alpha_rule = PolicyRule(
+        rule_id="deny_alpha_shell",
+        effect=PolicyEffect.DENY,
+        agent_id="agent-alpha",
+        reason="Alpha agent cannot use shell.",
+        priority=90,
+        event_types=["tool_invoke"],
+        tool_names=["shell.exec"],
+    )
+    scoped_beta_rule = PolicyRule(
+        rule_id="deny_beta_browser",
+        effect=PolicyEffect.DENY,
+        agent_id="agent-beta",
+        reason="Beta agent cannot browse.",
+        priority=90,
+        event_types=["tool_invoke"],
+        tool_names=["browser.open"],
+    )
+    plugin = RuleBasedPlugin()
+    from backend.runtime.policy.store import PolicyStore
+
+    plugin.set_policy_store(PolicyStore([scoped_alpha_rule, scoped_beta_rule], version="scoped-test"))
+    selected = plugin.rules(RuntimeContext(session_id="s-agent", agent_id="agent-alpha"))
+
+    assert [rule.rule_id for rule in selected] == ["deny_alpha_shell"]
+
+
+def test_manager_applies_only_agent_scoped_rules_for_current_agent():
+    m = RuntimeManager(
+        plugin_config={
+            "phases": {
+                "tool_before": {"client": [], "server": ["tool_invoke", "rule_based_plugin"]}
+            }
+        }
+    )
+    m.policy.store.set_rules(
+        [
+            PolicyRule(
+                rule_id="deny_alpha_shell",
+                effect=PolicyEffect.DENY,
+                agent_id="agent-alpha",
+                reason="Alpha agent cannot use shell.",
+                priority=90,
+                event_types=["tool_invoke"],
+                tool_names=["shell.exec"],
+            ),
+            PolicyRule(
+                rule_id="deny_beta_browser",
+                effect=PolicyEffect.DENY,
+                agent_id="agent-beta",
+                reason="Beta agent cannot browse.",
+                priority=90,
+                event_types=["tool_invoke"],
+                tool_names=["browser.open"],
+            ),
+        ]
+    )
+
+    alpha_result = m.decide(
+        {
+            "request_id": "agent-scope-alpha",
+            "context": {"session_id": "s-alpha", "agent_id": "agent-alpha"},
+            "current_event": {
+                "event_type": "tool_invoke",
+                "payload": {"tool_name": "shell.exec", "arguments": {}, "capabilities": []},
+            },
+            "trajectory_window": [],
+            "local_signals": [],
+        }
+    )
+    beta_result = m.decide(
+        {
+            "request_id": "agent-scope-beta",
+            "context": {"session_id": "s-beta", "agent_id": "agent-beta"},
+            "current_event": {
+                "event_type": "tool_invoke",
+                "payload": {"tool_name": "shell.exec", "arguments": {}, "capabilities": []},
+            },
+            "trajectory_window": [],
+            "local_signals": [],
+        }
+    )
+
+    assert alpha_result["decision"]["decision_type"] == "deny"
+    assert alpha_result["decision"]["policy_id"] == "server:deny_alpha_shell"
+    assert beta_result["decision"]["decision_type"] == "allow"
+    assert beta_result["decision"]["policy_id"] == "server:no_final_plugin"
+
+
 def test_rule_based_plugin_is_optional_in_runtime_manager():
     m = RuntimeManager()
     req = {

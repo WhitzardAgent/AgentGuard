@@ -60,7 +60,7 @@ def test_agentguard_load_snapshot_accepts_rules_file_path():
 
     assert snapshot.version == "rules/v3_trace_demo.rules"
     assert len(snapshot.rules) >= 1
-    assert all(rule.metadata.get("parsed_only") is True for rule in snapshot.rules)
+    assert any(rule.trace_clause is not None for rule in snapshot.rules)
 
 
 def test_cli_check_accepts_rules_directory(tmp_path: Path, capsys):
