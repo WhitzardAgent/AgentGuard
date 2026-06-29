@@ -392,13 +392,16 @@ class RuntimeManager:
         if ctx_dict:
             event.context = context
         cached_entries = list(request.get("client_cached_entries") or [])
-        cached_events = _events_from_cached_entries(cached_entries)
-        trace_window = _merge_event_window(
-            cached_events + [
-                RuntimeEvent.from_dict(e) for e in request.get("trajectory_window") or []
+        request_trace_window = _merge_event_window(
+            [
+                _bind_trace_event_context(item, context)
+                for item in (
+                    _events_from_cached_entries(cached_entries) + [
+                        RuntimeEvent.from_dict(e) for e in request.get("trajectory_window") or []
+                    ]
+                )
             ]
         )
-        request["trajectory_window"] = [e.to_dict() for e in trace_window]
         if cached_entries:
             self.record_uploaded_trace(
                 {
@@ -409,7 +412,17 @@ class RuntimeManager:
                     "entries": cached_entries,
                 }
             )
-        self._remember_trace_window(trace_window, context)
+        self._remember_trace_window(request_trace_window, context)
+        trace_window = _merge_event_window(
+            _events_from_trace_records(
+                self.trace_store.get(
+                    context.session_id or "unknown",
+                    agent_id=context.agent_id,
+                    user_id=context.user_id,
+                )
+            )
+        )
+        request["trajectory_window"] = [e.to_dict() for e in trace_window]
 
         session_cfg = self.session_pool.get(
             context.session_id or "",
@@ -794,6 +807,62 @@ def _events_from_cached_entries(entries: list[dict[str, Any]]) -> list[RuntimeEv
 
 def _cached_entry_event_dict(entry: dict[str, Any]) -> dict[str, Any] | None:
     return trace_entry_event_dict(entry)
+
+
+def _events_from_trace_records(
+    records: list[AuditTraceEntry | dict[str, Any]],
+) -> list[RuntimeEvent]:
+    events: list[RuntimeEvent] = []
+    for record in records:
+        event_dict = trace_entry_event_dict(record)
+        if not event_dict:
+            continue
+        try:
+            events.append(
+                _bind_trace_event_context(
+                    RuntimeEvent.from_dict(event_dict),
+                    _trace_record_context(record),
+                )
+            )
+        except Exception:
+            continue
+    return events
+
+
+def _trace_record_context(record: AuditTraceEntry | dict[str, Any]) -> RuntimeContext:
+    if isinstance(record, AuditTraceEntry):
+        return RuntimeContext(
+            session_id=record.session_id or "unknown",
+            agent_id=record.agent_id,
+            user_id=record.user_id,
+        )
+    return RuntimeContext(
+        session_id=str(record.get("session_id") or "unknown"),
+        agent_id=str(record.get("agent_id")) if record.get("agent_id") is not None else None,
+        user_id=str(record.get("user_id")) if record.get("user_id") is not None else None,
+    )
+
+
+def _bind_trace_event_context(
+    event: RuntimeEvent,
+    context: RuntimeContext,
+) -> RuntimeEvent:
+    observed = event.context
+    observed_session = str(observed.session_id or "").strip()
+    needs_session = observed_session in ("", "unknown")
+    same_session = observed_session == str(context.session_id or "").strip()
+    if not needs_session and not same_session:
+        return event
+
+    session_id = context.session_id if needs_session else observed.session_id
+    agent_id = observed.agent_id if observed.agent_id not in (None, "") else context.agent_id
+    user_id = observed.user_id if observed.user_id not in (None, "") else context.user_id
+    event.context = observed.child(
+        session_id=session_id,
+        agent_id=agent_id,
+        user_id=user_id,
+    )
+    return event
 
 
 def _merge_event_window(events: list[RuntimeEvent]) -> list[RuntimeEvent]:

