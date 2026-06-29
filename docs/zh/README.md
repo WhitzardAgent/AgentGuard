@@ -15,7 +15,7 @@
 pip install langchain==1.2.18
 pip install langchain-openai==1.2.1
 ```
-> 本指南以 LangChain 1.2.18 版本为例。AgentGuard 目前已兼容 LangChain、LangGraph、LlamaIndex、AutoGen、OpenAI Agents SDK 和 Openclaw；这里选择 LangChain 只是因为它更适合作为快速上手示例。
+> 本指南以 LangChain 1.2.18 版本为例。AgentGuard 目前已兼容 LangChain、LangGraph、LlamaIndex、AutoGen、OpenAI Agents SDK 和 OpenClaw；这里选择 LangChain 只是因为它更适合作为快速上手示例。
 
 #### 2. 编写智能体代码
 ```python
@@ -90,7 +90,7 @@ pip install -e .
 #### 2. 导入访问控制客户端
 下面是基于第 1 步编写的智能体代码，导入我们的访问控制客户端后的完整示例代码，标 🚩 符号的地方是客户端的插入位置：
 
-如果你想先看一页与具体框架无关的总体说明，可以先读 [AgentGuard Client](how-to-plugin/agentguard_client.md)。如果你接入的是其他运行时，可以直接参考对应章节：[LangGraph](how-to-plugin/langgraph.md)、[LlamaIndex](how-to-plugin/llamaindex.md)、[AutoGen](how-to-plugin/autogen.md)、[OpenAI Agents SDK](how-to-plugin/openai_agents_sdk.md) 和 [Openclaw](how-to-plugin/openclaw_adapter.md)。
+如果你想先看一页与具体框架无关的总体说明，可以先读 [AgentGuard Client](how-to-plugin/agentguard_client.md)。如果你接入的是其他运行时，可以直接参考对应章节：[LangGraph](how-to-plugin/langgraph.md)、[LlamaIndex](how-to-plugin/llamaindex.md)、[AutoGen](how-to-plugin/autogen.md)、[OpenAI Agents SDK](how-to-plugin/openai_agents_sdk.md) 和 [OpenClaw](how-to-plugin/openclaw_adapter.md)。
 
 ```python
 from langchain.agents import create_agent

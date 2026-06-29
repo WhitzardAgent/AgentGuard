@@ -6,7 +6,7 @@ AgentGuard is a zero-trust security foundation for AI agents. It integrates with
 
 AgentGuard covers several key areas highlighted in Anthropic's [Zero Trust for AI Agents](https://claude.com/blog/zero-trust-for-ai-agents), including access control and privilege management, observability and auditing, and behavioral monitoring and response.
 
-![AgentGuard positioning](../figs/positioning.png)
+![AgentGuard positioning](../figs/positioning_en.png)
 
 ## What AgentGuard Provides
 
@@ -37,7 +37,7 @@ Currently supported frameworks include:
 - [LlamaIndex](https://github.com/run-llama/llama_index)
 - [AutoGen](https://github.com/microsoft/autogen)
 - [OpenAI Agents SDK](https://github.com/openai/openai-agents-python)
-- Openclaw
+- OpenClaw
 
 ### Visual policy configuration and audit
 

@@ -32,8 +32,6 @@ COPY src/server ./src/server
 COPY src/shared ./src/shared
 COPY config ./config
 COPY rules ./rules
-COPY config ./config
-COPY plugins ./plugins
 COPY scripts ./scripts
 
 RUN chmod +x scripts/*.sh 2>/dev/null || true

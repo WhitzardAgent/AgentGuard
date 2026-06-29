@@ -1,10 +1,15 @@
 """Plugin for user/LLM input events."""
 from __future__ import annotations
 
+import re
+
 from shared.schemas.context import RuntimeContext
+from shared.schemas.decisions import GuardDecision
 from shared.schemas.events import EventType, RuntimeEvent
+
 from backend.runtime.plugins.base import BasePlugin, CheckResult
-from backend.runtime.plugins.common.patterns import find_signals, text_of
+from backend.runtime.plugins.common.patterns import text_of
+from backend.runtime.plugins.llm_before.jailbreak_templates import SUSPICIOUS_PROMPT_TEMPLATES
 from backend.runtime.plugins.registry import register
 
 
@@ -31,6 +36,9 @@ class JailbreakCheckPlugin(BasePlugin):
             signals.append(signal)
             matched_templates[signal] = matches
 
+        if not signals:
+            return CheckResult.empty()
+
         metadata = {"matched_prompt_templates": matched_templates} if matched_templates else {}
         return CheckResult(
             decision_candidate=GuardDecision.deny(
@@ -40,5 +48,6 @@ class JailbreakCheckPlugin(BasePlugin):
                 metadata=metadata,
             ),
             risk_signals=signals,
+            is_final=True,
             metadata=metadata,
         )

@@ -18,7 +18,7 @@ pip install langchain==1.2.18
 pip install langchain-openai==1.2.1
 ```
 
-> This guide uses LangChain 1.2.18. AgentGuard currently supports LangChain, LangGraph, LlamaIndex, AutoGen, OpenAI Agents SDK, and Openclaw; here we use LangChain only as the quickest walkthrough example.
+> This guide uses LangChain 1.2.18. AgentGuard currently supports LangChain, LangGraph, LlamaIndex, AutoGen, OpenAI Agents SDK, and OpenClaw; here we use LangChain only as the quickest walkthrough example.
 
 #### 2. Write the agent code
 
@@ -97,7 +97,7 @@ pip install -e .
 
 Below is the complete code after importing the AgentGuard client. Lines marked with 🚩 show where the client is inserted:
 
-If you want a framework-agnostic explanation first, see [AgentGuard Client](how-to-plugin/agentguard_client.md). If you are integrating a different runtime, see the dedicated pages for [LangGraph](how-to-plugin/langgraph.md), [LlamaIndex](how-to-plugin/llamaindex.md), [AutoGen](how-to-plugin/autogen.md), [OpenAI Agents SDK](how-to-plugin/openai_agents_sdk.md), and [Openclaw](how-to-plugin/openclaw_adapter.md).
+If you want a framework-agnostic explanation first, see [AgentGuard Client](how-to-plugin/agentguard_client.md). If you are integrating a different runtime, see the dedicated pages for [LangGraph](how-to-plugin/langgraph.md), [LlamaIndex](how-to-plugin/llamaindex.md), [AutoGen](how-to-plugin/autogen.md), [OpenAI Agents SDK](how-to-plugin/openai_agents_sdk.md), and [OpenClaw](how-to-plugin/openclaw_adapter.md).
 
 ```python
 from langchain.agents import create_agent

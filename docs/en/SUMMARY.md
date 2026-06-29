@@ -13,7 +13,7 @@
   * [AutoGen](how-to-plugin/autogen.md)
   * [OpenAI Agents SDK](how-to-plugin/openai_agents_sdk.md)
   * [Dify Workflow Agent Node](how-to-plugin/dify.md)
-  * [Openclaw](how-to-plugin/openclaw_adapter.md)
+  * [OpenClaw](how-to-plugin/openclaw_adapter.md)
   * [Custom Adapter](how-to-plugin/custom.md)
 * [AgentGuard Plugins](plugins.md)
   * [Builtin Plugins](plugins/builtin_plugins.md)

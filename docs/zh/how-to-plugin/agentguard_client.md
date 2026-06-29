@@ -51,7 +51,7 @@ AgentGuard 目前内置支持以下框架：
 | AutoGen | `guard.attach_autogen()` | [AutoGen](autogen.md) |
 | OpenAI Agents SDK | `guard.attach_openai_agents()` | [OpenAI Agents SDK](openai_agents_sdk.md) |
 | Dify Workflow Agent 节点 | 在 Dify `api`/`worker` 进程启动时调用 `install_dify_adapter()` | [Dify Workflow Agent 节点](dify.md) |
-| Openclaw | JavaScript 侧集成 | [Openclaw](openclaw_adapter.md) |
+| OpenClaw | JavaScript 侧集成 | [OpenClaw](openclaw_adapter.md) |
 
 如果你的框架不在上面的列表里，也可以通过实现自定义 adapter 的方式接入，详见 [Custom Adapter](custom.md)。
 

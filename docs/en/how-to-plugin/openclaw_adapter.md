@@ -1,8 +1,8 @@
-# Openclaw
+# OpenClaw
 
 ## Overview
 
-Openclaw is a JavaScript-side integration that connects OpenClaw's plugin hooks to AgentGuard's existing runtime phases.
+OpenClaw is a JavaScript-side integration that connects OpenClaw's plugin hooks to AgentGuard's existing runtime phases.
 
 This integration is implemented as a third-party OpenClaw plugin under:
 

@@ -1,8 +1,8 @@
-# Openclaw
+# OpenClaw
 
 ## 概览
 
-Openclaw 是一个 JavaScript 侧的接入方式，它把 OpenClaw 的插件 hook 映射到 AgentGuard 已有的运行时 phase 上。
+OpenClaw 是一个 JavaScript 侧的接入方式，它把 OpenClaw 的插件 hook 映射到 AgentGuard 已有的运行时 phase 上。
 
 这个集成当前是以第三方 OpenClaw 插件的形式实现的，目录位于：
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentguard"
-version = "0.3.0"
+version = "2.1"
 description = "Runtime access control plane for agent tool-use (allow / deny / human_check / degrade)."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -22,7 +22,7 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/WhitzardAgent/AgentGuard"
-Documentation = "https://whitzardagent.github.io/AgentGuard/"
+Documentation = "https://whitzard.tech/AgentGuard/"
 Issues = "https://github.com/WhitzardAgent/AgentGuard/issues"
 Releases = "https://github.com/WhitzardAgent/AgentGuard/releases"
 

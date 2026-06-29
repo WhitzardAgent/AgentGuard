@@ -49,7 +49,7 @@ AgentGuard currently provides built-in adapters for these frameworks:
 | AutoGen | `guard.attach_autogen()` | [AutoGen](autogen.md) |
 | OpenAI Agents SDK | `guard.attach_openai_agents()` | [OpenAI Agents SDK](openai_agents_sdk.md) |
 | Dify Workflow Agent node | `install_dify_adapter()` during Dify `api`/`worker` startup | [Dify Workflow Agent Node](dify.md) |
-| Openclaw | JavaScript-side integration | [Openclaw](openclaw_adapter.md) |
+| OpenClaw | JavaScript-side integration | [OpenClaw](openclaw_adapter.md) |
 
 If your framework is not listed here, you can still integrate AgentGuard by implementing a custom adapter. See [Custom Adapter](custom.md).
 

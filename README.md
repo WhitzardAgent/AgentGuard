@@ -56,7 +56,7 @@ Today, AgentGuard covers several key technical areas highlighted in Anthropic's 
 
 ![AgentGuard Positioning](./docs/figs/positioning_en.png)
 
-AgentGuard can be integrated into existing agent frameworks without modifying the underlying execution logic. Currently, it supports LangChain, AutoGen, OpenAI Agents SDK, Langgraph, Llamaindex, and [OpenClaw](https://github.com/openclaw/openclaw), and we are continuously expanding support for additional agent ecosystems and frameworks. For JavaScript-side integration details, refer to the [OpenClaw adapter document](https://whitzard.tech/AgentGuard/en/how-to-plugin/openclaw_adapter.html).
+AgentGuard can be integrated into existing agent frameworks without modifying the underlying execution logic. Currently, it supports LangChain, AutoGen, OpenAI Agents SDK, LangGraph, LlamaIndex, and [OpenClaw](https://github.com/openclaw/openclaw), and we are continuously expanding support for additional agent ecosystems and frameworks. For JavaScript-side integration details, refer to the [OpenClaw adapter document](https://whitzard.tech/AgentGuard/en/how-to-plugin/openclaw_adapter.html).
 
 ## ✨ Features
 
