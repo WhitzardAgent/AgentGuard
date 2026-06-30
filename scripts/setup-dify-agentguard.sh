@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Generate the deployment-side files needed to connect a local Dify Workflow
-# Agent node to AgentGuard without modifying Dify source code.
+# Generate and optionally apply the deployment-side files needed to connect a
+# local Dify instance to AgentGuard without modifying Dify source code.
 
 set -euo pipefail
 
@@ -10,35 +10,40 @@ AGENTGUARD_ROOT="$(dirname "$SCRIPT_DIR")"
 DIFY_DIR=""
 APP_IDS=""
 NODE_IDS=""
-SERVER_URL=""
+SERVER_URL="http://host.docker.internal:38080"
 CONSOLE_URL=""
 API_KEY=""
-POLICY="dify_default"
+POLICY=""
 BOOTSTRAP_DIR=""
 OUTPUT_FILE=""
+APPLY="false"
 
 usage() {
     cat <<'EOF'
 Usage:
   scripts/setup-dify-agentguard.sh \
     --dify-dir /path/to/dify \
-    --app-id <dify_app_id> \
-    --node-id <agent_node_id> \
-    --server-url <agentguard_server_url> \
+    [--app-id <dify_app_id>] \
+    [--server-url <agentguard_server_url>] \
     [--api-key <agentguard_api_key>] \
-    [--policy dify_default] \
-    [--console-url <agentguard_console_url>]
+    [--policy <mounted_rules_path>] \
+    [--console-url <agentguard_console_url>] \
+    [--apply]
 
 Options:
   --dify-dir       Dify source directory. The script writes into <dify-dir>/docker.
-  --app-id         Dify app id to guard. Repeat or pass comma-separated values.
-  --node-id        Dify Agent node id to guard. Repeat or pass comma-separated values.
+  --app-id         Optional Dify app id to guard. Repeat or pass comma-separated values.
+                   Omit to guard all Dify apps in the api/worker process.
+  --node-id        Optional advanced filter. Repeat or pass comma-separated values.
+                   Omit to guard every workflow node.
   --server-url     AgentGuard server API URL reachable from Dify containers.
+                   Defaults to http://host.docker.internal:38080.
   --api-key        Optional AgentGuard API key.
   --policy         Optional AgentGuard policy name or mounted rules path.
   --console-url    Optional AgentGuard frontend URL to print after setup.
   --bootstrap-dir  Optional bootstrap directory. Defaults to <dify-dir>/agentguard-dify-bootstrap.
   --output-file    Optional compose override path. Defaults to <dify-dir>/docker/docker-compose.agentguard.yml.
+  --apply          Run docker compose to recreate api/worker after generating files.
   -h, --help       Show this help.
 EOF
 }
@@ -91,6 +96,10 @@ while [ "$#" -gt 0 ]; do
             OUTPUT_FILE="${2:-}"
             shift 2
             ;;
+        --apply)
+            APPLY="true"
+            shift
+            ;;
         -h|--help)
             usage
             exit 0
@@ -103,7 +112,7 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
-if [ -z "$DIFY_DIR" ] || [ -z "$APP_IDS" ] || [ -z "$NODE_IDS" ] || [ -z "$SERVER_URL" ]; then
+if [ -z "$DIFY_DIR" ]; then
     usage >&2
     exit 2
 fi
@@ -120,9 +129,15 @@ OUTPUT_FILE="${OUTPUT_FILE:-$DIFY_DOCKER_DIR/docker-compose.agentguard.yml}"
 
 mkdir -p "$BOOTSTRAP_DIR"
 cat > "$BOOTSTRAP_DIR/sitecustomize.py" <<'PY'
+import logging
+
 from agentguard.adapters.agent.dify import install_dify_adapter
 
-install_dify_adapter()
+try:
+    status = install_dify_adapter()
+    logging.getLogger("agentguard.dify").warning("AgentGuard Dify adapter status: %s", status)
+except Exception:
+    logging.getLogger("agentguard.dify").exception("AgentGuard Dify adapter installation failed")
 PY
 
 cat > "$OUTPUT_FILE" <<YAML
@@ -135,6 +150,7 @@ services:
       AGENTGUARD_POLICY: "$POLICY"
       AGENTGUARD_DIFY_APP_IDS: "$APP_IDS"
       AGENTGUARD_DIFY_NODE_IDS: "$NODE_IDS"
+      AGENTGUARD_ENVIRONMENT: "dify"
       PYTHONPATH: "/agentguard-dify-bootstrap:/agentguard/src/client/python:/agentguard/src:/app/api"
     volumes:
       - $AGENTGUARD_ROOT:/agentguard:ro
@@ -150,6 +166,7 @@ services:
       AGENTGUARD_POLICY: "$POLICY"
       AGENTGUARD_DIFY_APP_IDS: "$APP_IDS"
       AGENTGUARD_DIFY_NODE_IDS: "$NODE_IDS"
+      AGENTGUARD_ENVIRONMENT: "dify"
       PYTHONPATH: "/agentguard-dify-bootstrap:/agentguard/src/client/python:/agentguard/src:/app/api"
     volumes:
       - $AGENTGUARD_ROOT:/agentguard:ro
@@ -169,6 +186,14 @@ Start Dify with AgentGuard:
   docker compose -f docker-compose.yaml -f $(basename "$OUTPUT_FILE") restart nginx
 
 EOF
+
+if [ "$APPLY" = "true" ]; then
+    (
+        cd "$DIFY_DOCKER_DIR"
+        docker compose -f docker-compose.yaml -f "$(basename "$OUTPUT_FILE")" up -d --force-recreate api worker
+        docker compose -f docker-compose.yaml -f "$(basename "$OUTPUT_FILE")" restart nginx
+    )
+fi
 
 if [ -n "$CONSOLE_URL" ]; then
     cat <<EOF

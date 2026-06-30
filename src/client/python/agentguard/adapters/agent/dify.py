@@ -9,7 +9,6 @@ from __future__ import annotations
 import contextvars
 import functools
 import os
-import threading
 from collections.abc import AsyncIterator, Generator, Iterable
 from contextlib import asynccontextmanager
 from typing import Any
@@ -30,8 +29,6 @@ _current_metadata: contextvars.ContextVar[dict[str, Any]] = contextvars.ContextV
     "agentguard_dify_metadata",
     default={},
 )
-_reported_tools_lock = threading.Lock()
-_reported_tools: set[tuple[str, str]] = set()
 
 
 def install_dify_adapter() -> dict[str, Any]:
@@ -43,12 +40,18 @@ def install_dify_adapter() -> dict[str, Any]:
     if not _env_enabled():
         return {"enabled": False, "patched": False, "reason": "disabled"}
 
+    workflow_status = _install_workflow_api_hooks()
     legacy_status = _install_legacy_api_hooks()
     v2_status = _install_agent_v2_hooks()
     return {
         "enabled": True,
-        "patched": bool(legacy_status.get("patched") or v2_status.get("patched")),
+        "patched": bool(
+            workflow_status.get("patched")
+            or legacy_status.get("patched")
+            or v2_status.get("patched")
+        ),
         "details": {
+            "workflow_api": workflow_status,
             "legacy_api": legacy_status,
             "agent_v2": v2_status,
         },
@@ -106,6 +109,29 @@ def _install_legacy_api_hooks() -> dict[str, Any]:
     }
 
 
+def _install_workflow_api_hooks() -> dict[str, Any]:
+    try:
+        from core.model_manager import ModelInstance  # type: ignore
+        from core.tools.tool_engine import ToolEngine  # type: ignore
+        from core.workflow.node_factory import DifyNodeFactory  # type: ignore
+    except Exception as exc:
+        return {
+            "patched": False,
+            "reason": "workflow_import_failed",
+            "error": str(exc),
+        }
+
+    patched: dict[str, bool] = {
+        "node_factory_create_node": _patch_workflow_node_factory(DifyNodeFactory),
+        "model_invoke_llm": _patch_legacy_model_invoke_llm(ModelInstance),
+        "tool_generic_invoke": _patch_workflow_tool_generic_invoke(ToolEngine),
+    }
+    return {
+        "patched": any(patched.values()),
+        "details": patched,
+    }
+
+
 def _patch_runner(runner_cls: Any) -> bool:
     original = getattr(runner_cls, "_run_agent", None)
     if not callable(original) or _is_patched(original):
@@ -153,6 +179,102 @@ def _patch_legacy_agent_node(agent_node_cls: Any) -> bool:
     _mark_patched(wrapper, original)
     setattr(agent_node_cls, "_run", wrapper)
     return True
+
+
+def _patch_workflow_node_factory(node_factory_cls: Any) -> bool:
+    original = getattr(node_factory_cls, "create_node", None)
+    if not callable(original) or _is_patched(original):
+        return False
+
+    @functools.wraps(original)
+    def wrapper(self: Any, node_config: Any, *args: Any, **kwargs: Any) -> Any:
+        node = original(self, node_config, *args, **kwargs)
+        _wrap_workflow_node_run(node, self, node_config)
+        return node
+
+    _mark_patched(wrapper, original)
+    setattr(node_factory_cls, "create_node", wrapper)
+    return True
+
+
+def _wrap_workflow_node_run(node: Any, node_factory: Any, node_config: Any) -> bool:
+    original = getattr(node, "run", None)
+    if not callable(original) or _is_patched(original):
+        return False
+
+    @functools.wraps(original)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        metadata = _metadata_from_workflow_node(node, node_factory, node_config)
+        if not _legacy_metadata_allowed(metadata):
+            return original(*args, **kwargs)
+        if _workflow_node_uses_specialized_hooks(metadata):
+            return _run_workflow_node_with_context(
+                metadata,
+                lambda: original(*args, **kwargs),
+                reason="dify_workflow_node_complete",
+            )
+        if _active_guard() is not None:
+            token_meta = _current_metadata.set(_merged_metadata(metadata))
+            try:
+                result = _run_workflow_node_as_tool(node, metadata, lambda: original(*args, **kwargs))
+            finally:
+                if "result" not in locals() or not _is_generator_like(result):
+                    _current_metadata.reset(token_meta)
+            if _is_generator_like(result):
+                return _metadata_scoped_generator(result, token_meta)
+            return result
+        return _run_with_ephemeral_guard(
+            metadata,
+            lambda: _run_workflow_node_as_tool(node, metadata, lambda: original(*args, **kwargs)),
+            reason="dify_workflow_node_complete",
+        )
+
+    _mark_patched(wrapper, original)
+    try:
+        setattr(node, "run", wrapper)
+    except Exception:
+        return False
+    return True
+
+
+def _run_workflow_node_with_context(metadata: dict[str, Any], call: Any, *, reason: str) -> Any:
+    if _active_guard() is None:
+        return _run_with_ephemeral_guard(
+            metadata,
+            lambda: _report_workflow_node_catalog(metadata) or call(),
+            reason=reason,
+        )
+    token_meta = _current_metadata.set(_merged_metadata(metadata))
+    try:
+        _report_workflow_node_catalog(metadata)
+        result = call()
+    finally:
+        if "result" not in locals() or not _is_generator_like(result):
+            _current_metadata.reset(token_meta)
+    if _is_generator_like(result):
+        return _metadata_scoped_generator(result, token_meta)
+    return result
+
+
+def _run_workflow_node_as_tool(node: Any, metadata: dict[str, Any], call: Any) -> Any:
+    _report_workflow_node_catalog(metadata)
+    tool_call = _workflow_node_tool_call(node, metadata)
+    decision = _guard_workflow_node_tool_invoke(tool_call)
+    blocked = _blocked_tool_value(decision, tool_call["tool_name"])
+    if blocked is not None:
+        raise AdapterError(blocked)
+    try:
+        result = call()
+    except Exception as exc:
+        _guard_workflow_node_tool_result(tool_call, None, error=str(exc))
+        raise
+    if _is_generator_like(result):
+        return _wrap_workflow_node_tool_generator(result, tool_call)
+    decision = _guard_workflow_node_tool_result(tool_call, _workflow_node_result_payload([result]))
+    blocked_result = _blocked_result_value(decision, tool_call["tool_name"])
+    if blocked_result is not None:
+        raise AdapterError(blocked_result)
+    return result
 
 
 def _patch_legacy_model_invoke_llm(model_instance_cls: Any) -> bool:
@@ -211,6 +333,30 @@ def _patch_legacy_tool_agent_invoke(tool_engine_cls: Any) -> bool:
 
     _mark_patched(wrapper, original)
     setattr(tool_engine_cls, "agent_invoke", wrapper)
+    return True
+
+
+def _patch_workflow_tool_generic_invoke(tool_engine_cls: Any) -> bool:
+    original = getattr(tool_engine_cls, "generic_invoke", None)
+    if not callable(original) or _is_patched(original):
+        return False
+
+    @functools.wraps(original)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        call = _workflow_tool_call_from_args(args, kwargs)
+        decision = _guard_workflow_tool_invoke(call)
+        blocked = _blocked_tool_value(decision, call["tool_name"])
+        if blocked is not None:
+            return _workflow_blocked_tool_generator(blocked)
+        try:
+            response = original(*args, **kwargs)
+        except Exception as exc:
+            _guard_workflow_tool_result(call, None, error=str(exc))
+            raise
+        return _wrap_workflow_tool_generator(response, call)
+
+    _mark_patched(wrapper, original)
+    setattr(tool_engine_cls, "generic_invoke", wrapper)
     return True
 
 
@@ -589,6 +735,84 @@ def _guard_plugin_backwards_tool_result(
     return guard.runtime.guard(event, phase="after").decision
 
 
+def _guard_workflow_tool_invoke(call: dict[str, Any]) -> GuardDecision:
+    guard = _active_guard()
+    if guard is None:
+        return GuardDecision.allow("AgentGuard Dify workflow adapter inactive.")
+    _report_tool_catalog(
+        call["tool_name"],
+        description=_legacy_tool_description(call.get("tool")),
+        capabilities=_workflow_tool_capabilities(call.get("tool")),
+        schema=_legacy_tool_schema(call),
+        required_args=_legacy_tool_required_args(call),
+        metadata=_workflow_tool_metadata(call, "tool_catalog"),
+    )
+    event = ev.tool_invoke(
+        guard.context,
+        call["tool_name"],
+        dict(call.get("tool_parameters") or {}),
+        capabilities=_workflow_tool_capabilities(call.get("tool")),
+        **_workflow_tool_metadata(call, "tool_before"),
+    )
+    return guard.runtime.guard(event).decision
+
+
+def _guard_workflow_tool_result(
+    call: dict[str, Any],
+    result: Any,
+    *,
+    error: str | None = None,
+) -> GuardDecision:
+    guard = _active_guard()
+    if guard is None:
+        return GuardDecision.allow("AgentGuard Dify workflow adapter inactive.")
+    metadata = _workflow_tool_metadata(call, "tool_after")
+    if error is not None:
+        metadata["error"] = error
+    event = ev.tool_result(
+        guard.context,
+        call["tool_name"],
+        _content_to_text(result),
+        **metadata,
+    )
+    return guard.runtime.guard(event, phase="after").decision
+
+
+def _guard_workflow_node_tool_invoke(call: dict[str, Any]) -> GuardDecision:
+    guard = _active_guard()
+    if guard is None:
+        return GuardDecision.allow("AgentGuard Dify workflow node adapter inactive.")
+    event = ev.tool_invoke(
+        guard.context,
+        call["tool_name"],
+        dict(call.get("tool_parameters") or {}),
+        capabilities=list(call.get("capabilities") or []),
+        **_workflow_node_tool_metadata(call, "tool_before"),
+    )
+    return guard.runtime.guard(event).decision
+
+
+def _guard_workflow_node_tool_result(
+    call: dict[str, Any],
+    result: Any,
+    *,
+    error: str | None = None,
+) -> GuardDecision:
+    guard = _active_guard()
+    if guard is None:
+        return GuardDecision.allow("AgentGuard Dify workflow node adapter inactive.")
+    metadata = _workflow_node_tool_metadata(call, "tool_after")
+    if error is not None:
+        metadata["error"] = error
+    event = ev.tool_result(
+        guard.context,
+        call["tool_name"],
+        _content_to_text(result),
+        **metadata,
+    )
+    return guard.runtime.guard(event, phase="after").decision
+
+
 def _guard_llm_input(model: Any, request_input: Any, *, stream: bool) -> GuardDecision:
     guard = _active_guard()
     if guard is None:
@@ -800,12 +1024,6 @@ def _report_tool_catalog(
     if not agent_id:
         return
 
-    key = (agent_id, tool_name)
-    with _reported_tools_lock:
-        if key in _reported_tools:
-            return
-        _reported_tools.add(key)
-
     try:
         from agentguard.tools.metadata import ToolMetadata
 
@@ -820,12 +1038,8 @@ def _report_tool_catalog(
         reporter = getattr(guard, "_report_tool_metadata", None)
         if callable(reporter):
             reporter(tool_metadata)
-        else:
-            with _reported_tools_lock:
-                _reported_tools.discard(key)
     except Exception:
-        with _reported_tools_lock:
-            _reported_tools.discard(key)
+        pass
 
 
 def _event_metadata(extra: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -918,6 +1132,90 @@ def _metadata_from_env_filter_defaults() -> dict[str, Any]:
     return metadata
 
 
+def _metadata_from_workflow_node(node: Any, node_factory: Any, node_config: Any) -> dict[str, Any]:
+    dify_ctx = _workflow_run_context(node, node_factory)
+    graph_init_params = getattr(node, "graph_init_params", None) or getattr(node_factory, "graph_init_params", None)
+    node_data = (
+        getattr(node, "node_data", None)
+        or getattr(node, "data", None)
+        or _get_attr_or_key(node_config, "data")
+    )
+    node_id = (
+        getattr(node, "node_id", None)
+        or getattr(node, "_node_id", None)
+        or getattr(node, "id", None)
+        or _get_attr_or_key(node_config, "id")
+    )
+    metadata = {
+        "adapter": "dify",
+        "dify_runtime": "workflow_api",
+        "node_id": _optional_text(node_id),
+        "node_execution_id": _optional_text(getattr(node, "execution_id", None) or getattr(node, "_execution_id", None)),
+        "node_type": _optional_text(
+            getattr(node, "node_type", None)
+            or _get_attr_or_key(node_data, "type")
+            or getattr(node, "type", None)
+        ),
+        "node_title": _optional_text(
+            getattr(node, "title", None)
+            or _get_attr_or_key(node_data, "title")
+        ),
+        "tenant_id": _optional_text(getattr(dify_ctx, "tenant_id", None)),
+        "user_id": _optional_text(getattr(dify_ctx, "user_id", None)),
+        "app_id": _optional_text(getattr(dify_ctx, "app_id", None)),
+        "workflow_id": _optional_text(
+            getattr(dify_ctx, "workflow_id", None)
+            or getattr(graph_init_params, "workflow_id", None)
+            or getattr(graph_init_params, "workflow_id_", None)
+        ),
+        "workflow_run_id": _optional_text(
+            getattr(dify_ctx, "workflow_run_id", None)
+            or getattr(dify_ctx, "trace_session_id", None)
+            or getattr(graph_init_params, "workflow_run_id", None)
+            or getattr(graph_init_params, "workflow_execution_id", None)
+        ),
+        "invoke_from": _optional_text(getattr(dify_ctx, "invoke_from", None)),
+    }
+    return {key: value for key, value in metadata.items() if value is not None}
+
+
+def _workflow_run_context(node: Any, node_factory: Any) -> Any:
+    for target in (node, node_factory):
+        dify_ctx = getattr(target, "_dify_context", None) or getattr(target, "dify_context", None)
+        if dify_ctx is not None:
+            return dify_ctx
+    run_context = getattr(getattr(node, "graph_init_params", None), "run_context", None)
+    if run_context is None:
+        run_context = getattr(getattr(node_factory, "graph_init_params", None), "run_context", None)
+    if run_context is not None:
+        try:
+            from core.app.entities.app_invoke_entities import DIFY_RUN_CONTEXT_KEY, DifyRunContext  # type: ignore
+
+            raw = run_context.get(DIFY_RUN_CONTEXT_KEY) if isinstance(run_context, dict) else run_context
+            return DifyRunContext.model_validate(raw)
+        except Exception:
+            if isinstance(run_context, dict):
+                return (
+                    run_context.get("dify_run_context")
+                    or run_context.get("_dify")
+                    or run_context
+                )
+            return run_context
+    try:
+        from core.app.entities.app_invoke_entities import DIFY_RUN_CONTEXT_KEY, DifyRunContext  # type: ignore
+
+        raw = node.require_run_context_value(DIFY_RUN_CONTEXT_KEY)
+        return DifyRunContext.model_validate(raw)
+    except Exception:
+        return getattr(node, "run_context", None)
+
+
+def _merged_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(_current_metadata.get({}))
+    merged.update(metadata)
+    return merged
+
+
 def _metadata_from_runner(runner: Any) -> dict[str, Any]:
     request = getattr(runner, "request", None)
     request_metadata = _normalize_value(getattr(request, "metadata", None))
@@ -994,6 +1292,35 @@ def _legacy_tool_call_from_args(args: tuple[Any, ...], kwargs: dict[str, Any]) -
     return call
 
 
+def _workflow_tool_call_from_args(args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[str, Any]:
+    names = [
+        "tool",
+        "tool_parameters",
+        "user_id",
+        "workflow_tool_callback",
+        "workflow_call_depth",
+        "conversation_id",
+        "app_id",
+        "message_id",
+    ]
+    call = {name: kwargs.get(name) for name in names if name in kwargs}
+    for index, value in enumerate(args):
+        if index < len(names) and names[index] not in call:
+            call[names[index]] = value
+    tool = call.get("tool")
+    entity = getattr(tool, "entity", None)
+    identity = getattr(entity, "identity", None)
+    runtime = getattr(tool, "runtime", None)
+    call["tool_name"] = str(getattr(identity, "name", "") or getattr(tool, "name", "") or "tool")
+    if not isinstance(call.get("tool_parameters"), dict):
+        call["tool_parameters"] = _normalize_value(call.get("tool_parameters"))
+    if not isinstance(call.get("tool_parameters"), dict):
+        call["tool_parameters"] = {"value": call.get("tool_parameters")}
+    if runtime is not None and isinstance(getattr(runtime, "runtime_parameters", None), dict):
+        call["runtime_parameters"] = dict(getattr(runtime, "runtime_parameters", {}) or {})
+    return call
+
+
 def _legacy_tool_metadata(call: dict[str, Any], phase: str) -> dict[str, Any]:
     tool = call.get("tool")
     entity = getattr(tool, "entity", None)
@@ -1023,6 +1350,81 @@ def _legacy_tool_metadata(call: dict[str, Any], phase: str) -> dict[str, Any]:
     return metadata
 
 
+def _workflow_tool_metadata(call: dict[str, Any], phase: str) -> dict[str, Any]:
+    tool = call.get("tool")
+    entity = getattr(tool, "entity", None)
+    identity = getattr(entity, "identity", None)
+    runtime = getattr(tool, "runtime", None)
+    provider_type = ""
+    try:
+        provider_type = str(tool.tool_provider_type().value)
+    except Exception:
+        provider_type = str(getattr(entity, "provider_type", "") or "")
+    metadata = _event_metadata(
+        {
+            "phase": phase,
+            "dify_runtime": "workflow_api",
+            "tool_provider": str(getattr(identity, "provider", "") or ""),
+            "provider": str(getattr(identity, "provider", "") or ""),
+            "tool_provider_type": provider_type,
+            "user_id": _optional_text(call.get("user_id")),
+            "app_id": _optional_text(call.get("app_id")),
+            "message_id": _optional_text(call.get("message_id")),
+            "conversation_id": _optional_text(call.get("conversation_id")),
+            "workflow_call_depth": call.get("workflow_call_depth"),
+            "runtime_parameters": _normalize_value(
+                call.get("runtime_parameters")
+                if "runtime_parameters" in call
+                else getattr(runtime, "runtime_parameters", None)
+            ),
+        }
+    )
+    return metadata
+
+
+def _workflow_node_tool_metadata(call: dict[str, Any], phase: str) -> dict[str, Any]:
+    return _event_metadata(
+        {
+            "phase": phase,
+            "dify_runtime": "workflow_api",
+            "tool_provider": "dify_workflow_node",
+            "provider": "dify_workflow_node",
+            "tool_provider_type": "workflow_node",
+            "node_as_tool": True,
+            "node_type": _optional_text(call.get("node_type")),
+            "node_title": _optional_text(call.get("node_title")),
+            "node_id": _optional_text(call.get("node_id")),
+            "node_execution_id": _optional_text(call.get("node_execution_id")),
+        }
+    )
+
+
+def _report_workflow_node_catalog(metadata: dict[str, Any]) -> None:
+    node_type = _optional_text(metadata.get("node_type")) or "node"
+    if node_type == "tool":
+        return
+    node_id = _optional_text(metadata.get("node_id")) or "unknown"
+    node_title = _optional_text(metadata.get("node_title")) or node_type
+    tool_name = f"dify_node:{node_type}:{node_id}"
+    _report_tool_catalog(
+        tool_name,
+        description=f"Dify workflow node: {node_title}",
+        capabilities=["dify_workflow_node", f"dify_node_type:{node_type}"],
+        schema={},
+        required_args=[],
+        metadata={
+            "adapter": "dify",
+            "dify_runtime": "workflow_api",
+            "node_as_tool": True,
+            "node_type": node_type,
+            "node_title": node_title,
+            "node_id": node_id,
+            "app_id": _optional_text(metadata.get("app_id")),
+            "workflow_id": _optional_text(metadata.get("workflow_id")),
+        },
+    )
+
+
 def _plugin_backwards_tool_metadata(call: dict[str, Any], phase: str) -> dict[str, Any]:
     return _event_metadata(
         {
@@ -1040,6 +1442,22 @@ def _plugin_backwards_tool_metadata(call: dict[str, Any], phase: str) -> dict[st
 
 def _legacy_tool_capabilities(tool: Any) -> list[str]:
     caps = ["dify_tool", "dify_legacy_tool"]
+    entity = getattr(tool, "entity", None)
+    identity = getattr(entity, "identity", None)
+    provider = str(getattr(identity, "provider", "") or "")
+    if provider:
+        caps.append(provider)
+    try:
+        provider_type = str(tool.tool_provider_type().value)
+    except Exception:
+        provider_type = ""
+    if provider_type:
+        caps.append(provider_type)
+    return caps
+
+
+def _workflow_tool_capabilities(tool: Any) -> list[str]:
+    caps = ["dify_tool", "dify_workflow_tool"]
     entity = getattr(tool, "entity", None)
     identity = getattr(entity, "identity", None)
     provider = str(getattr(identity, "provider", "") or "")
@@ -1206,6 +1624,103 @@ def _legacy_stream_output_payload(chunks: list[Any]) -> dict[str, Any]:
     return {"output": output, "final_output": output}
 
 
+def _wrap_workflow_tool_generator(result: Any, call: dict[str, Any]) -> Generator[Any, None, None]:
+    chunks: list[Any] = []
+    try:
+        for chunk in result:
+            chunks.append(chunk)
+            yield chunk
+    except Exception as exc:
+        _guard_workflow_tool_result(call, _workflow_tool_result_payload(chunks), error=str(exc))
+        raise
+    decision = _guard_workflow_tool_result(call, _workflow_tool_result_payload(chunks))
+    blocked_result = _blocked_result_value(decision, call["tool_name"])
+    if blocked_result is not None:
+        yield from _workflow_blocked_tool_generator(blocked_result)
+
+
+def _workflow_tool_result_payload(chunks: list[Any]) -> str:
+    parts: list[str] = []
+    for chunk in chunks:
+        text = _get_attr_or_key(chunk, "text")
+        if text is None:
+            message = _get_attr_or_key(chunk, "message")
+            text = _get_attr_or_key(message, "text")
+        if text is None:
+            text = _normalize_value(chunk)
+        parts.append(_content_to_text(text))
+    return "\n".join(part for part in parts if part)
+
+
+def _wrap_workflow_node_tool_generator(result: Any, call: dict[str, Any]) -> Generator[Any, None, None]:
+    chunks: list[Any] = []
+    try:
+        for chunk in result:
+            chunks.append(chunk)
+            yield chunk
+    except Exception as exc:
+        _guard_workflow_node_tool_result(call, _workflow_node_result_payload(chunks), error=str(exc))
+        raise
+    decision = _guard_workflow_node_tool_result(call, _workflow_node_result_payload(chunks))
+    blocked_result = _blocked_result_value(decision, call["tool_name"])
+    if blocked_result is not None:
+        raise AdapterError(blocked_result)
+
+
+def _workflow_node_uses_specialized_hooks(metadata: dict[str, Any]) -> bool:
+    node_type = str(metadata.get("node_type") or "").strip().lower()
+    return node_type in {
+        "agent",
+        "llm",
+        "question-classifier",
+        "question_classifier",
+        "parameter-extractor",
+        "parameter_extractor",
+        "tool",
+    }
+
+
+def _workflow_node_tool_call(node: Any, metadata: dict[str, Any]) -> dict[str, Any]:
+    node_type = str(metadata.get("node_type") or "node").strip() or "node"
+    node_title = str(metadata.get("node_title") or node_type).strip() or node_type
+    node_id = str(metadata.get("node_id") or "unknown").strip() or "unknown"
+    return {
+        "tool_name": f"dify_node:{node_type}:{node_id}",
+        "tool_parameters": _workflow_node_input_payload(node),
+        "capabilities": ["dify_workflow_node", f"dify_node_type:{node_type}"],
+        "node_type": node_type,
+        "node_title": node_title,
+        "node_id": metadata.get("node_id"),
+        "node_execution_id": metadata.get("node_execution_id"),
+    }
+
+
+def _workflow_node_input_payload(node: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    for attr in ("inputs", "input", "node_inputs"):
+        value = getattr(node, attr, None)
+        if value is not None:
+            payload[attr] = _normalize_value(value)
+    node_data = getattr(node, "node_data", None) or getattr(node, "data", None)
+    normalized_data = _normalize_value(node_data)
+    if isinstance(normalized_data, dict):
+        payload["node_data"] = normalized_data
+    return payload or {"node": _normalize_value(node)}
+
+
+def _workflow_node_result_payload(chunks: list[Any]) -> str:
+    parts: list[str] = []
+    for chunk in chunks:
+        for key in ("outputs", "output", "process_data", "metadata"):
+            value = _get_attr_or_key(chunk, key)
+            if value is not None:
+                parts.append(_content_to_text(_normalize_value(value)))
+                break
+        else:
+            parts.append(_content_to_text(_normalize_value(chunk)))
+    return "\n".join(part for part in parts if part)
+
+
 def _plugin_backwards_tool_call_from_args(args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[str, Any]:
     names = [
         "tenant_id",
@@ -1267,6 +1782,10 @@ def _plugin_backwards_blocked_tool_generator(text: str) -> Generator[Any, None, 
         yield ToolInvokeMessage(type="text", message={"text": text})
     except Exception:
         yield {"type": "text", "message": {"text": text}}
+
+
+def _workflow_blocked_tool_generator(text: str) -> Generator[Any, None, None]:
+    yield from _plugin_backwards_blocked_tool_generator(text)
 
 
 def _legacy_blocked_tool_response(text: str) -> tuple[str, list[str], Any]:
@@ -1333,6 +1852,16 @@ def _guarded_generator(
         _current_guard.reset(token_guard)
 
 
+def _metadata_scoped_generator(
+    result: Any,
+    token_meta: contextvars.Token[dict[str, Any]],
+) -> Generator[Any, None, None]:
+    try:
+        yield from result
+    finally:
+        _current_metadata.reset(token_meta)
+
+
 def _session_id(metadata: dict[str, Any]) -> str:
     workflow_run_id = _optional_text(metadata.get("workflow_run_id"))
     node_execution_id = _optional_text(metadata.get("node_execution_id"))
@@ -1350,11 +1879,17 @@ def _session_id(metadata: dict[str, Any]) -> str:
 
 
 def _agent_id(metadata: dict[str, Any]) -> str:
-    parts = [
-        _optional_text(metadata.get("app_id")),
-        _optional_text(metadata.get("workflow_id")),
-        _optional_text(metadata.get("node_id")),
-    ]
+    if _optional_text(metadata.get("dify_runtime")) == "workflow_api":
+        parts = [
+            _optional_text(metadata.get("app_id")),
+            _optional_text(metadata.get("workflow_id")),
+        ]
+    else:
+        parts = [
+            _optional_text(metadata.get("app_id")),
+            _optional_text(metadata.get("workflow_id")),
+            _optional_text(metadata.get("node_id")),
+        ]
     present = [part for part in parts if part]
     if present:
         return ":".join(present)
