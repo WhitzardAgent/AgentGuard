@@ -17,6 +17,7 @@ POLICY=""
 BOOTSTRAP_DIR=""
 OUTPUT_FILE=""
 APPLY="false"
+AGENT_CHAT="false"
 
 usage() {
     cat <<'EOF'
@@ -36,6 +37,9 @@ Options:
                    Omit to guard all Dify apps in the api/worker process.
   --node-id        Optional advanced filter. Repeat or pass comma-separated values.
                    Omit to guard every workflow node.
+  --agent-chat     Enable the legacy Dify agent-chat adapter. Use this for Dify
+                   apps whose URL looks like /app/<app_id>/configuration and
+                   whose mode is agent-chat. This does not require --node-id.
   --server-url     AgentGuard server API URL reachable from Dify containers.
                    Defaults to http://host.docker.internal:38080.
   --api-key        Optional AgentGuard API key.
@@ -100,6 +104,10 @@ while [ "$#" -gt 0 ]; do
             APPLY="true"
             shift
             ;;
+        --agent-chat)
+            AGENT_CHAT="true"
+            shift
+            ;;
         -h|--help)
             usage
             exit 0
@@ -131,20 +139,33 @@ mkdir -p "$BOOTSTRAP_DIR"
 cat > "$BOOTSTRAP_DIR/sitecustomize.py" <<'PY'
 import logging
 
-from agentguard.adapters.agent.dify import install_dify_adapter
+logger = logging.getLogger("agentguard.dify")
 
 try:
-    status = install_dify_adapter()
-    logging.getLogger("agentguard.dify").warning("AgentGuard Dify adapter status: %s", status)
+    from agentguard.adapters.agent.dify_agent_chat import install_dify_agent_chat_adapter
+
+    status = install_dify_agent_chat_adapter()
+    logger.warning("AgentGuard Dify Agent Chat adapter status: %s", status)
 except Exception:
-    logging.getLogger("agentguard.dify").exception("AgentGuard Dify adapter installation failed")
+    logger.exception("AgentGuard Dify Agent Chat adapter installation failed")
+
+try:
+    from agentguard.adapters.agent.dify import install_dify_adapter
+
+    status = install_dify_adapter()
+    logger.warning("AgentGuard Dify workflow adapter status: %s", status)
+except Exception:
+    logger.exception("AgentGuard Dify workflow adapter installation failed")
 PY
+
+AGENT_CHAT_ENABLED="$AGENT_CHAT"
 
 cat > "$OUTPUT_FILE" <<YAML
 services:
   api:
     environment:
       AGENTGUARD_ENABLED: "true"
+      AGENTGUARD_DIFY_AGENT_CHAT_ENABLED: "$AGENT_CHAT_ENABLED"
       AGENTGUARD_SERVER_URL: "$SERVER_URL"
       AGENTGUARD_API_KEY: "$API_KEY"
       AGENTGUARD_POLICY: "$POLICY"
@@ -161,6 +182,7 @@ services:
   worker:
     environment:
       AGENTGUARD_ENABLED: "true"
+      AGENTGUARD_DIFY_AGENT_CHAT_ENABLED: "$AGENT_CHAT_ENABLED"
       AGENTGUARD_SERVER_URL: "$SERVER_URL"
       AGENTGUARD_API_KEY: "$API_KEY"
       AGENTGUARD_POLICY: "$POLICY"
@@ -196,12 +218,25 @@ if [ "$APPLY" = "true" ]; then
 fi
 
 if [ -n "$CONSOLE_URL" ]; then
-    cat <<EOF
+    if [ "$AGENT_CHAT" = "true" ]; then
+        cat <<EOF
+After running your Dify Agent Chat app, open your AgentGuard console:
+  $CONSOLE_URL
+EOF
+    else
+        cat <<EOF
 After running a workflow, open your AgentGuard console:
   $CONSOLE_URL
 EOF
+    fi
 else
-    cat <<'EOF'
+    if [ "$AGENT_CHAT" = "true" ]; then
+        cat <<'EOF'
+After running your Dify Agent Chat app, open the AgentGuard console provided by your AgentGuard server operator.
+EOF
+    else
+        cat <<'EOF'
 After running a workflow, open the AgentGuard console provided by your AgentGuard server operator.
 EOF
+    fi
 fi

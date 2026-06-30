@@ -317,6 +317,45 @@ def test_agent_chat_registers_only_runtime_enabled_tools_and_emits_events(monkey
     assert guard.trace.entries[2].event.payload.arguments == {"year": 2026, "month": 2, "day": 28}
 
 
+def test_agent_chat_app_id_filter_skips_unmatched_app(monkeypatch):
+    fake = _install_fake_dify_agent_chat_modules(monkeypatch)
+    monkeypatch.setenv("AGENTGUARD_DIFY_APP_IDS", "other-app")
+    adapter = _fresh_adapter(monkeypatch)
+    adapter.install_dify_agent_chat_adapter()
+
+    created_guards = []
+
+    def make_guard(metadata):
+        created_guards.append(metadata)
+        raise AssertionError("unmatched app should not create an AgentGuard session")
+
+    monkeypatch.setattr(adapter, "_make_guard", make_guard)
+
+    app_config = types.SimpleNamespace(
+        tenant_id="tenant-1",
+        app_id="app-1",
+        agent=types.SimpleNamespace(strategy="function_call"),
+    )
+    application_generate_entity = types.SimpleNamespace(
+        app_config=app_config,
+        user_id="user-1",
+        task_id="task-1",
+        invoke_from="debugger",
+    )
+    conversation = types.SimpleNamespace(id="conversation-1")
+    message = types.SimpleNamespace(id="message-1", conversation_id="conversation-1")
+
+    result = fake.AgentChatAppRunner().run(
+        application_generate_entity=application_generate_entity,
+        queue_manager=object(),
+        conversation=conversation,
+        message=message,
+    )
+
+    assert result[0] == "Saturday"
+    assert created_guards == []
+
+
 def test_agent_chat_tool_before_deny_returns_dify_compatible_tuple(monkeypatch):
     fake = _install_fake_dify_agent_chat_modules(monkeypatch)
     adapter = _fresh_adapter(monkeypatch)

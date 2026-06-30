@@ -77,6 +77,8 @@ def _patch_agent_chat_runner(runner_cls: Any) -> bool:
     @functools.wraps(original)
     def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
         metadata = _metadata_from_runner_args(args, kwargs)
+        if not _app_allowed(metadata.get("app_id")):
+            return original(self, *args, **kwargs)
         guard = _make_guard(metadata)
         token_guard = _current_guard.set(guard)
         token_meta = _current_metadata.set(metadata)
@@ -680,6 +682,18 @@ def _env_enabled() -> bool:
     if specific is not None:
         return specific.strip().lower() in {"1", "true", "yes", "on"}
     return os.getenv("AGENTGUARD_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _app_allowed(app_id: Any) -> bool:
+    app_ids = _env_csv("AGENTGUARD_DIFY_APP_IDS")
+    if not app_ids:
+        return True
+    return str(app_id or "").strip() in app_ids
+
+
+def _env_csv(name: str) -> set[str]:
+    raw = os.getenv(name, "")
+    return {part.strip() for part in raw.split(",") if part.strip()}
 
 
 def _plugin_config() -> str | dict[str, Any] | None:

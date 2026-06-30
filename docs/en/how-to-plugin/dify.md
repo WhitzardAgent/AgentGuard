@@ -1,130 +1,236 @@
-# Dify Workflow Agent Node
+# Dify Agent And Workflow Agent Integration
 
-This guide explains how to connect a locally deployed Dify Workflow Agent node to AgentGuard. It assumes you have cloned the Dify source code, run Dify locally with Docker Compose, and built your workflow in the Dify UI.
+This guide explains how to connect locally deployed Dify agents to AgentGuard. Dify has two common runtime paths, and they use different adapters:
 
-## Supported Scope
+- **Agent Chat app**: the URL usually looks like `/app/<app_id>/configuration`, and the Dify app mode is `agent-chat`. This path runs through `AgentChatAppRunner` and uses the `dify_agent_chat` adapter.
+- **Workflow Agent node**: the URL usually looks like `/app/<app_id>/workflow`, and the workflow graph contains an Agent node. This path runs through the workflow runtime and uses the `dify` workflow adapter.
 
-The current Dify adapter is validated for:
+Neither path requires Dify source-code changes. The recommended deployment method installs AgentGuard adapters through `sitecustomize.py` when Dify `api` / `worker` Python processes start, and mounts the AgentGuard client with a Docker Compose override.
 
-- Dify 1.15.x local source deployment.
-- The legacy Workflow Agent path with `ENABLE_AGENT_V2=false`.
-- Workflows that contain an Agent node, for example `Start -> Agent -> End`.
-- Tools configured inside the Agent node.
-- LLM calls, LLM responses, tool calls, and tool results that happen inside the Agent node.
-- Tool catalog reporting for tools actually invoked by the Agent node, so the AgentGuard frontend can discover the Dify agent.
+## Quick Start: Dify Agent Chat App
 
-The adapter emits:
+Use this path when you already built a Dify Agent Chat app.
 
-- `llm_input`
-- `llm_output`
-- `tool_invoke`
-- `tool_result`
+Assumptions:
 
-If an LLM turn only requests a tool and does not produce natural-language text, `llm_output` remains empty:
+- AgentGuard source is at `/path/to/AgentGuard`
+- Dify source is at `/path/to/dify`
+- Dify runs locally with Docker Compose
+- Your Dify app URL looks like `/app/<app_id>/configuration`
+- You have an AgentGuard server URL and console URL
 
-```json
-{
-  "output": null,
-  "thought": null,
-  "final_output": null
-}
+### 1. Prepare AgentGuard Server URLs
+
+The Dify side only runs the AgentGuard client adapter. The AgentGuard server and frontend console are usually hosted by the AgentGuard service operator.
+
+You need:
+
+```text
+AGENTGUARD_SERVER_URL=https://<your-agentguard-server>
+AGENTGUARD_CONSOLE_URL=https://<your-agentguard-console>
 ```
 
-The tool name and arguments are represented by the following `tool_invoke` event.
+For local testing, start AgentGuard on the host:
 
-## Not Supported Yet
+```bash
+cd /path/to/AgentGuard
+./scripts/start.sh --build -d
+```
 
-The current adapter does not cover:
+Then Dify containers usually reach the host server with:
 
-- Normal Workflow LLM nodes.
-- Standalone Workflow Tool nodes.
-- Graphs where an LLM node routes to separate Tool nodes.
-- All Dify Agent App or Chat App paths.
-- Fully validated Dify Agent v2 backend / `dify-agent` service integration.
+```text
+AGENTGUARD_SERVER_URL=http://host.docker.internal:38080
+AGENTGUARD_CONSOLE_URL=http://127.0.0.1:38008/agents.html
+```
 
-Some Agent v2 hooks exist in the code, but the recommended and validated path is the legacy Workflow Agent node path described here.
+### 2. Get The Dify app_id
 
-## How It Works
+Open the Agent Chat app configuration page. The URL usually looks like:
 
-Dify creates Workflow Agent nodes, LLM models, and tools internally. There is no user-owned agent object to pass into `guard.attach_xxx()`.
+```text
+http://127.0.0.1/app/6680db75-b1ed-4735-b4b4-a76efe1b7b42/configuration
+```
 
-For Dify, install the runtime adapter once when the Dify `api` and `worker` Python processes start:
+The value below is the `app_id`:
+
+```text
+6680db75-b1ed-4735-b4b4-a76efe1b7b42
+```
+
+AgentGuard maps this app to this console `agent_id`:
+
+```text
+dify-agent-chat:<app_id>
+```
+
+Different users of the same Dify app share the same `agent_id`, but each message includes Dify `user_id`, `conversation_id`, and `message_id`, so the server and policies can still distinguish users and messages.
+
+### 3. Generate Integration Files
+
+From the AgentGuard directory:
+
+```bash
+cd /path/to/AgentGuard
+scripts/setup-dify-agentguard.sh \
+  --dify-dir /path/to/dify \
+  --agent-chat \
+  --app-id <your_app_id> \
+  --server-url <your_agentguard_server_url> \
+  --api-key <your_agentguard_api_key> \
+  --console-url <your_agentguard_console_url>
+```
+
+Local test example:
+
+```bash
+scripts/setup-dify-agentguard.sh \
+  --dify-dir /path/to/dify \
+  --agent-chat \
+  --app-id 6680db75-b1ed-4735-b4b4-a76efe1b7b42 \
+  --server-url http://host.docker.internal:38080 \
+  --console-url http://127.0.0.1:38008/agents.html
+```
+
+The script generates:
+
+```text
+/path/to/dify/agentguard-dify-bootstrap/sitecustomize.py
+/path/to/dify/docker/docker-compose.agentguard.yml
+```
+
+The generated `sitecustomize.py` installs both the Agent Chat adapter and the workflow adapter. Agent Chat is controlled by `AGENTGUARD_DIFY_AGENT_CHAT_ENABLED=true`.
+
+### 4. Start Dify With AgentGuard
+
+```bash
+cd /path/to/dify/docker
+docker compose -f docker-compose.yaml -f docker-compose.agentguard.yml up -d --force-recreate api worker
+docker compose -f docker-compose.yaml -f docker-compose.agentguard.yml restart nginx
+```
+
+If you only validate an Agent Chat app, the key process is `api`; recreating `worker` is useful when you also test workflows.
+
+### 5. Verify
+
+Open Dify and run your Agent Chat app. Use a prompt that triggers a tool call.
+
+Then open the AgentGuard console:
+
+```text
+<your_agentguard_console_url>
+```
+
+Refresh the Agent list and look for:
+
+```text
+dify-agent-chat:<app_id>
+```
+
+A tool-using Agent Chat run usually emits:
+
+```text
+llm_input
+llm_output
+tool_invoke
+tool_result
+```
+
+The tool catalog reports only tools enabled for the current runtime turn. The adapter uses `BaseAgentRunner._init_prompt_tools()` return value, `tool_instances`, as the registration source, so tools configured with `enabled=false` in Dify are not reported.
+
+## Agent Chat Adapter Behavior
+
+The Agent Chat adapter entry point is:
 
 ```python
-from agentguard.adapters.agent.dify import install_dify_adapter
+from agentguard.adapters.agent.dify_agent_chat import install_dify_agent_chat_adapter
 
-install_dify_adapter()
+install_dify_agent_chat_adapter()
 ```
 
-The recommended deployment path does not modify Dify source code. It uses `sitecustomize.py` so Python automatically installs the adapter during process startup.
+It patches these Dify call sites:
 
-The adapter patches these legacy Workflow Agent call sites:
-
-- `core.workflow.nodes.agent.agent_node.AgentNode._run`
+- `core.app.apps.agent_chat.app_runner.AgentChatAppRunner.run`
+- `core.agent.base_agent_runner.BaseAgentRunner._init_prompt_tools`
 - `core.model_manager.ModelInstance.invoke_llm`
 - `core.tools.tool_engine.ToolEngine.agent_invoke`
 
-It also patches the plugin daemon backwards invocation path:
+At run start, the adapter creates an AgentGuard session:
 
-- `core.plugin.backwards_invocation.model.PluginModelBackwardsInvocation.invoke_llm`
-- `core.plugin.backwards_invocation.tool.PluginToolBackwardsInvocation.invoke_tool`
-
-The backwards invocation hooks are important because Dify legacy Agent strategies often call LLMs and tools through plugin daemon callbacks. In that case the real LLM/tool work happens in the API process, not inside the worker process that entered the Agent node.
-
-## Security Behavior
-
-Before an LLM call, the adapter emits `llm_input` with the prompt messages Dify already constructed.
-
-After an LLM call, it emits `llm_output` with only `output`, `thought`, and `final_output`. Tool-call-only turns keep all three fields as `null`.
-
-Before a tool call, it emits `tool_invoke` with the tool name and arguments. If AgentGuard returns deny or pending, the adapter does not call the real tool and returns a readable blocked/pending observation to the Agent.
-
-After a tool call, it emits `tool_result` with the tool result text. If the result phase returns deny or sanitize, the adapter returns the handled observation to the Agent.
-
-## Prepare Dify
-
-Clone and run Dify with Docker Compose. This guide assumes Dify lives at:
-
-```bash
-/path/to/dify
+```text
+agent_id   = dify-agent-chat:<app_id>
+session_id = <message_id>, falling back to task_id
+user_id    = Dify application_generate_entity.user_id
 ```
 
-Make sure Dify uses the legacy Agent path:
+Event metadata includes:
+
+```text
+tenant_id
+app_id
+conversation_id
+message_id
+user_id
+task_id
+invoke_from
+agent_strategy
+```
+
+Server-side policies and filters can use `principal.agent_id`, `principal.user_id`, and `principal.session_id`.
+
+Tool deny / sanitize behavior:
+
+- If `tool_invoke` is denied, the adapter does not call the real tool and returns a Dify-compatible tool error observation.
+- If `tool_result` is denied or sanitized, the adapter returns a safe observation without breaking Dify's native message-record flow.
+
+## Quick Start: Dify Workflow Agent Node
+
+Use this path when your Dify agent is an Agent node inside a workflow graph.
+
+### 1. Confirm The Legacy Agent Path
+
+The validated path is the legacy Workflow Agent node with `ENABLE_AGENT_V2=false`. Check Dify `.env`:
+
+```bash
+cd /path/to/dify/docker
+rg 'ENABLE_AGENT_V2|AGENT_BACKEND_BASE_URL' .env
+```
+
+Recommended settings:
 
 ```text
 ENABLE_AGENT_V2=false
 AGENT_BACKEND_BASE_URL=
 ```
 
-Create or open your workflow in the Dify UI and confirm the graph contains an Agent node with tools configured inside that node.
+### 2. Get app_id And Agent node_id
 
-## Get app_id And node_id
-
-Record the IDs used to scope AgentGuard to one workflow Agent node.
-
-The `app_id` is usually in the browser URL:
+The `app_id` is in the workflow page URL:
 
 ```text
-http://localhost/app/<app_id>/workflow
+http://127.0.0.1/app/ce0aa322-1f3f-4ab9-8329-3af8588c7480/workflow
 ```
 
-The Agent node `node_id` can be found from the workflow DSL, debug events, workflow run events, or the database. During a workflow run, Dify SSE events contain data like:
+Dify may not show the node ID directly. Querying the Dify database is the recommended method:
 
-```json
-{
-  "event": "node_started",
-  "data": {
-    "node_id": "1782713638856",
-    "node_type": "agent"
-  }
-}
+```bash
+cd /path/to/dify/docker
+docker compose exec -T db_postgres psql -U postgres -d dify -c "
+select
+  node->>'id' as node_id,
+  node->'data'->>'title' as title,
+  node->'data'->>'type' as type
+from workflows w
+cross join lateral jsonb_array_elements(w.graph::jsonb->'nodes') as node
+where w.app_id='<your_app_id>'
+  and w.version='draft'
+  and node->'data'->>'type'='agent';
+"
 ```
 
-Here `1782713638856` is the Agent node ID.
+The output `node_id` is the Agent node ID.
 
-## Recommended: Generate Deployment Files
-
-AgentGuard provides a helper script that generates the required `sitecustomize.py` and Compose override:
+### 3. Generate Integration Files
 
 ```bash
 cd /path/to/AgentGuard
@@ -138,67 +244,9 @@ scripts/setup-dify-agentguard.sh \
   --console-url <your_agentguard_console_url>
 ```
 
-For multiple workflows or Agent nodes, repeat the options or pass comma-separated values:
+For multiple workflows or Agent nodes, repeat options or pass comma-separated values.
 
-```bash
-scripts/setup-dify-agentguard.sh \
-  --dify-dir /path/to/dify \
-  --app-id app_id_1 --app-id app_id_2 \
-  --node-id node_id_1 --node-id node_id_2 \
-  --server-url <your_agentguard_server_url>
-```
-
-The script generates:
-
-```text
-/path/to/dify/agentguard-dify-bootstrap/sitecustomize.py
-/path/to/dify/docker/docker-compose.agentguard.yml
-```
-
-The generated `sitecustomize.py` only installs the adapter:
-
-```python
-from agentguard.adapters.agent.dify import install_dify_adapter
-
-install_dify_adapter()
-```
-
-The generated Compose override mounts AgentGuard and the bootstrap directory into Dify `api` and `worker`, and configures:
-
-- `AGENTGUARD_ENABLED`
-- `AGENTGUARD_SERVER_URL`
-- `AGENTGUARD_API_KEY`
-- `AGENTGUARD_POLICY`
-- `AGENTGUARD_DIFY_APP_IDS`
-- `AGENTGUARD_DIFY_NODE_IDS`
-- `PYTHONPATH`
-
-## Prepare AgentGuard Server Connection
-
-Users only run the AgentGuard client adapter on the Dify side. The AgentGuard server and frontend console are normally hosted by the AgentGuard service operator.
-
-Make sure the server API URL is reachable from Dify containers:
-
-```text
-AGENTGUARD_SERVER_URL=<your_agentguard_server_url>
-```
-
-For local development, if the AgentGuard server runs on the host at port `38080`, use:
-
-```text
-AGENTGUARD_SERVER_URL=http://host.docker.internal:38080
-```
-
-On Linux Docker, the generated override includes:
-
-```yaml
-extra_hosts:
-  - "host.docker.internal:host-gateway"
-```
-
-## Start Dify With AgentGuard
-
-Run:
+### 4. Start And Verify
 
 ```bash
 cd /path/to/dify/docker
@@ -206,19 +254,7 @@ docker compose -f docker-compose.yaml -f docker-compose.agentguard.yml up -d --f
 docker compose -f docker-compose.yaml -f docker-compose.agentguard.yml restart nginx
 ```
 
-Restarting `nginx` is recommended after recreating `api`, because the container IP can change and nginx may still point to the old upstream.
-
-## Verify In The Frontend
-
-Run your Dify workflow, then open the AgentGuard console provided by your server operator:
-
-```text
-<your_agentguard_console_url>
-```
-
-Log in and refresh the Agent list. If the Agent node invoked a tool, you should see the Dify agent and its tool. Open the Runtime page to inspect the event sequence.
-
-A tool-using Agent node usually produces:
+Run the workflow and refresh the AgentGuard console. A tool-using Workflow Agent node usually emits:
 
 ```text
 llm_input
@@ -229,54 +265,148 @@ llm_input
 llm_output
 ```
 
-If the first LLM turn only decides to call a tool, `llm_output` is:
+## Workflow Adapter Behavior
 
-```json
-{
-  "output": null,
-  "thought": null,
-  "final_output": null
-}
+The workflow adapter entry point is:
+
+```python
+from agentguard.adapters.agent.dify import install_dify_adapter
+
+install_dify_adapter()
 ```
 
-The following `tool_invoke` contains the tool name and arguments.
+It patches these legacy Workflow Agent in-process call sites:
 
-## Connecting A New Workflow
+- `core.workflow.nodes.agent.agent_node.AgentNode._run`
+- `core.model_manager.ModelInstance.invoke_llm`
+- `core.tools.tool_engine.ToolEngine.agent_invoke`
 
-For a new workflow with an Agent node:
+It also patches plugin daemon backwards invocation:
 
-1. Keep `ENABLE_AGENT_V2=false`.
-2. Get the new `app_id`.
-3. Get the Agent node `node_id`.
-4. Run `scripts/setup-dify-agentguard.sh` again, or manually update `AGENTGUARD_DIFY_APP_IDS` and `AGENTGUARD_DIFY_NODE_IDS` in `docker-compose.agentguard.yml`.
-5. Recreate `api` and `worker`, then restart `nginx`.
-6. Run the workflow and inspect the AgentGuard console provided by your server operator.
+- `core.plugin.backwards_invocation.model.PluginModelBackwardsInvocation.invoke_llm`
+- `core.plugin.backwards_invocation.tool.PluginToolBackwardsInvocation.invoke_tool`
 
-No Dify source code changes are required.
+The backwards invocation hooks are important because Dify legacy Agents often call `/invoke/llm` and `/invoke/tool` through the plugin daemon. In that case, the real LLM/tool execution happens in the API process rather than the worker process that entered the Agent node.
+
+## Supported Scope
+
+Validated support currently includes:
+
+- Dify 1.15.x local source deployment.
+- Legacy `agent-chat` apps.
+- Legacy Workflow Agent nodes with `ENABLE_AGENT_V2=false`.
+- LLM calls, LLM outputs, tool calls, and tool results inside Agent Chat / Workflow Agent runtime.
+- Reporting the runtime-available tool catalog at run start or first tool initialization.
+
+Not covered yet:
+
+- Normal Workflow LLM nodes.
+- Standalone Workflow Tool nodes.
+- Graphs where an LLM node routes to separate Tool nodes.
+- Fully validated Dify Agent v2 backend / `dify-agent` service integration.
+
+## Manual Integration Files
+
+If you do not use the script, create `/path/to/dify/agentguard-dify-bootstrap/sitecustomize.py` manually:
+
+```python
+import logging
+
+logger = logging.getLogger("agentguard.dify")
+
+try:
+    from agentguard.adapters.agent.dify_agent_chat import install_dify_agent_chat_adapter
+
+    status = install_dify_agent_chat_adapter()
+    logger.warning("AgentGuard Dify Agent Chat adapter status: %s", status)
+except Exception:
+    logger.exception("AgentGuard Dify Agent Chat adapter installation failed")
+
+try:
+    from agentguard.adapters.agent.dify import install_dify_adapter
+
+    status = install_dify_adapter()
+    logger.warning("AgentGuard Dify workflow adapter status: %s", status)
+except Exception:
+    logger.exception("AgentGuard Dify workflow adapter installation failed")
+```
+
+Then create `/path/to/dify/docker/docker-compose.agentguard.yml`:
+
+```yaml
+services:
+  api:
+    environment:
+      AGENTGUARD_ENABLED: "true"
+      AGENTGUARD_DIFY_AGENT_CHAT_ENABLED: "true"
+      AGENTGUARD_SERVER_URL: "http://host.docker.internal:38080"
+      AGENTGUARD_API_KEY: ""
+      AGENTGUARD_POLICY: ""
+      AGENTGUARD_DIFY_APP_IDS: "<optional_app_id_filter>"
+      AGENTGUARD_DIFY_NODE_IDS: "<optional_workflow_node_id_filter>"
+      AGENTGUARD_ENVIRONMENT: "dify"
+      PYTHONPATH: "/agentguard-dify-bootstrap:/agentguard/src/client/python:/agentguard/src:/app/api"
+    volumes:
+      - /path/to/AgentGuard:/agentguard:ro
+      - /path/to/dify/agentguard-dify-bootstrap:/agentguard-dify-bootstrap:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  worker:
+    environment:
+      AGENTGUARD_ENABLED: "true"
+      AGENTGUARD_DIFY_AGENT_CHAT_ENABLED: "true"
+      AGENTGUARD_SERVER_URL: "http://host.docker.internal:38080"
+      AGENTGUARD_API_KEY: ""
+      AGENTGUARD_POLICY: ""
+      AGENTGUARD_DIFY_APP_IDS: "<optional_app_id_filter>"
+      AGENTGUARD_DIFY_NODE_IDS: "<optional_workflow_node_id_filter>"
+      AGENTGUARD_ENVIRONMENT: "dify"
+      PYTHONPATH: "/agentguard-dify-bootstrap:/agentguard/src/client/python:/agentguard/src:/app/api"
+    volumes:
+      - /path/to/AgentGuard:/agentguard:ro
+      - /path/to/dify/agentguard-dify-bootstrap:/agentguard-dify-bootstrap:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+```
+
+On Linux Docker, `host.docker.internal` requires the `host-gateway` mapping in `extra_hosts`.
 
 ## Troubleshooting
 
-If the UI is stuck or API requests return 502, restart nginx:
+### Dify UI Is Stuck Or API Returns 502
+
+If you recreated `api`, nginx may still point to the old upstream IP. Run:
 
 ```bash
 docker compose -f docker-compose.yaml -f docker-compose.agentguard.yml restart nginx
 ```
 
-If the Dify agent does not appear in the AgentGuard frontend, check:
+### Dify Agent Does Not Appear In AgentGuard
+
+Check:
 
 - You are logged in to the correct AgentGuard console.
 - Dify containers can reach `AGENTGUARD_SERVER_URL`.
-- The workflow really reached the target Agent node.
-- The Agent node actually invoked a tool. Tool catalog entries are reported on first tool invocation.
-- `AGENTGUARD_DIFY_APP_IDS` and `AGENTGUARD_DIFY_NODE_IDS` match the current workflow.
 - `PYTHONPATH` includes the bootstrap and AgentGuard client paths.
 - Both `api` and `worker` mount AgentGuard and the bootstrap directory.
+- Agent Chat apps have `AGENTGUARD_DIFY_AGENT_CHAT_ENABLED=true`.
+- If `AGENTGUARD_DIFY_APP_IDS` is set, the current app id is in the list.
+- Workflow Agent nodes use the correct `AGENTGUARD_DIFY_NODE_IDS`.
+- The agent actually initialized or invoked tools; the tool catalog is usually reported at run start or first tool initialization.
 
-If the workflow succeeds but the server receives no events, check Dify can reach AgentGuard:
+### Confirm Adapter Installation
+
+Check Dify `api` logs:
 
 ```bash
-docker compose -f docker-compose.yaml -f docker-compose.agentguard.yml exec api \
-  curl -sS <your_agentguard_server_url>/health
+cd /path/to/dify/docker
+docker compose -f docker-compose.yaml -f docker-compose.agentguard.yml logs api \
+  | rg "AgentGuard Dify Agent Chat adapter status|AgentGuard Dify workflow adapter status"
 ```
 
-If your AgentGuard server requires authentication or uses a different health path, use the test command provided by the server operator.
+`patched: True` means the hook was installed.
+
+### What Happens When A Tool Is Denied
+
+If `tool_invoke` is denied or pending, the adapter does not call the real tool. It returns a blocked/pending observation that the Agent can read and continue reasoning over.

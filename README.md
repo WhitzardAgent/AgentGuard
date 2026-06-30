@@ -56,7 +56,7 @@ Today, AgentGuard covers several key technical areas highlighted in Anthropic's 
 
 ![AgentGuard Positioning](./docs/figs/positioning_en.png)
 
-AgentGuard can be integrated into existing agent frameworks without modifying the underlying execution logic. Currently, it supports LangChain, AutoGen, OpenAI Agents SDK, LangGraph, LlamaIndex, and [OpenClaw](https://github.com/openclaw/openclaw), and we are continuously expanding support for additional agent ecosystems and frameworks. For JavaScript-side integration details, refer to the [OpenClaw adapter document](https://whitzard.tech/AgentGuard/en/how-to-plugin/openclaw_adapter.html).
+AgentGuard can be integrated into existing agent frameworks without modifying the underlying execution logic. Currently, it supports LangChain, AutoGen, OpenAI Agents SDK, LangGraph, LlamaIndex, Dify, and [OpenClaw](https://github.com/openclaw/openclaw), and we are continuously expanding support for additional agent ecosystems and frameworks. For Dify integration, refer to the [Dify Agent integration guide](https://whitzard.tech/AgentGuard/en/how-to-plugin/dify.html). For JavaScript-side integration details, refer to the [OpenClaw adapter document](https://whitzard.tech/AgentGuard/en/how-to-plugin/openclaw_adapter.html).
 
 ## ✨ Features
 
@@ -82,9 +82,10 @@ Currently, we support the following agent frameworks:
 - [LangChain](https://github.com/langchain-ai/langchain)
 - [AutoGen](https://github.com/microsoft/autogen)
 - [OpenAI Agents SDK](https://github.com/openai/openai-agents-python)
+- [Dify](https://github.com/langgenius/dify)
 - [OpenClaw](https://github.com/openclaw/openclaw)
 
-Refer to the [OpenClaw adapter document](https://whitzard.tech/AgentGuard/en/how-to-plugin/openclaw_adapter.html).
+Refer to the [Dify Agent integration guide](https://whitzard.tech/AgentGuard/en/how-to-plugin/dify.html) and the [OpenClaw adapter document](https://whitzard.tech/AgentGuard/en/how-to-plugin/openclaw_adapter.html).
 
 ### 3. Visual Policy Configuration & Audit
 
