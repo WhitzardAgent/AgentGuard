@@ -8,9 +8,7 @@ from __future__ import annotations
 
 import contextvars
 import functools
-import json
 import os
-import re
 import threading
 from collections.abc import AsyncIterator, Generator, Iterable
 from contextlib import asynccontextmanager
@@ -18,28 +16,11 @@ from typing import Any
 
 from agentguard.schemas import events as ev
 from agentguard.schemas.decisions import DecisionType, GuardDecision
-from agentguard.schemas.events import EventType
 from agentguard.utils.errors import AdapterError
 from agentguard.utils.json import safe_dumps, safe_loads
 
 _PATCHED_ATTR = "__agentguard_dify_patched__"
 _ORIGINAL_ATTR = "__agentguard_dify_original__"
-
-_SECRET_KEY_HINTS = (
-    "password",
-    "passwd",
-    "secret",
-    "token",
-    "api_key",
-    "apikey",
-    "authorization",
-    "access_key",
-    "private_key",
-    "session_key",
-)
-_SECRET_VALUE_PATTERNS = [
-    re.compile(r"sk-[A-Za-z0-9]{8,}"),
-]
 
 _current_guard: contextvars.ContextVar[Any | None] = contextvars.ContextVar(
     "agentguard_dify_guard",
@@ -839,24 +820,12 @@ def _report_tool_catalog(
         reporter = getattr(guard, "_report_tool_metadata", None)
         if callable(reporter):
             reporter(tool_metadata)
-            _print_dify_debug(
-                "reported tool catalog",
-                {"agent_id": agent_id, "tool_name": tool_name, "required_args": tool_metadata.required_args},
-            )
         else:
             with _reported_tools_lock:
                 _reported_tools.discard(key)
-            _print_dify_debug(
-                "tool catalog reporter unavailable",
-                {"agent_id": agent_id, "tool_name": tool_name},
-            )
-    except Exception as exc:
+    except Exception:
         with _reported_tools_lock:
             _reported_tools.discard(key)
-        _print_dify_debug(
-            "failed to report tool catalog",
-            {"agent_id": agent_id, "tool_name": tool_name, "error": str(exc)},
-        )
 
 
 def _event_metadata(extra: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -1309,69 +1278,6 @@ def _legacy_blocked_tool_response(text: str) -> tuple[str, list[str], Any]:
         return text, [], {"agentguard": "blocked", "reason": text}
 
 
-def _maybe_subscribe_event_printer(guard: Any) -> None:
-    if not _env_truthy("AGENTGUARD_DIFY_PRINT_EVENTS"):
-        return
-    try:
-        guard.runtime.bus.subscribe(None, _print_agentguard_event)
-    except Exception:
-        pass
-
-
-def _print_agentguard_event(event: Any) -> None:
-    try:
-        redacted = _redact_for_print(event.redacted().to_dict())
-    except Exception:
-        redacted = _redact_for_print(_normalize_value(event))
-    print("\n[AgentGuard Event]", flush=True)
-    print(json.dumps(redacted, ensure_ascii=False, indent=2), flush=True)
-
-    try:
-        if event.event_type == EventType.LLM_OUTPUT:
-            payload = redacted.get("payload") or {}
-            print("[AgentGuard LLMOutput Parsed]", flush=True)
-            print(
-                json.dumps(
-                    {
-                        "output": payload.get("output"),
-                        "thought": payload.get("thought"),
-                        "final_output": payload.get("final_output"),
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                ),
-                flush=True,
-            )
-    except Exception:
-        pass
-
-
-def _print_dify_debug(message: str, payload: dict[str, Any] | None = None) -> None:
-    if not _env_truthy("AGENTGUARD_DIFY_PRINT_EVENTS"):
-        return
-    print(
-        "[AgentGuard Dify]",
-        message,
-        json.dumps(_redact_for_print(payload or {}), ensure_ascii=False),
-        flush=True,
-    )
-
-
-def _redact_for_print(value: Any, key: str | None = None) -> Any:
-    if key and any(hint in key.lower() for hint in _SECRET_KEY_HINTS):
-        return "[REDACTED]"
-    if isinstance(value, dict):
-        return {str(k): _redact_for_print(v, str(k)) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_redact_for_print(item) for item in value]
-    if isinstance(value, str):
-        redacted = value
-        for pattern in _SECRET_VALUE_PATTERNS:
-            redacted = pattern.sub("[REDACTED]", redacted)
-        return redacted
-    return value
-
-
 def _make_guard(metadata: dict[str, Any]) -> Any:
     from agentguard.guard import AgentGuard
 
@@ -1387,7 +1293,6 @@ def _make_guard(metadata: dict[str, Any]) -> Any:
         sandbox="noop",
         plugin_config=_plugin_config(),
     )
-    _maybe_subscribe_event_printer(guard)
     return guard
 
 
