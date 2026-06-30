@@ -307,6 +307,194 @@ test("shared app core updates scoped tool labels through the new patch endpoint"
   assert.equal(global.window.AgentGuardData.loadToolCatalog("agent-a")[0].labels.sensitivity, "low");
 });
 
+test("shared app core sends skill LLM concurrency in detect requests", async () => {
+  const listeners = {};
+  let lastFetchUrl = "";
+  let lastFetchBody = "";
+
+  global.window = {
+    AgentGuardConfig: { apiBase: "http://127.0.0.1:38080" },
+    AgentGuardShell: {
+      getState() {
+        return { selectedAgentId: "agent-a" };
+      },
+      setToolStatus() {},
+      setApiStatus() {},
+    },
+    addEventListener(name, handler) {
+      listeners[name] = handler;
+    },
+  };
+  global.localStorage = createStorage();
+  global.localStorage.setItem("agentguard.scopedAgentId", "agent-a");
+  global.localStorage.setItem("agentguard.scopedSkillList", JSON.stringify([{
+    owner_agent_id: "agent-a",
+    skill_unique_id: "skill-1",
+    name: "demo skill",
+    skill_resource: { files: [] },
+  }]));
+  global.document = {
+    getElementById() {
+      return createToastElement();
+    },
+  };
+  global.fetch = async (url, options = {}) => {
+    lastFetchUrl = String(url);
+    lastFetchBody = String(options.body || "");
+    return {
+      ok: true,
+      async json() {
+        return {
+          ok: true,
+          results: [{
+            skill_unique_id: "skill-1",
+            detect_result: { label: "benign", metadata: {} },
+          }],
+        };
+      },
+    };
+  };
+  global.setTimeout = (fn) => {
+    fn();
+    return 1;
+  };
+  global.clearTimeout = () => {};
+
+  delete require.cache[require.resolve("../static/common/app.js")];
+  require("../static/common/app.js");
+
+  await global.window.AgentGuardData.detectSkills("agent-a", ["skill-1"], {
+    useLlm: true,
+    llmConcurrency: 8,
+  });
+
+  assert.equal(lastFetchUrl, "/api/agents/agent-a/skills/detect");
+  assert.deepEqual(JSON.parse(lastFetchBody), {
+    skill_unique_ids: ["skill-1"],
+    use_llm: true,
+    llm_config: null,
+    llm_concurrency: 8,
+  });
+});
+
+test("shared app core defaults skill detect LLM concurrency to one and uses 80s timeout", async () => {
+  const listeners = {};
+  let lastFetchBody = "";
+  let requestTimeoutMs = 0;
+
+  global.window = {
+    AgentGuardConfig: { apiBase: "http://127.0.0.1:38080" },
+    AgentGuardShell: {
+      getState() {
+        return { selectedAgentId: "agent-a" };
+      },
+      setToolStatus() {},
+      setApiStatus() {},
+    },
+    addEventListener(name, handler) {
+      listeners[name] = handler;
+    },
+  };
+  global.localStorage = createStorage();
+  global.localStorage.setItem("agentguard.scopedAgentId", "agent-a");
+  global.localStorage.setItem("agentguard.scopedSkillList", JSON.stringify([{
+    owner_agent_id: "agent-a",
+    skill_unique_id: "skill-1",
+    name: "demo skill",
+    skill_resource: { files: [] },
+  }]));
+  global.document = {
+    getElementById() {
+      return createToastElement();
+    },
+  };
+  global.fetch = async (_url, options = {}) => {
+    lastFetchBody = String(options.body || "");
+    return {
+      ok: true,
+      async json() {
+        return {
+          ok: true,
+          results: [{
+            skill_unique_id: "skill-1",
+            detect_result: { label: "benign", metadata: {} },
+          }],
+        };
+      },
+    };
+  };
+  global.setTimeout = (_fn, ms) => {
+    requestTimeoutMs = ms;
+    return 1;
+  };
+  global.clearTimeout = () => {};
+
+  delete require.cache[require.resolve("../static/common/app.js")];
+  require("../static/common/app.js");
+
+  await global.window.AgentGuardData.detectSkills("agent-a", ["skill-1"], {
+    useLlm: true,
+  });
+
+  assert.deepEqual(JSON.parse(lastFetchBody), {
+    skill_unique_ids: ["skill-1"],
+    use_llm: true,
+    llm_config: null,
+    llm_concurrency: 1,
+  });
+  assert.equal(requestTimeoutMs, 80000);
+});
+
+test("shared app core normalizes omitted skill file reasons", async () => {
+  const listeners = {};
+
+  global.window = {
+    AgentGuardConfig: { apiBase: "http://127.0.0.1:38080" },
+    AgentGuardShell: {
+      setToolStatus() {},
+      setApiStatus() {},
+    },
+    addEventListener(name, handler) {
+      listeners[name] = handler;
+    },
+  };
+  global.localStorage = createStorage();
+  global.document = {
+    getElementById() {
+      return createToastElement();
+    },
+  };
+  global.fetch = async () => ({
+    ok: true,
+    async json() {
+      return [];
+    },
+  });
+  global.setTimeout = (fn) => {
+    fn();
+    return 1;
+  };
+  global.clearTimeout = () => {};
+
+  delete require.cache[require.resolve("../static/common/app.js")];
+  require("../static/common/app.js");
+
+  const skill = global.window.AgentGuardData.normalizeSkill({
+    owner_agent_id: "agent-a",
+    skill_unique_id: "skill-1",
+    name: "demo skill",
+    skill_resource: {
+      files: [
+        { relative_path: "asset.bin", binary: true, content_omitted: true, reason: "binary" },
+        { relative_path: "large.md", content_omitted: true, reason: "too_large" },
+      ],
+    },
+  });
+
+  assert.equal(skill.skill_resource.files[0].content_omitted, "binary");
+  assert.equal(skill.skill_resource.files[1].content_omitted, "too_large");
+});
+
 test("shared app core times out hanging requests instead of waiting forever", async () => {
   const listeners = {};
   let timeoutCallback = null;
@@ -396,6 +584,390 @@ test("shared app core clears scoped caches when selected agent changes", async (
   assert.equal(global.localStorage.getItem("agentguard.scopedAgentId"), null);
   assert.equal(global.localStorage.getItem("agentguard.scopedToolCatalog"), null);
   assert.equal(global.localStorage.getItem("agentguard.scopedRuleList"), null);
+});
+
+test("skills page clears stale cached detection after successful refresh without server result", async () => {
+  const elements = new Map();
+  let persistedSkills = null;
+  let persistedAgentId = "";
+
+  function getElement(id) {
+    if (!elements.has(id)) {
+      elements.set(id, {
+        id,
+        textContent: "",
+        innerHTML: "",
+        disabled: false,
+        checked: false,
+        dataset: {},
+        classList: {
+          add() {},
+          remove() {},
+          toggle() {},
+        },
+        addEventListener() {},
+      });
+    }
+    return elements.get(id);
+  }
+
+  const cachedSkill = {
+    owner_agent_id: "agent-a",
+    agent_id: "agent-a",
+    skill_unique_id: "skill-1",
+    name: "cached skill",
+    description: "Cached copy",
+    source_framework: "openclaw",
+    file_count: 1,
+    total_size: 12,
+    detect_result: {
+      label: "malicious",
+      reason: "Old cached finding",
+      metadata: { rule_based: { findings: [] } },
+    },
+    skill_resource: {
+      files: [{ relative_path: "SKILL.md", kind: "skill", size: 12 }],
+      skill_markdown: { relative_path: "SKILL.md", content: "old" },
+    },
+  };
+  const freshSkill = {
+    ...cachedSkill,
+    description: "Fresh copy",
+    total_size: 13,
+    detect_result: null,
+    skill_resource: {
+      files: [{ relative_path: "SKILL.md", kind: "skill", size: 13 }],
+      skill_markdown: { relative_path: "SKILL.md", content: "fresh" },
+    },
+  };
+
+  global.window = {
+    AgentGuardData: {
+      loadSkillList() {
+        return [cachedSkill];
+      },
+      async refreshSkillList() {
+        return [freshSkill];
+      },
+      persistSkillList(skills, agentId) {
+        persistedSkills = skills;
+        persistedAgentId = agentId;
+      },
+      getLastSkillSyncTime() {
+        return "2026-06-30T00:00:00.000Z";
+      },
+    },
+    AgentGuardShell: {
+      getState() {
+        return { selectedAgentId: "agent-a" };
+      },
+      setPageContext() {},
+    },
+    AgentGuardApi: {
+      formatErrorMessage(error, fallback) {
+        return error?.message || fallback;
+      },
+    },
+    AgentGuardI18n: {
+      t(value) {
+        return value;
+      },
+      getLanguage() {
+        return "en";
+      },
+    },
+    AgentGuardUI: {
+      showToast() {},
+    },
+    addEventListener() {},
+  };
+  global.document = {
+    getElementById: getElement,
+  };
+  global.Element = function Element() {};
+  global.HTMLInputElement = function HTMLInputElement() {};
+
+  delete require.cache[require.resolve("../static/pages/skills/skills.js")];
+  require("../static/pages/skills/skills.js");
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(persistedAgentId, "agent-a");
+  assert.equal(persistedSkills?.[0]?.detect_result, null);
+  assert.match(getElement("skill-list").innerHTML, /not detected/);
+});
+
+test("skills page does not render cached detection before server refresh completes", async () => {
+  const elements = new Map();
+  let resolveRefresh;
+
+  function getElement(id) {
+    if (!elements.has(id)) {
+      elements.set(id, {
+        id,
+        textContent: "",
+        innerHTML: "",
+        disabled: false,
+        checked: false,
+        dataset: {},
+        classList: {
+          add() {},
+          remove() {},
+          toggle() {},
+        },
+        addEventListener() {},
+      });
+    }
+    return elements.get(id);
+  }
+
+  global.window = {
+    AgentGuardData: {
+      loadSkillList() {
+        return [{
+          owner_agent_id: "agent-a",
+          agent_id: "agent-a",
+          skill_unique_id: "skill-1",
+          name: "cached skill",
+          description: "Cached copy",
+          source_framework: "openclaw",
+          file_count: 1,
+          total_size: 12,
+          detect_result: {
+            label: "malicious",
+            reason: "Old cached finding",
+          },
+          skill_resource: {
+            files: [{ relative_path: "SKILL.md", kind: "skill", size: 12 }],
+          },
+        }];
+      },
+      refreshSkillList() {
+        return new Promise((resolve) => {
+          resolveRefresh = resolve;
+        });
+      },
+      persistSkillList() {},
+      getLastSkillSyncTime() {
+        return "";
+      },
+    },
+    AgentGuardShell: {
+      getState() {
+        return { selectedAgentId: "agent-a" };
+      },
+      setPageContext() {},
+    },
+    AgentGuardApi: {
+      formatErrorMessage(error, fallback) {
+        return error?.message || fallback;
+      },
+    },
+    AgentGuardI18n: {
+      t(value) {
+        return value;
+      },
+      getLanguage() {
+        return "en";
+      },
+    },
+    AgentGuardUI: {
+      showToast() {},
+    },
+    addEventListener() {},
+  };
+  global.document = {
+    getElementById: getElement,
+  };
+  global.Element = function Element() {};
+  global.HTMLInputElement = function HTMLInputElement() {};
+
+  delete require.cache[require.resolve("../static/pages/skills/skills.js")];
+  require("../static/pages/skills/skills.js");
+
+  assert.match(getElement("skill-list").innerHTML, /not detected/);
+  assert.doesNotMatch(getElement("skill-list").innerHTML, /malicious/);
+
+  resolveRefresh([]);
+  await new Promise((resolve) => setImmediate(resolve));
+});
+
+test("skills page keeps LLM review in waiting state after rule results finish", async () => {
+  const elements = new Map();
+  const listeners = {};
+  const llmResolvers = [];
+  let llmCalls = 0;
+
+  function getElement(id) {
+    if (!elements.has(id)) {
+      elements.set(id, {
+        id,
+        textContent: "",
+        innerHTML: "",
+        disabled: false,
+        checked: false,
+        value: id === "skill-llm-concurrency" ? "1" : "",
+        dataset: {},
+        classList: {
+          add() {},
+          remove() {},
+          toggle() {},
+        },
+        addEventListener(name, handler) {
+          this.listeners = this.listeners || {};
+          this.listeners[name] = handler;
+        },
+      });
+    }
+    return elements.get(id);
+  }
+
+  const skills = ["skill-1", "skill-2"].map((id) => ({
+    owner_agent_id: "agent-a",
+    agent_id: "agent-a",
+    skill_unique_id: id,
+    name: id,
+    description: "demo",
+    source_framework: "openclaw",
+    file_count: 1,
+    total_size: 12,
+    detect_result: null,
+    skill_resource: {
+      files: [{ relative_path: "SKILL.md", kind: "skill", size: 12, content: "# demo" }],
+    },
+  }));
+
+  function detectedSkill(id, withLlm = false) {
+    const detectResult = {
+      label: "malicious",
+      reason: "rule result",
+      metadata: {
+        rule_based: {
+          label: "malicious",
+          finding_count: 1,
+          parsed_summary: {
+            signals: [{
+              signal_id: "NET001_NETWORK_CALL",
+              kind: "network",
+              file_path: "SKILL.md",
+              line_number: 1,
+              evidence: "network call",
+              severity: 1,
+              confidence: 1,
+            }],
+          },
+        },
+        ...(withLlm ? {
+          llm_review: {
+            label: "malicious",
+            reason: "llm result",
+          },
+        } : {}),
+      },
+    };
+    const base = skills.find((skill) => skill.skill_unique_id === id);
+    return {
+      ...base,
+      detect_result: detectResult,
+    };
+  }
+
+  global.window = {
+    AgentGuardData: {
+      loadSkillList() {
+        return skills;
+      },
+      async refreshSkillList() {
+        return skills;
+      },
+      persistSkillList() {},
+      async detectSkills(_agentId, ids, options = {}) {
+        const id = ids[0];
+        if (options.useLlm === true) {
+          llmCalls += 1;
+          return new Promise((resolve) => {
+            llmResolvers.push(() => resolve({
+              ok: true,
+              results: [{
+                skill_unique_id: id,
+                detect_result: detectedSkill(id, true).detect_result,
+                skill: detectedSkill(id, true),
+              }],
+            }));
+          });
+        }
+        return {
+          ok: true,
+          results: [{
+            skill_unique_id: id,
+            detect_result: detectedSkill(id).detect_result,
+            skill: detectedSkill(id),
+          }],
+        };
+      },
+      getLastSkillSyncTime() {
+        return "";
+      },
+    },
+    AgentGuardShell: {
+      getState() {
+        return { selectedAgentId: "agent-a" };
+      },
+      setPageContext() {},
+    },
+    AgentGuardApi: {
+      formatErrorMessage(error, fallback) {
+        return error?.message || fallback;
+      },
+    },
+    AgentGuardI18n: {
+      t(value) {
+        return value;
+      },
+      getLanguage() {
+        return "en";
+      },
+    },
+    AgentGuardUI: {
+      showToast() {},
+    },
+    addEventListener(name, handler) {
+      listeners[name] = handler;
+    },
+    setInterval() {
+      return 1;
+    },
+    clearInterval() {},
+  };
+  global.document = {
+    getElementById: getElement,
+  };
+  global.Element = function Element() {};
+  global.HTMLInputElement = function HTMLInputElement() {};
+
+  delete require.cache[require.resolve("../static/pages/skills/skills.js")];
+  require("../static/pages/skills/skills.js");
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  getElement("skill-use-llm").checked = true;
+  getElement("select-all-skills").listeners.click();
+  const detectPromise = getElement("detect-selected-skills").listeners.click();
+
+  for (let i = 0; i < 10 && llmCalls === 0; i += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  const html = getElement("skill-list").innerHTML;
+  assert.doesNotMatch(html, /Rule-based result only\. LLM review was not requested\./);
+  assert.match(html, /Waiting for LLM response|Waiting for an LLM review slot/);
+
+  llmResolvers.shift()?.();
+  for (let i = 0; i < 10 && llmCalls < 2; i += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  llmResolvers.shift()?.();
+  await detectPromise;
 });
 
 test("shared app core builds multi-plugin config while preserving unrelated phase data", async () => {

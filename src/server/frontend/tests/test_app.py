@@ -427,6 +427,116 @@ def test_tool_label_patch_proxy_forwards_request():
     assert json.loads(str(observed["body"]))["boundary"] == "internal"
 
 
+def test_skills_proxy_lists_global_skills():
+    observed: dict[str, object] = {}
+
+    class UpstreamHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            observed["path"] = self.path
+            observed["api_key"] = self.headers.get("X-Api-Key")
+            body = json.dumps([
+                {
+                    "owner_agent_id": "agent-a",
+                    "skill_unique_id": "agent-a:skill-one",
+                    "name": "skill-one",
+                    "description": "demo",
+                }
+            ]).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    with _ThreadedServer(UpstreamHandler) as upstream:
+        with patched_proxy_target(upstream.url, api_key="test-secret"):
+            with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+                status, payload = _json_request("GET", preview.url, "/api/skills")
+
+    assert status == 200
+    assert payload[0]["name"] == "skill-one"
+    assert observed["path"] == "/v1/backend/skills"
+    assert observed["api_key"] == "test-secret"
+
+
+def test_agent_skills_proxy_lists_scoped_skills():
+    observed: dict[str, object] = {}
+
+    class UpstreamHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            observed["path"] = self.path
+            body = json.dumps([
+                {
+                    "owner_agent_id": "agent-a",
+                    "skill_unique_id": "agent-a:skill-one",
+                    "name": "skill-one",
+                }
+            ]).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    with _ThreadedServer(UpstreamHandler) as upstream:
+        with patched_proxy_target(upstream.url):
+            with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+                status, payload = _json_request("GET", preview.url, "/api/agents/agent-a/skills")
+
+    assert status == 200
+    assert payload[0]["skill_unique_id"] == "agent-a:skill-one"
+    assert observed["path"] == "/v1/backend/agents/agent-a/skills"
+
+
+def test_agent_skill_detect_proxy_forwards_payload_and_api_key():
+    observed: dict[str, object] = {}
+
+    class UpstreamHandler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            observed["path"] = self.path
+            observed["api_key"] = self.headers.get("X-Api-Key")
+            length = int(self.headers.get("Content-Length", "0"))
+            observed["body"] = self.rfile.read(length).decode("utf-8")
+            body = json.dumps({"ok": True, "agent_id": "agent-a", "detected": 1, "results": []}).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    request_body = {
+        "skill_unique_ids": ["agent-a:skill-one"],
+        "use_llm": True,
+        "llm_config": None,
+        "llm_concurrency": 4,
+    }
+
+    with _ThreadedServer(UpstreamHandler) as upstream:
+        with patched_proxy_target(upstream.url, api_key="test-secret"):
+            with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+                status, payload = _json_request(
+                    "POST",
+                    preview.url,
+                    "/api/agents/agent-a/skills/detect",
+                    request_body,
+                )
+
+    assert status == 200
+    assert payload["ok"] is True
+    assert observed["path"] == "/v1/backend/agents/agent-a/skills/detect"
+    assert observed["api_key"] == "test-secret"
+    assert json.loads(str(observed["body"])) == request_body
+
+
 def test_plugins_config_proxy_forwards_payload_and_api_key():
     observed: dict[str, object] = {}
 
@@ -625,6 +735,17 @@ def test_plugins_page_renders_plugin_selection_workspace():
     assert 'Plugins</a>' in body
 
 
+def test_skills_page_renders_skill_workspace():
+    with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+        status, body = _text_request("GET", preview.url, "/skills.html")
+
+    assert status == 200
+    assert "Registered Skills" in body
+    assert "Detect selected" in body
+    assert 'href="/skills.html"' in body
+    assert 'data-agent-required="true"' in body
+
+
 def test_mock_mode_lists_tools_and_agent_scoped_tools():
     with patched_mock_mode():
         with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
@@ -637,6 +758,32 @@ def test_mock_mode_lists_tools_and_agent_scoped_tools():
     assert scoped_status == 200
     assert {item["owner_agent_id"] for item in scoped_tools} == {"agent-alpha"}
     assert {item["name"] for item in scoped_tools} == {"shell.exec", "email.send", "docs.search"}
+
+
+def test_mock_mode_lists_and_detects_agent_skills():
+    with patched_mock_mode():
+        with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+            status, skills = _json_request("GET", preview.url, "/api/skills")
+            scoped_status, scoped_skills = _json_request("GET", preview.url, "/api/agents/agent-beta/skills")
+            skill_id = scoped_skills[0]["skill_unique_id"]
+            detect_status, detect_payload = _json_request(
+                "POST",
+                preview.url,
+                "/api/agents/agent-beta/skills/detect",
+                {"skill_unique_ids": [skill_id], "use_llm": True},
+            )
+            after_status, after_skills = _json_request("GET", preview.url, "/api/agents/agent-beta/skills")
+
+    assert status == 200
+    assert any(item["name"] == "customer_email_skill" for item in skills)
+    assert scoped_status == 200
+    assert [item["name"] for item in scoped_skills] == ["credential_exfiltration_skill"]
+    assert detect_status == 200
+    assert detect_payload["ok"] is True
+    assert detect_payload["results"][0]["detect_result"]["label"] == "malicious"
+    assert after_status == 200
+    assert after_skills[0]["detect_result"]["label"] == "malicious"
+    assert after_skills[0]["detect_result"]["metadata"]["llm_review"]["skipped"] is False
 
 
 def test_mock_mode_lists_global_and_agent_rules():

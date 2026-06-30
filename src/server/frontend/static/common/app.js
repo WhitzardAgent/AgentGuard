@@ -6,6 +6,8 @@
   const SCOPED_AGENT_ID_KEY = "agentguard.scopedAgentId";
   const SCOPED_TOOL_CATALOG_KEY = "agentguard.scopedToolCatalog";
   const SCOPED_TOOL_SYNC_KEY = "agentguard.scopedToolCatalogSyncedAt";
+  const SCOPED_SKILL_LIST_KEY = "agentguard.scopedSkillList";
+  const SCOPED_SKILL_SYNC_KEY = "agentguard.scopedSkillListSyncedAt";
   const SCOPED_RULE_LIST_KEY = "agentguard.scopedRuleList";
   const SCOPED_RULE_SYNC_KEY = "agentguard.scopedRuleListSyncedAt";
   const LEGACY_TOOL_CATALOG_KEY = "agentguard.toolCatalog";
@@ -246,6 +248,8 @@
     localStorage.removeItem(SCOPED_AGENT_ID_KEY);
     localStorage.removeItem(SCOPED_TOOL_CATALOG_KEY);
     localStorage.removeItem(SCOPED_TOOL_SYNC_KEY);
+    localStorage.removeItem(SCOPED_SKILL_LIST_KEY);
+    localStorage.removeItem(SCOPED_SKILL_SYNC_KEY);
     localStorage.removeItem(SCOPED_RULE_LIST_KEY);
     localStorage.removeItem(SCOPED_RULE_SYNC_KEY);
   }
@@ -328,6 +332,106 @@
     };
   }
 
+  function normalizeDetectionResult(item) {
+    if (!item || typeof item !== "object") {
+      return null;
+    }
+    return {
+      ...item,
+      object_id: String(item?.object_id || "").trim(),
+      object_type: String(item?.object_type || "").trim(),
+      name: String(item?.name || "").trim(),
+      risk_labels: Array.isArray(item?.risk_labels) ? item.risk_labels.map(String).filter(Boolean) : [],
+      risk_level: String(item?.risk_level || "").trim(),
+      label: String(item?.label || "").trim(),
+      reason: String(item?.reason || "").trim(),
+      metadata: item?.metadata && typeof item.metadata === "object" ? item.metadata : {},
+    };
+  }
+
+  function normalizeSkillFile(item) {
+    if (!item || typeof item !== "object") {
+      return null;
+    }
+    const omissionReason = item?.content_omitted
+      ? String(item?.reason || item?.content_omitted || "content_not_reported").trim()
+      : "";
+    return {
+      relative_path: String(item?.relative_path || item?.path || "").trim(),
+      kind: String(item?.kind || "file").trim() || "file",
+      size: Number.isFinite(Number(item?.size)) ? Number(item.size) : 0,
+      binary: item?.binary === true,
+      content_omitted: omissionReason,
+      content: typeof item?.content === "string" ? item.content : undefined,
+    };
+  }
+
+  function normalizeSkill(item) {
+    const ownerAgentId = String(item?.owner_agent_id || item?.agent_id || "").trim();
+    const skillResource = item?.skill_resource && typeof item.skill_resource === "object"
+      ? item.skill_resource
+      : (item?.descriptor && typeof item.descriptor === "object" ? item.descriptor : {});
+    const resourceFiles = Array.isArray(skillResource?.files) ? skillResource.files : [];
+    const files = resourceFiles
+      .map(normalizeSkillFile)
+      .filter((file) => file && file.relative_path);
+    const skillUniqueId = String(item?.skill_unique_id || skillResource?.skill_unique_id || "").trim();
+    const name = String(item?.name || skillResource?.name || "").trim();
+    return {
+      owner_agent_id: ownerAgentId,
+      agent_id: ownerAgentId,
+      user_id: item?.user_id == null ? null : String(item.user_id),
+      session_id: item?.session_id == null ? null : String(item.session_id),
+      skill_unique_id: skillUniqueId,
+      name,
+      description: String(item?.description || skillResource?.description || "").trim(),
+      source_framework: String(item?.source_framework || skillResource?.source_framework || "").trim(),
+      object_type: String(item?.object_type || skillResource?.object_type || "skill").trim() || "skill",
+      root_path: String(item?.root_path || skillResource?.root_path || "").trim(),
+      entry_file: String(item?.entry_file || skillResource?.entry_file || "SKILL.md").trim(),
+      sha256: String(item?.sha256 || skillResource?.sha256 || "").trim(),
+      file_count: Number.isFinite(Number(item?.file_count || skillResource?.file_count))
+        ? Number(item?.file_count || skillResource?.file_count)
+        : files.length,
+      total_size: Number.isFinite(Number(item?.total_size || skillResource?.total_size))
+        ? Number(item?.total_size || skillResource?.total_size)
+        : files.reduce((sum, file) => sum + Number(file.size || 0), 0),
+      extraction: item?.extraction && typeof item.extraction === "object"
+        ? item.extraction
+        : (skillResource?.extraction && typeof skillResource.extraction === "object" ? skillResource.extraction : {}),
+      detect_result: normalizeDetectionResult(item?.detect_result),
+      skill_resource: {
+        ...skillResource,
+        files,
+        skill_markdown: normalizeSkillFile(skillResource?.skill_markdown) || skillResource?.skill_markdown || null,
+        assets: Array.isArray(skillResource?.assets)
+          ? skillResource.assets.map(normalizeSkillFile).filter(Boolean)
+          : [],
+      },
+    };
+  }
+
+  function compactSkillForCache(skill) {
+    const normalized = normalizeSkill(skill);
+    const files = Array.isArray(normalized.skill_resource?.files)
+      ? normalized.skill_resource.files.map((file) => ({
+        relative_path: file.relative_path,
+        kind: file.kind,
+        size: file.size,
+        binary: file.binary,
+        content_omitted: file.content_omitted || (typeof file.content === "string" ? "cached_summary_only" : ""),
+      }))
+      : [];
+    return {
+      ...normalized,
+      skill_resource: {
+        files,
+        assets: files.filter((file) => file.kind === "asset"),
+        skill_markdown: files.find((file) => file.relative_path === "SKILL.md") || null,
+      },
+    };
+  }
+
   function normalizeRule(item) {
     return {
       ...item,
@@ -345,20 +449,26 @@
     };
   }
 
-  function buildAgentSummary(agentId, tools) {
+  function buildAgentSummary(agentId, tools, skills = []) {
     const sortedTools = (Array.isArray(tools) ? tools : [])
       .map((tool) => String(tool?.name || "").trim())
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+    const sortedSkills = (Array.isArray(skills) ? skills : [])
+      .map((skill) => String(skill?.name || "").trim())
       .filter(Boolean)
       .sort((a, b) => a.localeCompare(b));
     return {
       agent_id: agentId,
       tool_count: sortedTools.length,
       tool_names: sortedTools.slice(0, 4),
+      skill_count: sortedSkills.length,
+      skill_names: sortedSkills.slice(0, 4),
     };
   }
 
-  function buildAgentCatalogFromTools(tools) {
-    const grouped = (Array.isArray(tools) ? tools : []).reduce((acc, tool) => {
+  function buildAgentCatalogFromResources(tools, skills = []) {
+    const groupedTools = (Array.isArray(tools) ? tools : []).reduce((acc, tool) => {
       const agentId = String(tool?.owner_agent_id || "").trim();
       if (!agentId) {
         return acc;
@@ -369,9 +479,20 @@
       acc[agentId].push(tool);
       return acc;
     }, {});
-    return Object.keys(grouped)
+    const groupedSkills = (Array.isArray(skills) ? skills : []).reduce((acc, skill) => {
+      const agentId = String(skill?.owner_agent_id || skill?.agent_id || "").trim();
+      if (!agentId) {
+        return acc;
+      }
+      if (!acc[agentId]) {
+        acc[agentId] = [];
+      }
+      acc[agentId].push(skill);
+      return acc;
+    }, {});
+    return Array.from(new Set([...Object.keys(groupedTools), ...Object.keys(groupedSkills)]))
       .sort((a, b) => a.localeCompare(b))
-      .map((agentId) => buildAgentSummary(agentId, grouped[agentId]));
+      .map((agentId) => buildAgentSummary(agentId, groupedTools[agentId] || [], groupedSkills[agentId] || []));
   }
 
   function normalizeAgentSummary(item) {
@@ -380,6 +501,8 @@
       agent_id: agentId,
       tool_count: Number.isFinite(Number(item?.tool_count)) ? Number(item.tool_count) : 0,
       tool_names: Array.isArray(item?.tool_names) ? item.tool_names.map(String).filter(Boolean) : [],
+      skill_count: Number.isFinite(Number(item?.skill_count)) ? Number(item.skill_count) : 0,
+      skill_names: Array.isArray(item?.skill_names) ? item.skill_names.map(String).filter(Boolean) : [],
     };
   }
 
@@ -447,6 +570,38 @@
     localStorage.setItem(SCOPED_AGENT_ID_KEY, normalizedAgentId);
     localStorage.setItem(SCOPED_TOOL_CATALOG_KEY, JSON.stringify(catalog));
     localStorage.setItem(SCOPED_TOOL_SYNC_KEY, new Date().toISOString());
+  }
+
+  function loadScopedSkillList(agentId = getSelectedAgentId()) {
+    if (!matchesScopedAgent(agentId)) {
+      return [];
+    }
+    try {
+      const raw = localStorage.getItem(SCOPED_SKILL_LIST_KEY);
+      if (!raw) {
+        return [];
+      }
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
+      return parsed
+        .map(normalizeSkill)
+        .filter((skill) => skill.owner_agent_id && skill.skill_unique_id && skill.name);
+    } catch {
+      return [];
+    }
+  }
+
+  function persistScopedSkillList(agentId, skills) {
+    const normalizedAgentId = String(agentId || "").trim();
+    if (!normalizedAgentId) {
+      clearScopedAgentCache();
+      return;
+    }
+    localStorage.setItem(SCOPED_AGENT_ID_KEY, normalizedAgentId);
+    localStorage.setItem(SCOPED_SKILL_LIST_KEY, JSON.stringify((skills || []).map(compactSkillForCache)));
+    localStorage.setItem(SCOPED_SKILL_SYNC_KEY, new Date().toISOString());
   }
 
   function loadScopedRuleList(agentId = getSelectedAgentId()) {
@@ -593,12 +748,20 @@
   }
 
   async function refreshAgentCatalog() {
-    const payload = await fetchJson("/api/tools");
-    if (!Array.isArray(payload)) {
+    const toolPayload = await fetchJson("/api/tools");
+    if (!Array.isArray(toolPayload)) {
       throw new Error("Agent catalog payload has an unexpected format.");
     }
-    const tools = payload.map(normalizeTool);
-    const catalog = buildAgentCatalogFromTools(tools);
+    let skillPayload = [];
+    try {
+      const maybeSkills = await fetchJson("/api/skills");
+      skillPayload = Array.isArray(maybeSkills) ? maybeSkills : [];
+    } catch {
+      skillPayload = [];
+    }
+    const tools = toolPayload.map(normalizeTool);
+    const skills = skillPayload.map(normalizeSkill);
+    const catalog = buildAgentCatalogFromResources(tools, skills);
     persistAgentCatalog(catalog);
     return catalog;
   }
@@ -656,6 +819,79 @@
     }
     persistScopedToolCatalog(normalizedAgentId, nextCatalog);
     return normalizedTool;
+  }
+
+  async function refreshScopedSkillList(agentId = getSelectedAgentId()) {
+    const normalizedAgentId = String(agentId || "").trim();
+    if (!normalizedAgentId) {
+      clearScopedAgentCache();
+      return [];
+    }
+    const payload = await fetchJson(`/api/agents/${encodeURIComponent(normalizedAgentId)}/skills`);
+    if (!Array.isArray(payload)) {
+      throw new Error("Skill list payload has an unexpected format.");
+    }
+    const skills = payload.map(normalizeSkill);
+    persistScopedSkillList(normalizedAgentId, skills);
+    return skills;
+  }
+
+  async function detectScopedSkills(agentId, skillUniqueIds, options = {}) {
+    const normalizedAgentId = String(agentId || "").trim();
+    const ids = (Array.isArray(skillUniqueIds) ? skillUniqueIds : [])
+      .map((item) => String(item || "").trim())
+      .filter(Boolean);
+    if (!normalizedAgentId) {
+      throw new Error("agent_id is required.");
+    }
+    if (!ids.length) {
+      throw new Error("Select at least one skill to detect.");
+    }
+    const payload = await fetchJson(
+      `/api/agents/${encodeURIComponent(normalizedAgentId)}/skills/detect`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          skill_unique_ids: ids,
+          use_llm: options?.useLlm === true,
+          llm_config: options?.llmConfig || null,
+          llm_concurrency: Number.isFinite(Number(options?.llmConcurrency))
+            ? Number(options.llmConcurrency)
+            : 1,
+        }),
+        timeoutMs: Number.isFinite(Number(options?.timeoutMs))
+          ? Number(options.timeoutMs)
+          : 80000,
+      },
+    );
+    const current = loadScopedSkillList(normalizedAgentId);
+    const nextById = new Map(current.map((skill) => [skill.skill_unique_id, skill]));
+    (payload?.results || []).forEach((item) => {
+      const updatedSkill = normalizeSkill(item?.skill || {
+        ...nextById.get(String(item?.skill_unique_id || "").trim()),
+        detect_result: item?.detect_result || null,
+      });
+      if (updatedSkill.skill_unique_id) {
+        nextById.set(updatedSkill.skill_unique_id, updatedSkill);
+      }
+    });
+    const nextSkills = [...nextById.values()];
+    if (nextSkills.length) {
+      persistScopedSkillList(normalizedAgentId, nextSkills);
+    }
+    return {
+      ...payload,
+      results: Array.isArray(payload?.results)
+        ? payload.results.map((item) => ({
+          ...item,
+          detect_result: normalizeDetectionResult(item?.detect_result),
+          skill: item?.skill ? normalizeSkill(item.skill) : null,
+        }))
+        : [],
+    };
   }
 
   async function refreshScopedRuleList(agentId = getSelectedAgentId()) {
@@ -774,6 +1010,7 @@
     normalizeAgentSummary,
     normalizePluginOption,
     normalizeRule,
+    normalizeSkill,
     normalizeTool,
     buildPluginConfig,
     collapsePluginSelection,
@@ -794,6 +1031,16 @@
     },
     updateToolLabels(agentId, toolName, labels) {
       return updateScopedToolLabels(agentId, toolName, labels);
+    },
+    loadSkillList: loadScopedSkillList,
+    persistSkillList(skills, agentId = getSelectedAgentId()) {
+      persistScopedSkillList(agentId, skills);
+    },
+    refreshSkillList(agentId = getSelectedAgentId()) {
+      return refreshScopedSkillList(agentId);
+    },
+    detectSkills(agentId, skillUniqueIds, options = {}) {
+      return detectScopedSkills(agentId, skillUniqueIds, options);
     },
     loadRuleList: loadScopedRuleList,
     persistRuleList(rules, agentId = getSelectedAgentId()) {
@@ -818,6 +1065,9 @@
     },
     getLastToolSyncTime() {
       return localStorage.getItem(SCOPED_TOOL_SYNC_KEY);
+    },
+    getLastSkillSyncTime() {
+      return localStorage.getItem(SCOPED_SKILL_SYNC_KEY);
     },
     getLastRuleSyncTime() {
       return localStorage.getItem(SCOPED_RULE_SYNC_KEY);

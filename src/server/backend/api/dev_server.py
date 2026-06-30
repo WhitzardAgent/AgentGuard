@@ -9,11 +9,11 @@ from typing import Any
 
 from backend.api.auth import check_backend_api_key
 from backend.console.state import ConsoleState
-from shared.schemas.context import RuntimeContext
-from shared.utils.json import safe_dumps, safe_loads
 from backend.runtime.manager import RuntimeManager
 from backend.runtime.policy.snapshot_builder import snapshot_dict
 from backend.skill_service.router import SkillServiceRouter
+from shared.schemas.context import RuntimeContext
+from shared.utils.json import safe_dumps, safe_loads
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -201,6 +201,18 @@ class _Handler(BaseHTTPRequestHandler):
                 user_feedback=str(body.get("user_feedback") or ""),
                 current_candidate=body.get("current_candidate"),
                 max_rounds=int(body.get("max_rounds") or 4),
+                llm_config=body.get("llm_config") if isinstance(body.get("llm_config"), dict) else None,
+            )
+            self._send(int(result.pop("code", 200 if result.get("ok") else 422)), result)
+        elif self.path.startswith("/v1/backend/agents/") and self.path.endswith("/skills/detect"):
+            agent_id = self.path.split("/")[4]
+            skill_unique_ids = body.get("skill_unique_ids") or []
+            if not isinstance(skill_unique_ids, list):
+                skill_unique_ids = []
+            result = self.console.detect_skills(
+                agent_id,
+                skill_unique_ids,
+                use_llm=bool(body.get("use_llm")),
                 llm_config=body.get("llm_config") if isinstance(body.get("llm_config"), dict) else None,
             )
             self._send(int(result.pop("code", 200 if result.get("ok") else 422)), result)

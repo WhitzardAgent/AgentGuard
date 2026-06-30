@@ -37,6 +37,13 @@ class RuleGenerateBody(BaseModel):
     llm_config: dict[str, Any] | None = None
 
 
+class SkillDetectBody(BaseModel):
+    skill_unique_ids: list[str] = Field(default_factory=list)
+    use_llm: bool = False
+    llm_config: dict[str, Any] | None = None
+    llm_concurrency: int | None = None
+
+
 class ApprovalBody(BaseModel):
     note: str = ""
 
@@ -73,6 +80,19 @@ def list_skills() -> list[dict[str, Any]]:
 @router.get("/v1/backend/agents/{agent_id}/skills")
 def list_agent_skills(agent_id: str) -> list[dict[str, Any]]:
     return get_console().skills(agent_id)
+
+
+@router.post("/v1/backend/agents/{agent_id}/skills/detect")
+def detect_agent_skills(agent_id: str, body: SkillDetectBody) -> Any:
+    result = get_console().detect_skills(
+        agent_id,
+        body.skill_unique_ids,
+        use_llm=body.use_llm,
+        llm_config=body.llm_config,
+    )
+    if not result.get("ok"):
+        return JSONResponse(result, status_code=int(result.pop("code", 422)))
+    return result
 
 
 # ---- rules -------------------------------------------------------------

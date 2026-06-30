@@ -16,6 +16,7 @@
   const PLUGIN_SELECTION_PATH = "/plugins.html";
   const AGENT_REQUIRED_PATHS = new Set([
     "/plugins.html",
+    "/skills.html",
     "/labels.html",
     "/rules.html",
     "/runtime.html",

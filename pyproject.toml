@@ -51,6 +51,7 @@ frontend = [
     "static/common/*.js",
     "static/pages/agents/*.js",
     "static/pages/labels/*.js",
+    "static/pages/skills/*.js",
     "static/pages/rules/*.js",
     "static/pages/runtime/*.js",
     "templates/*.html",

@@ -35,8 +35,12 @@
     items.forEach((agent) => {
       const agentId = String(agent?.agent_id || "").trim();
       const toolCount = Number(agent?.tool_count || 0);
+      const skillCount = Number(agent?.skill_count || 0);
       const toolPreviewText = Array.isArray(agent?.tool_names)
         ? agent.tool_names.join(", ")
+        : "";
+      const skillPreviewText = Array.isArray(agent?.skill_names)
+        ? agent.skill_names.join(", ")
         : "";
       const card = document.createElement("button");
       card.type = "button";
@@ -49,8 +53,10 @@
         <div class="agent-list-top">
           <strong>${agentId}</strong>
           <span class="pill">${toolCount} tool${toolCount === 1 ? "" : "s"}</span>
+          <span class="pill">${skillCount} skill${skillCount === 1 ? "" : "s"}</span>
         </div>
         <p class="subtle">${toolPreviewText || "No tools registered."}</p>
+        <p class="subtle">${skillPreviewText ? `Skills: ${skillPreviewText}` : "No skills registered."}</p>
       `;
 
       card.addEventListener("click", () => {

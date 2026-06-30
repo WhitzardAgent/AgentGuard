@@ -2,42 +2,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any
 
-SkillDetectionLabel = Literal["benign", "suspicious", "malicious"]
+from backend.preprocess.detectors.base import DetectionResult
 
-
-@dataclass
-class SkillDetectionResult:
-    """Static skill detection output stored with a registered skill."""
-
-    label: SkillDetectionLabel
-    reason: str = ""
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "label": self.label,
-            "reason": self.reason,
-            "metadata": dict(self.metadata),
-        }
-
-    @classmethod
-    def from_value(cls, value: Any) -> SkillDetectionResult | None:
-        if value is None:
-            return None
-        if isinstance(value, cls):
-            return value
-        if not isinstance(value, dict):
-            return None
-        label = str(value.get("label") or value.get("result") or "").strip().lower()
-        if label not in {"benign", "suspicious", "malicious"}:
-            return None
-        return cls(
-            label=label,  # type: ignore[arg-type]
-            reason=str(value.get("reason") or ""),
-            metadata=dict(value.get("metadata") or {}),
-        )
+SkillDetectionResult = DetectionResult
 
 
 @dataclass
@@ -73,7 +42,7 @@ class SkillRecord:
     total_size: int = 0
     extraction: dict[str, Any] = field(default_factory=dict)
     skill_resource: SkillResource = field(default_factory=SkillResource)
-    detect_result: SkillDetectionResult | None = None
+    detect_result: DetectionResult | None = None
 
     @classmethod
     def from_descriptor(
@@ -105,7 +74,12 @@ class SkillRecord:
             total_size=_int_value(item.get("total_size")),
             extraction=dict(item.get("extraction") or {}),
             skill_resource=SkillResource.from_descriptor(item),
-            detect_result=SkillDetectionResult.from_value(item.get("detect_result")),
+            detect_result=DetectionResult.from_value(
+                item.get("detect_result"),
+                object_id=skill_unique_id,
+                object_type="skill",
+                name=name,
+            ),
         )
 
     @property

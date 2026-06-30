@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgentGuard Frontend Preview</title>
+  <script src="/static/common/i18n.js"></script>
+  <script>
+    (function () {
+      try {
+        if (!String(window.localStorage.getItem("agentguard.selectedAgentId") || "").trim()) {
+          window.location.replace("/agents.html");
+        }
+      } catch {
+        window.location.replace("/agents.html");
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/common/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+{{ shared:sidebar }}
+
+    <main class="app-main skill-main">
+      <section class="page-intro-card skill-hero">
+        <div class="skill-hero-copy">
+          <p class="page-kicker" data-i18n="Skill Security">Skill Security</p>
+          <h1><span data-i18n="Inspect skills for">Inspect skills for</span> <span id="skill-selected-agent">the selected agent</span>.</h1>
+          <p class="subtle skill-hero-description" data-i18n="Review the skill resources reported by adapters, run static detection, and keep the result attached to the selected agent.">Review the skill resources reported by adapters, run static detection, and keep the result attached to the selected agent.</p>
+        </div>
+        <div class="skill-hero-metrics" aria-label="Skill summary" data-i18n-aria-label="Skill summary">
+          <div class="skill-metric-tile">
+            <span id="skill-count-total">0</span>
+            <strong data-i18n="Skills">Skills</strong>
+          </div>
+          <div class="skill-metric-tile">
+            <span id="skill-count-risky">0</span>
+            <strong data-i18n="Risk flagged">Risk flagged</strong>
+          </div>
+          <div class="skill-metric-tile">
+            <span id="skill-count-files">0</span>
+            <strong data-i18n="Files">Files</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="card skill-control-card">
+        <div class="heading-row">
+          <div>
+            <h3 data-i18n="Registered Skills">Registered Skills</h3>
+            <p class="subtle" id="skill-sync-status" data-i18n="Loading skill catalog...">Loading skill catalog...</p>
+          </div>
+          <div class="heading-actions">
+            <button class="icon-label" id="refresh-skills" type="button" aria-label="Refresh skill catalog" title="Refresh skill catalog" data-i18n-aria-label="Refresh skill catalog" data-i18n-title="Refresh skill catalog">
+              <img class="btn-icon-image" src="/assets/refresh.png" alt="">
+            </button>
+          </div>
+        </div>
+
+        <div class="skill-action-bar">
+          <div class="skill-selection-copy">
+            <strong id="skill-selection-count">0 selected</strong>
+            <span class="subtle" data-i18n="Select one or more skills before running detection.">Select one or more skills before running detection.</span>
+          </div>
+          <label class="plugin-switch skill-llm-switch" aria-label="Use LLM review" data-i18n-aria-label="Use LLM review">
+            <input id="skill-use-llm" type="checkbox">
+            <span class="plugin-switch-track">
+              <span class="plugin-switch-thumb"></span>
+            </span>
+            <span class="plugin-switch-state" data-i18n="LLM review">LLM review</span>
+          </label>
+          <label class="skill-concurrency-control">
+            <span data-i18n="LLM parallel">LLM parallel</span>
+            <select id="skill-llm-concurrency" aria-label="LLM parallel" data-i18n-aria-label="LLM parallel">
+              <option value="1" selected>1</option>
+              <option value="2">2</option>
+              <option value="4">4</option>
+              <option value="8">8</option>
+            </select>
+          </label>
+          <div class="toolbar skill-toolbar">
+            <button class="btn" id="select-all-skills" type="button" data-i18n="Select all">Select all</button>
+            <button class="btn" id="clear-skill-selection" type="button" data-i18n="Clear selection">Clear selection</button>
+            <button class="btn primary" id="detect-selected-skills" type="button" data-i18n="Detect selected">Detect selected</button>
+          </div>
+        </div>
+
+        <div class="skill-list" id="skill-list"></div>
+      </section>
+    </main>
+
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <script src="/static/common/messages.js"></script>
+  <script src="/static/common/page-shell.js"></script>
+  <script src="/static/common/app.js"></script>
+  <script src="/static/pages/skills/skills.js"></script>
+</body>
+</html>

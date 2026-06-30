@@ -37,6 +37,18 @@ USE_MOCK_BACKEND = os.environ.get("AGENTGUARD_USE_MOCK", "").strip().lower() in 
     "on",
 }
 
+
+def _proxy_timeout_seconds() -> float:
+    raw_value = os.environ.get("AGENTGUARD_PROXY_TIMEOUT_SECONDS", "60").strip()
+    try:
+        value = float(raw_value)
+    except ValueError:
+        return 60.0
+    return max(1.0, value)
+
+
+PROXY_TIMEOUT_SECONDS = _proxy_timeout_seconds()
+
 PAGE_ROUTES = {
     "/": "home.html",
     "/index.html": "home.html",
@@ -44,6 +56,8 @@ PAGE_ROUTES = {
     "/agents.html": "agents.html",
     "/plugins": "plugins.html",
     "/plugins.html": "plugins.html",
+    "/skills": "skills.html",
+    "/skills.html": "skills.html",
     "/user": "user.html",
     "/user.html": "user.html",
     "/labels": "labels.html",
@@ -58,13 +72,14 @@ PAGE_TAB_KEYS = {
     "home.html": "home",
     "agents.html": "agents",
     "plugins.html": "plugins",
+    "skills.html": "skills",
     "user.html": "user",
     "labels.html": "labels",
     "rules.html": "rules",
     "runtime.html": "runtime",
 }
 
-SIDEBAR_TABS = ("home", "agents", "plugins", "user", "labels", "rules", "runtime")
+SIDEBAR_TABS = ("home", "agents", "plugins", "skills", "user", "labels", "rules", "runtime")
 
 
 class FrontendPreviewHandler(BaseHTTPRequestHandler):
@@ -78,6 +93,10 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
 
         if path == "/api/tools":
             self._proxy("tools", method="GET", query=query)
+            return
+
+        if path == "/api/skills":
+            self._proxy("skills", method="GET", query=query)
             return
 
         if path == "/api/rules":
@@ -120,6 +139,11 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
             return
 
         if path.startswith("/api/agents/") and path.endswith("/rules"):
+            upstream_path = path.removeprefix("/api/")
+            self._proxy(upstream_path, method="GET", query=query)
+            return
+
+        if path.startswith("/api/agents/") and path.endswith("/skills"):
             upstream_path = path.removeprefix("/api/")
             self._proxy(upstream_path, method="GET", query=query)
             return
@@ -175,6 +199,11 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
             return
 
         if path.startswith("/api/agents/") and path.endswith("/rules/generate"):
+            upstream_path = path.removeprefix("/api/")
+            self._proxy(upstream_path, method="POST", query=query)
+            return
+
+        if path.startswith("/api/agents/") and path.endswith("/skills/detect"):
             upstream_path = path.removeprefix("/api/")
             self._proxy(upstream_path, method="POST", query=query)
             return
@@ -274,11 +303,14 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
             return
 
         body = path.read_bytes()
-        self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+            return
 
     def _serve_template(self, page_name: str) -> None:
         path = TEMPLATES_DIR / page_name
@@ -287,11 +319,14 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
             return
 
         body = self._render_template(page_name).encode("utf-8")
-        self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+            return
 
     def _render_template(self, page_name: str) -> str:
         content = (TEMPLATES_DIR / page_name).read_text(encoding="utf-8")
@@ -329,7 +364,7 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
         request = Request(target_url, data=body, headers=headers, method=method)
 
         try:
-            with urlopen(request, timeout=5) as response:
+            with urlopen(request, timeout=PROXY_TIMEOUT_SECONDS) as response:
                 upstream_body = response.read()
                 content_type = response.headers.get(
                     "Content-Type", "application/json; charset=utf-8"
@@ -417,12 +452,15 @@ def serve(host: str | None = None, port: int | None = None) -> None:
     server = ThreadingHTTPServer((h, p), FrontendPreviewHandler)
     print(f"AgentGuard frontend  http://{h}:{p}")
     if USE_MOCK_BACKEND:
-        print("Mocking agent/tool/rule frontend API routes from frontend.mock_backend")
+        print("Mocking agent/tool/skill/rule frontend API routes from frontend.mock_backend")
     else:
         print(f"Proxying /api/tools to {API_BASE_URL}/v1/backend/tools")
+        print(f"Proxying /api/skills to {API_BASE_URL}/v1/backend/skills")
         print(f"Proxying /api/rules to {API_BASE_URL}/v1/backend/rules")
         print(f"Proxying /api/rules/reload to {API_BASE_URL}/v1/backend/rules/reload")
         print("Proxying /api/agents/{agent_id}/rules to agent-scoped rule endpoints")
+        print("Proxying /api/agents/{agent_id}/skills to agent-scoped skill endpoints")
+        print("Proxying /api/agents/{agent_id}/skills/detect to skill detect endpoint")
         print("Proxying /api/agents/{agent_id}/plugins/config to agent-scoped plugin endpoints")
         print("Proxying /api/agents/{agent_id}/plugins/available to agent-scoped plugin catalog endpoints")
         print("Proxying /api/agents/{agent_id}/tools/{tool_name}/labels to tool-label patch endpoint")

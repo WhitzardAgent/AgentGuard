@@ -11,17 +11,17 @@ import time
 from collections import deque
 from typing import Any
 
+from backend.console.dsl import ParsedRule, parse_source, rule_to_console_dict
 from backend.console.skill_record import SkillRecord
-from shared.schemas.decisions import DecisionType, GuardDecision
-from shared.schemas.events import RuntimeEvent
-from shared.schemas.policy import PolicyRule
+from backend.runtime.manager import RuntimeManager
 from shared.rules.llm_dsl_generator import (
     LLMRuleGeneratorWorkflow,
     RuleGenerationRequest,
     RuleGenerationSession,
 )
-from backend.console.dsl import ParsedRule, parse_source, rule_to_console_dict
-from backend.runtime.manager import RuntimeManager
+from shared.schemas.decisions import DecisionType, GuardDecision
+from shared.schemas.events import RuntimeEvent
+from shared.schemas.policy import PolicyRule
 
 _DECISION_TO_ACTION = {
     DecisionType.ALLOW: "allow",
@@ -68,6 +68,14 @@ class ConsoleState:
         if agent_id:
             items = [s for s in items if s.agent_id == agent_id]
         return [s.to_dict() for s in items]
+
+    def skill_record(self, agent_id: str, skill_unique_id: str) -> SkillRecord | None:
+        normalized_agent_id = str(agent_id or "").strip()
+        normalized_skill_id = str(skill_unique_id or "").strip()
+        if not normalized_agent_id or not normalized_skill_id:
+            return None
+        with self._lock:
+            return self._skills.get((normalized_agent_id, normalized_skill_id))
 
     def register_tool(
         self,
@@ -148,6 +156,81 @@ class ConsoleState:
                 "skills": [item.to_dict() for item in normalized],
                 "scan": scan_options,
             }
+
+    def detect_skills(
+        self,
+        agent_id: str,
+        skill_unique_ids: list[str],
+        *,
+        use_llm: bool = False,
+        llm_config: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized_agent_id = str(agent_id or "").strip()
+        normalized_skill_ids = [
+            str(item or "").strip()
+            for item in skill_unique_ids
+            if str(item or "").strip()
+        ]
+        if not normalized_agent_id:
+            return {"ok": False, "error": "agent_id is required", "code": 400}
+        if not normalized_skill_ids:
+            return {"ok": False, "error": "skill_unique_ids is required", "code": 400}
+
+        with self._lock:
+            records = [
+                self._skills[(normalized_agent_id, skill_id)]
+                for skill_id in normalized_skill_ids
+                if (normalized_agent_id, skill_id) in self._skills
+            ]
+        missing = [
+            skill_id
+            for skill_id in normalized_skill_ids
+            if all(record.skill_unique_id != skill_id for record in records)
+        ]
+        if not records:
+            return {
+                "ok": False,
+                "error": "no requested skills were found",
+                "agent_id": normalized_agent_id,
+                "missing_skill_unique_ids": missing,
+                "code": 404,
+            }
+
+        from backend.preprocess.detectors.skill_static_detector import (
+            SkillStaticDetector,  # noqa: PLC0415
+        )
+
+        detector = SkillStaticDetector()
+        results: list[dict[str, Any]] = []
+        for record in records:
+            detect_result = detector.detect(
+                record,
+                use_llm=use_llm,
+                llm_config=llm_config,
+            )
+            with self._lock:
+                current = self._skills.get((record.agent_id, record.skill_unique_id))
+                if current is None:
+                    continue
+                current.detect_result = detect_result
+                skill_dict = current.to_dict()
+            results.append(
+                {
+                    "skill_unique_id": record.skill_unique_id,
+                    "name": record.name,
+                    "detect_result": detect_result.to_dict(),
+                    "skill": skill_dict,
+                }
+            )
+
+        return {
+            "ok": True,
+            "agent_id": normalized_agent_id,
+            "requested": len(normalized_skill_ids),
+            "detected": len(results),
+            "missing_skill_unique_ids": missing,
+            "results": results,
+        }
 
     def patch_tool_labels(
         self, agent_id: str, tool_name: str, labels: dict[str, Any]

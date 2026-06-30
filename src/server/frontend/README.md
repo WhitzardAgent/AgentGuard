@@ -21,17 +21,28 @@ http://127.0.0.1:38080
 ```
 
 This proxy layer includes the existing agent/rule/runtime routes plus the
-plugin-config management routes used by the frontend:
+plugin-config and skill-management routes used by the frontend:
 
 - `POST /api/plugins/config`
 - `GET /api/agents/{agent_id}/plugins/config`
 - `POST /api/agents/{agent_id}/plugins/config`
 - `GET /api/agents/{agent_id}/plugins/available`
+- `GET /api/skills`
+- `GET /api/agents/{agent_id}/skills`
+- `POST /api/agents/{agent_id}/skills/detect`
 
 You can point the preview at another upstream API with:
 
 ```bash
 export AGENTGUARD_API_BASE="http://127.0.0.1:9000"
+./scripts/run-frontend.sh
+```
+
+For slower backend operations such as LLM-assisted skill detection, tune the
+preview proxy timeout if needed:
+
+```bash
+export AGENTGUARD_PROXY_TIMEOUT_SECONDS="60"
 ./scripts/run-frontend.sh
 ```
 
@@ -64,8 +75,11 @@ export AGENTGUARD_USE_MOCK="1"
 When mock mode is enabled, the frontend serves these API routes from `src/server/frontend/mock_backend.py` instead of proxying upstream:
 
 - `GET /api/tools`
+- `GET /api/skills`
 - `GET /api/rules`
 - `GET /api/agents/{agent_id}/tools`
+- `GET /api/agents/{agent_id}/skills`
+- `POST /api/agents/{agent_id}/skills/detect`
 - `GET /api/agents/{agent_id}/rules`
 - `POST /api/rules/check`
 - `POST /api/rules/reload`
