@@ -117,6 +117,63 @@ class ConsoleState:
             self._tools[(agent_id, name)] = record
             return dict(record)
 
+    def sync_tools(
+        self,
+        context: dict[str, Any] | Any,
+        tools: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        if hasattr(context, "to_dict"):
+            context = context.to_dict()
+        ctx = dict(context or {})
+        agent_id = str(ctx.get("agent_id") or "").strip()
+        if not agent_id:
+            return None
+
+        synced: list[dict[str, Any]] = []
+        seen_names: set[str] = set()
+        with self._lock:
+            for tool in tools:
+                if not isinstance(tool, dict):
+                    continue
+                name = str(tool.get("name") or "").strip()
+                if not name:
+                    continue
+                seen_names.add(name)
+                incoming_labels = dict(tool.get("labels") or {})
+                labels = {
+                    "boundary": str(incoming_labels.get("boundary") or "internal"),
+                    "sensitivity": str(incoming_labels.get("sensitivity") or "low"),
+                    "integrity": str(incoming_labels.get("integrity") or "trusted"),
+                    "tags": [
+                        str(tag)
+                        for tag in (incoming_labels.get("tags") or [])
+                        if str(tag).strip()
+                    ],
+                }
+                input_params = [
+                    str(param)
+                    for param in (tool.get("input_params") or [])
+                    if str(param).strip()
+                ]
+                record = {
+                    "owner_agent_id": agent_id,
+                    "name": name,
+                    "labels": labels,
+                    "input_params": input_params,
+                }
+                self._tools[(agent_id, name)] = record
+                synced.append(dict(record))
+
+            stale_keys = [
+                key
+                for key in self._tools
+                if key[0] == agent_id and key[1] not in seen_names
+            ]
+            for key in stale_keys:
+                self._tools.pop(key, None)
+
+        return {"agent_id": agent_id, "tool_count": len(synced), "tools": synced}
+
     def register_skills(
         self,
         context: dict[str, Any] | Any,

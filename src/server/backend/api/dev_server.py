@@ -132,6 +132,14 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(400, {"error": "agent_id and tool.name are required"})
             else:
                 self._send(200, {"status": "ok", "tool": tool})
+        elif self.path == "/v1/server/tools/sync":
+            if not self._validate_client_session():
+                return
+            result = self.console.sync_tools(body.get("context") or {}, body.get("tools") or [])
+            if result is None:
+                self._send(400, {"error": "agent_id is required"})
+            else:
+                self._send(200, {"status": "ok", **result})
         elif self.path == "/v1/server/skills/report":
             if not self._validate_client_session():
                 return

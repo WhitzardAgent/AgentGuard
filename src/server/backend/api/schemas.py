@@ -40,6 +40,11 @@ class ToolReportRequest(_ApiModel):
     tool: dict[str, Any] = Field(default_factory=dict)
 
 
+class ToolSyncRequest(_ApiModel):
+    context: dict[str, Any] = Field(default_factory=dict)
+    tools: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class SkillReportRequest(_ApiModel):
     context: dict[str, Any] = Field(default_factory=dict)
     skills: list[dict[str, Any]] = Field(default_factory=list)

@@ -10,12 +10,16 @@ from __future__ import annotations
 import contextvars
 import functools
 import os
+import threading
+import time
 from collections.abc import Generator
 from typing import Any
 
 from agentguard.schemas import events as ev
+from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.decisions import DecisionType, GuardDecision
 from agentguard.tools.metadata import ToolMetadata
+from agentguard.u_guard.remote_client import RemoteGuardClient
 from agentguard.utils.errors import AdapterError
 from agentguard.utils.json import safe_dumps
 
@@ -34,6 +38,8 @@ _current_tool_catalog: contextvars.ContextVar[list[str]] = contextvars.ContextVa
     "agentguard_dify_agent_chat_tool_catalog",
     default=[],
 )
+_catalog_sync_started = False
+_catalog_sync_lock = threading.Lock()
 
 
 def install_dify_agent_chat_adapter() -> dict[str, Any]:
@@ -66,7 +72,29 @@ def install_dify_agent_chat_adapter() -> dict[str, Any]:
         "model_invoke_llm": _patch_model_invoke_llm(ModelInstance),
         "tool_agent_invoke": _patch_tool_agent_invoke(ToolEngine),
     }
-    return {"enabled": True, "patched": any(patched.values()), "details": patched}
+    catalog_sync = start_dify_agent_chat_catalog_sync()
+    return {"enabled": True, "patched": any(patched.values()), "details": patched, "catalog_sync": catalog_sync}
+
+
+def start_dify_agent_chat_catalog_sync() -> dict[str, Any]:
+    if not _catalog_sync_enabled():
+        return {"enabled": False, "reason": "disabled"}
+    if not os.getenv("AGENTGUARD_SERVER_URL"):
+        return {"enabled": False, "reason": "server_url_missing"}
+
+    global _catalog_sync_started
+    with _catalog_sync_lock:
+        if _catalog_sync_started:
+            return {"enabled": True, "started": False, "reason": "already_started"}
+        _catalog_sync_started = True
+
+    thread = threading.Thread(
+        target=_catalog_sync_loop,
+        name="agentguard-dify-agent-chat-catalog-sync",
+        daemon=True,
+    )
+    thread.start()
+    return {"enabled": True, "started": True}
 
 
 def _patch_agent_chat_runner(runner_cls: Any) -> bool:
@@ -677,11 +705,217 @@ def _active_guard() -> Any | None:
     return _current_guard.get()
 
 
+def _catalog_sync_loop() -> None:
+    initial_delay = _env_float("AGENTGUARD_DIFY_CATALOG_INITIAL_DELAY_S", 5.0)
+    interval = _env_float("AGENTGUARD_DIFY_CATALOG_SYNC_INTERVAL_S", 30.0)
+    if initial_delay > 0:
+        time.sleep(initial_delay)
+    while True:
+        try:
+            _sync_published_agent_catalog_with_context()
+        except Exception:
+            pass
+        if interval <= 0:
+            return
+        time.sleep(interval)
+
+
+def _sync_published_agent_catalog_with_context() -> dict[str, Any]:
+    try:
+        from flask import has_app_context  # type: ignore
+
+        if has_app_context():
+            return _sync_published_agent_catalog_once()
+    except Exception:
+        pass
+
+    app = _dify_flask_app()
+    if app is None:
+        return {"app_count": 0, "synced": [], "reason": "app_context_unavailable"}
+    with app.app_context():
+        return _sync_published_agent_catalog_once()
+
+
+_catalog_dify_app: Any | None = None
+
+
+def _dify_flask_app() -> Any | None:
+    global _catalog_dify_app
+    if _catalog_dify_app is not None:
+        return _catalog_dify_app
+    try:
+        from flask import current_app  # type: ignore
+
+        app = current_app._get_current_object()
+        _catalog_dify_app = app
+        return app
+    except Exception:
+        pass
+    try:
+        from app_factory import create_app  # type: ignore
+
+        _socketio_app, app = create_app()
+        _catalog_dify_app = app
+        return app
+    except Exception:
+        return None
+
+
+def _sync_published_agent_catalog_once() -> dict[str, Any]:
+    apps = _published_agent_chat_apps()
+    synced: list[dict[str, Any]] = []
+    for app in apps:
+        result = _sync_app_tool_catalog(app)
+        if result is not None:
+            synced.append(result)
+    return {"app_count": len(apps), "synced": synced}
+
+
+def _published_agent_chat_apps() -> list[Any]:
+    from extensions.ext_database import db  # type: ignore
+    from models.model import App, AppMode  # type: ignore
+    from sqlalchemy import select  # type: ignore
+
+    stmt = select(App).where(App.mode == AppMode.AGENT_CHAT.value)
+    app_ids = _env_csv("AGENTGUARD_DIFY_APP_IDS")
+    if app_ids:
+        stmt = stmt.where(App.id.in_(app_ids))
+    return list(db.session.scalars(stmt).all())
+
+
+def _sync_app_tool_catalog(app: Any) -> dict[str, Any] | None:
+    app_id = _optional_text(getattr(app, "id", None))
+    if not app_id or not _app_allowed(app_id):
+        return None
+    app_model_config = getattr(app, "app_model_config", None)
+    if app_model_config is None:
+        return None
+    agent_mode = getattr(app_model_config, "agent_mode_dict", {}) or {}
+    if not isinstance(agent_mode, dict) or not agent_mode.get("enabled"):
+        return _sync_tools_to_agentguard(app, [])
+
+    tools: list[dict[str, Any]] = []
+    for tool_config in agent_mode.get("tools") or []:
+        if not isinstance(tool_config, dict) or not tool_config.get("enabled"):
+            continue
+        tool_payload = _catalog_tool_from_config(app, tool_config)
+        if tool_payload is not None:
+            tools.append(tool_payload)
+    return _sync_tools_to_agentguard(app, tools)
+
+
+def _catalog_tool_from_config(app: Any, tool_config: dict[str, Any]) -> dict[str, Any] | None:
+    tool_name = _optional_text(tool_config.get("tool_name"))
+    if not tool_name:
+        return None
+    runtime = _tool_runtime_from_config(app, tool_config)
+    provider_id = _optional_text(tool_config.get("provider_id"))
+    provider_type = _optional_text(tool_config.get("provider_type"))
+    label = _optional_text(tool_config.get("tool_label"))
+    tags = ["dify_agent_chat_tool"]
+    for tag in (provider_type, provider_id):
+        if tag:
+            tags.append(tag)
+    return {
+        "name": tool_name,
+        "description": _tool_description(runtime) if runtime is not None else label or tool_name,
+        "input_params": _tool_required_args(runtime) if runtime is not None else _config_required_args(tool_config),
+        "capabilities": tags,
+        "labels": {
+            "boundary": "internal",
+            "sensitivity": "low",
+            "integrity": "trusted",
+            "tags": tags,
+        },
+        "metadata": {
+            "source": "dify_agent_chat_catalog",
+            "provider_id": provider_id,
+            "provider_type": provider_type,
+            "tool_label": label,
+        },
+    }
+
+
+def _tool_runtime_from_config(app: Any, tool_config: dict[str, Any]) -> Any | None:
+    try:
+        from core.agent.entities import AgentToolEntity  # type: ignore
+        from core.tools.tool_manager import ToolManager  # type: ignore
+
+        return ToolManager.get_agent_tool_runtime(
+            tenant_id=str(getattr(app, "tenant_id", "")),
+            app_id=str(getattr(app, "id", "")),
+            agent_tool=AgentToolEntity.model_validate(tool_config),
+            user_id=_optional_text(getattr(app, "updated_by", None)) or _optional_text(getattr(app, "created_by", None)),
+        )
+    except Exception:
+        return None
+
+
+def _config_required_args(tool_config: dict[str, Any]) -> list[str]:
+    params = tool_config.get("tool_parameters")
+    if not isinstance(params, dict):
+        return []
+    return [str(key) for key, value in params.items() if value is None]
+
+
+def _sync_tools_to_agentguard(app: Any, tools: list[dict[str, Any]]) -> dict[str, Any] | None:
+    app_id = _optional_text(getattr(app, "id", None))
+    if not app_id:
+        return None
+    config_id = _optional_text(getattr(app, "app_model_config_id", None))
+    agent_id = f"dify-agent-chat:{app_id}"
+    session_id = f"dify-agent-chat-catalog:{app_id}:{config_id or 'active'}"
+    session_key = _catalog_session_key(app_id, config_id)
+    context = RuntimeContext(
+        session_id=session_id,
+        agent_id=agent_id,
+        user_id=None,
+        environment=os.getenv("AGENTGUARD_ENVIRONMENT") or "dify",
+        metadata={
+            "adapter": "dify_agent_chat",
+            "dify_runtime": "agent_chat",
+            "catalog_sync": True,
+            "app_id": app_id,
+            "tenant_id": _optional_text(getattr(app, "tenant_id", None)),
+            "app_model_config_id": config_id,
+            "client_session_key": session_key,
+        },
+    )
+    remote = RemoteGuardClient(
+        os.getenv("AGENTGUARD_SERVER_URL") or None,
+        api_key=os.getenv("AGENTGUARD_API_KEY") or None,
+        session_id=session_id,
+        agent_id=agent_id,
+        session_key=session_key,
+        timeout_s=_env_float("AGENTGUARD_DIFY_CATALOG_SYNC_TIMEOUT_S", 5.0),
+        retries=int(_env_float("AGENTGUARD_DIFY_CATALOG_SYNC_RETRIES", 1.0)),
+    )
+    if not remote.enabled:
+        return None
+    remote.register_session(context)
+    result = remote.sync_tools(context, tools)
+    return {"app_id": app_id, "agent_id": agent_id, "tool_count": result.get("tool_count", len(tools))}
+
+
+def _catalog_session_key(app_id: str, config_id: str | None = None) -> str:
+    seed = os.getenv("AGENTGUARD_DIFY_CATALOG_SESSION_KEY")
+    if seed:
+        return seed
+    return f"sk-dify-catalog-{app_id}-{config_id or 'active'}"
+
+
 def _env_enabled() -> bool:
     specific = os.getenv("AGENTGUARD_DIFY_AGENT_CHAT_ENABLED")
     if specific is not None:
         return specific.strip().lower() in {"1", "true", "yes", "on"}
     return os.getenv("AGENTGUARD_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _catalog_sync_enabled() -> bool:
+    specific = os.getenv("AGENTGUARD_DIFY_CATALOG_SYNC_ENABLED")
+    if specific is not None:
+        return specific.strip().lower() in {"1", "true", "yes", "on"}
+    return _env_enabled()
 
 
 def _app_allowed(app_id: Any) -> bool:
@@ -694,6 +928,16 @@ def _app_allowed(app_id: Any) -> bool:
 def _env_csv(name: str) -> set[str]:
     raw = os.getenv(name, "")
     return {part.strip() for part in raw.split(",") if part.strip()}
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
 
 
 def _plugin_config() -> str | dict[str, Any] | None:

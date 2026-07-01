@@ -61,6 +61,7 @@ class RemoteGuardClient:
         snapshot_path: str = "/v1/server/policy/snapshot",
         trace_path: str = "/v1/server/trace/upload",
         tool_report_path: str = "/v1/server/tools/report",
+        tool_sync_path: str = "/v1/server/tools/sync",
         approval_path: str = "/v1/server/approvals/{ticket_id}",
         register_path: str = "/v1/server/session/register",
         unregister_path: str = "/v1/server/session/unregister",
@@ -79,6 +80,7 @@ class RemoteGuardClient:
         self.snapshot_path = snapshot_path
         self.trace_path = trace_path
         self.tool_report_path = tool_report_path
+        self.tool_sync_path = tool_sync_path
         self.approval_path = approval_path
         self.register_path = register_path
         self.unregister_path = unregister_path
@@ -147,6 +149,15 @@ class RemoteGuardClient:
             "tool": tool,
         }
         return self._post(self.tool_report_path, body)
+
+    def sync_tools(self, context: RuntimeContext, tools: list[dict[str, Any]]) -> dict[str, Any]:
+        if not self.enabled:
+            raise RemoteGuardError("no server_url configured")
+        body = {
+            "context": context.to_dict(),
+            "tools": list(tools),
+        }
+        return self._post(self.tool_sync_path, body)
 
     def register_session(self, context: RuntimeContext) -> dict[str, Any]:
         if not self.enabled:

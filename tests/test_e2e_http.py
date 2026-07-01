@@ -518,6 +518,54 @@ def test_wrap_tool_reports_tool_to_server_before_invocation():
         srv.shutdown()
 
 
+def test_tool_sync_replaces_agent_catalog_over_http():
+    manager = RuntimeManager()
+    base_url, srv, _ = start_dev_server(manager=manager)
+    guard = AgentGuard(
+        session_id="catalog-sync-session",
+        agent_id="catalog-sync-agent",
+        server_url=base_url,
+    )
+    try:
+        headers = {
+            "X-AgentGuard-Session-Id": guard.context.session_id,
+            "X-AgentGuard-Agent-Id": guard.context.agent_id,
+            "X-AgentGuard-Session-Key": guard.session_key,
+        }
+        first = _post_json(
+            f"{base_url}/v1/server/tools/sync",
+            {
+                "context": guard.context.to_dict(),
+                "tools": [
+                    {"name": "weekday", "input_params": ["year", "month", "day"]},
+                    {"name": "old.disabled", "input_params": []},
+                ],
+            },
+            headers=headers,
+        )
+        assert first["status"] == "ok"
+        assert first["tool_count"] == 2
+
+        second = _post_json(
+            f"{base_url}/v1/server/tools/sync",
+            {
+                "context": guard.context.to_dict(),
+                "tools": [
+                    {"name": "weekday", "input_params": ["year", "month", "day"]},
+                ],
+            },
+            headers=headers,
+        )
+        assert second["tool_count"] == 1
+
+        tools = _get_json(f"{base_url}/v1/backend/tools")
+        scoped = [item for item in tools if item["owner_agent_id"] == "catalog-sync-agent"]
+        assert [item["name"] for item in scoped] == ["weekday"]
+    finally:
+        guard.close()
+        srv.shutdown()
+
+
 def test_backend_refreshes_stale_session_when_client_health_is_alive():
     manager = RuntimeManager()
     guard = AgentGuard("stale-session", agent_id="stale-agent")

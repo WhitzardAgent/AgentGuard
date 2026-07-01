@@ -219,6 +219,7 @@ def _install_fake_dify_agent_chat_modules(monkeypatch):
 
 def _fresh_adapter(monkeypatch):
     monkeypatch.setenv("AGENTGUARD_DIFY_AGENT_CHAT_ENABLED", "true")
+    monkeypatch.setenv("AGENTGUARD_DIFY_CATALOG_SYNC_ENABLED", "false")
     import agentguard.adapters.agent.dify_agent_chat as adapter
 
     return importlib.reload(adapter)
@@ -252,6 +253,93 @@ def test_install_dify_agent_chat_adapter_is_idempotent(monkeypatch):
     assert first["patched"] is True
     assert second["patched"] is False
     assert getattr(fake.AgentChatAppRunner.run, "__agentguard_dify_agent_chat_patched__", False)
+
+
+def test_agent_chat_catalog_sync_reports_enabled_tools(monkeypatch):
+    adapter = _fresh_adapter(monkeypatch)
+    monkeypatch.setenv("AGENTGUARD_SERVER_URL", "http://agentguard.test")
+
+    app_config = types.SimpleNamespace(
+        agent_mode_dict={
+            "enabled": True,
+            "tools": [
+                {
+                    "enabled": False,
+                    "provider_id": "yahoo",
+                    "provider_type": "builtin",
+                    "tool_name": "yahoo_finance_news",
+                    "tool_parameters": {"symbol": ""},
+                },
+                {
+                    "enabled": True,
+                    "provider_id": "time",
+                    "provider_type": "builtin",
+                    "tool_name": "weekday",
+                    "tool_label": "星期几计算器",
+                    "tool_parameters": {"year": None, "month": None, "day": None},
+                },
+            ],
+        }
+    )
+    app = types.SimpleNamespace(
+        id="app-1",
+        tenant_id="tenant-1",
+        app_model_config_id="config-1",
+        app_model_config=app_config,
+        created_by="user-1",
+        updated_by="user-1",
+    )
+
+    registered = []
+    synced = []
+
+    class FakeRemote:
+        def __init__(self, *args, **kwargs):
+            self.enabled = True
+
+        def register_session(self, context):
+            registered.append(context.to_dict())
+            return {"status": "ok"}
+
+        def sync_tools(self, context, tools):
+            synced.append((context.to_dict(), list(tools)))
+            return {"status": "ok", "tool_count": len(tools)}
+
+    monkeypatch.setattr(adapter, "RemoteGuardClient", FakeRemote)
+    monkeypatch.setattr(adapter, "_published_agent_chat_apps", lambda: [app])
+
+    result = adapter._sync_published_agent_catalog_once()
+
+    assert result["app_count"] == 1
+    assert registered[0]["agent_id"] == "dify-agent-chat:app-1"
+    assert synced[0][0]["agent_id"] == "dify-agent-chat:app-1"
+    assert [tool["name"] for tool in synced[0][1]] == ["weekday"]
+    assert synced[0][1][0]["input_params"] == ["year", "month", "day"]
+
+
+def test_agent_chat_catalog_sync_creates_app_context_when_needed(monkeypatch):
+    adapter = _fresh_adapter(monkeypatch)
+    calls = []
+
+    class FakeAppContext:
+        def __enter__(self):
+            calls.append("enter")
+
+        def __exit__(self, exc_type, exc, tb):
+            calls.append("exit")
+            return False
+
+    class FakeApp:
+        def app_context(self):
+            return FakeAppContext()
+
+    monkeypatch.setattr(adapter, "_dify_flask_app", lambda: FakeApp())
+    monkeypatch.setattr(adapter, "_sync_published_agent_catalog_once", lambda: {"app_count": 0, "synced": []})
+
+    result = adapter._sync_published_agent_catalog_with_context()
+
+    assert result == {"app_count": 0, "synced": []}
+    assert calls == ["enter", "exit"]
 
 
 def test_agent_chat_registers_only_runtime_enabled_tools_and_emits_events(monkeypatch):

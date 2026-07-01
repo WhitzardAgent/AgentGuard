@@ -290,6 +290,29 @@ def test_register_tool_adds_or_updates_console_catalog():
     assert any(item["name"] == "docs.search" for item in scoped)
 
 
+def test_sync_tools_replaces_console_catalog_for_agent():
+    con = _console()
+    con.register_tool({"agent_id": "live-agent"}, {"name": "old.tool"})
+
+    result = con.sync_tools(
+        {"agent_id": "live-agent"},
+        [
+            {
+                "name": "docs.search",
+                "input_params": ["query"],
+                "labels": {"tags": ["read_only"]},
+            }
+        ],
+    )
+
+    assert result is not None
+    assert result["tool_count"] == 1
+    scoped = con.tools("live-agent")
+    assert [item["name"] for item in scoped] == ["docs.search"]
+    assert scoped[0]["input_params"] == ["query"]
+    assert scoped[0]["labels"]["tags"] == ["read_only"]
+
+
 def test_register_skills_stores_skill_record_resource_and_detection_state():
     con = _console()
     result = con.register_skills(

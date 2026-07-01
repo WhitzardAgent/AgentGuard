@@ -12,6 +12,7 @@ from backend.api.schemas import (
     SkillReportRequest,
     SkillRunRequest,
     ToolReportRequest,
+    ToolSyncRequest,
     TraceUploadRequest,
 )
 from backend.app_state import get_console, get_manager, get_skills
@@ -72,6 +73,15 @@ def report_tool(req: ToolReportRequest, request: Request) -> dict[str, Any]:
     if tool is None:
         raise HTTPException(status_code=400, detail="agent_id and tool.name are required")
     return {"status": "ok", "tool": tool}
+
+
+@router.post("/v1/server/tools/sync")
+def sync_tools(req: ToolSyncRequest, request: Request) -> dict[str, Any]:
+    _validate_client_session(request)
+    result = _console.sync_tools(req.context, req.tools)
+    if result is None:
+        raise HTTPException(status_code=400, detail="agent_id is required")
+    return {"status": "ok", **result}
 
 
 @router.post("/v1/server/skills/report")
