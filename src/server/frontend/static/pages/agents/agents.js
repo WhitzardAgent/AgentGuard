@@ -36,11 +36,15 @@
       const agentId = String(agent?.agent_id || "").trim();
       const toolCount = Number(agent?.tool_count || 0);
       const skillCount = Number(agent?.skill_count || 0);
+      const mcpCount = Number(agent?.mcp_count || 0);
       const toolPreviewText = Array.isArray(agent?.tool_names)
         ? agent.tool_names.join(", ")
         : "";
       const skillPreviewText = Array.isArray(agent?.skill_names)
         ? agent.skill_names.join(", ")
+        : "";
+      const mcpPreviewText = Array.isArray(agent?.mcp_names)
+        ? agent.mcp_names.join(", ")
         : "";
       const card = document.createElement("button");
       card.type = "button";
@@ -54,9 +58,11 @@
           <strong>${agentId}</strong>
           <span class="pill">${toolCount} tool${toolCount === 1 ? "" : "s"}</span>
           <span class="pill">${skillCount} skill${skillCount === 1 ? "" : "s"}</span>
+          <span class="pill">${mcpCount} MCP${mcpCount === 1 ? "" : "s"}</span>
         </div>
         <p class="subtle">${toolPreviewText || "No tools registered."}</p>
         <p class="subtle">${skillPreviewText ? `Skills: ${skillPreviewText}` : "No skills registered."}</p>
+        <p class="subtle">${mcpPreviewText ? `MCP: ${mcpPreviewText}` : "No MCP services registered."}</p>
       `;
 
       card.addEventListener("click", () => {

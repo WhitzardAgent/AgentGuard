@@ -12,6 +12,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from backend.api.schemas import McpDetectRequest
 from backend.app_state import get_console
 
 router = APIRouter()
@@ -88,6 +89,29 @@ def detect_agent_skills(agent_id: str, body: SkillDetectBody) -> Any:
         agent_id,
         body.skill_unique_ids,
         use_llm=body.use_llm,
+        llm_config=body.llm_config,
+    )
+    if not result.get("ok"):
+        return JSONResponse(result, status_code=int(result.pop("code", 422)))
+    return result
+
+
+# ---- mcps -------------------------------------------------------------
+@router.get("/v1/backend/mcps")
+def list_mcps() -> list[dict[str, Any]]:
+    return get_console().mcps()
+
+
+@router.get("/v1/backend/agents/{agent_id}/mcps")
+def list_agent_mcps(agent_id: str) -> list[dict[str, Any]]:
+    return get_console().mcps(agent_id)
+
+
+@router.post("/v1/backend/agents/{agent_id}/mcps/detect")
+def detect_agent_mcps(agent_id: str, body: McpDetectRequest) -> Any:
+    result = get_console().detect_mcps(
+        agent_id,
+        body.mcp_unique_ids,
         llm_config=body.llm_config,
     )
     if not result.get("ok"):

@@ -8,6 +8,8 @@
   const SCOPED_TOOL_SYNC_KEY = "agentguard.scopedToolCatalogSyncedAt";
   const SCOPED_SKILL_LIST_KEY = "agentguard.scopedSkillList";
   const SCOPED_SKILL_SYNC_KEY = "agentguard.scopedSkillListSyncedAt";
+  const SCOPED_MCP_LIST_KEY = "agentguard.scopedMcpList";
+  const SCOPED_MCP_SYNC_KEY = "agentguard.scopedMcpListSyncedAt";
   const SCOPED_RULE_LIST_KEY = "agentguard.scopedRuleList";
   const SCOPED_RULE_SYNC_KEY = "agentguard.scopedRuleListSyncedAt";
   const LEGACY_TOOL_CATALOG_KEY = "agentguard.toolCatalog";
@@ -250,6 +252,8 @@
     localStorage.removeItem(SCOPED_TOOL_SYNC_KEY);
     localStorage.removeItem(SCOPED_SKILL_LIST_KEY);
     localStorage.removeItem(SCOPED_SKILL_SYNC_KEY);
+    localStorage.removeItem(SCOPED_MCP_LIST_KEY);
+    localStorage.removeItem(SCOPED_MCP_SYNC_KEY);
     localStorage.removeItem(SCOPED_RULE_LIST_KEY);
     localStorage.removeItem(SCOPED_RULE_SYNC_KEY);
   }
@@ -432,6 +436,109 @@
     };
   }
 
+  function normalizeMcpFile(item) {
+    if (!item || typeof item !== "object") {
+      return null;
+    }
+    const omissionReason = item?.content_omitted
+      ? String(item?.reason || item?.content_omitted || "content_not_reported").trim()
+      : "";
+    return {
+      relative_path: String(item?.relative_path || item?.path || "").trim(),
+      kind: String(item?.kind || "file").trim() || "file",
+      size: Number.isFinite(Number(item?.size)) ? Number(item.size) : 0,
+      binary: item?.binary === true,
+      content_omitted: omissionReason,
+      content: typeof item?.content === "string" ? item.content : undefined,
+    };
+  }
+
+  function normalizeMcpTool(item) {
+    if (!item || typeof item !== "object") {
+      return null;
+    }
+    return {
+      name: String(item?.name || "").trim(),
+      description: String(item?.description || "").trim(),
+      input_schema: item?.input_schema && typeof item.input_schema === "object" ? item.input_schema : {},
+    };
+  }
+
+  function normalizeMcp(item) {
+    const ownerAgentId = String(item?.owner_agent_id || item?.agent_id || "").trim();
+    const mcpResource = item?.mcp_resource && typeof item.mcp_resource === "object"
+      ? item.mcp_resource
+      : (item?.descriptor && typeof item.descriptor === "object" ? item.descriptor : {});
+    const resourceFiles = Array.isArray(mcpResource?.files) ? mcpResource.files : [];
+    const files = resourceFiles
+      .map(normalizeMcpFile)
+      .filter((file) => file && file.relative_path);
+    const tools = Array.isArray(mcpResource?.tools)
+      ? mcpResource.tools.map(normalizeMcpTool).filter((tool) => tool && tool.name)
+      : [];
+    const mcpUniqueId = String(item?.mcp_unique_id || mcpResource?.mcp_unique_id || mcpResource?.id || "").trim();
+    const name = String(item?.name || mcpResource?.name || "").trim();
+    return {
+      owner_agent_id: ownerAgentId,
+      agent_id: ownerAgentId,
+      user_id: item?.user_id == null ? null : String(item.user_id),
+      session_id: item?.session_id == null ? null : String(item.session_id),
+      mcp_unique_id: mcpUniqueId,
+      name,
+      description: String(item?.description || mcpResource?.description || "").trim(),
+      source_framework: String(item?.source_framework || mcpResource?.source_framework || "").trim(),
+      object_type: String(item?.object_type || mcpResource?.object_type || "mcp").trim() || "mcp",
+      transport: String(item?.transport || mcpResource?.transport || "").trim(),
+      remote: item?.remote === true || mcpResource?.remote === true,
+      root_path: String(item?.root_path || mcpResource?.root_path || "").trim(),
+      entry_file: String(item?.entry_file || mcpResource?.entry_file || "").trim(),
+      url: String(item?.url || mcpResource?.url || "").trim(),
+      sha256: String(item?.sha256 || mcpResource?.sha256 || "").trim(),
+      tool_count: Number.isFinite(Number(item?.tool_count || mcpResource?.tool_count))
+        ? Number(item?.tool_count || mcpResource?.tool_count)
+        : tools.length,
+      file_count: Number.isFinite(Number(item?.file_count || mcpResource?.file_count))
+        ? Number(item?.file_count || mcpResource?.file_count)
+        : files.length,
+      total_size: Number.isFinite(Number(item?.total_size || mcpResource?.total_size))
+        ? Number(item?.total_size || mcpResource?.total_size)
+        : files.reduce((sum, file) => sum + Number(file.size || 0), 0),
+      extraction: item?.extraction && typeof item.extraction === "object"
+        ? item.extraction
+        : (mcpResource?.extraction && typeof mcpResource.extraction === "object" ? mcpResource.extraction : {}),
+      detect_result: normalizeDetectionResult(item?.detect_result),
+      mcp_resource: {
+        ...mcpResource,
+        files,
+        tools,
+        server_config: mcpResource?.server_config && typeof mcpResource.server_config === "object"
+          ? mcpResource.server_config
+          : {},
+        sdk: mcpResource?.sdk && typeof mcpResource.sdk === "object" ? mcpResource.sdk : {},
+      },
+    };
+  }
+
+  function compactMcpForCache(mcp) {
+    const normalized = normalizeMcp(mcp);
+    const files = Array.isArray(normalized.mcp_resource?.files)
+      ? normalized.mcp_resource.files.map((file) => ({
+        relative_path: file.relative_path,
+        kind: file.kind,
+        size: file.size,
+        binary: file.binary,
+        content_omitted: file.content_omitted || (typeof file.content === "string" ? "cached_summary_only" : ""),
+      }))
+      : [];
+    return {
+      ...normalized,
+      mcp_resource: {
+        ...normalized.mcp_resource,
+        files,
+      },
+    };
+  }
+
   function normalizeRule(item) {
     return {
       ...item,
@@ -449,7 +556,7 @@
     };
   }
 
-  function buildAgentSummary(agentId, tools, skills = []) {
+  function buildAgentSummary(agentId, tools, skills = [], mcps = []) {
     const sortedTools = (Array.isArray(tools) ? tools : [])
       .map((tool) => String(tool?.name || "").trim())
       .filter(Boolean)
@@ -458,16 +565,22 @@
       .map((skill) => String(skill?.name || "").trim())
       .filter(Boolean)
       .sort((a, b) => a.localeCompare(b));
+    const sortedMcps = (Array.isArray(mcps) ? mcps : [])
+      .map((mcp) => String(mcp?.name || "").trim())
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
     return {
       agent_id: agentId,
       tool_count: sortedTools.length,
       tool_names: sortedTools.slice(0, 4),
       skill_count: sortedSkills.length,
       skill_names: sortedSkills.slice(0, 4),
+      mcp_count: sortedMcps.length,
+      mcp_names: sortedMcps.slice(0, 4),
     };
   }
 
-  function buildAgentCatalogFromResources(tools, skills = []) {
+  function buildAgentCatalogFromResources(tools, skills = [], mcps = []) {
     const groupedTools = (Array.isArray(tools) ? tools : []).reduce((acc, tool) => {
       const agentId = String(tool?.owner_agent_id || "").trim();
       if (!agentId) {
@@ -490,9 +603,25 @@
       acc[agentId].push(skill);
       return acc;
     }, {});
-    return Array.from(new Set([...Object.keys(groupedTools), ...Object.keys(groupedSkills)]))
+    const groupedMcps = (Array.isArray(mcps) ? mcps : []).reduce((acc, mcp) => {
+      const agentId = String(mcp?.owner_agent_id || mcp?.agent_id || "").trim();
+      if (!agentId) {
+        return acc;
+      }
+      if (!acc[agentId]) {
+        acc[agentId] = [];
+      }
+      acc[agentId].push(mcp);
+      return acc;
+    }, {});
+    return Array.from(new Set([...Object.keys(groupedTools), ...Object.keys(groupedSkills), ...Object.keys(groupedMcps)]))
       .sort((a, b) => a.localeCompare(b))
-      .map((agentId) => buildAgentSummary(agentId, groupedTools[agentId] || [], groupedSkills[agentId] || []));
+      .map((agentId) => buildAgentSummary(
+        agentId,
+        groupedTools[agentId] || [],
+        groupedSkills[agentId] || [],
+        groupedMcps[agentId] || [],
+      ));
   }
 
   function normalizeAgentSummary(item) {
@@ -503,6 +632,8 @@
       tool_names: Array.isArray(item?.tool_names) ? item.tool_names.map(String).filter(Boolean) : [],
       skill_count: Number.isFinite(Number(item?.skill_count)) ? Number(item.skill_count) : 0,
       skill_names: Array.isArray(item?.skill_names) ? item.skill_names.map(String).filter(Boolean) : [],
+      mcp_count: Number.isFinite(Number(item?.mcp_count)) ? Number(item.mcp_count) : 0,
+      mcp_names: Array.isArray(item?.mcp_names) ? item.mcp_names.map(String).filter(Boolean) : [],
     };
   }
 
@@ -602,6 +733,38 @@
     localStorage.setItem(SCOPED_AGENT_ID_KEY, normalizedAgentId);
     localStorage.setItem(SCOPED_SKILL_LIST_KEY, JSON.stringify((skills || []).map(compactSkillForCache)));
     localStorage.setItem(SCOPED_SKILL_SYNC_KEY, new Date().toISOString());
+  }
+
+  function loadScopedMcpList(agentId = getSelectedAgentId()) {
+    if (!matchesScopedAgent(agentId)) {
+      return [];
+    }
+    try {
+      const raw = localStorage.getItem(SCOPED_MCP_LIST_KEY);
+      if (!raw) {
+        return [];
+      }
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
+      return parsed
+        .map(normalizeMcp)
+        .filter((mcp) => mcp.owner_agent_id && mcp.mcp_unique_id && mcp.name);
+    } catch {
+      return [];
+    }
+  }
+
+  function persistScopedMcpList(agentId, mcps) {
+    const normalizedAgentId = String(agentId || "").trim();
+    if (!normalizedAgentId) {
+      clearScopedAgentCache();
+      return;
+    }
+    localStorage.setItem(SCOPED_AGENT_ID_KEY, normalizedAgentId);
+    localStorage.setItem(SCOPED_MCP_LIST_KEY, JSON.stringify((mcps || []).map(compactMcpForCache)));
+    localStorage.setItem(SCOPED_MCP_SYNC_KEY, new Date().toISOString());
   }
 
   function loadScopedRuleList(agentId = getSelectedAgentId()) {
@@ -759,9 +922,17 @@
     } catch {
       skillPayload = [];
     }
+    let mcpPayload = [];
+    try {
+      const maybeMcps = await fetchJson("/api/mcps");
+      mcpPayload = Array.isArray(maybeMcps) ? maybeMcps : [];
+    } catch {
+      mcpPayload = [];
+    }
     const tools = toolPayload.map(normalizeTool);
     const skills = skillPayload.map(normalizeSkill);
-    const catalog = buildAgentCatalogFromResources(tools, skills);
+    const mcps = mcpPayload.map(normalizeMcp);
+    const catalog = buildAgentCatalogFromResources(tools, skills, mcps);
     persistAgentCatalog(catalog);
     return catalog;
   }
@@ -836,6 +1007,21 @@
     return skills;
   }
 
+  async function refreshScopedMcpList(agentId = getSelectedAgentId()) {
+    const normalizedAgentId = String(agentId || "").trim();
+    if (!normalizedAgentId) {
+      clearScopedAgentCache();
+      return [];
+    }
+    const payload = await fetchJson(`/api/agents/${encodeURIComponent(normalizedAgentId)}/mcps`);
+    if (!Array.isArray(payload)) {
+      throw new Error("MCP list payload has an unexpected format.");
+    }
+    const mcps = payload.map(normalizeMcp);
+    persistScopedMcpList(normalizedAgentId, mcps);
+    return mcps;
+  }
+
   async function detectScopedSkills(agentId, skillUniqueIds, options = {}) {
     const normalizedAgentId = String(agentId || "").trim();
     const ids = (Array.isArray(skillUniqueIds) ? skillUniqueIds : [])
@@ -889,6 +1075,60 @@
           ...item,
           detect_result: normalizeDetectionResult(item?.detect_result),
           skill: item?.skill ? normalizeSkill(item.skill) : null,
+        }))
+        : [],
+    };
+  }
+
+  async function detectScopedMcps(agentId, mcpUniqueIds, options = {}) {
+    const normalizedAgentId = String(agentId || "").trim();
+    const ids = (Array.isArray(mcpUniqueIds) ? mcpUniqueIds : [])
+      .map((item) => String(item || "").trim())
+      .filter(Boolean);
+    if (!normalizedAgentId) {
+      throw new Error("agent_id is required.");
+    }
+    if (!ids.length) {
+      throw new Error("Select at least one MCP service to detect.");
+    }
+    const payload = await fetchJson(
+      `/api/agents/${encodeURIComponent(normalizedAgentId)}/mcps/detect`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          mcp_unique_ids: ids,
+          llm_config: options?.llmConfig || null,
+        }),
+        timeoutMs: Number.isFinite(Number(options?.timeoutMs))
+          ? Number(options.timeoutMs)
+          : 80000,
+      },
+    );
+    const current = loadScopedMcpList(normalizedAgentId);
+    const nextById = new Map(current.map((mcp) => [mcp.mcp_unique_id, mcp]));
+    (payload?.results || []).forEach((item) => {
+      const updatedMcp = normalizeMcp(item?.mcp || {
+        ...nextById.get(String(item?.mcp_unique_id || "").trim()),
+        detect_result: item?.detect_result || null,
+      });
+      if (updatedMcp.mcp_unique_id) {
+        nextById.set(updatedMcp.mcp_unique_id, updatedMcp);
+      }
+    });
+    const nextMcps = [...nextById.values()];
+    if (nextMcps.length) {
+      persistScopedMcpList(normalizedAgentId, nextMcps);
+    }
+    return {
+      ...payload,
+      results: Array.isArray(payload?.results)
+        ? payload.results.map((item) => ({
+          ...item,
+          detect_result: normalizeDetectionResult(item?.detect_result),
+          mcp: item?.mcp ? normalizeMcp(item.mcp) : null,
         }))
         : [],
     };
@@ -1008,6 +1248,7 @@
     groupToolsByAgent,
     listAgentIds,
     normalizeAgentSummary,
+    normalizeMcp,
     normalizePluginOption,
     normalizeRule,
     normalizeSkill,
@@ -1042,6 +1283,16 @@
     detectSkills(agentId, skillUniqueIds, options = {}) {
       return detectScopedSkills(agentId, skillUniqueIds, options);
     },
+    loadMcpList: loadScopedMcpList,
+    persistMcpList(mcps, agentId = getSelectedAgentId()) {
+      persistScopedMcpList(agentId, mcps);
+    },
+    refreshMcpList(agentId = getSelectedAgentId()) {
+      return refreshScopedMcpList(agentId);
+    },
+    detectMcps(agentId, mcpUniqueIds, options = {}) {
+      return detectScopedMcps(agentId, mcpUniqueIds, options);
+    },
     loadRuleList: loadScopedRuleList,
     persistRuleList(rules, agentId = getSelectedAgentId()) {
       persistScopedRuleList(agentId, rules);
@@ -1068,6 +1319,9 @@
     },
     getLastSkillSyncTime() {
       return localStorage.getItem(SCOPED_SKILL_SYNC_KEY);
+    },
+    getLastMcpSyncTime() {
+      return localStorage.getItem(SCOPED_MCP_SYNC_KEY);
     },
     getLastRuleSyncTime() {
       return localStorage.getItem(SCOPED_RULE_SYNC_KEY);

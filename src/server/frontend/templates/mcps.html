@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgentGuard Frontend Preview</title>
+  <script src="/static/common/i18n.js"></script>
+  <script>
+    (function () {
+      try {
+        if (!String(window.localStorage.getItem("agentguard.selectedAgentId") || "").trim()) {
+          window.location.replace("/agents.html");
+        }
+      } catch {
+        window.location.replace("/agents.html");
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/common/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+{{ shared:sidebar }}
+
+    <main class="app-main skill-main mcp-main">
+      <section class="page-intro-card skill-hero mcp-hero">
+        <div class="skill-hero-copy">
+          <p class="page-kicker" data-i18n="MCP Security">MCP Security</p>
+          <h1><span data-i18n="Inspect MCP services for">Inspect MCP services for</span> <span id="mcp-selected-agent">the selected agent</span>.</h1>
+          <p class="subtle skill-hero-description" data-i18n="Review MCP service metadata and recovered source reported by adapters, run LLM detection, and keep the result attached to the selected agent.">Review MCP service metadata and recovered source reported by adapters, run LLM detection, and keep the result attached to the selected agent.</p>
+        </div>
+        <div class="skill-hero-metrics" aria-label="MCP summary" data-i18n-aria-label="MCP summary">
+          <div class="skill-metric-tile">
+            <span id="mcp-count-total">0</span>
+            <strong data-i18n="MCP Services">MCP Services</strong>
+          </div>
+          <div class="skill-metric-tile">
+            <span id="mcp-count-risky">0</span>
+            <strong data-i18n="Risk flagged">Risk flagged</strong>
+          </div>
+          <div class="skill-metric-tile">
+            <span id="mcp-count-files">0</span>
+            <strong data-i18n="Files">Files</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="card skill-control-card mcp-control-card">
+        <div class="heading-row">
+          <div>
+            <h3 data-i18n="Registered MCP Services">Registered MCP Services</h3>
+            <p class="subtle" id="mcp-sync-status" data-i18n="Loading MCP catalog...">Loading MCP catalog...</p>
+          </div>
+          <div class="heading-actions">
+            <button class="icon-label" id="refresh-mcps" type="button" aria-label="Refresh MCP catalog" title="Refresh MCP catalog" data-i18n-aria-label="Refresh MCP catalog" data-i18n-title="Refresh MCP catalog">
+              <img class="btn-icon-image" src="/assets/refresh.png" alt="">
+            </button>
+          </div>
+        </div>
+
+        <div class="skill-action-bar mcp-action-bar">
+          <div class="skill-selection-copy">
+            <strong id="mcp-selection-count">0 selected</strong>
+            <span class="subtle" data-i18n="Select one or more MCP services before running detection.">Select one or more MCP services before running detection.</span>
+          </div>
+          <label class="skill-concurrency-control">
+            <span data-i18n="LLM parallel">LLM parallel</span>
+            <select id="mcp-llm-concurrency" aria-label="LLM parallel" data-i18n-aria-label="LLM parallel">
+              <option value="1" selected>1</option>
+              <option value="2">2</option>
+              <option value="4">4</option>
+              <option value="8">8</option>
+            </select>
+          </label>
+          <div class="toolbar skill-toolbar mcp-toolbar">
+            <button class="btn" id="select-all-mcps" type="button" data-i18n="Select all">Select all</button>
+            <button class="btn" id="clear-mcp-selection" type="button" data-i18n="Clear selection">Clear selection</button>
+            <button class="btn primary" id="detect-selected-mcps" type="button" data-i18n="Detect selected MCPs">Detect selected MCPs</button>
+          </div>
+        </div>
+
+        <div class="skill-list mcp-list" id="mcp-list"></div>
+      </section>
+    </main>
+
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <script src="/static/common/messages.js"></script>
+  <script src="/static/common/page-shell.js"></script>
+  <script src="/static/common/app.js"></script>
+  <script src="/static/pages/mcps/mcps.js"></script>
+</body>
+</html>

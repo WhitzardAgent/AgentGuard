@@ -58,6 +58,8 @@ PAGE_ROUTES = {
     "/plugins.html": "plugins.html",
     "/skills": "skills.html",
     "/skills.html": "skills.html",
+    "/mcps": "mcps.html",
+    "/mcps.html": "mcps.html",
     "/user": "user.html",
     "/user.html": "user.html",
     "/labels": "labels.html",
@@ -73,13 +75,14 @@ PAGE_TAB_KEYS = {
     "agents.html": "agents",
     "plugins.html": "plugins",
     "skills.html": "skills",
+    "mcps.html": "mcps",
     "user.html": "user",
     "labels.html": "labels",
     "rules.html": "rules",
     "runtime.html": "runtime",
 }
 
-SIDEBAR_TABS = ("home", "agents", "plugins", "skills", "user", "labels", "rules", "runtime")
+SIDEBAR_TABS = ("home", "agents", "plugins", "skills", "mcps", "user", "labels", "rules", "runtime")
 
 
 class FrontendPreviewHandler(BaseHTTPRequestHandler):
@@ -97,6 +100,10 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
 
         if path == "/api/skills":
             self._proxy("skills", method="GET", query=query)
+            return
+
+        if path == "/api/mcps":
+            self._proxy("mcps", method="GET", query=query)
             return
 
         if path == "/api/rules":
@@ -144,6 +151,11 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
             return
 
         if path.startswith("/api/agents/") and path.endswith("/skills"):
+            upstream_path = path.removeprefix("/api/")
+            self._proxy(upstream_path, method="GET", query=query)
+            return
+
+        if path.startswith("/api/agents/") and path.endswith("/mcps"):
             upstream_path = path.removeprefix("/api/")
             self._proxy(upstream_path, method="GET", query=query)
             return
@@ -204,6 +216,11 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
             return
 
         if path.startswith("/api/agents/") and path.endswith("/skills/detect"):
+            upstream_path = path.removeprefix("/api/")
+            self._proxy(upstream_path, method="POST", query=query)
+            return
+
+        if path.startswith("/api/agents/") and path.endswith("/mcps/detect"):
             upstream_path = path.removeprefix("/api/")
             self._proxy(upstream_path, method="POST", query=query)
             return
@@ -456,11 +473,14 @@ def serve(host: str | None = None, port: int | None = None) -> None:
     else:
         print(f"Proxying /api/tools to {API_BASE_URL}/v1/backend/tools")
         print(f"Proxying /api/skills to {API_BASE_URL}/v1/backend/skills")
+        print(f"Proxying /api/mcps to {API_BASE_URL}/v1/backend/mcps")
         print(f"Proxying /api/rules to {API_BASE_URL}/v1/backend/rules")
         print(f"Proxying /api/rules/reload to {API_BASE_URL}/v1/backend/rules/reload")
         print("Proxying /api/agents/{agent_id}/rules to agent-scoped rule endpoints")
         print("Proxying /api/agents/{agent_id}/skills to agent-scoped skill endpoints")
         print("Proxying /api/agents/{agent_id}/skills/detect to skill detect endpoint")
+        print("Proxying /api/agents/{agent_id}/mcps to agent-scoped MCP endpoints")
+        print("Proxying /api/agents/{agent_id}/mcps/detect to MCP detect endpoint")
         print("Proxying /api/agents/{agent_id}/plugins/config to agent-scoped plugin endpoints")
         print("Proxying /api/agents/{agent_id}/plugins/available to agent-scoped plugin catalog endpoints")
         print("Proxying /api/agents/{agent_id}/tools/{tool_name}/labels to tool-label patch endpoint")

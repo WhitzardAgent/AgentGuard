@@ -537,6 +537,114 @@ def test_agent_skill_detect_proxy_forwards_payload_and_api_key():
     assert json.loads(str(observed["body"])) == request_body
 
 
+def test_mcps_proxy_lists_global_mcps():
+    observed: dict[str, object] = {}
+
+    class UpstreamHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            observed["path"] = self.path
+            observed["api_key"] = self.headers.get("X-Api-Key")
+            body = json.dumps([
+                {
+                    "owner_agent_id": "agent-a",
+                    "mcp_unique_id": "agent-a:mcp-one",
+                    "name": "mcp-one",
+                    "description": "demo mcp",
+                }
+            ]).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    with _ThreadedServer(UpstreamHandler) as upstream:
+        with patched_proxy_target(upstream.url, api_key="test-secret"):
+            with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+                status, payload = _json_request("GET", preview.url, "/api/mcps")
+
+    assert status == 200
+    assert payload[0]["name"] == "mcp-one"
+    assert observed["path"] == "/v1/backend/mcps"
+    assert observed["api_key"] == "test-secret"
+
+
+def test_agent_mcps_proxy_lists_scoped_mcps():
+    observed: dict[str, object] = {}
+
+    class UpstreamHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            observed["path"] = self.path
+            body = json.dumps([
+                {
+                    "owner_agent_id": "agent-a",
+                    "mcp_unique_id": "agent-a:mcp-one",
+                    "name": "mcp-one",
+                }
+            ]).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    with _ThreadedServer(UpstreamHandler) as upstream:
+        with patched_proxy_target(upstream.url):
+            with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+                status, payload = _json_request("GET", preview.url, "/api/agents/agent-a/mcps")
+
+    assert status == 200
+    assert payload[0]["mcp_unique_id"] == "agent-a:mcp-one"
+    assert observed["path"] == "/v1/backend/agents/agent-a/mcps"
+
+
+def test_agent_mcp_detect_proxy_forwards_payload_and_api_key():
+    observed: dict[str, object] = {}
+
+    class UpstreamHandler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            observed["path"] = self.path
+            observed["api_key"] = self.headers.get("X-Api-Key")
+            length = int(self.headers.get("Content-Length", "0"))
+            observed["body"] = self.rfile.read(length).decode("utf-8")
+            body = json.dumps({"ok": True, "agent_id": "agent-a", "detected": 1, "results": []}).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    request_body = {
+        "mcp_unique_ids": ["agent-a:mcp-one"],
+        "llm_config": None,
+    }
+
+    with _ThreadedServer(UpstreamHandler) as upstream:
+        with patched_proxy_target(upstream.url, api_key="test-secret"):
+            with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+                status, payload = _json_request(
+                    "POST",
+                    preview.url,
+                    "/api/agents/agent-a/mcps/detect",
+                    request_body,
+                )
+
+    assert status == 200
+    assert payload["ok"] is True
+    assert observed["path"] == "/v1/backend/agents/agent-a/mcps/detect"
+    assert observed["api_key"] == "test-secret"
+    assert json.loads(str(observed["body"])) == request_body
+
+
 def test_plugins_config_proxy_forwards_payload_and_api_key():
     observed: dict[str, object] = {}
 
@@ -746,6 +854,17 @@ def test_skills_page_renders_skill_workspace():
     assert 'data-agent-required="true"' in body
 
 
+def test_mcps_page_renders_mcp_workspace():
+    with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+        status, body = _text_request("GET", preview.url, "/mcps.html")
+
+    assert status == 200
+    assert "Registered MCP Services" in body
+    assert "Detect selected" in body
+    assert 'href="/mcps.html"' in body
+    assert 'data-agent-required="true"' in body
+
+
 def test_mock_mode_lists_tools_and_agent_scoped_tools():
     with patched_mock_mode():
         with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
@@ -784,6 +903,31 @@ def test_mock_mode_lists_and_detects_agent_skills():
     assert after_status == 200
     assert after_skills[0]["detect_result"]["label"] == "malicious"
     assert after_skills[0]["detect_result"]["metadata"]["llm_review"]["skipped"] is False
+
+
+def test_mock_mode_lists_and_detects_agent_mcps():
+    with patched_mock_mode():
+        with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+            status, mcps = _json_request("GET", preview.url, "/api/mcps")
+            scoped_status, scoped_mcps = _json_request("GET", preview.url, "/api/agents/agent-alpha/mcps")
+            mcp_id = scoped_mcps[0]["mcp_unique_id"]
+            detect_status, detect_payload = _json_request(
+                "POST",
+                preview.url,
+                "/api/agents/agent-alpha/mcps/detect",
+                {"mcp_unique_ids": [mcp_id]},
+            )
+            after_status, after_mcps = _json_request("GET", preview.url, "/api/agents/agent-alpha/mcps")
+
+    assert status == 200
+    assert any(item["name"] == "local_mcp" for item in mcps)
+    assert scoped_status == 200
+    assert [item["name"] for item in scoped_mcps] == ["local_mcp"]
+    assert detect_status == 200
+    assert detect_payload["ok"] is True
+    assert detect_payload["results"][0]["detect_result"]["label"] == "benign"
+    assert after_status == 200
+    assert after_mcps[0]["detect_result"]["label"] == "benign"
 
 
 def test_mock_mode_lists_global_and_agent_rules():

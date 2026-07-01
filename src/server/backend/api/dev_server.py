@@ -76,6 +76,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, self.console.tools())
         elif path == "/v1/backend/skills":
             self._send(200, self.console.skills())
+        elif path == "/v1/backend/mcps":
+            self._send(200, self.console.mcps())
         elif path == "/v1/backend/approvals":
             self._send(200, self.console.approvals())
         elif path.startswith("/v1/backend/agents/") and path.endswith("/tools"):
@@ -84,6 +86,9 @@ class _Handler(BaseHTTPRequestHandler):
         elif path.startswith("/v1/backend/agents/") and path.endswith("/skills"):
             agent_id = path.split("/")[4]
             self._send(200, self.console.skills(agent_id))
+        elif path.startswith("/v1/backend/agents/") and path.endswith("/mcps"):
+            agent_id = path.split("/")[4]
+            self._send(200, self.console.mcps(agent_id))
         elif path.startswith("/v1/backend/agents/") and path.endswith("/runtime/approvals"):
             agent_id = path.split("/")[4]
             self._send(200, self.console.approvals(agent_id))
@@ -159,6 +164,25 @@ class _Handler(BaseHTTPRequestHandler):
                         "skills": result["skills"],
                     },
                 )
+        elif self.path == "/v1/server/mcps/report":
+            if not self._validate_client_session():
+                return
+            result = self.console.register_mcps(
+                body.get("context") or {},
+                body.get("mcps") or [],
+                body.get("scan") or {},
+            )
+            if result is None:
+                self._send(400, {"error": "agent_id is required"})
+            else:
+                self._send(
+                    200,
+                    {
+                        "status": "ok",
+                        "mcp_count": result["mcp_count"],
+                        "mcps": result["mcps"],
+                    },
+                )
         elif self.path == "/v1/server/session/register":
             context = RuntimeContext.from_dict(body.get("context") or {})
             try:
@@ -221,6 +245,17 @@ class _Handler(BaseHTTPRequestHandler):
                 agent_id,
                 skill_unique_ids,
                 use_llm=bool(body.get("use_llm")),
+                llm_config=body.get("llm_config") if isinstance(body.get("llm_config"), dict) else None,
+            )
+            self._send(int(result.pop("code", 200 if result.get("ok") else 422)), result)
+        elif self.path.startswith("/v1/backend/agents/") and self.path.endswith("/mcps/detect"):
+            agent_id = self.path.split("/")[4]
+            mcp_unique_ids = body.get("mcp_unique_ids") or []
+            if not isinstance(mcp_unique_ids, list):
+                mcp_unique_ids = []
+            result = self.console.detect_mcps(
+                agent_id,
+                mcp_unique_ids,
                 llm_config=body.get("llm_config") if isinstance(body.get("llm_config"), dict) else None,
             )
             self._send(int(result.pop("code", 200 if result.get("ok") else 422)), result)

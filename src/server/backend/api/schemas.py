@@ -51,6 +51,12 @@ class SkillReportRequest(_ApiModel):
     scan: dict[str, Any] = Field(default_factory=dict)
 
 
+class McpReportRequest(_ApiModel):
+    context: dict[str, Any] = Field(default_factory=dict)
+    mcps: list[dict[str, Any]] = Field(default_factory=list)
+    scan: dict[str, Any] = Field(default_factory=dict)
+
+
 class SessionRegisterRequest(_ApiModel):
     context: dict[str, Any] = Field(default_factory=dict)
 
@@ -97,6 +103,11 @@ class AgentPluginAvailableResponse(_ApiModel):
 class SkillRunRequest(_ApiModel):
     skill_name: str
     input: dict[str, Any] = Field(default_factory=dict)
+
+
+class McpDetectRequest(_ApiModel):
+    mcp_unique_ids: list[str] = Field(default_factory=list)
+    llm_config: dict[str, Any] | None = None
 
 
 class TraceAuditRequest(_ApiModel):

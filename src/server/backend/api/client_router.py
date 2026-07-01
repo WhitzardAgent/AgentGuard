@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from backend.api.schemas import (
     GuardDecideRequest,
     GuardDecideResponse,
+    McpReportRequest,
     SessionRegisterRequest,
     SkillReportRequest,
     SkillRunRequest,
@@ -94,6 +95,19 @@ def report_skills(req: SkillReportRequest, request: Request) -> dict[str, Any]:
         "status": "ok",
         "skill_count": result["skill_count"],
         "skills": result["skills"],
+    }
+
+
+@router.post("/v1/server/mcps/report")
+def report_mcps(req: McpReportRequest, request: Request) -> dict[str, Any]:
+    _validate_client_session(request)
+    result = _console.register_mcps(req.context, req.mcps, req.scan)
+    if result is None:
+        raise HTTPException(status_code=400, detail="agent_id is required")
+    return {
+        "status": "ok",
+        "mcp_count": result["mcp_count"],
+        "mcps": result["mcps"],
     }
 
 

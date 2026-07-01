@@ -17,6 +17,7 @@
   const AGENT_REQUIRED_PATHS = new Set([
     "/plugins.html",
     "/skills.html",
+    "/mcps.html",
     "/labels.html",
     "/rules.html",
     "/runtime.html",

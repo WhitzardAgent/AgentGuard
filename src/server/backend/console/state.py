@@ -12,6 +12,7 @@ from collections import deque
 from typing import Any
 
 from backend.console.dsl import ParsedRule, parse_source, rule_to_console_dict
+from backend.console.mcp_record import McpRecord
 from backend.console.skill_record import SkillRecord
 from backend.runtime.manager import RuntimeManager
 from shared.rules.llm_dsl_generator import (
@@ -45,6 +46,7 @@ class ConsoleState:
 
         self._tools: dict[tuple[str, str], dict[str, Any]] = {}
         self._skills: dict[tuple[str, str], SkillRecord] = {}
+        self._mcps: dict[tuple[str, str], McpRecord] = {}
 
         self._traffic: deque[dict[str, Any]] = deque(maxlen=1000)
         self._audit: deque[dict[str, Any]] = deque(maxlen=1000)
@@ -53,7 +55,11 @@ class ConsoleState:
 
     # ---- agents / tools ------------------------------------------------
     def agents(self) -> list[str]:
-        return sorted({owner for owner, _ in self._tools} | {owner for owner, _ in self._skills})
+        return sorted(
+            {owner for owner, _ in self._tools}
+            | {owner for owner, _ in self._skills}
+            | {owner for owner, _ in self._mcps}
+        )
 
     def tools(self, agent_id: str | None = None) -> list[dict[str, Any]]:
         with self._lock:
@@ -69,6 +75,13 @@ class ConsoleState:
             items = [s for s in items if s.agent_id == agent_id]
         return [s.to_dict() for s in items]
 
+    def mcps(self, agent_id: str | None = None) -> list[dict[str, Any]]:
+        with self._lock:
+            items = list(self._mcps.values())
+        if agent_id:
+            items = [m for m in items if m.agent_id == agent_id]
+        return [m.to_dict() for m in items]
+
     def skill_record(self, agent_id: str, skill_unique_id: str) -> SkillRecord | None:
         normalized_agent_id = str(agent_id or "").strip()
         normalized_skill_id = str(skill_unique_id or "").strip()
@@ -76,6 +89,14 @@ class ConsoleState:
             return None
         with self._lock:
             return self._skills.get((normalized_agent_id, normalized_skill_id))
+
+    def mcp_record(self, agent_id: str, mcp_unique_id: str) -> McpRecord | None:
+        normalized_agent_id = str(agent_id or "").strip()
+        normalized_mcp_id = str(mcp_unique_id or "").strip()
+        if not normalized_agent_id or not normalized_mcp_id:
+            return None
+        with self._lock:
+            return self._mcps.get((normalized_agent_id, normalized_mcp_id))
 
     def register_tool(
         self,
@@ -214,6 +235,46 @@ class ConsoleState:
                 "scan": scan_options,
             }
 
+    def register_mcps(
+        self,
+        context: dict[str, Any] | Any,
+        mcps: list[dict[str, Any]],
+        scan: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        if hasattr(context, "to_dict"):
+            context = context.to_dict()
+        ctx = dict(context or {})
+        agent_id = str(ctx.get("agent_id") or "").strip()
+        user_id = _optional_string(ctx.get("user_id"))
+        session_id = _optional_string(ctx.get("session_id"))
+        if not agent_id:
+            return None
+
+        normalized: list[McpRecord] = []
+        for item in mcps:
+            if not isinstance(item, dict):
+                continue
+            record = McpRecord.from_descriptor(
+                agent_id=agent_id,
+                user_id=user_id,
+                session_id=session_id,
+                descriptor=item,
+            )
+            if record is None:
+                continue
+            normalized.append(record)
+
+        scan_options = dict(scan or {})
+        with self._lock:
+            for record in normalized:
+                self._mcps[(agent_id, record.mcp_unique_id)] = record
+            return {
+                "owner_agent_id": agent_id,
+                "mcp_count": len(normalized),
+                "mcps": [item.to_dict() for item in normalized],
+                "scan": scan_options,
+            }
+
     def detect_skills(
         self,
         agent_id: str,
@@ -286,6 +347,79 @@ class ConsoleState:
             "requested": len(normalized_skill_ids),
             "detected": len(results),
             "missing_skill_unique_ids": missing,
+            "results": results,
+        }
+
+    def detect_mcps(
+        self,
+        agent_id: str,
+        mcp_unique_ids: list[str],
+        *,
+        llm_config: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized_agent_id = str(agent_id or "").strip()
+        normalized_mcp_ids = [
+            str(item or "").strip()
+            for item in mcp_unique_ids
+            if str(item or "").strip()
+        ]
+        if not normalized_agent_id:
+            return {"ok": False, "error": "agent_id is required", "code": 400}
+        if not normalized_mcp_ids:
+            return {"ok": False, "error": "mcp_unique_ids is required", "code": 400}
+
+        with self._lock:
+            records = [
+                self._mcps[(normalized_agent_id, mcp_id)]
+                for mcp_id in normalized_mcp_ids
+                if (normalized_agent_id, mcp_id) in self._mcps
+            ]
+        missing = [
+            mcp_id
+            for mcp_id in normalized_mcp_ids
+            if all(record.mcp_unique_id != mcp_id for record in records)
+        ]
+        if not records:
+            return {
+                "ok": False,
+                "error": "no requested mcps were found",
+                "agent_id": normalized_agent_id,
+                "missing_mcp_unique_ids": missing,
+                "code": 404,
+            }
+
+        from backend.preprocess.detectors.mcp_llm_detector import (  # noqa: PLC0415
+            MCPLLMDetector,
+        )
+
+        detector = MCPLLMDetector()
+        results: list[dict[str, Any]] = []
+        for record in records:
+            detect_result = detector.detect(
+                record,
+                llm_config=llm_config,
+            )
+            with self._lock:
+                current = self._mcps.get((record.agent_id, record.mcp_unique_id))
+                if current is None:
+                    continue
+                current.detect_result = detect_result
+                mcp_dict = current.to_dict()
+            results.append(
+                {
+                    "mcp_unique_id": record.mcp_unique_id,
+                    "name": record.name,
+                    "detect_result": detect_result.to_dict(),
+                    "mcp": mcp_dict,
+                }
+            )
+
+        return {
+            "ok": True,
+            "agent_id": normalized_agent_id,
+            "requested": len(normalized_mcp_ids),
+            "detected": len(results),
+            "missing_mcp_unique_ids": missing,
             "results": results,
         }
 

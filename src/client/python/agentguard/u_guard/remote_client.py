@@ -61,6 +61,7 @@ class RemoteGuardClient:
         snapshot_path: str = "/v1/server/policy/snapshot",
         trace_path: str = "/v1/server/trace/upload",
         tool_report_path: str = "/v1/server/tools/report",
+        mcp_report_path: str = "/v1/server/mcps/report",
         tool_sync_path: str = "/v1/server/tools/sync",
         approval_path: str = "/v1/server/approvals/{ticket_id}",
         register_path: str = "/v1/server/session/register",
@@ -80,6 +81,7 @@ class RemoteGuardClient:
         self.snapshot_path = snapshot_path
         self.trace_path = trace_path
         self.tool_report_path = tool_report_path
+        self.mcp_report_path = mcp_report_path
         self.tool_sync_path = tool_sync_path
         self.approval_path = approval_path
         self.register_path = register_path
@@ -149,6 +151,16 @@ class RemoteGuardClient:
             "tool": tool,
         }
         return self._post(self.tool_report_path, body)
+
+    def report_mcps(self, context: RuntimeContext, mcps: list[dict[str, Any]], scan: dict[str, Any] | None = None) -> dict[str, Any]:
+        if not self.enabled:
+            raise RemoteGuardError("no server_url configured")
+        body = {
+            "context": context.to_dict(),
+            "mcps": list(mcps),
+            "scan": scan if isinstance(scan, dict) else {},
+        }
+        return self._post(self.mcp_report_path, body)
 
     def sync_tools(self, context: RuntimeContext, tools: list[dict[str, Any]]) -> dict[str, Any]:
         if not self.enabled:

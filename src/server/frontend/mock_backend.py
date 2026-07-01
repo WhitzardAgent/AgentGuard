@@ -17,10 +17,16 @@ class MockRoute:
 
 class FrontendMockBackend:
     _AGENT_TOOLS_ROUTE = MockRoute("GET", re.compile(r"^/api/agents/(?P<agent_id>[^/]+)/tools$"))
+    _MCPS_ROUTE = MockRoute("GET", re.compile(r"^/api/mcps$"))
     _AGENT_SKILLS_ROUTE = MockRoute("GET", re.compile(r"^/api/agents/(?P<agent_id>[^/]+)/skills$"))
     _AGENT_SKILLS_DETECT_ROUTE = MockRoute(
         "POST",
         re.compile(r"^/api/agents/(?P<agent_id>[^/]+)/skills/detect$"),
+    )
+    _AGENT_MCPS_ROUTE = MockRoute("GET", re.compile(r"^/api/agents/(?P<agent_id>[^/]+)/mcps$"))
+    _AGENT_MCPS_DETECT_ROUTE = MockRoute(
+        "POST",
+        re.compile(r"^/api/agents/(?P<agent_id>[^/]+)/mcps/detect$"),
     )
     _AGENT_TOOL_LABELS_PATCH_ROUTE = MockRoute(
         "PATCH",
@@ -42,6 +48,7 @@ class FrontendMockBackend:
         with self._lock:
             self._tools = [self._clone(tool) for tool in self._default_tools]
             self._skills = [self._clone(skill) for skill in self._default_skills]
+            self._mcps = [self._clone(mcp) for mcp in self._build_default_mcps()]
             self._published_source = self._default_source
             self._published_rules = self._parse_rules_from_source(self._published_source)
             self._agent_rule_sources: dict[str, list[str]] = {}
@@ -68,10 +75,20 @@ class FrontendMockBackend:
             self._send_json(handler, self._get_tools_for_agent(agent_id))
             return True
 
+        if method == self._MCPS_ROUTE.method and path == "/api/mcps":
+            self._send_json(handler, self._get_all_mcps())
+            return True
+
         match = self._AGENT_SKILLS_ROUTE.pattern.match(path)
         if method == self._AGENT_SKILLS_ROUTE.method and match:
             agent_id = match.group("agent_id")
             self._send_json(handler, self._get_skills_for_agent(agent_id))
+            return True
+
+        match = self._AGENT_MCPS_ROUTE.pattern.match(path)
+        if method == self._AGENT_MCPS_ROUTE.method and match:
+            agent_id = match.group("agent_id")
+            self._send_json(handler, self._get_mcps_for_agent(agent_id))
             return True
 
         match = self._AGENT_RULES_ROUTE.pattern.match(path)
@@ -101,6 +118,16 @@ class FrontendMockBackend:
                 self._send_json(handler, self._invalid_json_response(), status=HTTPStatus.BAD_REQUEST)
                 return True
             response, status = self._detect_skills(match.group("agent_id"), payload)
+            self._send_json(handler, response, status=status)
+            return True
+
+        match = self._AGENT_MCPS_DETECT_ROUTE.pattern.match(path)
+        if method == self._AGENT_MCPS_DETECT_ROUTE.method and match:
+            payload = self._read_json_body(handler)
+            if payload is None:
+                self._send_json(handler, self._invalid_json_response(), status=HTTPStatus.BAD_REQUEST)
+                return True
+            response, status = self._detect_mcps(match.group("agent_id"), payload)
             self._send_json(handler, response, status=status)
             return True
 
@@ -188,6 +215,18 @@ class FrontendMockBackend:
                 self._clone(skill)
                 for skill in self._skills
                 if str(skill.get("owner_agent_id") or skill.get("agent_id") or "").strip() == agent_id
+            ]
+
+    def _get_all_mcps(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return [self._clone(mcp) for mcp in self._mcps]
+
+    def _get_mcps_for_agent(self, agent_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            return [
+                self._clone(mcp)
+                for mcp in self._mcps
+                if str(mcp.get("owner_agent_id") or mcp.get("agent_id") or "").strip() == agent_id
             ]
 
     def _detect_skills(self, agent_id: str, payload: dict[str, Any]) -> tuple[dict[str, Any], HTTPStatus]:
@@ -286,6 +325,82 @@ class FrontendMockBackend:
             "requested": len(requested),
             "detected": len(results),
             "missing_skill_unique_ids": missing,
+            "results": results,
+        }, HTTPStatus.OK)
+
+    def _detect_mcps(self, agent_id: str, payload: dict[str, Any]) -> tuple[dict[str, Any], HTTPStatus]:
+        requested = [
+            str(item or "").strip()
+            for item in (payload.get("mcp_unique_ids") or [])
+            if str(item or "").strip()
+        ]
+        if not requested:
+            return ({"ok": False, "error": "mcp_unique_ids is required"}, HTTPStatus.BAD_REQUEST)
+
+        results: list[dict[str, Any]] = []
+        missing: list[str] = []
+        with self._lock:
+            for mcp_id in requested:
+                found_index = next((
+                    index
+                    for index, mcp in enumerate(self._mcps)
+                    if str(mcp.get("owner_agent_id") or mcp.get("agent_id") or "").strip() == agent_id
+                    and str(mcp.get("mcp_unique_id") or "").strip() == mcp_id
+                ), None)
+                if found_index is None:
+                    missing.append(mcp_id)
+                    continue
+
+                mcp = self._clone(self._mcps[found_index])
+                label = "malicious" if "exfil" in str(mcp.get("name", "")).lower() else "benign"
+                reason = (
+                    "Mock LLM flagged this MCP service as malicious."
+                    if label == "malicious"
+                    else "Mock LLM found no high-confidence risk signals."
+                )
+                detect_result = {
+                    "object_id": mcp_id,
+                    "object_type": "mcp",
+                    "name": mcp.get("name", ""),
+                    "risk_labels": [label],
+                    "risk_level": "high" if label == "malicious" else "low",
+                    "metadata": {
+                        "llm_review": {
+                            "skipped": False,
+                            "label": label,
+                            "reason": reason,
+                        }
+                    },
+                    "label": label,
+                    "reason": reason,
+                    "agent_id": agent_id,
+                    "user_id": mcp.get("user_id"),
+                    "session_id": mcp.get("session_id"),
+                    "mcp_unique_id": mcp_id,
+                }
+                mcp["detect_result"] = detect_result
+                self._mcps[found_index] = self._clone(mcp)
+                results.append({
+                    "mcp_unique_id": mcp_id,
+                    "name": mcp.get("name", ""),
+                    "detect_result": self._clone(detect_result),
+                    "mcp": self._clone(mcp),
+                })
+
+        if not results:
+            return ({
+                "ok": False,
+                "error": "no requested mcps were found",
+                "agent_id": agent_id,
+                "missing_mcp_unique_ids": missing,
+            }, HTTPStatus.NOT_FOUND)
+
+        return ({
+            "ok": True,
+            "agent_id": agent_id,
+            "requested": len(requested),
+            "detected": len(results),
+            "missing_mcp_unique_ids": missing,
             "results": results,
         }, HTTPStatus.OK)
 
@@ -757,6 +872,62 @@ class FrontendMockBackend:
         return [customer_skill, exfil_skill]
 
     @staticmethod
+    def _build_default_mcps() -> list[dict[str, Any]]:
+        local_mcp = FrontendMockBackend._mcp_record(
+            agent_id="agent-alpha",
+            mcp_id="agent-alpha:local-mcp",
+            name="local_mcp",
+            description="Local MCP service that exposes internal tools.",
+            transport="stdio",
+            remote=False,
+            root_path="/mock/agent-alpha/local-mcp",
+            entry_file="server.js",
+            files=[
+                {
+                    "relative_path": "server.js",
+                    "kind": "script",
+                    "content": "import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';\n",
+                },
+                {
+                    "relative_path": "package.json",
+                    "kind": "manifest",
+                    "content": json.dumps({"name": "local-mcp", "dependencies": {"@modelcontextprotocol/sdk": "^1.0.0"}}),
+                },
+            ],
+            tools=[
+                {
+                    "name": "collect_internal_docs",
+                    "description": "Collect internal documents for downstream analysis.",
+                    "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}},
+                }
+            ],
+        )
+        remote_mcp = FrontendMockBackend._mcp_record(
+            agent_id="agent-beta",
+            mcp_id="agent-beta:remote-mcp",
+            name="remote_mcp",
+            description="Remote MCP service reachable over HTTP.",
+            transport="http",
+            remote=True,
+            url="https://mcp.example/mcp",
+            files=[
+                {
+                    "relative_path": "README.md",
+                    "kind": "text",
+                    "content": "Remote MCP service fixture.\n",
+                }
+            ],
+            tools=[
+                {
+                    "name": "fetch_remote_data",
+                    "description": "Fetch remote data for testing.",
+                    "input_schema": {"type": "object", "properties": {"url": {"type": "string"}}},
+                }
+            ],
+        )
+        return [local_mcp, remote_mcp]
+
+    @staticmethod
     def _skill_record(
         *,
         agent_id: str,
@@ -811,6 +982,85 @@ class FrontendMockBackend:
             "extraction": resource["extraction"],
             "detect_result": None,
             "skill_resource": FrontendMockBackend._clone(resource),
+            "descriptor": FrontendMockBackend._clone(resource),
+        }
+
+    @staticmethod
+    def _mcp_record(
+        *,
+        agent_id: str,
+        mcp_id: str,
+        name: str,
+        description: str,
+        transport: str,
+        remote: bool,
+        files: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        root_path: str = "",
+        entry_file: str = "",
+        url: str = "",
+    ) -> dict[str, Any]:
+        normalized_files = []
+        total_size = 0
+        for file in files:
+            content = str(file.get("content", ""))
+            size = len(content.encode("utf-8"))
+            total_size += size
+            normalized_files.append({
+                "relative_path": str(file.get("relative_path", "")).strip(),
+                "kind": str(file.get("kind", "file")).strip() or "file",
+                "size": size,
+                "binary": False,
+                "content": content,
+            })
+        resource = {
+            "object_type": "mcp",
+            "source_framework": "mcp_native",
+            "name": name,
+            "description": description,
+            "transport": transport,
+            "remote": remote,
+            "root_path": root_path,
+            "entry_file": entry_file,
+            "url": url,
+            "sha256": mcp_id.rsplit(":", 1)[-1],
+            "files": normalized_files,
+            "tools": tools,
+            "server_config": {"transport": transport, "remote": remote, "url": url, "cwd": root_path},
+            "sdk": {"detected": True, "packages": ["@modelcontextprotocol/sdk"] if not remote else []},
+            "file_count": len(normalized_files),
+            "tool_count": len(tools),
+            "total_size": total_size,
+            "extraction": {
+                "level": "source_directory" if not remote else "remote_endpoint",
+                "confidence": "high",
+                "source_status": "source_recovered" if not remote else "remote_source_unavailable",
+                "sdk_detected": not remote,
+                "hookable": not remote,
+            },
+        }
+        return {
+            "owner_agent_id": agent_id,
+            "agent_id": agent_id,
+            "user_id": "mock-user",
+            "session_id": f"{agent_id}-session",
+            "mcp_unique_id": mcp_id,
+            "name": name,
+            "description": description,
+            "source_framework": "mcp_native",
+            "object_type": "mcp",
+            "transport": transport,
+            "remote": remote,
+            "root_path": root_path,
+            "entry_file": entry_file,
+            "url": url,
+            "sha256": resource["sha256"],
+            "tool_count": len(tools),
+            "file_count": len(normalized_files),
+            "total_size": total_size,
+            "extraction": resource["extraction"],
+            "detect_result": None,
+            "mcp_resource": FrontendMockBackend._clone(resource),
             "descriptor": FrontendMockBackend._clone(resource),
         }
 

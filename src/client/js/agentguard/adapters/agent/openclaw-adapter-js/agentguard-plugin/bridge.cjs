@@ -9,6 +9,10 @@ const {
   scanSkillRoots,
 } = require("./skill_scanner.cjs");
 const {
+  DEFAULT_OPTIONS: DEFAULT_MCP_SCAN_OPTIONS,
+  scanMcpConfigs,
+} = require("./mcp_scanner.cjs");
+const {
   AuditLogger,
   AuditRecorder,
   ClientConfigAPIServer,
@@ -50,6 +54,7 @@ function normalizePluginConfig(raw = {}) {
     identity: normalizeIdentity(config.identity),
     defaultTools: resolveDefaultTools(config, configDir),
     skillScan: normalizeSkillScanConfig(config.skillScan, configDir),
+    mcpScan: normalizeMcpScanConfig(config.mcpScan, configDir),
     remoteUnavailableMode:
       asNonEmptyString(config.remoteUnavailableMode) || DEFAULT_REMOTE_UNAVAILABLE_MODE,
     windowSize: asPositiveInteger(config.windowSize, DEFAULT_WINDOW_SIZE),
@@ -216,6 +221,34 @@ function normalizeSkillScanConfig(value, configDir) {
     textExtensions: normalizeStringArray(
       input.textExtensions,
       DEFAULT_SKILL_SCAN_OPTIONS.textExtensions,
+    ),
+    followSymlinks: input.followSymlinks === true,
+  };
+}
+
+function normalizeMcpScanConfig(value, configDir) {
+  const input = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const baseDir = configDir || process.cwd();
+  return {
+    enabled: input.enabled === true,
+    roots: normalizeStringArray(input.roots).map((item) => resolveScanPath(item, baseDir)),
+    configPaths: normalizeStringArray(input.configPaths).map((item) => resolveScanPath(item, baseDir)),
+    configNames: normalizeStringArray(input.configNames, DEFAULT_MCP_SCAN_OPTIONS.configNames),
+    baseDir,
+    maxFileBytes: asPositiveInteger(input.maxFileBytes, DEFAULT_MCP_SCAN_OPTIONS.maxFileBytes),
+    maxTotalBytesPerServer: asPositiveInteger(
+      input.maxTotalBytesPerServer,
+      DEFAULT_MCP_SCAN_OPTIONS.maxTotalBytesPerServer,
+    ),
+    maxFilesPerServer: asPositiveInteger(
+      input.maxFilesPerServer,
+      DEFAULT_MCP_SCAN_OPTIONS.maxFilesPerServer,
+    ),
+    excludeDirs: normalizeStringArray(input.excludeDirs, DEFAULT_MCP_SCAN_OPTIONS.excludeDirs),
+    excludeFiles: normalizeStringArray(input.excludeFiles, DEFAULT_MCP_SCAN_OPTIONS.excludeFiles),
+    textExtensions: normalizeStringArray(
+      input.textExtensions,
+      DEFAULT_MCP_SCAN_OPTIONS.textExtensions,
     ),
     followSymlinks: input.followSymlinks === true,
   };
@@ -652,6 +685,20 @@ function emptySkillScanResult(config, diagnostics = []) {
   };
 }
 
+function emptyMcpScanResult(config, diagnostics = []) {
+  return {
+    enabled: Boolean(config && config.enabled),
+    mcps: [],
+    diagnostics,
+    summary: {
+      roots: config && Array.isArray(config.roots) ? config.roots : [],
+      config_paths: config && Array.isArray(config.configPaths) ? config.configPaths : [],
+      mcp_count: 0,
+      diagnostic_count: diagnostics.length,
+    },
+  };
+}
+
 function scanConfiguredSkills(config, logger = console) {
   if (!config || !config.enabled) {
     return emptySkillScanResult(config);
@@ -694,6 +741,52 @@ function scanConfiguredSkills(config, logger = console) {
   }
 }
 
+function scanConfiguredMcps(config, logger = console) {
+  if (!config || !config.enabled) {
+    return emptyMcpScanResult(config);
+  }
+  const hasRoots = Array.isArray(config.roots) && config.roots.length > 0;
+  const hasConfigPaths = Array.isArray(config.configPaths) && config.configPaths.length > 0;
+  if (!hasRoots && !hasConfigPaths) {
+    return emptyMcpScanResult(config, [
+      {
+        level: "warning",
+        reason: "no_mcp_scan_sources",
+        message: "mcpScan.enabled is true but mcpScan.roots and mcpScan.configPaths are empty.",
+      },
+    ]);
+  }
+  try {
+    const result = scanMcpConfigs({
+      roots: config.roots,
+      configPaths: config.configPaths,
+      configNames: config.configNames,
+      baseDir: config.baseDir,
+      maxFileBytes: config.maxFileBytes,
+      maxTotalBytesPerServer: config.maxTotalBytesPerServer,
+      maxFilesPerServer: config.maxFilesPerServer,
+      excludeDirs: config.excludeDirs,
+      excludeFiles: config.excludeFiles,
+      textExtensions: config.textExtensions,
+      followSymlinks: config.followSymlinks,
+    });
+    return {
+      enabled: true,
+      ...result,
+    };
+  } catch (error) {
+    const message = String(error && error.message ? error.message : error);
+    logger.warn?.("AgentGuard OpenClaw plugin failed to scan configured MCP servers.", error);
+    return emptyMcpScanResult(config, [
+      {
+        level: "error",
+        reason: "mcp_scan_failed",
+        message,
+      },
+    ]);
+  }
+}
+
 function buildSkillScanMetadata(skillScan) {
   const summary = skillScan && skillScan.summary ? skillScan.summary : {};
   return {
@@ -710,6 +803,34 @@ function buildSkillScanMetadata(skillScan) {
         file_count: Number.isFinite(skill.file_count) ? skill.file_count : 0,
         total_size: Number.isFinite(skill.total_size) ? skill.total_size : 0,
         extraction: skill.extraction || null,
+      }))
+      : [],
+  };
+}
+
+function buildMcpScanMetadata(mcpScan) {
+  const summary = mcpScan && mcpScan.summary ? mcpScan.summary : {};
+  return {
+    enabled: Boolean(mcpScan && mcpScan.enabled),
+    roots: Array.isArray(summary.roots) ? summary.roots : [],
+    config_paths: Array.isArray(summary.config_paths) ? summary.config_paths : [],
+    mcp_count: Number.isFinite(summary.mcp_count) ? summary.mcp_count : 0,
+    diagnostic_count: Number.isFinite(summary.diagnostic_count) ? summary.diagnostic_count : 0,
+    mcps: Array.isArray(mcpScan && mcpScan.mcps)
+      ? mcpScan.mcps.map((mcp) => ({
+        name: asNonEmptyString(mcp.name) || "",
+        description: asNonEmptyString(mcp.description) || "",
+        transport: asNonEmptyString(mcp.transport) || "",
+        remote: Boolean(mcp.remote),
+        root_path: asNonEmptyString(mcp.root_path) || "",
+        entry_file: asNonEmptyString(mcp.entry_file) || "",
+        url: asNonEmptyString(mcp.url) || "",
+        source_status: asNonEmptyString(mcp.source_status) || "",
+        sha256: asNonEmptyString(mcp.sha256) || "",
+        tool_count: Number.isFinite(mcp.tool_count) ? mcp.tool_count : 0,
+        file_count: Number.isFinite(mcp.file_count) ? mcp.file_count : 0,
+        total_size: Number.isFinite(mcp.total_size) ? mcp.total_size : 0,
+        extraction: mcp.extraction || null,
       }))
       : [],
   };
@@ -766,11 +887,16 @@ class AgentGuardOpenClawBridge {
     this.config = normalizePluginConfig(options.pluginConfig || {});
     this.logger = options.logger || console;
     this.skillScan = scanConfiguredSkills(this.config.skillScan, this.logger);
+    this.mcpScan = scanConfiguredMcps(this.config.mcpScan, this.logger);
     this.sessions = new Map();
   }
 
   getSkillScanResult() {
     return this.skillScan;
+  }
+
+  getMcpScanResult() {
+    return this.mcpScan;
   }
 
   getState(identityContext) {
@@ -814,6 +940,7 @@ class AgentGuardOpenClawBridge {
       enforcer,
       audit,
       skillScan: this.skillScan,
+      mcpScan: this.mcpScan,
       clientPluginConfig: buildPluginConfigPayload(this.config),
       remotePluginConfig: buildPluginConfigPayload(this.config),
       clientConfigApi: null,
@@ -822,11 +949,13 @@ class AgentGuardOpenClawBridge {
       defaultToolReporting: null,
       recentLlmOutputs: new Map(),
       skillReporting: null,
+      mcpReporting: null,
     };
     this.syncContextMetadata(state);
     this.sessions.set(sessionKey, state);
     this.ensureDefaultToolReports(state);
     this.ensureSkillReports(state);
+    this.ensureMcpReports(state);
     return state;
   }
 
@@ -851,6 +980,7 @@ class AgentGuardOpenClawBridge {
       client_plugin_config: state.clientPluginConfig,
       remote_plugin_config: state.remotePluginConfig,
       skill_scan: buildSkillScanMetadata(state.skillScan),
+      mcp_scan: buildMcpScanMetadata(state.mcpScan),
     };
     if (state.clientConfigApi) {
       state.context.metadata.client_config_url = state.clientConfigApi.plugin_config_url;
@@ -1011,6 +1141,42 @@ class AgentGuardOpenClawBridge {
         return false;
       });
     return state.skillReporting;
+  }
+
+  ensureMcpReports(state) {
+    const remote = state.enforcer.remote;
+    if (!remote || !remote.enabled) {
+      return Promise.resolve(false);
+    }
+    const mcps = Array.isArray(state.mcpScan && state.mcpScan.mcps)
+      ? state.mcpScan.mcps
+      : [];
+    if (!state.mcpScan || !state.mcpScan.enabled || mcps.length === 0) {
+      return Promise.resolve(false);
+    }
+    if (state.mcpReporting) {
+      return state.mcpReporting;
+    }
+    state.mcpReporting = this.ensureRemoteSessionRegistered(state)
+      .then((registered) => {
+        if (!registered) {
+          return false;
+        }
+        return remote.report_mcps(
+          state.context,
+          mcps,
+          {
+            source_framework: "mcp_native",
+            summary: state.mcpScan.summary || {},
+            diagnostics: state.mcpScan.diagnostics || [],
+          },
+        ).then(() => true);
+      })
+      .catch((error) => {
+        this.logger.warn?.("AgentGuard OpenClaw plugin failed to report MCPs.", error);
+        return false;
+      });
+    return state.mcpReporting;
   }
 
   async flushAsync(state, reason = "round_complete") {
@@ -1358,9 +1524,12 @@ module.exports = {
     isRemoteUnavailableDecision,
     loadConfigFile,
     loadPluginConfigSource,
+    normalizeMcpScanConfig,
     normalizePluginConfig,
     normalizeSkillScanConfig,
+    buildMcpScanMetadata,
     buildSkillScanMetadata,
+    scanConfiguredMcps,
     scanConfiguredSkills,
     shouldFailClosed,
   },

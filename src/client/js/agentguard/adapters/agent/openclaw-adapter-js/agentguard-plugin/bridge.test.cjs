@@ -186,6 +186,116 @@ test("skillScan can be enabled without roots and reports a local diagnostic", ()
   assert.equal(state.context.metadata.skill_scan.diagnostic_count, 1);
 });
 
+test("mcpScan config scans configured MCP servers into bridge state", () => {
+  const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-openclaw-mcp-scan-"));
+  const configPath = path.join(configDir, "agentguard-config.json");
+  const toolCatalogPath = path.join(configDir, "openclaw-tools.json");
+  const serverDir = path.join(configDir, "mcp-server");
+  writeFile(
+    path.join(serverDir, "package.json"),
+    JSON.stringify({
+      name: "demo-mcp-server",
+      type: "module",
+    }),
+  );
+  writeFile(
+    path.join(serverDir, "src", "server.js"),
+    [
+      "import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';",
+      "import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';",
+      "const server = new McpServer({ name: 'demo', version: '1.0.0' });",
+      "server.tool('read_file', 'Read files', {}, async () => ({}));",
+      "await server.connect(new StdioServerTransport());",
+    ].join("\n"),
+  );
+  writeFile(
+    path.join(configDir, ".cursor", "mcp.json"),
+    JSON.stringify({
+      mcpServers: {
+        local_mcp: {
+          command: "node",
+          args: ["./src/server.js"],
+          cwd: "./mcp-server",
+          tools: [
+            {
+              name: "read_file",
+              description: "Read files",
+              inputSchema: { type: "object" },
+            },
+          ],
+        },
+        remote_mcp: {
+          transport: "streamable-http",
+          url: "https://mcp.example/mcp",
+        },
+      },
+    }),
+  );
+  fs.writeFileSync(
+    toolCatalogPath,
+    JSON.stringify({
+      tools: [
+        {
+          name: "custom_tool",
+          description: "Custom tool catalog entry.",
+        },
+      ],
+    }),
+  );
+  fs.writeFileSync(
+    configPath,
+    JSON.stringify({
+      phases: buildPhases(),
+      defaultToolCatalogPath: "./openclaw-tools.json",
+      mcpScan: {
+        enabled: true,
+        roots: ["."],
+      },
+    }),
+  );
+
+  const bridge = new AgentGuardOpenClawBridge({
+    pluginConfig: { configPath },
+  });
+  const state = bridge.getState(buildToolContext());
+  const byName = Object.fromEntries(state.mcpScan.mcps.map((mcp) => [mcp.name, mcp]));
+
+  assert.equal(bridge.config.mcpScan.enabled, true);
+  assert.deepEqual(bridge.config.mcpScan.roots, [configDir]);
+  assert.equal(state.mcpScan.summary.mcp_count, 2);
+  assert.equal(byName.local_mcp.source_status, "source_recovered");
+  assert.equal(byName.local_mcp.transport, "stdio");
+  assert.equal(byName.local_mcp.tool_count, 1);
+  assert.equal(byName.local_mcp.extraction.sdk_detected, true);
+  assert.equal(byName.local_mcp.files.some((file) => file.relative_path === "src/server.js"), true);
+  assert.match(
+    byName.local_mcp.files.find((file) => file.relative_path === "src/server.js").content,
+    /McpServer/,
+  );
+  assert.equal(byName.remote_mcp.remote, true);
+  assert.equal(byName.remote_mcp.source_status, "remote_source_unavailable");
+  assert.equal(state.context.metadata.mcp_scan.mcp_count, 2);
+  assert.equal(state.context.metadata.mcp_scan.mcps[0].name, "local_mcp");
+  assert.equal(Object.prototype.hasOwnProperty.call(state.context.metadata.mcp_scan.mcps[0], "files"), false);
+});
+
+test("mcpScan can be enabled without sources and reports a local diagnostic", () => {
+  const bridge = new AgentGuardOpenClawBridge({
+    pluginConfig: {
+      phases: buildPhases(),
+      mcpScan: {
+        enabled: true,
+      },
+    },
+  });
+  const state = bridge.getState(buildToolContext());
+
+  assert.equal(state.mcpScan.summary.mcp_count, 0);
+  assert.equal(state.mcpScan.diagnostics[0].reason, "no_mcp_scan_sources");
+  assert.equal(state.context.metadata.mcp_scan.enabled, true);
+  assert.equal(state.context.metadata.mcp_scan.diagnostic_count, 1);
+});
+
 test("remote-enabled sessions auto-register and report default OpenClaw tools", async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];
@@ -316,6 +426,90 @@ test("remote-enabled sessions report configured skill descriptors", async () => 
     assert.equal(skillCalls[0].body.skills[0].name, "demo-skill");
     assert.match(skillCalls[0].body.skills[0].skill_markdown.content, /Demo Skill/);
     assert.equal(skillCalls[0].body.scan.summary.skill_count, 1);
+  } finally {
+    bridge?.clearAll();
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("remote-enabled sessions report configured MCP descriptors", async () => {
+  const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-openclaw-mcp-report-"));
+  const serverDir = path.join(configDir, "mcp-server");
+  writeFile(
+    path.join(serverDir, "package.json"),
+    JSON.stringify({
+      name: "demo-mcp-server",
+      type: "module",
+    }),
+  );
+  writeFile(
+    path.join(serverDir, "server.js"),
+    [
+      "import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';",
+      "const server = new McpServer({ name: 'demo', version: '1.0.0' });",
+      "server.tool('read_file', 'Read files', {}, async () => ({}));",
+    ].join("\n"),
+  );
+  writeFile(
+    path.join(configDir, ".cursor", "mcp.json"),
+    JSON.stringify({
+      mcpServers: {
+        local_mcp: {
+          command: "node",
+          args: ["server.js"],
+          cwd: "./mcp-server",
+          tools: [
+            {
+              name: "read_file",
+              description: "Read files",
+              inputSchema: { type: "object" },
+            },
+          ],
+        },
+      },
+    }),
+  );
+
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push({
+      url: String(url),
+      body: options.body ? JSON.parse(options.body) : null,
+    });
+    return {
+      ok: true,
+      async json() {
+        return {};
+      },
+    };
+  };
+
+  let bridge = null;
+  try {
+    bridge = new AgentGuardOpenClawBridge({
+      pluginConfig: {
+        serverUrl: "http://server.test",
+        phases: buildPhases(),
+        mcpScan: {
+          enabled: true,
+          roots: [configDir],
+        },
+      },
+    });
+
+    const state = bridge.getState(buildToolContext());
+    await bridge.ensureMcpReports(state);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const mcpCalls = calls.filter((call) => call.url.endsWith("/v1/server/mcps/report"));
+    assert.equal(mcpCalls.length, 1);
+    assert.equal(mcpCalls[0].body.context.agent_id, "agent-main");
+    assert.equal(mcpCalls[0].body.mcps.length, 1);
+    assert.equal(mcpCalls[0].body.mcps[0].name, "local_mcp");
+    assert.equal(mcpCalls[0].body.mcps[0].source_status, "source_recovered");
+    assert.equal(mcpCalls[0].body.mcps[0].files.some((file) => file.relative_path === "server.js"), true);
+    assert.equal(mcpCalls[0].body.scan.summary.mcp_count, 1);
   } finally {
     bridge?.clearAll();
     globalThis.fetch = originalFetch;

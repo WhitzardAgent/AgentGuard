@@ -50,6 +50,7 @@ class RemoteGuardClient {
     this.trace_path = options.trace_path || "/v1/server/trace/upload";
     this.tool_report_path = options.tool_report_path || "/v1/server/tools/report";
     this.skill_report_path = options.skill_report_path || options.skillReportPath || "/v1/server/skills/report";
+    this.mcp_report_path = options.mcp_report_path || options.mcpReportPath || "/v1/server/mcps/report";
     this.approval_path = options.approval_path || "/v1/server/approvals/{ticket_id}";
     this.register_path = options.register_path || "/v1/server/session/register";
     this.unregister_path = options.unregister_path || "/v1/server/session/unregister";
@@ -109,6 +110,14 @@ class RemoteGuardClient {
     return this.post(this.skill_report_path, {
       context: context.toDict(),
       skills: Array.isArray(skills) ? skills : [],
+      scan: scan && typeof scan === "object" && !Array.isArray(scan) ? scan : {},
+    });
+  }
+
+  report_mcps(context, mcps, scan = {}) {
+    return this.post(this.mcp_report_path, {
+      context: context.toDict(),
+      mcps: Array.isArray(mcps) ? mcps : [],
       scan: scan && typeof scan === "object" && !Array.isArray(scan) ? scan : {},
     });
   }
