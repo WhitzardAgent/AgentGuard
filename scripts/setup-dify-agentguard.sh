@@ -17,7 +17,7 @@ POLICY=""
 BOOTSTRAP_DIR=""
 OUTPUT_FILE=""
 APPLY="false"
-AGENT_CHAT="false"
+AGENT_CHAT="true"
 
 usage() {
     cat <<'EOF'
@@ -35,11 +35,10 @@ Options:
   --dify-dir       Dify source directory. The script writes into <dify-dir>/docker.
   --app-id         Optional Dify app id to guard. Repeat or pass comma-separated values.
                    Omit to guard all Dify apps in the api/worker process.
-  --node-id        Optional advanced filter. Repeat or pass comma-separated values.
-                   Omit to guard every workflow node.
-  --agent-chat     Enable the legacy Dify agent-chat adapter. Use this for Dify
-                   apps whose URL looks like /app/<app_id>/configuration and
-                   whose mode is agent-chat. This does not require --node-id.
+  --node-id        Legacy/debug filter for old Workflow Agent node paths.
+                   Workflow/chatflow node coverage no longer requires node ids.
+  --agent-chat     Enable the legacy Dify agent-chat adapter. This is enabled
+                   by default so one setup covers Agent Chat and Workflow/Chatflow.
   --server-url     AgentGuard server API URL reachable from Dify containers.
                    Defaults to http://host.docker.internal:38080.
   --api-key        Optional AgentGuard API key.
@@ -218,25 +217,12 @@ if [ "$APPLY" = "true" ]; then
 fi
 
 if [ -n "$CONSOLE_URL" ]; then
-    if [ "$AGENT_CHAT" = "true" ]; then
-        cat <<EOF
-After running your Dify Agent Chat app, open your AgentGuard console:
+    cat <<EOF
+Open your AgentGuard console to configure rules and inspect Dify agents:
   $CONSOLE_URL
 EOF
-    else
-        cat <<EOF
-After running a workflow, open your AgentGuard console:
-  $CONSOLE_URL
-EOF
-    fi
 else
-    if [ "$AGENT_CHAT" = "true" ]; then
-        cat <<'EOF'
-After running your Dify Agent Chat app, open the AgentGuard console provided by your AgentGuard server operator.
+    cat <<'EOF'
+Open the AgentGuard console provided by your AgentGuard server operator to configure rules and inspect Dify agents.
 EOF
-    else
-        cat <<'EOF'
-After running a workflow, open the AgentGuard console provided by your AgentGuard server operator.
-EOF
-    fi
 fi

@@ -367,6 +367,8 @@ def _install_fake_legacy_dify_modules(monkeypatch):
             node_type = node_config["data"]["type"]
             if node_type == "tool":
                 return WorkflowToolNode(node_config)
+            if node_type in {"if-else", "human-input", "iteration", "loop"}:
+                return WorkflowLogicNode(node_config)
             if node_type == "code":
                 return WorkflowGenericNode(node_config)
             return WorkflowLLMNode(node_config)
@@ -419,6 +421,17 @@ def _install_fake_legacy_dify_modules(monkeypatch):
 
         def run(self):
             yield types.SimpleNamespace(outputs={"result": "processed"})
+
+    class WorkflowLogicNode:
+        def __init__(self, node_config):
+            self.node_id = node_config["id"]
+            self.id = node_config["id"]
+            self.node_data = types.SimpleNamespace(**node_config["data"])
+            self.graph_init_params = types.SimpleNamespace(workflow_id="workflow-1")
+            self.execution_id = f"{node_config['id']}-exec"
+
+        def run(self):
+            yield types.SimpleNamespace(outputs={"routed": self.node_data.type})
 
     node_factory_mod.DifyNodeFactory = DifyNodeFactory
 
@@ -486,6 +499,7 @@ def _install_fake_legacy_dify_modules(monkeypatch):
         WorkflowLLMNode=WorkflowLLMNode,
         WorkflowToolNode=WorkflowToolNode,
         WorkflowGenericNode=WorkflowGenericNode,
+        WorkflowLogicNode=WorkflowLogicNode,
         FakeTool=FakeTool,
         PluginModelBackwardsInvocation=PluginModelBackwardsInvocation,
         PluginToolBackwardsInvocation=PluginToolBackwardsInvocation,
@@ -750,15 +764,37 @@ def test_workflow_llm_node_emits_events(monkeypatch):
     assert dify_adapter._current_guard.get() is None
     assert len(created_guards) == 1
     guard = created_guards[0]
+    assert guard.context.session_id == "workflow-llm-test"
     assert dify_adapter._agent_id(guard.context.metadata) == "ce0aa322-1f3f-4ab9-8329-3af8588c7480:workflow-1"
     assert _event_types(guard) == ["llm_input", "llm_output"]
     assert guard.trace.entries[0].event.metadata["dify_runtime"] == "workflow_api"
     assert guard.trace.entries[0].event.metadata["node_type"] == "llm"
     assert guard.trace.entries[0].event.metadata["node_title"] == "构造联网query"
     assert guard.trace.entries[0].event.metadata["app_id"] == "ce0aa322-1f3f-4ab9-8329-3af8588c7480"
-    assert len(guard.reported_tools) == 1
-    assert guard.reported_tools[0].name == "dify_node:llm:1782718941283"
-    assert "dify_workflow_node" in guard.reported_tools[0].capabilities
+    assert guard.reported_tools == []
+
+
+def test_workflow_make_guard_uses_workflow_run_session_and_stores_metadata(monkeypatch):
+    _install_fake_legacy_dify_modules(monkeypatch)
+    dify_adapter = _fresh_adapter(monkeypatch)
+
+    metadata = {
+        "adapter": "dify",
+        "dify_runtime": "workflow_api",
+        "app_id": "app-1",
+        "workflow_id": "workflow-1",
+        "workflow_run_id": "workflow-run-1",
+        "node_id": "node-1",
+        "node_execution_id": "node-exec-1",
+        "node_type": "code",
+    }
+
+    guard = dify_adapter._make_guard(metadata)
+
+    assert guard.context.session_id == "workflow-run-1"
+    assert guard.context.agent_id == "app-1:workflow-1"
+    assert guard.context.metadata["node_execution_id"] == "node-exec-1"
+    assert guard.context.metadata["node_type"] == "code"
 
 
 def test_workflow_question_classifier_node_emits_llm_events(monkeypatch):
@@ -788,7 +824,7 @@ def test_workflow_question_classifier_node_emits_llm_events(monkeypatch):
     assert _event_types(created_guards[0]) == ["llm_input", "llm_output"]
     assert created_guards[0].trace.entries[0].event.metadata["node_type"] == "question-classifier"
     assert created_guards[0].trace.entries[0].event.metadata["dify_runtime"] == "workflow_api"
-    assert created_guards[0].reported_tools[0].name == "dify_node:question-classifier:1782718852307"
+    assert created_guards[0].reported_tools == []
 
 
 def test_workflow_tool_node_emits_events(monkeypatch):
@@ -889,6 +925,58 @@ def test_workflow_generic_node_emits_tool_events(monkeypatch):
     assert guard.trace.entries[0].event.metadata["node_as_tool"] is True
     assert guard.trace.entries[1].event.payload.result == '{"result": "processed"}'
     assert guard.reported_tools[0].name == "dify_node:code:1782719000000"
+
+
+def test_workflow_node_id_filter_does_not_skip_workflow_api_nodes(monkeypatch):
+    fake = _install_fake_legacy_dify_modules(monkeypatch)
+    monkeypatch.setenv("AGENTGUARD_DIFY_NODE_IDS", "some-other-node")
+    dify_adapter = _fresh_adapter(monkeypatch)
+    dify_adapter.install_dify_adapter()
+    created_guards = []
+
+    from agentguard import AgentGuard
+
+    def make_guard(metadata):
+        guard = AgentGuard("workflow-node-filter-test", sandbox="noop")
+        guard.context.metadata.update(metadata)
+        guard.reported_tools = []
+        guard._report_tool_metadata = guard.reported_tools.append
+        created_guards.append(guard)
+        return guard
+
+    monkeypatch.setattr(dify_adapter, "_make_guard", make_guard)
+    node = fake.DifyNodeFactory().create_node(
+        {"id": "1782719000000", "data": {"type": "code", "title": "Code"}}
+    )
+
+    list(node.run())
+
+    assert len(created_guards) == 1
+    assert _event_types(created_guards[0]) == ["tool_invoke", "tool_result"]
+    assert created_guards[0].trace.entries[0].event.metadata["node_id"] == "1782719000000"
+
+
+def test_workflow_logic_nodes_are_not_guarded(monkeypatch):
+    fake = _install_fake_legacy_dify_modules(monkeypatch)
+    dify_adapter = _fresh_adapter(monkeypatch)
+    dify_adapter.install_dify_adapter()
+
+    created_guards = []
+
+    def make_guard(metadata):
+        created_guards.append(metadata)
+        raise AssertionError("logic nodes should not create an AgentGuard session")
+
+    monkeypatch.setattr(dify_adapter, "_make_guard", make_guard)
+
+    for node_type in ("if-else", "human-input", "iteration", "loop"):
+        node = fake.DifyNodeFactory().create_node(
+            {"id": f"{node_type}-node", "data": {"type": node_type, "title": node_type}}
+        )
+        chunks = list(node.run())
+        assert chunks[0].outputs == {"routed": node_type}
+
+    assert created_guards == []
 
 
 def test_workflow_tool_before_deny_skips_original_tool(monkeypatch):

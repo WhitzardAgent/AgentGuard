@@ -205,7 +205,9 @@ def _wrap_workflow_node_run(node: Any, node_factory: Any, node_config: Any) -> b
     @functools.wraps(original)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         metadata = _metadata_from_workflow_node(node, node_factory, node_config)
-        if not _legacy_metadata_allowed(metadata):
+        if not _workflow_metadata_allowed(metadata):
+            return original(*args, **kwargs)
+        if _workflow_node_should_skip(metadata):
             return original(*args, **kwargs)
         if _workflow_node_uses_specialized_hooks(metadata):
             return _run_workflow_node_with_context(
@@ -241,12 +243,12 @@ def _run_workflow_node_with_context(metadata: dict[str, Any], call: Any, *, reas
     if _active_guard() is None:
         return _run_with_ephemeral_guard(
             metadata,
-            lambda: _report_workflow_node_catalog(metadata) or call(),
+            lambda: _report_workflow_node_catalog_if_needed(metadata) or call(),
             reason=reason,
         )
     token_meta = _current_metadata.set(_merged_metadata(metadata))
     try:
-        _report_workflow_node_catalog(metadata)
+        _report_workflow_node_catalog_if_needed(metadata)
         result = call()
     finally:
         if "result" not in locals() or not _is_generator_like(result):
@@ -1251,6 +1253,14 @@ def _legacy_metadata_allowed(metadata: dict[str, Any]) -> bool:
     return True
 
 
+def _workflow_metadata_allowed(metadata: dict[str, Any]) -> bool:
+    app_ids = _env_csv("AGENTGUARD_DIFY_APP_IDS")
+    app_id = _optional_text(metadata.get("app_id"))
+    if app_ids and app_id not in app_ids:
+        return False
+    return True
+
+
 def _legacy_llm_call_from_args(args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[str, Any]:
     names = ["prompt_messages", "model_parameters", "tools", "stop", "stream", "callbacks"]
     call = {name: kwargs.get(name) for name in names if name in kwargs}
@@ -1423,6 +1433,11 @@ def _report_workflow_node_catalog(metadata: dict[str, Any]) -> None:
             "workflow_id": _optional_text(metadata.get("workflow_id")),
         },
     )
+
+
+def _report_workflow_node_catalog_if_needed(metadata: dict[str, Any]) -> None:
+    if _workflow_node_should_report_catalog(metadata):
+        _report_workflow_node_catalog(metadata)
 
 
 def _plugin_backwards_tool_metadata(call: dict[str, Any], phase: str) -> dict[str, Any]:
@@ -1668,7 +1683,7 @@ def _wrap_workflow_node_tool_generator(result: Any, call: dict[str, Any]) -> Gen
 
 
 def _workflow_node_uses_specialized_hooks(metadata: dict[str, Any]) -> bool:
-    node_type = str(metadata.get("node_type") or "").strip().lower()
+    node_type = _workflow_node_type(metadata)
     return node_type in {
         "agent",
         "llm",
@@ -1678,6 +1693,38 @@ def _workflow_node_uses_specialized_hooks(metadata: dict[str, Any]) -> bool:
         "parameter_extractor",
         "tool",
     }
+
+
+def _workflow_node_should_report_catalog(metadata: dict[str, Any]) -> bool:
+    node_type = _workflow_node_type(metadata)
+    return node_type not in {
+        "agent",
+        "llm",
+        "question-classifier",
+        "question_classifier",
+        "parameter-extractor",
+        "parameter_extractor",
+        "tool",
+    }
+
+
+def _workflow_node_should_skip(metadata: dict[str, Any]) -> bool:
+    node_type = _workflow_node_type(metadata)
+    return node_type in {
+        "answer",
+        "end",
+        "human-input",
+        "human_input",
+        "if-else",
+        "if_else",
+        "iteration",
+        "loop",
+        "start",
+    }
+
+
+def _workflow_node_type(metadata: dict[str, Any]) -> str:
+    return str(metadata.get("node_type") or "").strip().lower()
 
 
 def _workflow_node_tool_call(node: Any, metadata: dict[str, Any]) -> dict[str, Any]:
@@ -1812,6 +1859,7 @@ def _make_guard(metadata: dict[str, Any]) -> Any:
         sandbox="noop",
         plugin_config=_plugin_config(),
     )
+    guard.context.metadata.update(metadata)
     return guard
 
 
@@ -1865,6 +1913,8 @@ def _metadata_scoped_generator(
 def _session_id(metadata: dict[str, Any]) -> str:
     workflow_run_id = _optional_text(metadata.get("workflow_run_id"))
     node_execution_id = _optional_text(metadata.get("node_execution_id"))
+    if _optional_text(metadata.get("dify_runtime")) == "workflow_api" and workflow_run_id:
+        return workflow_run_id
     if workflow_run_id and node_execution_id:
         return f"{workflow_run_id}:{node_execution_id}"
     run_id = _optional_text(metadata.get("dify_agent_run_id"))

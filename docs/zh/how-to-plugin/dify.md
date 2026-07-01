@@ -1,22 +1,21 @@
-# Dify Agent 与 Workflow Agent 接入
+# Dify 统一接入
 
-本文介绍如何把本地 Docker Compose 部署的 Dify agent 接入 AgentGuard。Dify 里常见有两条不同运行路径，接入时要先分清楚：
+本文介绍如何把本地 Docker Compose 部署的 Dify 接入 AgentGuard。当前 adapter 已基本覆盖两类主流 Dify 智能体：
 
-- **Agent Chat app**：URL 通常类似 `/app/<app_id>/configuration`，Dify app mode 是 `agent-chat`。这种 app 由 `AgentChatAppRunner` 直接运行，使用 `dify_agent_chat` adapter。
-- **Workflow Agent 节点**：URL 通常类似 `/app/<app_id>/workflow`，workflow 图里有一个 Agent 节点。它由 workflow runtime 运行，使用 `dify` workflow adapter。
+- **旧版 Agent Chat app**：URL 通常类似 `/app/<app_id>/configuration`，Dify app mode 是 `agent-chat`，由 `dify_agent_chat` adapter 接入。
+- **Workflow / Chatflow app**：URL 通常类似 `/app/<app_id>/workflow`，由 `dify` workflow adapter 接入，覆盖图里的 LLM、Agent、Tool 和执行型节点。
 
-两种接入都不需要修改 Dify 源码。推荐方式是在 Dify `api` / `worker` Python 进程启动时通过 `sitecustomize.py` 安装 AgentGuard adapter，并用 Docker Compose override 挂载 AgentGuard client。
+两类接入共用同一套部署方式，不需要修改 Dify 源码。推荐在 Dify `api` / `worker` Python 进程启动时通过 `sitecustomize.py` 自动安装 AgentGuard adapter，并用 Docker Compose override 挂载 AgentGuard client。
 
-## Quick Start：接入 Dify Agent Chat app
+接入后，AgentGuard 前端可以在运行前看到已同步的 Dify agent / 工具目录，用来提前配置安全规则。运行时事件仍会按实际调用持续写入 trace。
 
-下面是用户已经在 Dify 里开发好一个 Agent Chat app 后的最短接入路径。
+## Quick Start：统一接入 Dify
 
 假设：
 
 - AgentGuard 源码在 `/path/to/AgentGuard`
 - Dify 源码在 `/path/to/dify`
 - Dify 使用 Docker Compose 本地部署
-- 你的 Dify app URL 类似 `/app/<app_id>/configuration`
 - 你已经拿到 AgentGuard server 地址和控制台地址
 
 ### 1. 准备 AgentGuard server 地址
@@ -44,40 +43,17 @@ AGENTGUARD_SERVER_URL=http://host.docker.internal:38080
 AGENTGUARD_CONSOLE_URL=http://127.0.0.1:38008/agents.html
 ```
 
-### 2. 获取 Dify app_id
+### 2. 生成接入文件
 
-打开 Agent Chat app 配置页，URL 通常类似：
-
-```text
-http://127.0.0.1/app/6680db75-b1ed-4735-b4b4-a76efe1b7b42/configuration
-```
-
-其中：
-
-```text
-6680db75-b1ed-4735-b4b4-a76efe1b7b42
-```
-
-就是 `app_id`。AgentGuard 会把这个 app 映射成：
-
-```text
-dify-agent-chat:<app_id>
-```
-
-作为控制台里的 `agent_id`。同一个 Dify app 的不同用户会共享这个 `agent_id`，但每条消息会带上 Dify 的 `user_id`、`conversation_id`、`message_id`，server 和策略仍然可以区分用户和消息。
-
-### 3. 生成接入文件
-
-回到 AgentGuard 目录：
+如果希望接入当前 Dify 实例里的所有旧版 Agent Chat 和 Workflow/Chatflow app，不传 `--app-id`：
 
 ```bash
 cd /path/to/AgentGuard
 scripts/setup-dify-agentguard.sh \
   --dify-dir /path/to/dify \
-  --agent-chat \
-  --app-id <your_app_id> \
   --server-url <your_agentguard_server_url> \
   --api-key <your_agentguard_api_key> \
+  --policy dify_default \
   --console-url <your_agentguard_console_url>
 ```
 
@@ -86,10 +62,24 @@ scripts/setup-dify-agentguard.sh \
 ```bash
 scripts/setup-dify-agentguard.sh \
   --dify-dir /path/to/dify \
-  --agent-chat \
-  --app-id 6680db75-b1ed-4735-b4b4-a76efe1b7b42 \
   --server-url http://host.docker.internal:38080 \
   --console-url http://127.0.0.1:38008/agents.html
+```
+
+如果只想接入指定 app，可以从 Dify URL 中取 `app_id`：
+
+```text
+http://127.0.0.1/app/bdec9bf4-a065-4066-8472-fe6a594a1bdd/workflow
+```
+
+其中 `bdec9bf4-a065-4066-8472-fe6a594a1bdd` 是 `app_id`，不要带 `/workflow`。指定过滤时使用：
+
+```bash
+scripts/setup-dify-agentguard.sh \
+  --dify-dir /path/to/dify \
+  --app-id bdec9bf4-a065-4066-8472-fe6a594a1bdd \
+  --server-url <your_agentguard_server_url> \
+  --console-url <your_agentguard_console_url>
 ```
 
 脚本会生成：
@@ -99,9 +89,9 @@ scripts/setup-dify-agentguard.sh \
 /path/to/dify/docker/docker-compose.agentguard.yml
 ```
 
-生成的 `sitecustomize.py` 会安装 Agent Chat adapter 和 workflow adapter。Agent Chat 是否启用由 `AGENTGUARD_DIFY_AGENT_CHAT_ENABLED=true` 控制。
+脚本默认开启 `AGENTGUARD_DIFY_AGENT_CHAT_ENABLED=true`，因此同一份配置会同时覆盖旧版 Agent Chat 和 Workflow/Chatflow。
 
-### 4. 启动接入后的 Dify
+### 3. 启动接入后的 Dify
 
 ```bash
 cd /path/to/dify/docker
@@ -109,25 +99,32 @@ docker compose -f docker-compose.yaml -f docker-compose.agentguard.yml up -d --f
 docker compose -f docker-compose.yaml -f docker-compose.agentguard.yml restart nginx
 ```
 
-如果只验证 Agent Chat app，关键进程是 `api`；同时重建 `worker` 对 workflow 测试更方便。
+### 4. 在 AgentGuard 前端配置规则
 
-### 5. 验证
-
-打开 Dify，运行你的 Agent Chat app。建议发一条会触发工具的问题。
-
-然后打开 AgentGuard 控制台：
+打开 AgentGuard 控制台：
 
 ```text
 <your_agentguard_console_url>
 ```
 
-刷新 Agent 列表，查找：
+刷新 Agent 列表。已同步的 Dify agent 会以不同 `agent_id` 出现：
 
 ```text
 dify-agent-chat:<app_id>
+<app_id>:<workflow_id>
 ```
 
-一次带工具调用的 Agent Chat 运行通常会产生：
+进入对应 agent 后，可以先查看工具目录并配置规则。常见工具来源包括：
+
+- 旧版 Agent Chat 中实际启用的 Dify tool。
+- Workflow/Chatflow 中的真实 Tool 节点。
+- Workflow/Chatflow 中的执行型节点，例如 Code、HTTP Request、Knowledge Retrieval、Template Transform、Document Extractor、Variable Aggregator、List Operator、Datasource。
+
+LLM、Agent、Question Classifier、Parameter Extractor 节点不会作为工具注册到前端；它们会在运行时产生 `llm_input` / `llm_output` 事件。If/Else、Human Input、Iteration、Loop、Start、End、Answer 等逻辑或控制流节点本身不 hook。
+
+### 5. 运行 Dify 并验证 trace
+
+在 Dify 里运行 Agent Chat 或 Workflow/Chatflow。一次包含 LLM 和工具调用的运行通常会产生：
 
 ```text
 llm_input
@@ -136,173 +133,55 @@ tool_invoke
 tool_result
 ```
 
-工具目录只会上报本轮运行时实际启用的工具。adapter 使用 Dify `BaseAgentRunner._init_prompt_tools()` 返回的 `tool_instances` 作为注册源，因此 Dify 配置中 `enabled=false` 的工具不会被注册。
+旧版 Agent Chat 的 session 通常按消息维度记录；Workflow/Chatflow 的一次运行会聚合为一个 AgentGuard session，节点 ID、节点执行 ID、节点类型和节点标题会写入事件 metadata。
 
-## Agent Chat adapter 行为
+## Adapter 行为
 
-Agent Chat adapter 安装入口是：
+统一接入文件会同时安装两个 adapter：
 
 ```python
 from agentguard.adapters.agent.dify_agent_chat import install_dify_agent_chat_adapter
+from agentguard.adapters.agent.dify import install_dify_adapter
 
 install_dify_agent_chat_adapter()
+install_dify_adapter()
 ```
 
-它 patch 的 Dify 调用点包括：
+Agent Chat adapter patch 的 Dify 调用点包括：
 
 - `core.app.apps.agent_chat.app_runner.AgentChatAppRunner.run`
 - `core.agent.base_agent_runner.BaseAgentRunner._init_prompt_tools`
 - `core.model_manager.ModelInstance.invoke_llm`
 - `core.tools.tool_engine.ToolEngine.agent_invoke`
 
-运行开始时，adapter 会创建 AgentGuard session：
+Workflow adapter patch 的 Dify 调用点包括：
 
-```text
-agent_id   = dify-agent-chat:<app_id>
-session_id = <message_id>，没有 message_id 时兜底 task_id
-user_id    = Dify application_generate_entity.user_id
-```
-
-事件 metadata 会包含：
-
-```text
-tenant_id
-app_id
-conversation_id
-message_id
-user_id
-task_id
-invoke_from
-agent_strategy
-```
-
-server 侧可以按 `principal.agent_id`、`principal.user_id`、`principal.session_id` 写策略或过滤运行记录。
-
-工具 deny / sanitize 行为：
-
-- `tool_invoke` 阶段被 deny 时，adapter 不调用真实工具，而是返回 Dify 兼容的工具错误 observation。
-- `tool_result` 阶段被 deny 或 sanitize 时，adapter 返回安全 observation，避免破坏 Dify 原生消息记录流程。
-
-## Quick Start：接入 Dify Workflow Agent 节点
-
-如果你的 Dify agent 是 workflow 图里的 Agent 节点，按下面路径接入。
-
-### 1. 确认 Dify 使用 legacy Agent 路径
-
-当前已验证支持的是 `ENABLE_AGENT_V2=false` 的 legacy Workflow Agent 节点。检查 Dify 的 `.env`：
-
-```bash
-cd /path/to/dify/docker
-rg 'ENABLE_AGENT_V2|AGENT_BACKEND_BASE_URL' .env
-```
-
-推荐配置：
-
-```text
-ENABLE_AGENT_V2=false
-AGENT_BACKEND_BASE_URL=
-```
-
-### 2. 获取 app_id 和 Agent 节点 node_id
-
-`app_id` 可以从 workflow 页面 URL 获取：
-
-```text
-http://127.0.0.1/app/ce0aa322-1f3f-4ab9-8329-3af8588c7480/workflow
-```
-
-Dify 页面上不一定直接显示节点 ID。推荐从 Dify 数据库查询：
-
-```bash
-cd /path/to/dify/docker
-docker compose exec -T db_postgres psql -U postgres -d dify -c "
-select
-  node->>'id' as node_id,
-  node->'data'->>'title' as title,
-  node->'data'->>'type' as type
-from workflows w
-cross join lateral jsonb_array_elements(w.graph::jsonb->'nodes') as node
-where w.app_id='<your_app_id>'
-  and w.version='draft'
-  and node->'data'->>'type'='agent';
-"
-```
-
-输出中的 `node_id` 就是 Agent 节点 ID。
-
-### 3. 生成接入文件
-
-```bash
-cd /path/to/AgentGuard
-scripts/setup-dify-agentguard.sh \
-  --dify-dir /path/to/dify \
-  --app-id <your_app_id> \
-  --node-id <your_agent_node_id> \
-  --server-url <your_agentguard_server_url> \
-  --api-key <your_agentguard_api_key> \
-  --policy dify_default \
-  --console-url <your_agentguard_console_url>
-```
-
-多个 workflow 或多个 Agent 节点可以重复传入参数，或使用逗号分隔。
-
-### 4. 启动与验证
-
-```bash
-cd /path/to/dify/docker
-docker compose -f docker-compose.yaml -f docker-compose.agentguard.yml up -d --force-recreate api worker
-docker compose -f docker-compose.yaml -f docker-compose.agentguard.yml restart nginx
-```
-
-运行 workflow 后，在 AgentGuard 控制台刷新 Agent 列表。一个包含工具调用的 Workflow Agent 节点通常会产生：
-
-```text
-llm_input
-llm_output
-tool_invoke
-tool_result
-llm_input
-llm_output
-```
-
-## Workflow adapter 行为
-
-Workflow adapter 安装入口是：
-
-```python
-from agentguard.adapters.agent.dify import install_dify_adapter
-
-install_dify_adapter()
-```
-
-它 patch 的 legacy Workflow Agent 同进程路径包括：
-
+- `core.workflow.node_factory.DifyNodeFactory.create_node`
 - `core.workflow.nodes.agent.agent_node.AgentNode._run`
 - `core.model_manager.ModelInstance.invoke_llm`
 - `core.tools.tool_engine.ToolEngine.agent_invoke`
-
-也会 patch plugin daemon 反向调用路径：
-
+- `core.tools.tool_engine.ToolEngine.generic_invoke`
 - `core.plugin.backwards_invocation.model.PluginModelBackwardsInvocation.invoke_llm`
 - `core.plugin.backwards_invocation.tool.PluginToolBackwardsInvocation.invoke_tool`
 
-第二组 hook 很重要。Dify legacy Agent 经常会通过 plugin daemon 调用 `/invoke/llm` 和 `/invoke/tool`，真实 LLM 和工具执行发生在 API 进程里，而不是最初进入 Agent 节点的 worker 进程里。
+工具 deny / sanitize 行为：
+
+- `tool_invoke` 阶段被 deny 时，adapter 不调用真实工具，而是返回 Dify 兼容的 blocked / pending observation。
+- `tool_result` 阶段被 deny 或 sanitize 时，adapter 返回安全 observation，避免破坏 Dify 原生消息记录流程。
 
 ## 支持范围
 
 当前已验证支持：
 
 - Dify 1.15.x 本地源码部署。
-- legacy `agent-chat` app。
-- `ENABLE_AGENT_V2=false` 的 legacy Workflow Agent 节点。
-- Agent Chat / Workflow Agent 内部的 LLM 调用、LLM 返回、工具调用、工具返回。
-- 运行开始或首次工具初始化时上报本轮可用工具目录。
+- 旧版 `agent-chat` app。
+- Workflow/Chatflow 中的 LLM、Agent、Tool、Question Classifier、Parameter Extractor 和执行型节点。
+- Agent Chat / Workflow/Chatflow 内部的 LLM 调用、LLM 返回、工具调用、工具返回。
+- 运行前同步 agent / 工具目录，用于提前在 AgentGuard 前端配置规则。
 
 当前暂不覆盖：
 
-- 普通 Workflow LLM 节点。
-- 独立 Workflow Tool 节点。
-- LLM 节点输出后通过条件路由到不同 Tool 节点的图结构。
+- 逻辑或控制流节点本身，例如 If/Else、Human Input、Iteration、Loop、Start、End、Answer。
 - Dify Agent v2 backend / `dify-agent` 服务路径的完整验证。
 
 ## 手动接入文件
@@ -342,8 +221,8 @@ services:
       AGENTGUARD_SERVER_URL: "http://host.docker.internal:38080"
       AGENTGUARD_API_KEY: ""
       AGENTGUARD_POLICY: ""
-      AGENTGUARD_DIFY_APP_IDS: "<optional_app_id_filter>"
-      AGENTGUARD_DIFY_NODE_IDS: "<optional_workflow_node_id_filter>"
+      AGENTGUARD_DIFY_APP_IDS: ""
+      AGENTGUARD_DIFY_NODE_IDS: ""
       AGENTGUARD_ENVIRONMENT: "dify"
       PYTHONPATH: "/agentguard-dify-bootstrap:/agentguard/src/client/python:/agentguard/src:/app/api"
     volumes:
@@ -359,8 +238,8 @@ services:
       AGENTGUARD_SERVER_URL: "http://host.docker.internal:38080"
       AGENTGUARD_API_KEY: ""
       AGENTGUARD_POLICY: ""
-      AGENTGUARD_DIFY_APP_IDS: "<optional_app_id_filter>"
-      AGENTGUARD_DIFY_NODE_IDS: "<optional_workflow_node_id_filter>"
+      AGENTGUARD_DIFY_APP_IDS: ""
+      AGENTGUARD_DIFY_NODE_IDS: ""
       AGENTGUARD_ENVIRONMENT: "dify"
       PYTHONPATH: "/agentguard-dify-bootstrap:/agentguard/src/client/python:/agentguard/src:/app/api"
     volumes:
@@ -390,10 +269,9 @@ docker compose -f docker-compose.yaml -f docker-compose.agentguard.yml restart n
 - Dify 容器是否能访问 `AGENTGUARD_SERVER_URL`。
 - `PYTHONPATH` 是否包含 bootstrap 和 AgentGuard client 路径。
 - `api` 和 `worker` 是否都挂载了 AgentGuard 和 bootstrap。
-- Agent Chat app 是否设置了 `AGENTGUARD_DIFY_AGENT_CHAT_ENABLED=true`。
-- 如果配置了 `AGENTGUARD_DIFY_APP_IDS`，当前 app id 是否在列表中。
-- Workflow Agent 节点是否配置了正确的 `AGENTGUARD_DIFY_NODE_IDS`。
-- agent 是否实际初始化或调用过工具；工具目录通常在运行开始或首次工具初始化时上报。
+- 是否设置了 `AGENTGUARD_DIFY_AGENT_CHAT_ENABLED=true`，以覆盖旧版 Agent Chat。
+- 如果配置了 `AGENTGUARD_DIFY_APP_IDS`，当前 app id 是否在列表中；只填写 UUID，不要带 `/workflow`。
+- 如果配置了 legacy/debug 用的 `AGENTGUARD_DIFY_NODE_IDS`，确认你验证的是旧版 Agent 节点路径；常规 workflow/chatflow 接入不需要 node id。
 
 ### 如何确认 adapter 安装成功
 
@@ -406,7 +284,3 @@ docker compose -f docker-compose.yaml -f docker-compose.agentguard.yml logs api 
 ```
 
 看到 `patched: True` 表示 hook 已安装。
-
-### 工具 deny 后 Dify 会发生什么
-
-`tool_invoke` 阶段如果被 deny 或 pending，adapter 不会调用真实工具，而是返回一段 Agent 可读的 blocked/pending observation。Agent 后续会把这段 observation 当作工具观察结果继续推理。
