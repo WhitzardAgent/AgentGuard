@@ -11,11 +11,13 @@ import functools
 import hashlib
 import json
 import os
+import re
 import sys
 import threading
 import time
 from collections.abc import AsyncIterator, Generator, Iterable
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import Any
 
 from agentguard.adapters.agent.dify_flask import (
@@ -1042,14 +1044,13 @@ def _llm_output_payload(output: Any) -> dict[str, Any]:
         else:
             text = _content_to_text(output)
 
-        if "final_output" in output:
-            final_output = _content_to_optional_text(output.get("final_output"))
-        else:
-            final_output = text
-        return {
-            "output": text,
-            "final_output": final_output,
-        }
+        return _llm_output_payload_from_text(
+            text,
+            thought=_extract_llm_thought(output),
+            final_output=_content_to_optional_text(output.get("final_output"))
+            if "final_output" in output
+            else None,
+        )
     parts = getattr(output, "parts", None)
     if isinstance(parts, list):
         text_parts: list[str] = []
@@ -1058,9 +1059,138 @@ def _llm_output_payload(output: Any) -> dict[str, Any]:
             if content is not None:
                 text_parts.append(_content_to_text(content))
         text = "\n".join(part for part in text_parts if part) or None
-        return {"output": text, "final_output": text}
+        return _llm_output_payload_from_text(text, thought=_extract_llm_thought({"parts": parts}))
     text = _content_to_text(output)
-    return {"output": text, "final_output": text}
+    return _llm_output_payload_from_text(text)
+
+
+def _llm_output_payload_from_text(
+    output: str | None,
+    *,
+    thought: str | None = None,
+    final_output: str | None = None,
+) -> dict[str, Any]:
+    parsed = _parse_tagged_llm_output(output) if output is not None else _ParsedLLMOutput(None, None)
+    payload = {
+        "output": output,
+        "final_output": final_output if final_output is not None else parsed.final_output,
+    }
+    thought = thought if thought is not None else parsed.thought
+    if thought is not None:
+        payload["thought"] = thought
+    return payload
+
+
+def _extract_llm_thought(value: Any) -> str | None:
+    if isinstance(value, dict):
+        direct = _first_non_empty_text(
+            value,
+            "thought",
+            "reasoning_content",
+            "reasoningContent",
+            "thinking",
+            "reasoning",
+        )
+        if direct is not None:
+            return direct
+        for container_key in ("additional_kwargs", "response_metadata", "metadata", "extra"):
+            nested = value.get(container_key)
+            if isinstance(nested, dict):
+                nested_thought = _extract_llm_thought(nested)
+                if nested_thought is not None:
+                    return nested_thought
+        for blocks_key in ("parts", "content", "output"):
+            blocks = value.get(blocks_key)
+            if isinstance(blocks, list):
+                block_thought = _extract_llm_thought_from_blocks(blocks)
+                if block_thought is not None:
+                    return block_thought
+        return None
+
+    direct = _first_non_empty_attr(
+        value,
+        "thought",
+        "reasoning_content",
+        "reasoningContent",
+        "thinking",
+        "reasoning",
+    )
+    if direct is not None:
+        return direct
+    parts = getattr(value, "parts", None)
+    if isinstance(parts, list):
+        return _extract_llm_thought_from_blocks(parts)
+    return None
+
+
+def _extract_llm_thought_from_blocks(blocks: list[Any]) -> str | None:
+    thought_parts: list[str] = []
+    for block in blocks:
+        block_type = ""
+        if isinstance(block, dict):
+            block_type = str(block.get("type") or block.get("kind") or "").lower()
+            if block_type in {"thinking", "thinkingblock", "reasoning", "reasoningblock"}:
+                text = _first_non_empty_text(block, "content", "text", "thinking", "reasoning", "summary")
+                if text is not None:
+                    thought_parts.append(text)
+        else:
+            block_type = str(getattr(block, "type", None) or getattr(block, "kind", None) or "").lower()
+            if block_type in {"thinking", "thinkingblock", "reasoning", "reasoningblock"}:
+                text = _first_non_empty_attr(block, "content", "text", "thinking", "reasoning", "summary")
+                if text is not None:
+                    thought_parts.append(text)
+    return "\n\n".join(thought_parts) or None
+
+
+def _first_non_empty_text(value: dict[str, Any], *keys: str) -> str | None:
+    for key in keys:
+        text = _content_to_optional_text(value.get(key))
+        if text is not None:
+            return text
+    return None
+
+
+def _first_non_empty_attr(value: Any, *keys: str) -> str | None:
+    for key in keys:
+        text = _content_to_optional_text(getattr(value, key, None))
+        if text is not None:
+            return text
+    return None
+
+
+@dataclass(frozen=True)
+class _ParsedLLMOutput:
+    thought: str | None
+    final_output: str | None
+
+
+_THOUGHT_TAG_RE = re.compile(
+    r"<(?P<tag>think|thought|reason|reasoning)\b[^>]*>(?P<body>.*?)</(?P=tag)>",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+_FINAL_TAG_RE = re.compile(
+    r"<(?P<tag>answer|final|final_output)\b[^>]*>(?P<body>.*?)</(?P=tag)>",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+
+
+def _parse_tagged_llm_output(output: str) -> _ParsedLLMOutput:
+    thought_matches = list(_THOUGHT_TAG_RE.finditer(output))
+    if not thought_matches:
+        return _ParsedLLMOutput(thought=None, final_output=output)
+
+    thought_parts = [match.group("body").strip() for match in thought_matches]
+    thought = "\n\n".join(part for part in thought_parts if part) or None
+    remainder = _THOUGHT_TAG_RE.sub("", output).strip()
+
+    final_matches = list(_FINAL_TAG_RE.finditer(remainder))
+    if final_matches:
+        final_parts = [match.group("body").strip() for match in final_matches]
+        final_output = "\n\n".join(part for part in final_parts if part)
+    else:
+        final_output = remainder
+
+    return _ParsedLLMOutput(thought=thought, final_output=final_output)
 
 
 def _streamed_response_value(response: Any) -> Any:
@@ -1713,14 +1843,19 @@ def _wrap_legacy_llm_generator(model: Any, result: Any, call: dict[str, Any]) ->
 
 def _legacy_stream_output_payload(chunks: list[Any]) -> dict[str, Any]:
     text_parts: list[str] = []
+    thought_parts: list[str] = []
     for chunk in chunks:
         delta = getattr(chunk, "delta", None)
         message = getattr(delta, "message", None)
         content = getattr(message, "content", None)
         if content is not None:
             text_parts.append(_content_to_text(content))
+        thought = _extract_llm_thought(delta) or _extract_llm_thought(message) or _extract_llm_thought(chunk)
+        if thought is not None:
+            thought_parts.append(thought)
     output = "\n".join(part for part in text_parts if part) or None
-    return {"output": output, "final_output": output}
+    thought = "\n\n".join(thought_parts) or None
+    return _llm_output_payload_from_text(output, thought=thought)
 
 
 def _wrap_workflow_tool_generator(result: Any, call: dict[str, Any]) -> Generator[Any, None, None]:

@@ -13,6 +13,7 @@
   * [AutoGen](how-to-plugin/autogen.md)
   * [OpenAI Agents SDK](how-to-plugin/openai_agents_sdk.md)
   * [Dify Agent](how-to-plugin/dify.md)
+  * [n8n](how-to-plugin/n8n.md)
   * [OpenClaw](how-to-plugin/openclaw_adapter.md)
   * [Custom Adapter](how-to-plugin/custom.md)
 * [AgentGuard插件](plugins.md)

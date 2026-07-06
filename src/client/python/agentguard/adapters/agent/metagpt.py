@@ -3,8 +3,10 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 import contextvars
+from dataclasses import dataclass
 import functools
 import inspect
+import re
 from typing import Any
 
 from agentguard.adapters.agent.base import BaseAgentAdapter, LLMBinding, ToolBinding
@@ -368,14 +370,146 @@ def _action_tool_name(obj: Any, fn: Any) -> str:
 
 
 def _normalize_metagpt_llm_output(value: Any, *, owner: Any = None) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "output": value,
-        "final_output": value,
-    }
-    thought = getattr(owner, "reasoning_content", None)
-    if isinstance(thought, str) and thought:
+    visible = _metagpt_visible_output_text(value)
+    thought = _metagpt_owner_thought(owner) or _extract_metagpt_thought(value)
+    final_output: Any = visible
+    if isinstance(visible, str):
+        parsed = _parse_tagged_metagpt_llm_output(visible)
+        if thought is None:
+            thought = parsed.thought
+        if parsed.thought is not None:
+            final_output = parsed.final_output
+
+    payload: dict[str, Any] = {"output": visible, "final_output": final_output}
+    if thought is not None:
         payload["thought"] = thought
     return payload
+
+
+def _metagpt_visible_output_text(value: Any) -> Any:
+    if isinstance(value, dict):
+        text = _first_non_empty_text(value, "output", "content", "text", "message")
+        if text is not None:
+            return text
+    return value
+
+
+def _metagpt_owner_thought(owner: Any) -> str | None:
+    thought = getattr(owner, "reasoning_content", None)
+    if isinstance(thought, str) and thought:
+        return thought
+    return None
+
+
+def _extract_metagpt_thought(value: Any) -> str | None:
+    if isinstance(value, dict):
+        direct = _first_non_empty_text(
+            value,
+            "thought",
+            "reasoning_content",
+            "reasoningContent",
+            "thinking",
+            "reasoning",
+        )
+        if direct is not None:
+            return direct
+        for container_key in ("additional_kwargs", "response_metadata", "metadata", "extra"):
+            nested = value.get(container_key)
+            if isinstance(nested, dict):
+                nested_thought = _extract_metagpt_thought(nested)
+                if nested_thought is not None:
+                    return nested_thought
+        for blocks_key in ("parts", "content", "output"):
+            blocks = value.get(blocks_key)
+            if isinstance(blocks, list):
+                block_thought = _extract_metagpt_thought_from_blocks(blocks)
+                if block_thought is not None:
+                    return block_thought
+        return None
+
+    direct = _first_non_empty_attr(
+        value,
+        "thought",
+        "reasoning_content",
+        "reasoningContent",
+        "thinking",
+        "reasoning",
+    )
+    if direct is not None:
+        return direct
+    parts = getattr(value, "parts", None)
+    if isinstance(parts, list):
+        return _extract_metagpt_thought_from_blocks(parts)
+    return None
+
+
+def _extract_metagpt_thought_from_blocks(blocks: list[Any]) -> str | None:
+    thought_parts: list[str] = []
+    for block in blocks:
+        if isinstance(block, dict):
+            block_type = str(block.get("type") or block.get("kind") or "").lower()
+            if block_type in {"thinking", "thinkingblock", "reasoning", "reasoningblock"}:
+                text = _first_non_empty_text(block, "content", "text", "thinking", "reasoning", "summary")
+                if text is not None:
+                    thought_parts.append(text)
+        else:
+            block_type = str(getattr(block, "type", None) or getattr(block, "kind", None) or "").lower()
+            if block_type in {"thinking", "thinkingblock", "reasoning", "reasoningblock"}:
+                text = _first_non_empty_attr(block, "content", "text", "thinking", "reasoning", "summary")
+                if text is not None:
+                    thought_parts.append(text)
+    return "\n\n".join(thought_parts) or None
+
+
+def _first_non_empty_text(value: dict[str, Any], *keys: str) -> str | None:
+    for key in keys:
+        item = value.get(key)
+        if isinstance(item, str) and item:
+            return item
+    return None
+
+
+def _first_non_empty_attr(value: Any, *keys: str) -> str | None:
+    for key in keys:
+        item = getattr(value, key, None)
+        if isinstance(item, str) and item:
+            return item
+    return None
+
+
+@dataclass(frozen=True)
+class _ParsedMetaGPTLLMOutput:
+    thought: str | None
+    final_output: str
+
+
+_METAGPT_THOUGHT_TAG_RE = re.compile(
+    r"<(?P<tag>think|thought|reason|reasoning)\b[^>]*>(?P<body>.*?)</(?P=tag)>",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+_METAGPT_FINAL_TAG_RE = re.compile(
+    r"<(?P<tag>answer|final|final_output)\b[^>]*>(?P<body>.*?)</(?P=tag)>",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+
+
+def _parse_tagged_metagpt_llm_output(output: str) -> _ParsedMetaGPTLLMOutput:
+    thought_matches = list(_METAGPT_THOUGHT_TAG_RE.finditer(output))
+    if not thought_matches:
+        return _ParsedMetaGPTLLMOutput(thought=None, final_output=output)
+
+    thought_parts = [match.group("body").strip() for match in thought_matches]
+    thought = "\n\n".join(part for part in thought_parts if part) or None
+    remainder = _METAGPT_THOUGHT_TAG_RE.sub("", output).strip()
+
+    final_matches = list(_METAGPT_FINAL_TAG_RE.finditer(remainder))
+    if final_matches:
+        final_parts = [match.group("body").strip() for match in final_matches]
+        final_output = "\n\n".join(part for part in final_parts if part)
+    else:
+        final_output = remainder
+
+    return _ParsedMetaGPTLLMOutput(thought=thought, final_output=final_output)
 
 
 def _metagpt_llm_extra(owner: Any = None) -> dict[str, Any]:

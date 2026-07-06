@@ -49,6 +49,7 @@ class RemoteGuardClient {
     this.snapshot_path = options.snapshot_path || "/v1/server/policy/snapshot";
     this.trace_path = options.trace_path || "/v1/server/trace/upload";
     this.tool_report_path = options.tool_report_path || "/v1/server/tools/report";
+    this.tool_sync_path = options.tool_sync_path || options.toolSyncPath || "/v1/server/tools/sync";
     this.skill_report_path = options.skill_report_path || options.skillReportPath || "/v1/server/skills/report";
     this.mcp_report_path = options.mcp_report_path || options.mcpReportPath || "/v1/server/mcps/report";
     this.approval_path = options.approval_path || "/v1/server/approvals/{ticket_id}";
@@ -103,6 +104,13 @@ class RemoteGuardClient {
     return this.post(this.tool_report_path, {
       context: context.toDict(),
       tool,
+    });
+  }
+
+  sync_tools(context, tools) {
+    return this.post(this.tool_sync_path, {
+      context: context.toDict(),
+      tools: Array.isArray(tools) ? tools : [],
     });
   }
 

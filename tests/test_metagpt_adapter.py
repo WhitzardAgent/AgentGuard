@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from agentguard import AgentGuard
+from agentguard.adapters.agent import metagpt as metagpt_adapter
 from agentguard.adapters.agent.metagpt import MetaGPTAgentAdapter
 
 
@@ -98,6 +99,33 @@ def test_attach_metagpt_patches_rolezero_tool_execution_map():
     assert invoke.metadata["metagpt_tool_name"] == "Editor.read"
     assert invoke.metadata["command_owner"] == "Editor"
     assert invoke.metadata["command_name"] == "read"
+
+
+def test_metagpt_llm_output_splits_tagged_thought():
+    payload = metagpt_adapter._normalize_metagpt_llm_output(
+        "<think>hidden reasoning</think>\n<final>visible answer</final>"
+    )
+
+    assert payload == {
+        "output": "<think>hidden reasoning</think>\n<final>visible answer</final>",
+        "final_output": "visible answer",
+        "thought": "hidden reasoning",
+    }
+
+
+def test_metagpt_llm_output_splits_structured_reasoning():
+    payload = metagpt_adapter._normalize_metagpt_llm_output(
+        {
+            "content": "visible answer",
+            "metadata": {"reasoning_content": "hidden reasoning"},
+        }
+    )
+
+    assert payload == {
+        "output": "visible answer",
+        "final_output": "visible answer",
+        "thought": "hidden reasoning",
+    }
 
 
 @pytest.mark.asyncio

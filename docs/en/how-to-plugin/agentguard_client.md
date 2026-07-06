@@ -49,6 +49,7 @@ AgentGuard currently provides built-in adapters for these frameworks:
 | AutoGen | `guard.attach_autogen()` | [AutoGen](autogen.md) |
 | OpenAI Agents SDK | `guard.attach_openai_agents()` | [OpenAI Agents SDK](openai_agents_sdk.md) |
 | Dify Workflow Agent node | `install_dify_adapter()` during Dify `api`/`worker` startup | [Dify Workflow Agent Node](dify.md) |
+| n8n workflow | Preload the n8n adapter with `NODE_OPTIONS=--require ...` | [n8n](n8n.md) |
 | OpenClaw | JavaScript-side integration | [OpenClaw](openclaw_adapter.md) |
 
 If your framework is not listed here, you can still integrate AgentGuard by implementing a custom adapter. See [Custom Adapter](custom.md).
@@ -64,6 +65,18 @@ install_dify_adapter()
 ```
 
 Configure the client with environment variables such as `AGENTGUARD_ENABLED=true`, `AGENTGUARD_SERVER_URL`, `AGENTGUARD_API_KEY`, and `AGENTGUARD_POLICY`. The validated path is the Dify 1.15 local deployment with `ENABLE_AGENT_V2=false`, covering legacy Workflow Agent nodes and observing LLM/tool calls inside those nodes. See [Dify Workflow Agent Node](dify.md).
+
+### n8n workflow
+
+n8n also creates Agent nodes, LLM nodes, AI Tool nodes, and ordinary executable nodes inside the n8n runtime. For n8n, preload the adapter in the n8n Node.js main process and task runner with `NODE_OPTIONS=--require /agentguard-n8n-bootstrap/register.cjs`:
+
+```js
+const { installN8nAdapter } = require("/agentguard/src/client/js/agentguard/adapters/agent/n8n");
+
+installN8nAdapter();
+```
+
+Configure the client with environment variables such as `AGENTGUARD_ENABLED=true`, `AGENTGUARD_SERVER_URL`, `AGENTGUARD_API_KEY`, and `AGENTGUARD_POLICY`. By default, all active / published workflows are connected and synced as `n8n:<workflow_id>` agents. See [n8n](n8n.md).
 
 ## Minimal mental model
 

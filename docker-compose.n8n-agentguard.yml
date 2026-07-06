@@ -1,0 +1,21 @@
+services:
+  n8n:
+    environment:
+      AGENTGUARD_ENABLED: "true"
+      AGENTGUARD_ENVIRONMENT: "n8n"
+      AGENTGUARD_ROOT: "/agentguard"
+      AGENTGUARD_SERVER_URL: "http://host.docker.internal:38080"
+      AGENTGUARD_API_KEY: ""
+      AGENTGUARD_POLICY: ""
+      AGENTGUARD_N8N_NODE_IDS: ""
+      AGENTGUARD_N8N_SKIP_NODE_TYPES: ""
+      AGENTGUARD_N8N_CATALOG_SYNC_ENABLED: "true"
+      AGENTGUARD_N8N_CATALOG_INITIAL_DELAY_S: "2"
+      AGENTGUARD_N8N_CATALOG_SYNC_INTERVAL_S: "5"
+      AGENTGUARD_N8N_DB_PATH: "/home/node/.n8n/database.sqlite"
+      NODE_OPTIONS: "--require /agentguard-n8n-bootstrap/register.cjs"
+    volumes:
+      - /home/dgroup/hjr/AgentGuard:/agentguard:ro
+      - /home/dgroup/hjr/AgentGuard/agentguard-n8n-bootstrap:/agentguard-n8n-bootstrap:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

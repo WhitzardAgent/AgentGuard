@@ -225,6 +225,48 @@ def _fresh_adapter(monkeypatch):
     return importlib.reload(adapter)
 
 
+def test_llm_output_payload_splits_structured_reasoning(monkeypatch):
+    adapter = _fresh_adapter(monkeypatch)
+
+    payload = adapter._llm_output_payload(
+        {
+            "content": "visible answer",
+            "response_metadata": {"reasoning_content": "hidden reasoning"},
+            "tool_calls": [{"name": "web_search"}],
+        }
+    )
+
+    assert payload["output"] == "visible answer"
+    assert payload["final_output"] == "visible answer"
+    assert payload["thought"] == "hidden reasoning"
+    assert payload["tool_calls"] == [{"name": "web_search"}]
+
+
+def test_llm_stream_output_payload_splits_think_tags(monkeypatch):
+    adapter = _fresh_adapter(monkeypatch)
+
+    payload = adapter._llm_stream_output_payload(
+        [
+            types.SimpleNamespace(
+                delta=types.SimpleNamespace(
+                    message=types.SimpleNamespace(content="<think>hidden reasoning</think>", tool_calls=None)
+                )
+            ),
+            types.SimpleNamespace(
+                delta=types.SimpleNamespace(
+                    message=types.SimpleNamespace(content="\n<final>visible answer</final>", tool_calls=None)
+                )
+            ),
+        ]
+    )
+
+    assert payload == {
+        "output": "<think>hidden reasoning</think>\n<final>visible answer</final>",
+        "final_output": "visible answer",
+        "thought": "hidden reasoning",
+    }
+
+
 def _install_fake_app_event(monkeypatch):
     events_pkg = types.ModuleType("events")
     app_event_mod = types.ModuleType("events.app_event")

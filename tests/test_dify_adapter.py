@@ -1589,6 +1589,51 @@ def test_legacy_llm_tool_call_only_output_is_null(monkeypatch):
     }
 
 
+def test_llm_output_payload_splits_structured_reasoning(monkeypatch):
+    dify_adapter = _fresh_adapter(monkeypatch)
+
+    payload = dify_adapter._llm_output_payload(
+        {
+            "content": "visible answer",
+            "additional_kwargs": {"reasoning_content": "hidden reasoning"},
+        }
+    )
+
+    assert payload == {
+        "output": "visible answer",
+        "final_output": "visible answer",
+        "thought": "hidden reasoning",
+    }
+
+
+def test_legacy_stream_output_payload_splits_think_tags(monkeypatch):
+    _install_fake_legacy_dify_modules(monkeypatch)
+    dify_adapter = _fresh_adapter(monkeypatch)
+
+    payload = dify_adapter._legacy_stream_output_payload(
+        [
+            types.SimpleNamespace(
+                delta=types.SimpleNamespace(
+                    message=types.SimpleNamespace(content="<think>hidden reasoning</think>"),
+                    usage=None,
+                )
+            ),
+            types.SimpleNamespace(
+                delta=types.SimpleNamespace(
+                    message=types.SimpleNamespace(content="<final>visible answer</final>"),
+                    usage=None,
+                )
+            ),
+        ]
+    )
+
+    assert payload == {
+        "output": "<think>hidden reasoning</think>\n<final>visible answer</final>",
+        "final_output": "visible answer",
+        "thought": "hidden reasoning",
+    }
+
+
 def test_legacy_agent_node_filter_skips_unmatched_app(monkeypatch):
     fake = _install_fake_legacy_dify_modules(monkeypatch)
     monkeypatch.setenv("AGENTGUARD_DIFY_APP_IDS", "other-app")

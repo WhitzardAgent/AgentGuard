@@ -51,6 +51,7 @@ AgentGuard 目前内置支持以下框架：
 | AutoGen | `guard.attach_autogen()` | [AutoGen](autogen.md) |
 | OpenAI Agents SDK | `guard.attach_openai_agents()` | [OpenAI Agents SDK](openai_agents_sdk.md) |
 | Dify Workflow Agent 节点 | 在 Dify `api`/`worker` 进程启动时调用 `install_dify_adapter()` | [Dify Workflow Agent 节点](dify.md) |
+| n8n workflow | 通过 `NODE_OPTIONS=--require ...` 预加载 n8n adapter | [n8n](n8n.md) |
 | OpenClaw | JavaScript 侧集成 | [OpenClaw](openclaw_adapter.md) |
 
 如果你的框架不在上面的列表里，也可以通过实现自定义 adapter 的方式接入，详见 [Custom Adapter](custom.md)。
@@ -66,6 +67,18 @@ install_dify_adapter()
 ```
 
 通过环境变量配置客户端，例如 `AGENTGUARD_ENABLED=true`、`AGENTGUARD_SERVER_URL`、`AGENTGUARD_API_KEY` 和 `AGENTGUARD_POLICY`。当前已验证支持 Dify 1.15 本地部署下 `ENABLE_AGENT_V2=false` 的 legacy Workflow Agent 节点路径，用于观察 Agent 节点内部的 LLM 调用和工具调用。详细步骤见 [Dify Workflow Agent 节点](dify.md)。
+
+### n8n workflow
+
+n8n 的 Agent 节点、LLM 节点、AI Tool 节点和普通执行节点也都在 n8n runtime 内部创建。n8n 场景需要在 n8n Node.js 主进程和 task runner 启动时通过 `NODE_OPTIONS=--require /agentguard-n8n-bootstrap/register.cjs` 预加载 adapter：
+
+```js
+const { installN8nAdapter } = require("/agentguard/src/client/js/agentguard/adapters/agent/n8n");
+
+installN8nAdapter();
+```
+
+通过环境变量配置客户端，例如 `AGENTGUARD_ENABLED=true`、`AGENTGUARD_SERVER_URL`、`AGENTGUARD_API_KEY` 和 `AGENTGUARD_POLICY`。默认接入所有 active / published workflow，并把每个 workflow 同步为一个 `n8n:<workflow_id>` agent。详细步骤见 [n8n](n8n.md)。
 
 ## 最简理解
 
