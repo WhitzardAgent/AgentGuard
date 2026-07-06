@@ -75,18 +75,19 @@ def main() -> int:
     try:
         register_quickstart_tools(guard)
         skills = scan_skill_roots(args.skill_root)
-        if not skills:
-            print(f"No skills found under {args.skill_root}", file=sys.stderr)
-            return 2
+        registered_skills: list[dict[str, Any]] = []
+        if skills:
+            report_payload = report_skills(
+                server_url,
+                guard=guard,
+                skills=skills,
+                skill_root=args.skill_root,
+                api_key=api_key,
+            )
+            registered_skills = report_payload.get("skills") or []
+        else:
+            print(f"No skills found under {args.skill_root}; continuing with tools only.")
 
-        report_payload = report_skills(
-            server_url,
-            guard=guard,
-            skills=skills,
-            skill_root=args.skill_root,
-            api_key=api_key,
-        )
-        registered_skills = report_payload.get("skills") or []
         print(f"Registered agent: {guard.context.agent_id}")
         print("Registered tools: retrieve_doc, send_email_to")
         print(f"Registered skills: {len(registered_skills)}")
@@ -100,7 +101,7 @@ def main() -> int:
                 )
             )
 
-        if args.detect:
+        if args.detect and registered_skills:
             skill_ids = [
                 str(item.get("skill_unique_id") or "").strip()
                 for item in registered_skills
@@ -123,11 +124,15 @@ def main() -> int:
                         reason=result.get("reason") or "no reason",
                     )
                 )
+        elif args.detect:
+            print("Skipping skill detection because no skills were registered.")
 
         print()
         print("Open frontend: http://127.0.0.1:8008/agents.html")
         print(f"Select agent: {guard.context.agent_id}")
-        print("Then open the Skills entry to verify skill listing and detection.")
+        print("Then open the Plugins entry to verify server plugin listing.")
+        if registered_skills:
+            print("Open the Skills entry to verify skill listing and detection.")
         return 0
     finally:
         guard.close()

@@ -1065,6 +1065,64 @@ test("shared app core builds multi-plugin config while preserving unrelated phas
   });
 });
 
+test("shared app core preserves object plugin specs when rebuilding config", async () => {
+  const listeners = {};
+  global.window = {
+    AgentGuardConfig: { apiBase: "http://127.0.0.1:38080" },
+    AgentGuardShell: {
+      setToolStatus() {},
+      setApiStatus() {},
+    },
+    addEventListener(name, handler) {
+      listeners[name] = handler;
+    },
+  };
+  global.localStorage = createStorage();
+  global.document = {
+    getElementById() {
+      return createToastElement();
+    },
+  };
+  global.fetch = async () => ({
+    ok: true,
+    async json() {
+      return [];
+    },
+  });
+  global.setTimeout = (fn) => {
+    fn();
+    return 1;
+  };
+  global.clearTimeout = () => {};
+
+  delete require.cache[require.resolve("../static/common/app.js")];
+  require("../static/common/app.js");
+
+  const qwenSpec = {
+    name: "qwen3guard_input",
+    env: {
+      api_url: "http://qwen3guard.test/v1/chat/completions",
+      api_key: "$QWEN3GUARD_API_KEY",
+      model: "Qwen3Guard-Gen-8B",
+    },
+    timeout_s: 20,
+  };
+  const config = global.window.AgentGuardData.buildPluginConfig(
+    [{ name: "qwen3guard_input", description: "", event_types: ["llm_input"], phases: ["llm_before"] }],
+    [{ name: "qwen3guard_input", description: "", event_types: ["llm_input"], phases: ["llm_before"] }],
+    {
+      phases: {
+        llm_before: {
+          client: [],
+          server: [qwenSpec],
+        },
+      },
+    },
+  );
+
+  assert.deepEqual(config.phases.llm_before.server, [qwenSpec]);
+});
+
 test("shared app core derives active plugin names and primary plugin from config", async () => {
   const listeners = {};
   global.window = {

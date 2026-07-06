@@ -153,6 +153,27 @@
     return phases[phase];
   }
 
+  function clonePluginSpec(spec) {
+    if (!spec || typeof spec !== "object") {
+      return spec;
+    }
+    return JSON.parse(JSON.stringify(spec));
+  }
+
+  function existingPluginSpecsByName(basePhases, scope) {
+    const specsByName = new Map();
+    Object.values(basePhases || {}).forEach((phaseConfig) => {
+      const normalized = normalizePhaseConfig(phaseConfig);
+      normalized[scope].forEach((spec) => {
+        const name = pluginNameFromSpec(spec);
+        if (name && !specsByName.has(name)) {
+          specsByName.set(name, clonePluginSpec(spec));
+        }
+      });
+    });
+    return specsByName;
+  }
+
   function buildPluginConfig(plugins, availablePlugins = null, existingConfig = null, scope = "server") {
     const targetScope = normalizePluginScope(scope);
     const selectedOptions = (Array.isArray(plugins) ? plugins : [plugins])
@@ -165,6 +186,7 @@
     const manageableNames = new Set(catalog.map((option) => option.name));
     const baseConfig = existingConfig && typeof existingConfig === "object" ? existingConfig : null;
     const basePhases = baseConfig?.phases && typeof baseConfig.phases === "object" ? baseConfig.phases : {};
+    const existingSpecs = existingPluginSpecsByName(basePhases, targetScope);
     const phases = {};
 
     Object.keys(basePhases).forEach((phase) => {
@@ -188,7 +210,7 @@
       phaseNames.forEach((phase) => {
         const phaseConfig = ensurePhase(phases, phase, basePhases);
         if (!phaseConfig[targetScope].some((spec) => pluginNameFromSpec(spec) === name)) {
-          phaseConfig[targetScope].push(name);
+          phaseConfig[targetScope].push(clonePluginSpec(existingSpecs.get(name) || name));
         }
       });
     });

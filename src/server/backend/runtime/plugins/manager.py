@@ -1,6 +1,7 @@
 """Server plugin manager: phased plugin execution."""
 from __future__ import annotations
 
+import copy
 import importlib
 import inspect
 import json
@@ -272,11 +273,13 @@ def _plugin_outcome_dict(plugin: BasePlugin, res: CheckResult) -> dict[str, Any]
     return {
         "plugin": plugin.name,
         "decision_candidate": (
-            res.decision_candidate.to_dict() if res.decision_candidate is not None else None
+            copy.deepcopy(res.decision_candidate.to_dict())
+            if res.decision_candidate is not None
+            else None
         ),
         "risk_signals": list(res.risk_signals),
         "is_final": bool(res.is_final),
-        "metadata": dict(res.metadata),
+        "metadata": copy.deepcopy(dict(res.metadata)),
     }
 
 

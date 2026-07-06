@@ -747,9 +747,9 @@ def _plugin_result_dict(check: CheckResult) -> dict[str, Any]:
         "risk_signals": list(check.risk_signals),
         "is_final": check.is_final,
         "decision_candidate": (
-            check.decision_candidate.to_dict() if check.decision_candidate else None
+            copy.deepcopy(check.decision_candidate.to_dict()) if check.decision_candidate else None
         ),
-        "metadata": dict(check.metadata),
+        "metadata": copy.deepcopy(dict(check.metadata)),
     }
 
 
