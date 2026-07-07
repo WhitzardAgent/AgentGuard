@@ -9,8 +9,8 @@ from agentguard.plugins.registry import (
     register,
     registered_plugins,
 )
-from agentguard.plugins.llm_after import LLMOutputPlugin
-from agentguard.plugins.llm_before import JailbreakCheckPlugin
+from agentguard.plugins.llm_after import LLMOutputPlugin, Qwen3GuardOutputPlugin
+from agentguard.plugins.llm_before import JailbreakCheckPlugin, Qwen3GuardInputPlugin
 from agentguard.plugins.tool_after import ToolResultPlugin
 from agentguard.plugins.tool_before import ToolInvokePlugin
 
@@ -25,6 +25,8 @@ __all__ = [
     "plugin_descriptions",
     "JailbreakCheckPlugin",
     "LLMOutputPlugin",
+    "Qwen3GuardInputPlugin",
+    "Qwen3GuardOutputPlugin",
     "ToolInvokePlugin",
     "ToolResultPlugin",
 ]

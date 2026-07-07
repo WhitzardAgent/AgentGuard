@@ -1,7 +1,18 @@
 {
   "phases": {
     "llm_before": {
-      "client": [],
+      "client": [
+        {
+          "name": "qwen3guard_input",
+          "env": {
+            "api_url": "http://gw-bzokqkvr2cblz8ok6y.cn-wulanchabu-acdr-1.pai-eas.aliyuncs.com/api/predict/llm_hg_qwen3guard_gen_8b/v1/chat/completions",
+            "api_key": "$QWEN3GUARD_API_KEY",
+            "model": "Qwen3Guard-Gen-8B"
+          },
+          "temperature": 0,
+          "timeout_s": 20
+        }
+      ],
       "server": [
         {
           "name": "qwen3guard_input",
@@ -10,12 +21,24 @@
             "api_key": "$QWEN3GUARD_API_KEY",
             "model": "Qwen3Guard-Gen-8B"
           },
+          "temperature": 0,
           "timeout_s": 20
         }
       ]
     },
     "llm_after": {
-      "client": [],
+      "client": [
+        {
+          "name": "qwen3guard_output",
+          "env": {
+            "api_url": "http://gw-bzokqkvr2cblz8ok6y.cn-wulanchabu-acdr-1.pai-eas.aliyuncs.com/api/predict/llm_hg_qwen3guard_gen_8b/v1/chat/completions",
+            "api_key": "$QWEN3GUARD_API_KEY",
+            "model": "Qwen3Guard-Gen-8B"
+          },
+          "temperature": 0,
+          "timeout_s": 20
+        }
+      ],
       "server": [
         {
           "name": "qwen3guard_output",
@@ -24,6 +47,7 @@
             "api_key": "$QWEN3GUARD_API_KEY",
             "model": "Qwen3Guard-Gen-8B"
           },
+          "temperature": 0,
           "timeout_s": 20
         }
       ]

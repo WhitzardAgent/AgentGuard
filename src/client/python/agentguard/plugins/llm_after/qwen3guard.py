@@ -1,4 +1,4 @@
-"""Qwen3Guard plugin for LLM input events."""
+"""Qwen3Guard plugin for local LLM output events."""
 from __future__ import annotations
 
 import json
@@ -6,32 +6,26 @@ import re
 import urllib.request
 from typing import Any
 
-from shared.schemas.context import RuntimeContext
-from shared.schemas.decisions import GuardDecision
-from shared.schemas.events import EventType, RuntimeEvent
-
-from backend.runtime.plugins.base import BasePlugin, CheckResult
-from backend.runtime.plugins.common.patterns import text_of
-from backend.runtime.plugins.registry import register
+from agentguard.plugins.base import BasePlugin, CheckResult
+from agentguard.plugins.common.patterns import text_of
+from agentguard.plugins.registry import register
+from agentguard.schemas.context import RuntimeContext
+from agentguard.schemas.decisions import GuardDecision
+from agentguard.schemas.events import EventType, RuntimeEvent
 
 DEFAULT_MODEL = "Qwen3Guard-Gen-8B"
 DEFAULT_TEMPERATURE = 0.0
 
 
 @register(
-    name="qwen3guard_input",
-    description="Classify LLM input with Qwen3Guard before model execution.",
+    name="qwen3guard_output",
+    description="Classify LLM output with Qwen3Guard after model execution.",
 )
-class Qwen3GuardInputPlugin(BasePlugin):
-    event_types = [EventType.LLM_INPUT]
-    policy_scope = "llm_input"
+class Qwen3GuardOutputPlugin(BasePlugin):
+    event_types = [EventType.LLM_OUTPUT]
+    policy_scope = "llm_output"
 
-    def check(
-        self,
-        event: RuntimeEvent,
-        context: RuntimeContext,
-        trajectory_window: list[RuntimeEvent] | None = None,
-    ) -> CheckResult:
+    def check(self, event: RuntimeEvent, context: RuntimeContext) -> CheckResult:
         messages = self._messages_for_event(event)
         if not messages:
             return CheckResult.empty()
@@ -69,7 +63,7 @@ class Qwen3GuardInputPlugin(BasePlugin):
             return CheckResult(
                 decision_candidate=GuardDecision.deny(
                     f"Qwen3Guard classified {self.policy_scope} content as unsafe.",
-                    policy_id=f"server:qwen3guard:{self.policy_scope}:unsafe",
+                    policy_id=f"local:qwen3guard:{self.policy_scope}:unsafe",
                     risk_signals=[signal],
                     metadata=metadata,
                 ),
@@ -82,7 +76,7 @@ class Qwen3GuardInputPlugin(BasePlugin):
         return CheckResult(
             decision_candidate=GuardDecision.human_check(
                 f"Qwen3Guard classified {self.policy_scope} content as {safety}; human review required.",
-                policy_id=f"server:qwen3guard:{self.policy_scope}:{safety}",
+                policy_id=f"local:qwen3guard:{self.policy_scope}:{safety}",
                 risk_signals=[signal],
                 metadata=metadata,
             ),
@@ -93,13 +87,8 @@ class Qwen3GuardInputPlugin(BasePlugin):
 
     @staticmethod
     def _messages_for_event(event: RuntimeEvent) -> list[dict[str, str]]:
-        messages = []
-        for item in event.payload.messages:
-            role = str(item.get("role") or "user").strip() or "user"
-            content = text_of(item.get("content"))
-            if content:
-                messages.append({"role": role, "content": content})
-        return messages
+        content = text_of(event.payload.output)
+        return [{"role": "user", "content": content}] if content else []
 
     def _post_chat_completion(self, messages: list[dict[str, str]]) -> str:
         api_url = str(getattr(self, "api_url", "") or "").strip()
