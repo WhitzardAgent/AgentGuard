@@ -19,6 +19,7 @@ class RemoteSkillRunner:
         agent_id: str | None = None,
         user_id: str | None = None,
         session_key: str | None = None,
+        user_ticket: str | None = None,
         timeout_s: float = 10.0,
     ) -> None:
         self.server_url = (server_url or "").rstrip("/")
@@ -27,6 +28,7 @@ class RemoteSkillRunner:
         self.agent_id = agent_id
         self.user_id = user_id
         self.session_key = session_key
+        self.user_ticket = user_ticket
         self.timeout_s = timeout_s
 
     @property
@@ -48,6 +50,8 @@ class RemoteSkillRunner:
             headers["X-AgentGuard-User-Id"] = self.user_id
         if self.session_key:
             headers["X-AgentGuard-Session-Key"] = self.session_key
+        if self.user_ticket:
+            headers["X-AgentGuard-User-Ticket"] = self.user_ticket
         req = urllib.request.Request(
             f"{self.server_url}/v1/server/skills/run", data=body, headers=headers, method="POST"
         )

@@ -51,6 +51,7 @@ class AgentGuard {
       agent_id: this.context.agent_id,
       user_id: this.context.user_id,
       session_key: this.session_key,
+      user_ticket: options.user_ticket || options.userTicket || null,
       timeout_s: options.remote_timeout_s ?? options.remoteTimeoutS ?? 5.0,
       retries: options.remote_retries ?? options.remoteRetries ?? 2,
     });
@@ -88,6 +89,7 @@ class AgentGuard {
             agent_id: this.context.agent_id,
             user_id: this.context.user_id,
             session_key: this.session_key,
+            user_ticket: options.user_ticket || options.userTicket || null,
           })
         : null,
     });

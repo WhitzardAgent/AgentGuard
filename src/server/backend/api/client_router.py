@@ -119,6 +119,7 @@ def register_session(req: SessionRegisterRequest, request: Request) -> dict[str,
             context,
             client_ip=_client_ip(request),
             client_key=request.headers.get("x-agentguard-session-key"),
+            user_ticket=request.headers.get("x-agentguard-user-ticket"),
             enforce_key=True,
         )
     except PermissionError as exc:
@@ -163,6 +164,7 @@ def _transport_metadata(request: Request, *, enforce_session_key: bool) -> dict[
     return {
         "client_ip": _client_ip(request),
         "client_key": request.headers.get("x-agentguard-session-key"),
+        "user_ticket": request.headers.get("x-agentguard-user-ticket"),
         "agent_id": request.headers.get("x-agentguard-agent-id"),
         "user_id": request.headers.get("x-agentguard-user-id"),
         "enforce_session_key": enforce_session_key,
@@ -181,6 +183,7 @@ def _validate_client_session(request: Request) -> None:
             client_ip=_client_ip(request),
             client_key=request.headers.get("x-agentguard-session-key"),
             enforce_key=True,
+            metadata=_identity_metadata_from_request(request),
         )
         if record is None:
             raise PermissionError("unknown client session")
@@ -190,8 +193,30 @@ def _validate_client_session(request: Request) -> None:
 
 def _session_key_error(exc: PermissionError) -> HTTPException:
     message = str(exc)
-    status = 401 if "missing" in message else 403
+    if "user ticket validation is unavailable" in message:
+        return HTTPException(status_code=503, detail=message)
+    status = 401 if (
+        "missing" in message
+        or "user ticket" in message
+    ) else 403
     return HTTPException(status_code=status, detail=message)
+
+
+def _identity_metadata_from_request(request: Request) -> dict[str, Any]:
+    ticket = request.headers.get("x-agentguard-user-ticket")
+    if not ticket:
+        return {}
+    from backend.user.store import resolve_user_ticket  # noqa: PLC0415
+
+    identity = resolve_user_ticket(ticket)
+    if identity is None:
+        return {}
+    return {
+        "canonical_user_id": identity.user_id,
+        "canonical_username": identity.username,
+        "user_ticket_id": identity.ticket_id,
+        "user_ticket_prefix": identity.ticket_prefix,
+    }
 
 
 def _ticket_belongs_to_request(ticket: dict[str, Any], request: Request) -> bool:

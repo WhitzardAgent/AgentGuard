@@ -17,6 +17,14 @@ from shared.schemas.events import EventType, RuntimeEvent
 from shared.schemas.policy import PolicyEffect, PolicyRule, RuleCondition
 
 
+class _FakeTicketIdentity:
+    user_id = 42
+    username = "alice"
+    ticket_id = 7
+    ticket_prefix = "agt_fake"
+    expires_at = None
+
+
 def _exfil_request():
     return {
         "request_id": "r1",
@@ -164,6 +172,98 @@ def test_manager_records_session_pool_metadata():
     assert record["principal"] == {"role": "tester"}
     assert record["metadata"]["custom"] == "value"
     assert record["metadata"]["event_metadata"] == {"principal": {"role": "tester"}}
+
+
+def test_manager_attaches_canonical_user_from_user_ticket(monkeypatch):
+    monkeypatch.setattr(
+        "backend.runtime.manager.resolve_user_ticket",
+        lambda ticket: _FakeTicketIdentity() if ticket == "agt_fake_token" else None,
+    )
+    m = RuntimeManager()
+    m.decide(
+        {
+            "request_id": "ticket-identity",
+            "context": {
+                "session_id": "ticket-session",
+                "agent_id": "agent-a",
+                "user_id": "external-user",
+            },
+            "current_event": {
+                "event_type": "tool_invoke",
+                "payload": {
+                    "tool_name": "noop",
+                    "arguments": {},
+                    "capabilities": [],
+                },
+            },
+            "_transport": {
+                "user_ticket": "agt_fake_token",
+            },
+        }
+    )
+
+    record = m.session_pool.get(
+        "ticket-session",
+        agent_id="agent-a",
+        user_id="external-user",
+    )
+    assert record is not None
+    assert record["metadata"]["canonical_user_id"] == 42
+    assert record["metadata"]["principal"]["external_user_id"] == "external-user"
+
+    trace = m.get_trace_records(
+        "ticket-session",
+        agent_id="agent-a",
+        user_id="external-user",
+    )
+    assert trace
+    event = trace[-1].event
+    assert event is not None
+    assert event.metadata["canonical_user_id"] == 42
+    assert event.metadata["principal"]["canonical_username"] == "alice"
+
+
+def test_uploaded_trace_event_gets_canonical_user_from_user_ticket(monkeypatch):
+    monkeypatch.setattr(
+        "backend.runtime.manager.resolve_user_ticket",
+        lambda ticket: _FakeTicketIdentity() if ticket == "agt_fake_token" else None,
+    )
+    m = RuntimeManager()
+    count = m.record_uploaded_trace(
+        {
+            "session_id": "uploaded-ticket-session",
+            "agent_id": "agent-a",
+            "user_id": "external-user",
+            "reason": "manual_upload",
+            "_transport": {
+                "user_ticket": "agt_fake_token",
+            },
+            "entries": [
+                {
+                    "event": {
+                        "event_id": "uploaded-event-1",
+                        "event_type": "tool_invoke",
+                        "payload": {
+                            "tool_name": "noop",
+                            "arguments": {},
+                            "capabilities": [],
+                        },
+                    }
+                }
+            ],
+        }
+    )
+
+    assert count == 1
+    trace = m.get_trace_records(
+        "uploaded-ticket-session",
+        agent_id="agent-a",
+        user_id="external-user",
+    )
+    event = trace[0].event
+    assert event is not None
+    assert event.metadata["canonical_user_id"] == 42
+    assert event.metadata["principal"]["external_user_id"] == "external-user"
 
 
 def test_session_pool_requires_exact_composite_key_for_lookup():

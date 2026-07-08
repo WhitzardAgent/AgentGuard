@@ -1,4 +1,22 @@
 services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:-agentguard-root}"
+      MYSQL_DATABASE: "${MYSQL_DATABASE:-agentguard}"
+      MYSQL_USER: "${MYSQL_USER:-agentguard}"
+      MYSQL_PASSWORD: "${MYSQL_PASSWORD:-agentguard}"
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - agentguard_mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$$MYSQL_USER -p$$MYSQL_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   server:
     build:
       context: .
@@ -14,6 +32,9 @@ services:
       AGENTGUARD_API_KEY: "${AGENTGUARD_API_KEY:-sk-agentguard-backend-X9m42Vq7Tz8nL3pA6cR0yH5uJ1sWfKdE}"
       AGENTGUARD_SERVER_PLUGIN_CONFIG: "${AGENTGUARD_SERVER_PLUGIN_CONFIG:-}"
       AGENTGUARD_POLICY: "${AGENTGUARD_POLICY:-}"
+      AGENTGUARD_MYSQL_URL: "${AGENTGUARD_MYSQL_URL:-mysql://${MYSQL_USER:-agentguard}:${MYSQL_PASSWORD:-agentguard}@mysql:3306/${MYSQL_DATABASE:-agentguard}}"
+      AGENTGUARD_USER_SESSION_TTL_SECONDS: "${AGENTGUARD_USER_SESSION_TTL_SECONDS:-86400}"
+      AGENTGUARD_USER_TICKET_TTL_SECONDS: "${AGENTGUARD_USER_TICKET_TTL_SECONDS:-300}"
       AGENTGUARD_LLM_BASE_URL: "${AGENTGUARD_LLM_BASE_URL:-}"
       AGENTGUARD_LLM_MODEL: "${AGENTGUARD_LLM_MODEL:-}"
       AGENTGUARD_LLM_API_KEY: "${AGENTGUARD_LLM_API_KEY:-}"
@@ -22,6 +43,9 @@ services:
       interval: 5s
       timeout: 3s
       retries: 12
+    depends_on:
+      mysql:
+        condition: service_healthy
 
   frontend:
     build:
@@ -54,3 +78,6 @@ services:
         condition: service_healthy
     environment:
       AGENTGUARD_SERVER_URL: http://server:38080
+
+volumes:
+  agentguard_mysql:

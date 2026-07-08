@@ -55,6 +55,7 @@ class RemoteGuardClient:
         agent_id: str | None = None,
         user_id: str | None = None,
         session_key: str | None = None,
+        user_ticket: str | None = None,
         timeout_s: float = 5.0,
         retries: int = 2,
         decide_path: str = "/v1/server/guard/decide",
@@ -75,6 +76,7 @@ class RemoteGuardClient:
         self.agent_id = agent_id
         self.user_id = user_id
         self.session_key = session_key
+        self.user_ticket = user_ticket
         self.timeout_s = timeout_s
         self.retries = retries
         self.decide_path = decide_path
@@ -217,6 +219,8 @@ class RemoteGuardClient:
             headers["X-AgentGuard-User-Id"] = self.user_id
         if self.session_key:
             headers["X-AgentGuard-Session-Key"] = self.session_key
+        if self.user_ticket:
+            headers["X-AgentGuard-User-Ticket"] = self.user_ticket
         return headers
 
     def _request(self, method: str, path: str, body: dict | None) -> dict[str, Any]:

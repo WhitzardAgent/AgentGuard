@@ -33,6 +33,9 @@ class RemoteSkillRunner {
     if (this.options.session_key) {
       headers["X-AgentGuard-Session-Key"] = this.options.session_key;
     }
+    if (this.options.user_ticket || this.options.userTicket) {
+      headers["X-AgentGuard-User-Ticket"] = this.options.user_ticket || this.options.userTicket;
+    }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeout_s * 1000);
     try {

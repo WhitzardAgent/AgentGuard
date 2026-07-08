@@ -21,6 +21,7 @@ from backend.runtime.degrade.planner import DegradePlanner
 from backend.runtime.policy.engine import PolicyEngine
 from backend.runtime.review import ReviewQueue
 from backend.runtime.storage import SessionPool, TraceStore, trace_entry_event_dict
+from backend.user.store import resolve_user_ticket
 from shared.utils.json import safe_dumps, safe_loads
 from shared.utils.time import now_ts
 
@@ -85,9 +86,13 @@ class RuntimeManager:
         client_key: str | None = None,
         enforce_key: bool = False,
         event_dict: dict[str, Any] | None = None,
+        user_ticket: str | None = None,
         timeout_s: float = 2.0,
         push_config: bool = True,
     ) -> dict[str, Any]:
+        identity_metadata = self._identity_metadata_from_ticket(user_ticket)
+        if identity_metadata:
+            self._attach_identity_to_context(context, identity_metadata)
         record = self.session_pool.upsert(
             context,
             client_ip=client_ip or (context.metadata or {}).get("client_ip"),
@@ -417,6 +422,7 @@ class RuntimeManager:
             client_key=(request.get("_transport") or {}).get("client_key"),
             enforce_key=bool((request.get("_transport") or {}).get("enforce_session_key")),
             event_dict=event_dict,
+            user_ticket=(request.get("_transport") or {}).get("user_ticket"),
             push_config=False,
         )
         event = RuntimeEvent.from_dict(event_dict)
@@ -424,6 +430,7 @@ class RuntimeManager:
         # correct session/agent identity (current_event rarely embeds context).
         if ctx_dict:
             event.context = context
+        self._attach_identity_to_event(event, context)
         self._inject_console_tool_labels(event, context)
         cached_entries = list(request.get("client_cached_entries") or [])
         request_trace_window = _merge_event_window(
@@ -441,6 +448,7 @@ class RuntimeManager:
             context,
         )
         if cached_entries:
+            transport = request.get("_transport") or {}
             self.record_uploaded_trace(
                 {
                     "session_id": context.session_id,
@@ -448,6 +456,9 @@ class RuntimeManager:
                     "user_id": context.user_id,
                     "reason": "decision_sync",
                     "entries": cached_entries,
+                    "_transport": {
+                        "user_ticket": transport.get("user_ticket"),
+                    },
                 }
             )
         self._remember_trace_window(request_trace_window, context)
@@ -588,16 +599,21 @@ class RuntimeManager:
 
     def record_uploaded_trace(self, trace: dict[str, Any]) -> int:
         session_id = trace.get("session_id") or "unknown"
-        agent_id = trace.get("agent_id") or (trace.get("_transport") or {}).get("agent_id")
-        user_id = trace.get("user_id") or (trace.get("_transport") or {}).get("user_id")
+        transport = trace.get("_transport") or {}
+        agent_id = trace.get("agent_id") or transport.get("agent_id")
+        user_id = trace.get("user_id") or transport.get("user_id")
+        identity_metadata = self._identity_metadata_from_ticket(transport.get("user_ticket"))
         self.session_pool.touch(
             session_id,
             agent_id=str(agent_id) if agent_id is not None else None,
             user_id=str(user_id) if user_id is not None else None,
-            client_ip=(trace.get("_transport") or {}).get("client_ip"),
-            client_key=(trace.get("_transport") or {}).get("client_key"),
-            enforce_key=bool((trace.get("_transport") or {}).get("enforce_session_key")),
-            metadata={"last_trace_upload_reason": trace.get("reason")},
+            client_ip=transport.get("client_ip"),
+            client_key=transport.get("client_key"),
+            enforce_key=bool(transport.get("enforce_session_key")),
+            metadata={
+                "last_trace_upload_reason": trace.get("reason"),
+                **identity_metadata,
+            },
         )
         count = 0
         for entry in trace.get("entries") or []:
@@ -612,6 +628,23 @@ class RuntimeManager:
                     **entry,
                 }
             )
+            if record.event is not None and identity_metadata:
+                current_context = record.event.context
+                event_context = record.event.context.child(
+                    session_id=(
+                        session_id
+                        if current_context.session_id in (None, "", "unknown")
+                        else current_context.session_id
+                    ),
+                    agent_id=current_context.agent_id or agent_id,
+                    user_id=current_context.user_id or user_id,
+                    metadata={
+                        **dict(current_context.metadata or {}),
+                        **identity_metadata,
+                    },
+                )
+                record.event.context = event_context
+                self._attach_identity_to_event(record.event, event_context)
             stored = self._store_trace_record(
                 session_id,
                 record,
@@ -662,6 +695,71 @@ class RuntimeManager:
             user_id=str(user_id) if user_id is not None else None,
         )
         return status != "unchanged"
+
+    def _identity_metadata_from_ticket(self, user_ticket: str | None) -> dict[str, Any]:
+        if not user_ticket:
+            return {}
+        identity = resolve_user_ticket(user_ticket)
+        if identity is None:
+            return {}
+        return {
+            "canonical_user_id": identity.user_id,
+            "canonical_username": identity.username,
+            "user_ticket_id": identity.ticket_id,
+            "user_ticket_prefix": identity.ticket_prefix,
+        }
+
+    @staticmethod
+    def _attach_identity_to_context(
+        context: RuntimeContext,
+        identity_metadata: dict[str, Any],
+    ) -> None:
+        metadata = dict(context.metadata or {})
+        metadata.update(identity_metadata)
+        principal = dict(metadata.get("principal") or {})
+        if context.user_id not in (None, ""):
+            principal.setdefault("external_user_id", context.user_id)
+        principal.update(
+            {
+                "canonical_user_id": identity_metadata.get("canonical_user_id"),
+                "canonical_username": identity_metadata.get("canonical_username"),
+            }
+        )
+        metadata["principal"] = principal
+        context.metadata = metadata
+
+    @classmethod
+    def _attach_identity_to_event(
+        cls,
+        event: RuntimeEvent,
+        context: RuntimeContext,
+    ) -> None:
+        identity_keys = {
+            "canonical_user_id",
+            "canonical_username",
+            "user_ticket_id",
+            "user_ticket_prefix",
+        }
+        identity_metadata = {
+            key: value
+            for key, value in dict(context.metadata or {}).items()
+            if key in identity_keys
+        }
+        if not identity_metadata:
+            return
+        metadata = dict(event.metadata or {})
+        metadata.update(identity_metadata)
+        principal = dict(metadata.get("principal") or {})
+        if context.user_id not in (None, ""):
+            principal.setdefault("external_user_id", context.user_id)
+        principal.update(
+            {
+                "canonical_user_id": identity_metadata.get("canonical_user_id"),
+                "canonical_username": identity_metadata.get("canonical_username"),
+            }
+        )
+        metadata["principal"] = principal
+        event.metadata = metadata
 
     def _bind_rule_based_plugins(self) -> None:
         self._bind_rule_based_plugins_for(self.plugins, policy=self.policy)

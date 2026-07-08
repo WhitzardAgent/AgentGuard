@@ -130,6 +130,14 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
             self._proxy("approvals", method="GET", query=query)
             return
 
+        if path == "/api/user/me":
+            self._proxy("v1/user/me", method="GET", query=query)
+            return
+
+        if path == "/api/user/tickets":
+            self._proxy("v1/user/tickets", method="GET", query=query)
+            return
+
         if path.startswith("/api/agents/") and "/runtime/" in path:
             upstream_path = path.removeprefix("/api/")
             self._proxy(upstream_path, method="GET", query=query)
@@ -230,6 +238,15 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
         ):
             upstream_path = path.removeprefix("/api/")
             self._proxy(upstream_path, method="POST", query=query)
+            return
+
+        if path in {
+            "/api/user/register",
+            "/api/user/login",
+            "/api/user/logout",
+            "/api/user/tickets",
+        }:
+            self._proxy(f"v1/user/{path.rsplit('/', 1)[-1]}", method="POST", query=query)
             return
 
         self.send_error(HTTPStatus.NOT_FOUND, "Not Found")
@@ -377,6 +394,9 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
             )
         if API_KEY:
             headers["X-Api-Key"] = API_KEY
+        cookie = self.headers.get("Cookie")
+        if cookie:
+            headers["Cookie"] = cookie
 
         request = Request(target_url, data=body, headers=headers, method=method)
 
@@ -386,12 +406,17 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
                 content_type = response.headers.get(
                     "Content-Type", "application/json; charset=utf-8"
                 )
+                set_cookie_headers = response.headers.get_all("Set-Cookie") or []
         except HTTPError as exc:
-            upstream_message = self._read_http_error(exc)
-            self._send_json(
-                {"ok": False, "error": upstream_message or f"upstream returned {exc.code}"},
-                status=HTTPStatus.BAD_GATEWAY,
-            )
+            upstream_body = exc.read()
+            content_type = exc.headers.get("Content-Type", "application/json; charset=utf-8")
+            self.send_response(exc.code)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(upstream_body)))
+            for value in exc.headers.get_all("Set-Cookie") or []:
+                self.send_header("Set-Cookie", value)
+            self.end_headers()
+            self.wfile.write(upstream_body)
             return
         except URLError as exc:
             self._send_json(
@@ -403,6 +428,8 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(upstream_body)))
+        for value in set_cookie_headers:
+            self.send_header("Set-Cookie", value)
         self.end_headers()
         self.wfile.write(upstream_body)
 

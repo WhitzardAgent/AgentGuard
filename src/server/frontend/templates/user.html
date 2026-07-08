@@ -22,14 +22,68 @@
         </div>
       </section>
 
-      <section class="card">
-        <div class="heading-row">
-          <h3>User Management</h3>
+      <section class="grid two">
+        <div class="card" id="auth-card">
+          <div class="heading-row">
+            <h3>Sign In</h3>
+          </div>
+          <form class="form-grid" id="login-form">
+            <label>
+              <span>Username</span>
+              <input id="login-username" autocomplete="username" required minlength="3" maxlength="255">
+            </label>
+            <label>
+              <span>Password</span>
+              <input id="login-password" type="password" autocomplete="current-password" required minlength="8">
+            </label>
+            <div class="form-grid-actions">
+              <button class="btn primary" type="submit">Sign In</button>
+            </div>
+          </form>
+
+          <div class="heading-row">
+            <h3>Create Account</h3>
+          </div>
+          <form class="form-grid" id="register-form">
+            <label>
+              <span>Username</span>
+              <input id="register-username" autocomplete="username" required minlength="3" maxlength="255">
+            </label>
+            <label>
+              <span>Password</span>
+              <input id="register-password" type="password" autocomplete="new-password" required minlength="8">
+            </label>
+            <div class="form-grid-actions">
+              <button class="btn" type="submit">Register</button>
+            </div>
+          </form>
         </div>
-        <p class="subtle">Coming soon.</p>
-        <p class="subtle">
-          basic user management features to be added...
-        </p>
+
+        <div class="card" id="profile-card">
+          <div class="heading-row">
+            <h3>Current User</h3>
+            <button class="btn" id="logout-button" type="button" hidden>Logout</button>
+          </div>
+          <p class="subtle" id="user-status">Not signed in.</p>
+          <div class="toolbar" id="ticket-toolbar" hidden>
+            <button class="btn primary" id="generate-ticket-button" type="button">Generate Ticket</button>
+            <button class="btn" id="copy-ticket-button" type="button" hidden>Copy Ticket</button>
+          </div>
+          <div class="empty-state" id="ticket-output" hidden></div>
+          <div class="table-card" id="ticket-list-card" hidden>
+            <table>
+              <thead>
+                <tr>
+                  <th>Prefix</th>
+                  <th>Expires</th>
+                  <th>Last Used</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="ticket-list"></tbody>
+            </table>
+          </div>
+        </div>
       </section>
     </main>
 
@@ -43,6 +97,178 @@
       title: "User",
       description: "Manage frontend user identities and related configuration.",
     });
+  </script>
+  <script>
+    (function () {
+      const loginForm = document.getElementById("login-form");
+      const registerForm = document.getElementById("register-form");
+      const logoutButton = document.getElementById("logout-button");
+      const statusNode = document.getElementById("user-status");
+      const ticketToolbar = document.getElementById("ticket-toolbar");
+      const generateTicketButton = document.getElementById("generate-ticket-button");
+      const copyTicketButton = document.getElementById("copy-ticket-button");
+      const ticketOutput = document.getElementById("ticket-output");
+      const ticketListCard = document.getElementById("ticket-list-card");
+      const ticketList = document.getElementById("ticket-list");
+      let currentTicket = "";
+
+      function showToast(message, tone) {
+        const toast = document.getElementById("toast");
+        if (!toast) {
+          return;
+        }
+        toast.textContent = message;
+        toast.className = `toast ${tone || "success"} show`;
+        window.setTimeout(() => toast.classList.remove("show"), 2600);
+      }
+
+      function formPayload(prefix) {
+        return {
+          username: document.getElementById(`${prefix}-username`).value.trim(),
+          password: document.getElementById(`${prefix}-password`).value,
+        };
+      }
+
+      async function api(path, options) {
+        const response = await fetch(path, {
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          ...options,
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload.detail || payload.error || `HTTP ${response.status}`);
+        }
+        return payload;
+      }
+
+      function updateShellUser(user) {
+        const label = user ? user.username : "";
+        window.AgentGuardShell?.setCurrentUser?.(label);
+      }
+
+      function renderUser(user) {
+        const signedIn = Boolean(user);
+        statusNode.textContent = signedIn
+          ? `Signed in as ${user.username} (user #${user.id}).`
+          : "Not signed in.";
+        logoutButton.hidden = !signedIn;
+        ticketToolbar.hidden = !signedIn;
+        loginForm.hidden = signedIn;
+        registerForm.hidden = signedIn;
+        if (!signedIn) {
+          ticketOutput.hidden = true;
+          ticketListCard.hidden = true;
+          currentTicket = "";
+        }
+        updateShellUser(user);
+      }
+
+      function renderTickets(tickets) {
+        if (!tickets.length) {
+          ticketListCard.hidden = true;
+          ticketList.innerHTML = "";
+          return;
+        }
+        ticketListCard.hidden = false;
+        ticketList.innerHTML = tickets.map((ticket) => `
+          <tr>
+            <td>${escapeHtml(ticket.ticket_prefix || "")}</td>
+            <td>${escapeHtml(ticket.expires_at || "")}</td>
+            <td>${escapeHtml(ticket.last_used_at || "-")}</td>
+            <td>${ticket.expired ? "Expired" : "Active"}</td>
+          </tr>
+        `).join("");
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
+
+      async function refresh() {
+        try {
+          const payload = await api("/api/user/me");
+          renderUser(payload.user);
+          const ticketPayload = await api("/api/user/tickets");
+          renderTickets(ticketPayload.tickets || []);
+        } catch {
+          renderUser(null);
+        }
+      }
+
+      loginForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        try {
+          const payload = await api("/api/user/login", {
+            method: "POST",
+            body: JSON.stringify(formPayload("login")),
+          });
+          renderUser(payload.user);
+          await refresh();
+          showToast("Signed in.", "success");
+        } catch (error) {
+          showToast(error.message || "Login failed.", "warning");
+        }
+      });
+
+      registerForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        try {
+          await api("/api/user/register", {
+            method: "POST",
+            body: JSON.stringify(formPayload("register")),
+          });
+          showToast("Account created. You can sign in now.", "success");
+        } catch (error) {
+          showToast(error.message || "Registration failed.", "warning");
+        }
+      });
+
+      logoutButton.addEventListener("click", async () => {
+        try {
+          await api("/api/user/logout", { method: "POST", body: "{}" });
+        } catch {
+          // Continue local logout even if the session is already gone.
+        }
+        renderUser(null);
+        showToast("Signed out.", "success");
+      });
+
+      generateTicketButton.addEventListener("click", async () => {
+        try {
+          const payload = await api("/api/user/tickets", { method: "POST", body: "{}" });
+          currentTicket = payload.ticket || "";
+          ticketOutput.hidden = false;
+          ticketOutput.textContent = currentTicket
+            ? `Ticket: ${currentTicket}\nExpires: ${payload.expires_at}`
+            : "Ticket generated.";
+          copyTicketButton.hidden = !currentTicket;
+          await refresh();
+          showToast("Ticket generated.", "success");
+        } catch (error) {
+          showToast(error.message || "Failed to generate ticket.", "warning");
+        }
+      });
+
+      copyTicketButton.addEventListener("click", async () => {
+        if (!currentTicket) {
+          return;
+        }
+        try {
+          await navigator.clipboard.writeText(currentTicket);
+          showToast("Ticket copied.", "success");
+        } catch {
+          showToast("Copy failed.", "warning");
+        }
+      });
+
+      refresh();
+    })();
   </script>
 </body>
 </html>

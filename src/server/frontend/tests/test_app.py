@@ -73,6 +73,28 @@ def _json_request(method: str, base_url: str, path: str, body: dict | None = Non
     return response.status, parsed
 
 
+def _raw_request(
+    method: str,
+    base_url: str,
+    path: str,
+    body: dict | None = None,
+    headers: dict[str, str] | None = None,
+) -> tuple[int, dict[str, list[str]], bytes]:
+    conn = http.client.HTTPConnection("127.0.0.1", int(base_url.rsplit(":", 1)[1]), timeout=5)
+    payload = json.dumps(body).encode("utf-8") if body is not None else None
+    request_headers = dict(headers or {})
+    if payload is not None:
+        request_headers.setdefault("Content-Type", "application/json")
+    conn.request(method, path, body=payload, headers=request_headers)
+    response = conn.getresponse()
+    raw = response.read()
+    response_headers: dict[str, list[str]] = {}
+    for key, value in response.getheaders():
+        response_headers.setdefault(key.lower(), []).append(value)
+    conn.close()
+    return response.status, response_headers, raw
+
+
 def _text_request(method: str, base_url: str, path: str) -> tuple[int, str]:
     conn = http.client.HTTPConnection("127.0.0.1", int(base_url.rsplit(":", 1)[1]), timeout=5)
     conn.request(method, path)
@@ -116,6 +138,57 @@ def test_rules_proxy_forwards_api_key_and_payload():
     assert observed["path"] == "/v1/backend/rules/reload"
     assert observed["api_key"] == "test-secret"
     assert json.loads(str(observed["body"]))["source"].startswith("RULE test")
+
+
+def test_user_proxy_forwards_set_cookie_and_cookie_header():
+    observed: dict[str, object] = {}
+
+    class UpstreamHandler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            observed["post_path"] = self.path
+            body = json.dumps({"user": {"id": 1, "username": "alice"}}).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Set-Cookie", "agentguard_user_session=session-1; HttpOnly; Path=/")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self) -> None:
+            observed["get_path"] = self.path
+            observed["cookie"] = self.headers.get("Cookie")
+            body = json.dumps({"user": {"id": 1, "username": "alice"}}).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    with _ThreadedServer(UpstreamHandler) as upstream:
+        with patched_proxy_target(upstream.url):
+            with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+                status, headers, _ = _raw_request(
+                    "POST",
+                    preview.url,
+                    "/api/user/login",
+                    {"username": "alice", "password": "correct horse"},
+                )
+                assert status == 200
+                cookie = headers["set-cookie"][0]
+                status, _, _ = _raw_request(
+                    "GET",
+                    preview.url,
+                    "/api/user/me",
+                    headers={"Cookie": cookie.split(";", 1)[0]},
+                )
+
+    assert status == 200
+    assert observed["post_path"] == "/v1/user/login"
+    assert observed["get_path"] == "/v1/user/me"
+    assert observed["cookie"] == "agentguard_user_session=session-1"
 
 
 def test_rules_check_proxy_forwards_api_key_and_payload():

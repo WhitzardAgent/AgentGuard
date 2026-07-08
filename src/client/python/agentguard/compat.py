@@ -65,6 +65,7 @@ class Guard:
         remote_retries: int = 2,
         plugin_config: str | dict[str, Any] | None = None,
         session_key: str | None = None,
+        user_ticket: str | None = None,
         agent_id: str | None = None,
         user_id: str | None = None,
     ) -> None:
@@ -86,6 +87,7 @@ class Guard:
             "remote_retries": remote_retries,
             "plugin_config": plugin_config,
             "session_key": session_key,
+            "user_ticket": user_ticket,
             "agent_id": agent_id,
             "user_id": user_id,
         }
@@ -136,6 +138,7 @@ class Guard:
             remote_retries=self._config["remote_retries"],
             plugin_config=self._config["plugin_config"],
             session_key=self._config["session_key"],
+            user_ticket=self._config["user_ticket"],
         )
         if metadata:
             guard.context.metadata.update(metadata)

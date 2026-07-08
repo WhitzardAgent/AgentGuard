@@ -51,6 +51,7 @@ class AgentGuard:
         remote_retries: int = 2,
         plugin_config: str | dict[str, Any] | None = None,
         session_key: str | None = None,
+        user_ticket: str | None = None,
     ) -> None:
         plugin_payload = _plugin_config_payload(plugin_config)
         snapshot = self._load_snapshot(policy)
@@ -77,6 +78,7 @@ class AgentGuard:
             agent_id=self.context.agent_id,
             user_id=self.context.user_id,
             session_key=self.session_key,
+            user_ticket=user_ticket,
             timeout_s=remote_timeout_s,
             retries=remote_retries,
         )
@@ -116,6 +118,7 @@ class AgentGuard:
                 agent_id=self.context.agent_id,
                 user_id=self.context.user_id,
                 session_key=self.session_key,
+                user_ticket=user_ticket,
             )
             if server_url
             else None

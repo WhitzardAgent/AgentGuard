@@ -1,0 +1,18 @@
+"""Schema initialization entrypoint for persistent backend modules."""
+from __future__ import annotations
+
+from backend.database.config import get_mysql_config
+
+
+def ensure_schema() -> None:
+    """Initialize configured persistent schemas.
+
+    No-op when MySQL is not configured so existing in-memory-only development
+    and tests keep working. When AGENTGUARD_MYSQL_URL is set, failures propagate
+    and FastAPI startup fails fast.
+    """
+    if get_mysql_config() is None:
+        return
+    from backend.user.store import ensure_user_schema  # noqa: PLC0415
+
+    ensure_user_schema()

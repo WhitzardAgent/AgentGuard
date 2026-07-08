@@ -201,6 +201,21 @@
     render();
   }
 
+  function setCurrentUser(label) {
+    const normalized = String(label || "").trim();
+    state.currentUserLabel = normalized || "Current User";
+    try {
+      if (normalized) {
+        window.localStorage?.setItem(CURRENT_USER_KEY, normalized);
+      } else {
+        window.localStorage?.removeItem(CURRENT_USER_KEY);
+      }
+    } catch {
+      // Ignore localStorage write issues in preview mode.
+    }
+    render();
+  }
+
   function dispatchSelectionEvent(name, detail) {
     if (
       typeof window !== "undefined"
@@ -260,6 +275,7 @@
     render,
     setApiStatus,
     setPageContext,
+    setCurrentUser,
     setSelectedAgent,
     setSelectedPlugin,
     setToolStatus,

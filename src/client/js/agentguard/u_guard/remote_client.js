@@ -43,6 +43,7 @@ class RemoteGuardClient {
     this.agent_id = options.agent_id || options.agentId || null;
     this.user_id = options.user_id || options.userId || null;
     this.session_key = options.session_key || options.sessionKey || null;
+    this.user_ticket = options.user_ticket || options.userTicket || null;
     this.timeout_s = options.timeout_s ?? options.timeoutS ?? 5.0;
     this.retries = options.retries ?? 2;
     this.decide_path = options.decide_path || "/v1/server/guard/decide";
@@ -171,6 +172,9 @@ class RemoteGuardClient {
     }
     if (this.session_key) {
       headers["X-AgentGuard-Session-Key"] = this.session_key;
+    }
+    if (this.user_ticket) {
+      headers["X-AgentGuard-User-Ticket"] = this.user_ticket;
     }
     return headers;
   }
