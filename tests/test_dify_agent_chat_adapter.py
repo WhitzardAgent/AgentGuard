@@ -452,12 +452,21 @@ def test_agent_chat_catalog_sync_reports_enabled_tools(monkeypatch):
 
     monkeypatch.setattr(adapter, "RemoteGuardClient", FakeRemote)
     monkeypatch.setattr(adapter, "_published_agent_chat_apps", lambda: [app])
+    monkeypatch.setattr(
+        adapter,
+        "_dify_account_email_for_app",
+        lambda app: "alice@example.com",
+    )
 
     result = adapter._sync_published_agent_catalog_once()
 
     assert result["app_count"] == 1
     assert registered[0]["agent_id"] == "dify-agent-chat:app-1"
+    assert registered[0]["metadata"]["external_provider"] == "dify"
+    assert registered[0]["metadata"]["dify_user_email"] == "alice@example.com"
+    assert registered[0]["metadata"]["external_account_email"] == "alice@example.com"
     assert synced[0][0]["agent_id"] == "dify-agent-chat:app-1"
+    assert synced[0][0]["metadata"]["dify_user_email"] == "alice@example.com"
     assert [tool["name"] for tool in synced[0][1]] == ["weekday"]
     assert synced[0][1][0]["input_params"] == ["year", "month", "day"]
 

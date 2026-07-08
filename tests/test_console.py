@@ -352,6 +352,38 @@ def test_sync_tools_replaces_console_catalog_for_agent():
     assert scoped[0]["labels"]["tags"] == ["read_only"]
 
 
+def test_sync_tools_scopes_dify_catalog_by_external_email():
+    con = _console()
+    con.sync_tools(
+        {
+            "agent_id": "dify-workflow:alice-app",
+            "metadata": {
+                "adapter": "dify",
+                "dify_user_email": "Alice@Example.COM",
+            },
+        },
+        [{"name": "docs.search"}],
+    )
+    con.sync_tools(
+        {
+            "agent_id": "dify-workflow:bob-app",
+            "metadata": {
+                "adapter": "dify",
+                "external_account_email": "bob@example.com",
+            },
+        },
+        [{"name": "mail.send"}],
+    )
+
+    alice_tools = con.tools(visible_to_external_accounts={("dify", "alice@example.com")})
+    bob_tools = con.tools(visible_to_external_accounts={("dify", "bob@example.com")})
+    unbound_tools = con.tools(visible_to_external_accounts=set())
+
+    assert [item["owner_agent_id"] for item in alice_tools] == ["dify-workflow:alice-app"]
+    assert [item["owner_agent_id"] for item in bob_tools] == ["dify-workflow:bob-app"]
+    assert unbound_tools == []
+
+
 def test_register_skills_stores_skill_record_resource_and_detection_state():
     con = _console()
     result = con.register_skills(

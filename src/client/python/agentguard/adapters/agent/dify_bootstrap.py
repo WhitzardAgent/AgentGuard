@@ -27,6 +27,30 @@ def install_dify_app_factory_capture() -> dict[str, Any]:
         return {"installed": True, "patched": False, "reason": "import_hook_installed"}
 
 
+def install_dify_post_gevent_bootstrap() -> dict[str, Any]:
+    """Backward-compatible Dify bootstrap entrypoint used by older overrides."""
+    status: dict[str, Any] = {
+        "app_factory": install_dify_app_factory_capture(),
+        "agent_chat": None,
+        "workflow": None,
+    }
+    try:
+        from agentguard.adapters.agent.dify_agent_chat import (  # noqa: PLC0415
+            install_dify_agent_chat_adapter,
+        )
+
+        status["agent_chat"] = install_dify_agent_chat_adapter()
+    except Exception as exc:
+        status["agent_chat"] = {"patched": False, "error": str(exc)}
+    try:
+        from agentguard.adapters.agent.dify import install_dify_adapter  # noqa: PLC0415
+
+        status["workflow"] = install_dify_adapter()
+    except Exception as exc:
+        status["workflow"] = {"patched": False, "error": str(exc)}
+    return status
+
+
 class _AppFactoryCaptureFinder(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname: str, path: Any, target: Any = None) -> Any:
         if fullname != "app_factory":
@@ -95,4 +119,4 @@ def _register_app(app: Any) -> bool:
         return False
 
 
-__all__ = ["install_dify_app_factory_capture"]
+__all__ = ["install_dify_app_factory_capture", "install_dify_post_gevent_bootstrap"]

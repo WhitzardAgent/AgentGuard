@@ -1078,6 +1078,11 @@ def test_workflow_catalog_sync_reports_published_workflow_tools(monkeypatch):
             return {"status": "ok", "tool_count": len(tools)}
 
     monkeypatch.setattr(dify_adapter, "RemoteGuardClient", FakeRemote)
+    monkeypatch.setattr(
+        dify_adapter,
+        "_dify_account_email_for_app",
+        lambda app: "alice@example.com",
+    )
 
     result = dify_adapter._sync_published_workflow_catalog_once()
 
@@ -1092,7 +1097,11 @@ def test_workflow_catalog_sync_reports_published_workflow_tools(monkeypatch):
     ]
     assert registered[0]["agent_id"] == "dify-workflow:app-1"
     assert registered[0]["metadata"]["catalog_sync"] is True
+    assert registered[0]["metadata"]["external_provider"] == "dify"
+    assert registered[0]["metadata"]["dify_user_email"] == "alice@example.com"
+    assert registered[0]["metadata"]["external_account_email"] == "alice@example.com"
     assert synced[0][0]["agent_id"] == "dify-workflow:app-1"
+    assert synced[0][0]["metadata"]["dify_user_email"] == "alice@example.com"
     tools = {tool["name"]: tool for tool in synced[0][1]}
     assert sorted(tools) == ["google_search", "local_script", "web_search", "weekday"]
     assert tools["weekday"]["input_params"] == ["year", "month"]

@@ -2259,7 +2259,7 @@ def _is_generator_like(value: Any) -> bool:
 
 def _workflow_catalog_sync_loop() -> None:
     initial_delay = _env_float("AGENTGUARD_DIFY_CATALOG_INITIAL_DELAY_S", 5.0)
-    interval = _env_float("AGENTGUARD_DIFY_CATALOG_SYNC_INTERVAL_S", 0.0)
+    interval = _env_float("AGENTGUARD_DIFY_CATALOG_SYNC_INTERVAL_S", 60.0)
     if initial_delay > 0:
         time.sleep(initial_delay)
     try:
@@ -2269,6 +2269,7 @@ def _workflow_catalog_sync_loop() -> None:
     while interval > 0:
         time.sleep(interval)
         try:
+            _clear_catalog_fingerprints()
             _sync_published_workflow_catalog_with_context()
         except Exception:
             pass
@@ -2768,8 +2769,9 @@ def _sync_workflow_tools_to_agentguard(app: Any, workflow: Any, tools: list[dict
         return None
     agent_id = _workflow_agent_id(app_id)
     version = _optional_text(getattr(workflow, "version", None))
+    account_email = _dify_account_email_for_app(app)
     fingerprint_key = f"workflow:{agent_id}"
-    fingerprint = _catalog_fingerprint(tools, version)
+    fingerprint = _catalog_fingerprint(tools, f"{version or ''}:{account_email or ''}")
     if _catalog_fingerprint_unchanged(fingerprint_key, fingerprint):
         return {
             "app_id": app_id,
@@ -2781,22 +2783,31 @@ def _sync_workflow_tools_to_agentguard(app: Any, workflow: Any, tools: list[dict
         }
     session_id = f"dify-workflow-catalog:{app_id}:{workflow_id}:{version or 'published'}"
     session_key = _catalog_session_key(app_id, workflow_id, version)
+    metadata = {
+        "adapter": "dify",
+        "dify_runtime": "workflow_api",
+        "catalog_sync": True,
+        "app_id": app_id,
+        "tenant_id": _optional_text(getattr(app, "tenant_id", None) or getattr(workflow, "tenant_id", None)),
+        "workflow_id": workflow_id,
+        "workflow_version": version,
+        "workflow_type": _optional_text(getattr(workflow, "type", None)),
+        "client_session_key": session_key,
+    }
+    if account_email:
+        metadata.update(
+            {
+                "external_provider": "dify",
+                "external_account_email": account_email,
+                "dify_user_email": account_email,
+            }
+        )
     context = RuntimeContext(
         session_id=session_id,
         agent_id=agent_id,
         user_id=None,
         environment=os.getenv("AGENTGUARD_ENVIRONMENT") or "dify",
-        metadata={
-            "adapter": "dify",
-            "dify_runtime": "workflow_api",
-            "catalog_sync": True,
-            "app_id": app_id,
-            "tenant_id": _optional_text(getattr(app, "tenant_id", None) or getattr(workflow, "tenant_id", None)),
-            "workflow_id": workflow_id,
-            "workflow_version": version,
-            "workflow_type": _optional_text(getattr(workflow, "type", None)),
-            "client_session_key": session_key,
-        },
+        metadata=metadata,
     )
     remote = RemoteGuardClient(
         os.getenv("AGENTGUARD_SERVER_URL") or None,
@@ -2818,6 +2829,56 @@ def _sync_workflow_tools_to_agentguard(app: Any, workflow: Any, tools: list[dict
         "agent_id": agent_id,
         "tool_count": result.get("tool_count", len(tools)),
     }
+
+
+def _dify_account_email_for_app(app: Any) -> str | None:
+    for attr in ("dify_user_email", "account_email", "user_email", "email"):
+        email = _optional_text(getattr(app, attr, None))
+        if email and "@" in email:
+            return email.lower()
+
+    account_id = (
+        _optional_text(getattr(app, "updated_by", None))
+        or _optional_text(getattr(app, "created_by", None))
+    )
+    if not account_id:
+        return None
+
+    try:
+        from extensions.ext_database import db  # type: ignore
+        from sqlalchemy import select  # type: ignore
+    except Exception:
+        return None
+
+    account_cls = None
+    for module_name in ("models.account", "models.model"):
+        try:
+            module = __import__(module_name, fromlist=["Account"])
+            account_cls = getattr(module, "Account", None)
+        except Exception:
+            account_cls = None
+        if account_cls is not None:
+            break
+    if account_cls is None:
+        return None
+
+    try:
+        stmt = select(account_cls).where(account_cls.id == account_id)
+        session = db.session
+        account = None
+        if hasattr(session, "scalar"):
+            account = session.scalar(stmt)
+        elif hasattr(session, "execute"):
+            result = session.execute(stmt)
+            if hasattr(result, "scalar_one_or_none"):
+                account = result.scalar_one_or_none()
+            elif hasattr(result, "scalars"):
+                scalars = result.scalars()
+                account = scalars.first() if hasattr(scalars, "first") else None
+        email = _optional_text(getattr(account, "email", None))
+    except Exception:
+        return None
+    return email.lower() if email and "@" in email else None
 
 
 def _workflow_agent_id(app_id: str) -> str:
@@ -2869,6 +2930,11 @@ def _catalog_fingerprint_unchanged(key: str, fingerprint: str) -> bool:
 def _remember_catalog_fingerprint(key: str, fingerprint: str) -> None:
     with _catalog_fingerprints_lock:
         _catalog_fingerprints[key] = fingerprint
+
+
+def _clear_catalog_fingerprints() -> None:
+    with _catalog_fingerprints_lock:
+        _catalog_fingerprints.clear()
 
 
 def _catalog_sync_enabled() -> bool:

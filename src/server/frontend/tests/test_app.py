@@ -191,6 +191,73 @@ def test_user_proxy_forwards_set_cookie_and_cookie_header():
     assert observed["cookie"] == "agentguard_user_session=session-1"
 
 
+def test_user_external_account_proxy_forwards_requests():
+    observed: dict[str, object] = {}
+
+    class UpstreamHandler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            observed["post_path"] = self.path
+            length = int(self.headers.get("Content-Length", "0"))
+            observed["post_body"] = self.rfile.read(length).decode("utf-8")
+            body = json.dumps(
+                {"external_account": {"id": 7, "provider": "dify", "account_email": "alice@example.com"}}
+            ).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self) -> None:
+            observed["get_path"] = self.path
+            body = json.dumps({"external_accounts": []}).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_DELETE(self) -> None:
+            observed["delete_path"] = self.path
+            body = json.dumps({"status": "ok"}).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    with _ThreadedServer(UpstreamHandler) as upstream:
+        with patched_proxy_target(upstream.url):
+            with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+                post_status, _ = _json_request(
+                    "POST",
+                    preview.url,
+                    "/api/user/dify/bind",
+                    {"email": "alice@example.com"},
+                )
+                get_status, _ = _json_request(
+                    "GET",
+                    preview.url,
+                    "/api/user/external-accounts?provider=dify",
+                )
+                delete_status, _ = _json_request(
+                    "DELETE",
+                    preview.url,
+                    "/api/user/external-accounts/7",
+                )
+
+    assert post_status == 200
+    assert get_status == 200
+    assert delete_status == 200
+    assert observed["post_path"] == "/v1/user/dify/bind"
+    assert json.loads(str(observed["post_body"]))["email"] == "alice@example.com"
+    assert observed["get_path"] == "/v1/user/external-accounts?provider=dify"
+    assert observed["delete_path"] == "/v1/user/external-accounts/7"
+
+
 def test_rules_check_proxy_forwards_api_key_and_payload():
     observed: dict[str, object] = {}
 

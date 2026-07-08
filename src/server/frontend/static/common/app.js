@@ -1332,7 +1332,13 @@
       return updateAgentPluginConfig(agentId, config, clientConfig);
     },
     clearToolCache: clearScopedAgentCache,
+    clearAgentCatalogCache,
     clearScopedAgentCache,
+    clearAllCatalogCaches() {
+      clearAgentCatalogCache();
+      clearScopedAgentCache();
+      clearLegacyToolCache();
+    },
     getLastAgentSyncTime() {
       return localStorage.getItem(AGENT_SYNC_KEY);
     },

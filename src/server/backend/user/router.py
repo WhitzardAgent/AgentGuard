@@ -9,7 +9,9 @@ from pydantic import BaseModel, Field
 
 from backend.database import DatabaseUnavailable
 from backend.user.store import (
+    DuplicateExternalAccount,
     DuplicateUsername,
+    ExternalAccountMapping,
     InvalidCredentials,
     User,
     UserStore,
@@ -23,6 +25,12 @@ SESSION_COOKIE = "agentguard_user_session"
 class Credentials(BaseModel):
     username: str = Field(min_length=3, max_length=255)
     password: str = Field(min_length=8)
+
+
+class DifyBindRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=255)
+    display_name: str | None = Field(default=None, max_length=255)
+    metadata_json: str | None = None
 
 
 def get_user_store() -> UserStore:
@@ -99,6 +107,49 @@ def list_tickets(
     return {"tickets": [_ticket_payload(item) for item in tickets]}
 
 
+@router.post("/v1/user/dify/bind")
+def bind_dify_account(
+    req: DifyBindRequest,
+    agentguard_user_session: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    user = _current_user_or_401(agentguard_user_session)
+    try:
+        mapping = _store_or_503().bind_external_account(
+            user,
+            provider="dify",
+            account_email=req.email,
+            display_name=req.display_name,
+            metadata_json=req.metadata_json,
+        )
+    except DuplicateExternalAccount as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"external_account": _external_account_payload(mapping)}
+
+
+@router.get("/v1/user/external-accounts")
+def list_external_accounts(
+    provider: str | None = None,
+    agentguard_user_session: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    user = _current_user_or_401(agentguard_user_session)
+    accounts = _store_or_503().list_external_accounts(user, provider=provider)
+    return {"external_accounts": [_external_account_payload(item) for item in accounts]}
+
+
+@router.delete("/v1/user/external-accounts/{mapping_id}")
+def delete_external_account(
+    mapping_id: int,
+    agentguard_user_session: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    user = _current_user_or_401(agentguard_user_session)
+    deleted = _store_or_503().delete_external_account(user, mapping_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="external account not found")
+    return {"status": "ok", "external_account_id": mapping_id}
+
+
 def _store_or_503() -> UserStore:
     try:
         return get_user_store()
@@ -139,6 +190,19 @@ def _ticket_payload(item: dict[str, Any]) -> dict[str, Any]:
         "created_at": _iso(item.get("created_at")),
         "last_used_at": _iso(item.get("last_used_at")),
         "expired": bool(item.get("expired")),
+    }
+
+
+def _external_account_payload(item: ExternalAccountMapping) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "user_id": item.user_id,
+        "provider": item.provider,
+        "account_email": item.account_email,
+        "display_name": item.display_name,
+        "metadata_json": item.metadata_json,
+        "created_at": _iso(item.created_at),
+        "updated_at": _iso(item.updated_at),
     }
 
 

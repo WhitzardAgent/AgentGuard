@@ -47,6 +47,7 @@ class ConsoleState:
         self._tools: dict[tuple[str, str], dict[str, Any]] = {}
         self._skills: dict[tuple[str, str], SkillRecord] = {}
         self._mcps: dict[tuple[str, str], McpRecord] = {}
+        self._agent_external_accounts: dict[str, set[tuple[str, str]]] = {}
 
         self._traffic: deque[dict[str, Any]] = deque(maxlen=1000)
         self._audit: deque[dict[str, Any]] = deque(maxlen=1000)
@@ -54,32 +55,88 @@ class ConsoleState:
         manager.add_observer(self._observe)
 
     # ---- agents / tools ------------------------------------------------
-    def agents(self) -> list[str]:
-        return sorted(
+    def agents(
+        self,
+        *,
+        visible_to_external_accounts: set[tuple[str, str]] | None = None,
+    ) -> list[str]:
+        agent_ids = (
             {owner for owner, _ in self._tools}
             | {owner for owner, _ in self._skills}
             | {owner for owner, _ in self._mcps}
         )
+        if visible_to_external_accounts is not None:
+            agent_ids = {
+                agent_id
+                for agent_id in agent_ids
+                if self._agent_visible_to_external_accounts(
+                    agent_id,
+                    visible_to_external_accounts,
+                )
+            }
+        return sorted(agent_ids)
 
-    def tools(self, agent_id: str | None = None) -> list[dict[str, Any]]:
+    def tools(
+        self,
+        agent_id: str | None = None,
+        *,
+        visible_to_external_accounts: set[tuple[str, str]] | None = None,
+    ) -> list[dict[str, Any]]:
         with self._lock:
             items = list(self._tools.values())
         if agent_id:
             items = [t for t in items if t["owner_agent_id"] == agent_id]
+        if visible_to_external_accounts is not None:
+            items = [
+                t
+                for t in items
+                if self._agent_visible_to_external_accounts(
+                    str(t.get("owner_agent_id") or ""),
+                    visible_to_external_accounts,
+                )
+            ]
         return [dict(t) for t in items]
 
-    def skills(self, agent_id: str | None = None) -> list[dict[str, Any]]:
+    def skills(
+        self,
+        agent_id: str | None = None,
+        *,
+        visible_to_external_accounts: set[tuple[str, str]] | None = None,
+    ) -> list[dict[str, Any]]:
         with self._lock:
             items = list(self._skills.values())
         if agent_id:
             items = [s for s in items if s.agent_id == agent_id]
+        if visible_to_external_accounts is not None:
+            items = [
+                s
+                for s in items
+                if self._agent_visible_to_external_accounts(
+                    s.agent_id,
+                    visible_to_external_accounts,
+                )
+            ]
         return [s.to_dict() for s in items]
 
-    def mcps(self, agent_id: str | None = None) -> list[dict[str, Any]]:
+    def mcps(
+        self,
+        agent_id: str | None = None,
+        *,
+        visible_to_external_accounts: set[tuple[str, str]] | None = None,
+    ) -> list[dict[str, Any]]:
         with self._lock:
             items = list(self._mcps.values())
         if agent_id:
             items = [m for m in items if m.agent_id == agent_id]
+        if visible_to_external_accounts is not None:
+            items = [
+                m
+                for m in items
+                if self._agent_visible_to_external_accounts(
+                    m.agent_id,
+                    visible_to_external_accounts,
+                )
+            ]
         return [m.to_dict() for m in items]
 
     def skill_record(self, agent_id: str, skill_unique_id: str) -> SkillRecord | None:
@@ -110,6 +167,7 @@ class ConsoleState:
         name = str(tool.get("name") or "").strip()
         if not agent_id or not name:
             return None
+        external_accounts = _external_accounts_from_context(ctx)
 
         incoming_labels = dict(tool.get("labels") or {})
         labels = {
@@ -136,6 +194,7 @@ class ConsoleState:
                 "input_params": input_params or list(existing.get("input_params") or []),
             }
             self._tools[(agent_id, name)] = record
+            self._record_agent_external_accounts(agent_id, external_accounts)
             return dict(record)
 
     def sync_tools(
@@ -149,6 +208,7 @@ class ConsoleState:
         agent_id = str(ctx.get("agent_id") or "").strip()
         if not agent_id:
             return None
+        external_accounts = _external_accounts_from_context(ctx)
 
         synced: list[dict[str, Any]] = []
         seen_names: set[str] = set()
@@ -185,6 +245,7 @@ class ConsoleState:
                 self._tools[(agent_id, name)] = record
                 synced.append(dict(record))
 
+            self._record_agent_external_accounts(agent_id, external_accounts)
             stale_keys = [
                 key
                 for key in self._tools
@@ -209,6 +270,7 @@ class ConsoleState:
         session_id = _optional_string(ctx.get("session_id"))
         if not agent_id:
             return None
+        external_accounts = _external_accounts_from_context(ctx)
 
         normalized: list[SkillRecord] = []
         for item in skills:
@@ -228,6 +290,7 @@ class ConsoleState:
         with self._lock:
             for record in normalized:
                 self._skills[(agent_id, record.skill_unique_id)] = record
+            self._record_agent_external_accounts(agent_id, external_accounts)
             return {
                 "owner_agent_id": agent_id,
                 "skill_count": len(normalized),
@@ -249,6 +312,7 @@ class ConsoleState:
         session_id = _optional_string(ctx.get("session_id"))
         if not agent_id:
             return None
+        external_accounts = _external_accounts_from_context(ctx)
 
         normalized: list[McpRecord] = []
         for item in mcps:
@@ -268,12 +332,32 @@ class ConsoleState:
         with self._lock:
             for record in normalized:
                 self._mcps[(agent_id, record.mcp_unique_id)] = record
+            self._record_agent_external_accounts(agent_id, external_accounts)
             return {
                 "owner_agent_id": agent_id,
                 "mcp_count": len(normalized),
                 "mcps": [item.to_dict() for item in normalized],
                 "scan": scan_options,
             }
+
+    def _record_agent_external_accounts(
+        self,
+        agent_id: str,
+        external_accounts: set[tuple[str, str]],
+    ) -> None:
+        if not agent_id or not external_accounts:
+            return
+        current = self._agent_external_accounts.setdefault(agent_id, set())
+        current.update(external_accounts)
+
+    def _agent_visible_to_external_accounts(
+        self,
+        agent_id: str,
+        visible_accounts: set[tuple[str, str]],
+    ) -> bool:
+        if not agent_id or not visible_accounts:
+            return False
+        return bool(self._agent_external_accounts.get(agent_id, set()) & visible_accounts)
 
     def detect_skills(
         self,
@@ -929,6 +1013,35 @@ def _optional_string(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _external_accounts_from_context(ctx: dict[str, Any]) -> set[tuple[str, str]]:
+    metadata = _safe_dict(ctx.get("metadata"))
+    values = {**ctx, **metadata}
+
+    provider = _optional_string(
+        values.get("external_provider")
+        or values.get("provider")
+        or values.get("external_account_provider")
+    )
+    adapter = str(values.get("adapter") or "").strip().lower()
+    if not provider and adapter.startswith("dify"):
+        provider = "dify"
+
+    email = _optional_string(
+        values.get("external_account_email")
+        or values.get("dify_user_email")
+        or values.get("account_email")
+        or values.get("user_email")
+    )
+    if not provider or not email:
+        return set()
+
+    normalized_provider = provider.strip().lower()
+    normalized_email = email.strip().lower()
+    if not normalized_provider or "@" not in normalized_email:
+        return set()
+    return {(normalized_provider, normalized_email)}
 
 
 def _plugin_summary(plugin_result: dict[str, Any]) -> list[dict[str, Any]]:

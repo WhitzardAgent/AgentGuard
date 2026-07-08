@@ -59,6 +59,38 @@
           </form>
         </div>
 
+        <div class="card" id="dify-card" hidden>
+          <div class="heading-row">
+            <h3>Dify Account</h3>
+          </div>
+          <form class="form-grid" id="dify-bind-form">
+            <label>
+              <span>Dify Email</span>
+              <input id="dify-email" type="email" autocomplete="email" required maxlength="255">
+            </label>
+            <label>
+              <span>Display Name</span>
+              <input id="dify-display-name" maxlength="255">
+            </label>
+            <div class="form-grid-actions">
+              <button class="btn primary" type="submit">Bind Dify</button>
+            </div>
+          </form>
+          <div class="table-card" id="external-account-list-card" hidden>
+            <table>
+              <thead>
+                <tr>
+                  <th>Provider</th>
+                  <th>Email</th>
+                  <th>Name</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="external-account-list"></tbody>
+            </table>
+          </div>
+        </div>
+
         <div class="card" id="profile-card">
           <div class="heading-row">
             <h3>Current User</h3>
@@ -104,6 +136,10 @@
       const registerForm = document.getElementById("register-form");
       const logoutButton = document.getElementById("logout-button");
       const statusNode = document.getElementById("user-status");
+      const difyCard = document.getElementById("dify-card");
+      const difyBindForm = document.getElementById("dify-bind-form");
+      const externalAccountListCard = document.getElementById("external-account-list-card");
+      const externalAccountList = document.getElementById("external-account-list");
       const ticketToolbar = document.getElementById("ticket-toolbar");
       const generateTicketButton = document.getElementById("generate-ticket-button");
       const copyTicketButton = document.getElementById("copy-ticket-button");
@@ -147,6 +183,25 @@
         window.AgentGuardShell?.setCurrentUser?.(label);
       }
 
+      function clearCatalogCaches() {
+        window.AgentGuardToolData?.clearAllCatalogCaches?.();
+        [
+          "agentguard.agentCatalog",
+          "agentguard.agentCatalogSyncedAt",
+          "agentguard.scopedAgentId",
+          "agentguard.scopedToolCatalog",
+          "agentguard.scopedToolCatalogSyncedAt",
+          "agentguard.scopedSkillList",
+          "agentguard.scopedSkillListSyncedAt",
+          "agentguard.scopedMcpList",
+          "agentguard.scopedMcpListSyncedAt",
+          "agentguard.scopedRuleList",
+          "agentguard.scopedRuleListSyncedAt",
+          "agentguard.toolCatalog",
+          "agentguard.toolCatalogSyncedAt",
+        ].forEach((key) => localStorage.removeItem(key));
+      }
+
       function renderUser(user) {
         const signedIn = Boolean(user);
         statusNode.textContent = signedIn
@@ -154,14 +209,39 @@
           : "Not signed in.";
         logoutButton.hidden = !signedIn;
         ticketToolbar.hidden = !signedIn;
+        difyCard.hidden = !signedIn;
         loginForm.hidden = signedIn;
         registerForm.hidden = signedIn;
         if (!signedIn) {
           ticketOutput.hidden = true;
           ticketListCard.hidden = true;
+          externalAccountListCard.hidden = true;
+          externalAccountList.innerHTML = "";
           currentTicket = "";
+          clearCatalogCaches();
         }
         updateShellUser(user);
+      }
+
+      function renderExternalAccounts(accounts) {
+        if (!accounts.length) {
+          externalAccountListCard.hidden = true;
+          externalAccountList.innerHTML = "";
+          return;
+        }
+        externalAccountListCard.hidden = false;
+        externalAccountList.innerHTML = accounts.map((account) => `
+          <tr>
+            <td>${escapeHtml(account.provider || "")}</td>
+            <td>${escapeHtml(account.account_email || "")}</td>
+            <td>${escapeHtml(account.display_name || "-")}</td>
+            <td>
+              <button class="btn" type="button" data-external-account-id="${escapeHtml(account.id || "")}">
+                Unbind
+              </button>
+            </td>
+          </tr>
+        `).join("");
       }
 
       function renderTickets(tickets) {
@@ -196,6 +276,8 @@
           renderUser(payload.user);
           const ticketPayload = await api("/api/user/tickets");
           renderTickets(ticketPayload.tickets || []);
+          const externalPayload = await api("/api/user/external-accounts?provider=dify");
+          renderExternalAccounts(externalPayload.external_accounts || []);
         } catch {
           renderUser(null);
         }
@@ -237,6 +319,44 @@
         }
         renderUser(null);
         showToast("Signed out.", "success");
+      });
+
+      difyBindForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        try {
+          await api("/api/user/dify/bind", {
+            method: "POST",
+            body: JSON.stringify({
+              email: document.getElementById("dify-email").value.trim(),
+              display_name: document.getElementById("dify-display-name").value.trim() || null,
+            }),
+          });
+          difyBindForm.reset();
+          await refresh();
+          showToast("Dify account bound.", "success");
+        } catch (error) {
+          showToast(error.message || "Failed to bind Dify account.", "warning");
+        }
+      });
+
+      externalAccountList.addEventListener("click", async (event) => {
+        const button = event.target.closest("[data-external-account-id]");
+        if (!button) {
+          return;
+        }
+        const mappingId = button.dataset.externalAccountId;
+        if (!mappingId) {
+          return;
+        }
+        try {
+          await api(`/api/user/external-accounts/${encodeURIComponent(mappingId)}`, {
+            method: "DELETE",
+          });
+          await refresh();
+          showToast("Dify account unbound.", "success");
+        } catch (error) {
+          showToast(error.message || "Failed to unbind Dify account.", "warning");
+        }
       });
 
       generateTicketButton.addEventListener("click", async () => {

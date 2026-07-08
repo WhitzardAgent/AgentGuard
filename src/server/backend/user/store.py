@@ -47,7 +47,23 @@ class UserTicketIdentity:
     expires_at: datetime
 
 
+@dataclass(frozen=True)
+class ExternalAccountMapping:
+    id: int
+    user_id: int
+    provider: str
+    account_email: str
+    display_name: str | None = None
+    metadata_json: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
 class DuplicateUsername(ValueError):
+    pass
+
+
+class DuplicateExternalAccount(ValueError):
     pass
 
 
@@ -205,6 +221,130 @@ class UserStore:
             expires_at=_coerce_datetime(row["expires_at"]),
         )
 
+    def bind_external_account(
+        self,
+        user: User,
+        *,
+        provider: str,
+        account_email: str,
+        display_name: str | None = None,
+        metadata_json: str | None = None,
+    ) -> ExternalAccountMapping:
+        clean_provider = _normalize_provider(provider)
+        clean_email = _normalize_email(account_email)
+        existing = self.external_account_by_provider_email(
+            provider=clean_provider,
+            account_email=clean_email,
+        )
+        if existing is not None and existing.user_id != user.id:
+            raise DuplicateExternalAccount(
+                f"{clean_provider} account is already bound: {clean_email}"
+            )
+        if existing is not None:
+            self.db.execute(
+                """
+                UPDATE user_external_accounts
+                SET display_name = %s,
+                    metadata_json = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s AND user_id = %s
+                """,
+                (
+                    _optional_text(display_name),
+                    _optional_text(metadata_json),
+                    existing.id,
+                    user.id,
+                ),
+            )
+            mapping = self.external_account_by_provider_email(
+                provider=clean_provider,
+                account_email=clean_email,
+            )
+            if mapping is not None:
+                return mapping
+        try:
+            mapping_id = self.db.insert(
+                """
+                INSERT INTO user_external_accounts (
+                  user_id, provider, account_email, display_name, metadata_json
+                )
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (
+                    user.id,
+                    clean_provider,
+                    clean_email,
+                    _optional_text(display_name),
+                    _optional_text(metadata_json),
+                ),
+            )
+        except Exception as exc:
+            if _is_duplicate_key(exc):
+                raise DuplicateExternalAccount(
+                    f"{clean_provider} account is already bound: {clean_email}"
+                ) from exc
+            raise
+        row = self.db.fetchone(
+            """
+            SELECT id, user_id, provider, account_email, display_name,
+                   metadata_json, created_at, updated_at
+            FROM user_external_accounts
+            WHERE id = %s
+            """,
+            (mapping_id,),
+        )
+        return _external_account_from_row(row)
+
+    def list_external_accounts(
+        self,
+        user: User,
+        *,
+        provider: str | None = None,
+    ) -> list[ExternalAccountMapping]:
+        params: list[Any] = [user.id]
+        provider_clause = ""
+        if provider is not None:
+            provider_clause = "AND provider = %s"
+            params.append(_normalize_provider(provider))
+        rows = self.db.fetchall(
+            f"""
+            SELECT id, user_id, provider, account_email, display_name,
+                   metadata_json, created_at, updated_at
+            FROM user_external_accounts
+            WHERE user_id = %s {provider_clause}
+            ORDER BY updated_at DESC, created_at DESC
+            """,
+            tuple(params),
+        )
+        return [_external_account_from_row(row) for row in rows]
+
+    def delete_external_account(self, user: User, mapping_id: int) -> bool:
+        changed = self.db.execute(
+            """
+            DELETE FROM user_external_accounts
+            WHERE id = %s AND user_id = %s
+            """,
+            (int(mapping_id), user.id),
+        )
+        return changed > 0
+
+    def external_account_by_provider_email(
+        self,
+        *,
+        provider: str,
+        account_email: str,
+    ) -> ExternalAccountMapping | None:
+        row = self.db.fetchone(
+            """
+            SELECT id, user_id, provider, account_email, display_name,
+                   metadata_json, created_at, updated_at
+            FROM user_external_accounts
+            WHERE provider = %s AND account_email = %s
+            """,
+            (_normalize_provider(provider), _normalize_email(account_email)),
+        )
+        return _external_account_from_row(row) if row else None
+
 
 def ensure_user_schema() -> None:
     UserStore().ensure_schema()
@@ -246,6 +386,23 @@ _SCHEMA = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS user_external_accounts (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      provider VARCHAR(64) NOT NULL,
+      account_email VARCHAR(255) NOT NULL,
+      display_name VARCHAR(255) NULL,
+      metadata_json JSON NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_user_external_provider_email (provider, account_email),
+      INDEX idx_user_external_accounts_user_id (user_id),
+      CONSTRAINT fk_user_external_accounts_user
+        FOREIGN KEY (user_id) REFERENCES users(id)
+        ON DELETE CASCADE
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS user_tickets (
       id INT AUTO_INCREMENT PRIMARY KEY,
       user_id INT NOT NULL,
@@ -278,6 +435,33 @@ def _validate_password(password: str) -> None:
         raise ValueError("password must be at least 8 characters")
 
 
+def _normalize_provider(provider: str) -> str:
+    normalized = str(provider or "").strip().lower()
+    if not normalized:
+        raise ValueError("provider is required")
+    if len(normalized) > 64:
+        raise ValueError("provider must be at most 64 characters")
+    return normalized
+
+
+def _normalize_email(email: str) -> str:
+    normalized = str(email or "").strip().lower()
+    if not normalized:
+        raise ValueError("email is required")
+    if len(normalized) > 255:
+        raise ValueError("email must be at most 255 characters")
+    if "@" not in normalized or normalized.startswith("@") or normalized.endswith("@"):
+        raise ValueError("email must be a valid email address")
+    return normalized
+
+
+def _optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 def _hash_token(token: str) -> str:
     return hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()
 
@@ -304,6 +488,21 @@ def _user_from_row(row: dict[str, Any]) -> User:
         id=int(row["id"]),
         username=str(row["username"]),
         profile_json=row.get("profile_json"),
+    )
+
+
+def _external_account_from_row(row: dict[str, Any] | None) -> ExternalAccountMapping:
+    if row is None:
+        raise ValueError("external account row is required")
+    return ExternalAccountMapping(
+        id=int(row["id"]),
+        user_id=int(row["user_id"]),
+        provider=str(row["provider"]),
+        account_email=str(row["account_email"]),
+        display_name=_optional_text(row.get("display_name")),
+        metadata_json=_optional_text(row.get("metadata_json")),
+        created_at=_coerce_datetime(row["created_at"]) if row.get("created_at") else None,
+        updated_at=_coerce_datetime(row["updated_at"]) if row.get("updated_at") else None,
     )
 
 

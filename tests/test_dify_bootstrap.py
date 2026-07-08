@@ -69,3 +69,41 @@ def test_dify_app_factory_capture_notifies_app_ready_callbacks(monkeypatch, tmp_
     result = module.create_app()
 
     assert seen == [result[1]]
+
+
+def test_dify_post_gevent_bootstrap_compat_entrypoint(monkeypatch):
+    import agentguard.adapters.agent.dify_bootstrap as bootstrap
+
+    bootstrap = importlib.reload(bootstrap)
+    calls = []
+
+    def fake_app_factory_capture():
+        calls.append("app_factory")
+        return {"installed": True}
+
+    def fake_agent_chat():
+        calls.append("agent_chat")
+        return {"patched": True}
+
+    def fake_workflow():
+        calls.append("workflow")
+        return {"patched": True}
+
+    monkeypatch.setattr(bootstrap, "install_dify_app_factory_capture", fake_app_factory_capture)
+    monkeypatch.setattr(
+        "agentguard.adapters.agent.dify_agent_chat.install_dify_agent_chat_adapter",
+        fake_agent_chat,
+    )
+    monkeypatch.setattr(
+        "agentguard.adapters.agent.dify.install_dify_adapter",
+        fake_workflow,
+    )
+
+    status = bootstrap.install_dify_post_gevent_bootstrap()
+
+    assert calls == ["app_factory", "agent_chat", "workflow"]
+    assert status == {
+        "app_factory": {"installed": True},
+        "agent_chat": {"patched": True},
+        "workflow": {"patched": True},
+    }

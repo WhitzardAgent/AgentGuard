@@ -933,7 +933,7 @@ def _active_guard() -> Any | None:
 
 def _catalog_sync_loop() -> None:
     initial_delay = _env_float("AGENTGUARD_DIFY_CATALOG_INITIAL_DELAY_S", 5.0)
-    interval = _env_float("AGENTGUARD_DIFY_CATALOG_SYNC_INTERVAL_S", 0.0)
+    interval = _env_float("AGENTGUARD_DIFY_CATALOG_SYNC_INTERVAL_S", 60.0)
     if initial_delay > 0:
         time.sleep(initial_delay)
     try:
@@ -943,6 +943,7 @@ def _catalog_sync_loop() -> None:
     while interval > 0:
         time.sleep(interval)
         try:
+            _clear_catalog_fingerprints()
             _sync_published_agent_catalog_with_context()
         except Exception:
             pass
@@ -1141,8 +1142,9 @@ def _sync_tools_to_agentguard(app: Any, tools: list[dict[str, Any]]) -> dict[str
         return None
     config_id = _optional_text(getattr(app, "app_model_config_id", None))
     agent_id = f"dify-agent-chat:{app_id}"
+    account_email = _dify_account_email_for_app(app)
     fingerprint_key = f"agent_chat:{agent_id}"
-    fingerprint = _catalog_fingerprint(tools, config_id)
+    fingerprint = _catalog_fingerprint(tools, f"{config_id or ''}:{account_email or ''}")
     if _catalog_fingerprint_unchanged(fingerprint_key, fingerprint):
         return {
             "app_id": app_id,
@@ -1153,20 +1155,29 @@ def _sync_tools_to_agentguard(app: Any, tools: list[dict[str, Any]]) -> dict[str
         }
     session_id = f"dify-agent-chat-catalog:{app_id}:{config_id or 'active'}"
     session_key = _catalog_session_key(app_id, config_id)
+    metadata = {
+        "adapter": "dify_agent_chat",
+        "dify_runtime": "agent_chat",
+        "catalog_sync": True,
+        "app_id": app_id,
+        "tenant_id": _optional_text(getattr(app, "tenant_id", None)),
+        "app_model_config_id": config_id,
+        "client_session_key": session_key,
+    }
+    if account_email:
+        metadata.update(
+            {
+                "external_provider": "dify",
+                "external_account_email": account_email,
+                "dify_user_email": account_email,
+            }
+        )
     context = RuntimeContext(
         session_id=session_id,
         agent_id=agent_id,
         user_id=None,
         environment=os.getenv("AGENTGUARD_ENVIRONMENT") or "dify",
-        metadata={
-            "adapter": "dify_agent_chat",
-            "dify_runtime": "agent_chat",
-            "catalog_sync": True,
-            "app_id": app_id,
-            "tenant_id": _optional_text(getattr(app, "tenant_id", None)),
-            "app_model_config_id": config_id,
-            "client_session_key": session_key,
-        },
+        metadata=metadata,
     )
     remote = RemoteGuardClient(
         os.getenv("AGENTGUARD_SERVER_URL") or None,
@@ -1183,6 +1194,56 @@ def _sync_tools_to_agentguard(app: Any, tools: list[dict[str, Any]]) -> dict[str
     result = remote.sync_tools(context, tools)
     _remember_catalog_fingerprint(fingerprint_key, fingerprint)
     return {"app_id": app_id, "agent_id": agent_id, "tool_count": result.get("tool_count", len(tools))}
+
+
+def _dify_account_email_for_app(app: Any) -> str | None:
+    for attr in ("dify_user_email", "account_email", "user_email", "email"):
+        email = _optional_text(getattr(app, attr, None))
+        if email and "@" in email:
+            return email.lower()
+
+    account_id = (
+        _optional_text(getattr(app, "updated_by", None))
+        or _optional_text(getattr(app, "created_by", None))
+    )
+    if not account_id:
+        return None
+
+    try:
+        from extensions.ext_database import db  # type: ignore
+        from sqlalchemy import select  # type: ignore
+    except Exception:
+        return None
+
+    account_cls = None
+    for module_name in ("models.account", "models.model"):
+        try:
+            module = __import__(module_name, fromlist=["Account"])
+            account_cls = getattr(module, "Account", None)
+        except Exception:
+            account_cls = None
+        if account_cls is not None:
+            break
+    if account_cls is None:
+        return None
+
+    try:
+        stmt = select(account_cls).where(account_cls.id == account_id)
+        session = db.session
+        account = None
+        if hasattr(session, "scalar"):
+            account = session.scalar(stmt)
+        elif hasattr(session, "execute"):
+            result = session.execute(stmt)
+            if hasattr(result, "scalar_one_or_none"):
+                account = result.scalar_one_or_none()
+            elif hasattr(result, "scalars"):
+                scalars = result.scalars()
+                account = scalars.first() if hasattr(scalars, "first") else None
+        email = _optional_text(getattr(account, "email", None))
+    except Exception:
+        return None
+    return email.lower() if email and "@" in email else None
 
 
 def _catalog_session_key(app_id: str, config_id: str | None = None) -> str:
@@ -1206,6 +1267,11 @@ def _catalog_fingerprint_unchanged(key: str, fingerprint: str) -> bool:
 def _remember_catalog_fingerprint(key: str, fingerprint: str) -> None:
     with _catalog_fingerprints_lock:
         _catalog_fingerprints[key] = fingerprint
+
+
+def _clear_catalog_fingerprints() -> None:
+    with _catalog_fingerprints_lock:
+        _catalog_fingerprints.clear()
 
 
 def _env_enabled() -> bool:

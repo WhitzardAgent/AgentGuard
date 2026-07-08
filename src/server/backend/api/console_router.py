@@ -8,12 +8,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Cookie
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from backend.api.schemas import McpDetectRequest
 from backend.app_state import get_console
+from backend.database import DatabaseUnavailable
+from backend.user.router import SESSION_COOKIE, get_user_store
 
 router = APIRouter()
 
@@ -55,13 +57,23 @@ def _err(message: str, status: int) -> JSONResponse:
 
 # ---- tools -------------------------------------------------------------
 @router.get("/v1/backend/tools")
-def list_tools() -> list[dict[str, Any]]:
-    return get_console().tools()
+def list_tools(
+    agentguard_user_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+) -> list[dict[str, Any]]:
+    return get_console().tools(
+        visible_to_external_accounts=_visible_external_accounts(agentguard_user_session)
+    )
 
 
 @router.get("/v1/backend/agents/{agent_id}/tools")
-def list_agent_tools(agent_id: str) -> list[dict[str, Any]]:
-    return get_console().tools(agent_id)
+def list_agent_tools(
+    agent_id: str,
+    agentguard_user_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+) -> list[dict[str, Any]]:
+    return get_console().tools(
+        agent_id,
+        visible_to_external_accounts=_visible_external_accounts(agentguard_user_session),
+    )
 
 
 @router.patch("/v1/backend/agents/{agent_id}/tools/{tool_name}/labels")
@@ -74,13 +86,23 @@ def patch_tool_labels(agent_id: str, tool_name: str, body: LabelBody) -> Any:
 
 # ---- skills ------------------------------------------------------------
 @router.get("/v1/backend/skills")
-def list_skills() -> list[dict[str, Any]]:
-    return get_console().skills()
+def list_skills(
+    agentguard_user_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+) -> list[dict[str, Any]]:
+    return get_console().skills(
+        visible_to_external_accounts=_visible_external_accounts(agentguard_user_session)
+    )
 
 
 @router.get("/v1/backend/agents/{agent_id}/skills")
-def list_agent_skills(agent_id: str) -> list[dict[str, Any]]:
-    return get_console().skills(agent_id)
+def list_agent_skills(
+    agent_id: str,
+    agentguard_user_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+) -> list[dict[str, Any]]:
+    return get_console().skills(
+        agent_id,
+        visible_to_external_accounts=_visible_external_accounts(agentguard_user_session),
+    )
 
 
 @router.post("/v1/backend/agents/{agent_id}/skills/detect")
@@ -98,13 +120,23 @@ def detect_agent_skills(agent_id: str, body: SkillDetectBody) -> Any:
 
 # ---- mcps -------------------------------------------------------------
 @router.get("/v1/backend/mcps")
-def list_mcps() -> list[dict[str, Any]]:
-    return get_console().mcps()
+def list_mcps(
+    agentguard_user_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+) -> list[dict[str, Any]]:
+    return get_console().mcps(
+        visible_to_external_accounts=_visible_external_accounts(agentguard_user_session)
+    )
 
 
 @router.get("/v1/backend/agents/{agent_id}/mcps")
-def list_agent_mcps(agent_id: str) -> list[dict[str, Any]]:
-    return get_console().mcps(agent_id)
+def list_agent_mcps(
+    agent_id: str,
+    agentguard_user_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+) -> list[dict[str, Any]]:
+    return get_console().mcps(
+        agent_id,
+        visible_to_external_accounts=_visible_external_accounts(agentguard_user_session),
+    )
 
 
 @router.post("/v1/backend/agents/{agent_id}/mcps/detect")
@@ -229,3 +261,21 @@ def deny_ticket(ticket_id: str, body: ApprovalBody | None = None) -> Any:
     if get_console().resolve_ticket(ticket_id, approved=False, note=(body.note if body else "")):
         return {"ok": True}
     return JSONResponse({"detail": "ticket not found or already resolved"}, status_code=404)
+
+
+def _visible_external_accounts(
+    session_token: str | None,
+) -> set[tuple[str, str]]:
+    if not session_token:
+        return set()
+    try:
+        store = get_user_store()
+        user = store.user_for_session(session_token)
+        if user is None:
+            return set()
+        return {
+            (item.provider.lower(), item.account_email.lower())
+            for item in store.list_external_accounts(user)
+        }
+    except DatabaseUnavailable:
+        return set()

@@ -138,6 +138,10 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
             self._proxy("v1/user/tickets", method="GET", query=query)
             return
 
+        if path == "/api/user/external-accounts":
+            self._proxy("v1/user/external-accounts", method="GET", query=query)
+            return
+
         if path.startswith("/api/agents/") and "/runtime/" in path:
             upstream_path = path.removeprefix("/api/")
             self._proxy(upstream_path, method="GET", query=query)
@@ -249,6 +253,10 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
             self._proxy(f"v1/user/{path.rsplit('/', 1)[-1]}", method="POST", query=query)
             return
 
+        if path == "/api/user/dify/bind":
+            self._proxy("v1/user/dify/bind", method="POST", query=query)
+            return
+
         self.send_error(HTTPStatus.NOT_FOUND, "Not Found")
 
     def do_DELETE(self) -> None:
@@ -262,6 +270,15 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
         if path.startswith("/api/agents/") and "/rules/" in path:
             upstream_path = path.removeprefix("/api/")
             self._proxy(upstream_path, method="DELETE", query=query)
+            return
+
+        if path.startswith("/api/user/external-accounts/"):
+            mapping_id = path.rsplit("/", 1)[-1]
+            self._proxy(
+                f"v1/user/external-accounts/{mapping_id}",
+                method="DELETE",
+                query=query,
+            )
             return
 
         self.send_error(HTTPStatus.NOT_FOUND, "Not Found")
