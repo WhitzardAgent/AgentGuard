@@ -341,6 +341,43 @@
     return agentId && name ? `${agentId}::${name}` : "";
   }
 
+  function firstText(...values) {
+    for (const value of values) {
+      const textValue = String(value || "").trim();
+      if (textValue) {
+        return textValue;
+      }
+    }
+    return "";
+  }
+
+  function agentIdentityFromItem(item, nested = {}) {
+    const externalProvider = firstText(
+      item?.external_provider,
+      nested?.external_provider,
+      item?.provider,
+      nested?.provider,
+    );
+    const externalAgentId = firstText(
+      item?.external_agent_id,
+      nested?.external_agent_id,
+      item?.app_id,
+      nested?.app_id,
+    );
+    const displayAgentId = firstText(
+      item?.display_agent_id,
+      nested?.display_agent_id,
+      externalProvider.toLowerCase() === "dify" ? firstText(item?.app_id, nested?.app_id) : "",
+      externalAgentId,
+    );
+    return {
+      external_provider: externalProvider,
+      external_agent_id: externalAgentId,
+      display_agent_id: displayAgentId,
+      agent_type: firstText(item?.agent_type, nested?.agent_type),
+    };
+  }
+
   function normalizeTool(item) {
     const ownerAgentId = String(item?.owner_agent_id || "").trim();
     const name = String(item?.name || "").trim();
@@ -355,6 +392,7 @@
         tags: Array.isArray(item?.labels?.tags) ? item.labels.tags.map(String) : [],
       },
       input_params: Array.isArray(item?.input_params) ? item.input_params.map(String) : [],
+      ...agentIdentityFromItem(item),
     };
   }
 
@@ -408,6 +446,7 @@
       agent_id: ownerAgentId,
       user_id: item?.user_id == null ? null : String(item.user_id),
       session_id: item?.session_id == null ? null : String(item.session_id),
+      ...agentIdentityFromItem(item, skillResource),
       skill_unique_id: skillUniqueId,
       name,
       description: String(item?.description || skillResource?.description || "").trim(),
@@ -505,6 +544,7 @@
       agent_id: ownerAgentId,
       user_id: item?.user_id == null ? null : String(item.user_id),
       session_id: item?.session_id == null ? null : String(item.session_id),
+      ...agentIdentityFromItem(item, mcpResource),
       mcp_unique_id: mcpUniqueId,
       name,
       description: String(item?.description || mcpResource?.description || "").trim(),
@@ -579,6 +619,15 @@
   }
 
   function buildAgentSummary(agentId, tools, skills = [], mcps = []) {
+    const resources = [
+      ...(Array.isArray(tools) ? tools : []),
+      ...(Array.isArray(skills) ? skills : []),
+      ...(Array.isArray(mcps) ? mcps : []),
+    ];
+    const identity = resources
+      .map((item) => agentIdentityFromItem(item))
+      .find((item) => item.display_agent_id || item.external_agent_id || item.external_provider)
+      || {};
     const sortedTools = (Array.isArray(tools) ? tools : [])
       .map((tool) => String(tool?.name || "").trim())
       .filter(Boolean)
@@ -593,6 +642,10 @@
       .sort((a, b) => a.localeCompare(b));
     return {
       agent_id: agentId,
+      display_agent_id: identity.display_agent_id || identity.external_agent_id || agentId,
+      external_agent_id: identity.external_agent_id || "",
+      external_provider: identity.external_provider || "",
+      agent_type: identity.agent_type || "",
       tool_count: sortedTools.length,
       tool_names: sortedTools.slice(0, 4),
       skill_count: sortedSkills.length,
@@ -646,10 +699,39 @@
       ));
   }
 
+  function mergeAgentCatalogs(baseCatalog, resourceCatalog) {
+    const merged = new Map();
+    (Array.isArray(baseCatalog) ? baseCatalog : [])
+      .map(normalizeAgentSummary)
+      .filter((agent) => agent.agent_id)
+      .forEach((agent) => {
+        merged.set(agent.agent_id, agent);
+      });
+    (Array.isArray(resourceCatalog) ? resourceCatalog : [])
+      .map(normalizeAgentSummary)
+      .filter((agent) => agent.agent_id)
+      .forEach((agent) => {
+        const existing = merged.get(agent.agent_id) || {};
+        merged.set(agent.agent_id, {
+          ...existing,
+          ...agent,
+          display_agent_id: existing.display_agent_id || agent.display_agent_id,
+          external_agent_id: existing.external_agent_id || agent.external_agent_id,
+          external_provider: existing.external_provider || agent.external_provider,
+          agent_type: existing.agent_type || agent.agent_type,
+        });
+      });
+    return Array.from(merged.values()).sort((a, b) => a.agent_id.localeCompare(b.agent_id));
+  }
+
   function normalizeAgentSummary(item) {
     const agentId = String(item?.agent_id || item?.agentId || "").trim();
     return {
       agent_id: agentId,
+      display_agent_id: String(item?.display_agent_id || item?.displayAgentId || item?.external_agent_id || agentId).trim(),
+      external_agent_id: String(item?.external_agent_id || item?.externalAgentId || "").trim(),
+      external_provider: String(item?.external_provider || item?.externalProvider || "").trim(),
+      agent_type: String(item?.agent_type || item?.agentType || "").trim(),
       tool_count: Number.isFinite(Number(item?.tool_count)) ? Number(item.tool_count) : 0,
       tool_names: Array.isArray(item?.tool_names) ? item.tool_names.map(String).filter(Boolean) : [],
       skill_count: Number.isFinite(Number(item?.skill_count)) ? Number(item.skill_count) : 0,
@@ -933,6 +1015,13 @@
   }
 
   async function refreshAgentCatalog() {
+    let registeredPayload = [];
+    try {
+      const maybeAgents = await fetchJson("/api/agents");
+      registeredPayload = Array.isArray(maybeAgents) ? maybeAgents : [];
+    } catch {
+      registeredPayload = [];
+    }
     const toolPayload = await fetchJson("/api/tools");
     if (!Array.isArray(toolPayload)) {
       throw new Error("Agent catalog payload has an unexpected format.");
@@ -954,7 +1043,9 @@
     const tools = toolPayload.map(normalizeTool);
     const skills = skillPayload.map(normalizeSkill);
     const mcps = mcpPayload.map(normalizeMcp);
-    const catalog = buildAgentCatalogFromResources(tools, skills, mcps);
+    const registeredCatalog = registeredPayload.map(normalizeAgentSummary).filter((agent) => agent.agent_id);
+    const resourceCatalog = buildAgentCatalogFromResources(tools, skills, mcps);
+    const catalog = mergeAgentCatalogs(registeredCatalog, resourceCatalog);
     persistAgentCatalog(catalog);
     return catalog;
   }
@@ -1269,6 +1360,7 @@
     findToolByKey,
     groupToolsByAgent,
     listAgentIds,
+    mergeAgentCatalogs,
     normalizeAgentSummary,
     normalizeMcp,
     normalizePluginOption,

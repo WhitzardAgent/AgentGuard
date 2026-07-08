@@ -28,6 +28,7 @@ from agentguard.adapters.agent.dify_flask import (
 from agentguard.schemas import events as ev
 from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.decisions import DecisionType, GuardDecision
+from agentguard.u_guard.agent_keys import build_agent_registration_payload
 from agentguard.u_guard.remote_client import RemoteGuardClient
 from agentguard.utils.errors import AdapterError
 from agentguard.utils.json import safe_dumps, safe_loads
@@ -47,6 +48,8 @@ _catalog_sync_started = False
 _catalog_sync_lock = threading.Lock()
 _catalog_fingerprints: dict[str, str] = {}
 _catalog_fingerprints_lock = threading.Lock()
+_runtime_agent_registrations: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
+_runtime_agent_registrations_lock = threading.Lock()
 
 
 def install_dify_adapter() -> dict[str, Any]:
@@ -2066,6 +2069,7 @@ def _legacy_blocked_tool_response(text: str) -> tuple[str, list[str], Any]:
 def _make_guard(metadata: dict[str, Any]) -> Any:
     from agentguard.guard import AgentGuard
 
+    metadata = _metadata_with_registered_workflow_agent(metadata)
     session_id = _session_id(metadata)
     guard = AgentGuard(
         session_id,
@@ -2080,6 +2084,114 @@ def _make_guard(metadata: dict[str, Any]) -> Any:
     )
     guard.context.metadata.update(metadata)
     return guard
+
+
+def _metadata_with_registered_workflow_agent(metadata: dict[str, Any]) -> dict[str, Any]:
+    if _optional_text(metadata.get("dify_runtime")) != "workflow_api":
+        return metadata
+    if _optional_text(metadata.get("agentguard_agent_id")):
+        return metadata
+
+    registration = _runtime_workflow_agent_registration(metadata)
+    if not registration:
+        return metadata
+
+    registered_agent = registration.get("agent") or {}
+    canonical_agent_id = _optional_text(registered_agent.get("agent_id"))
+    if not canonical_agent_id:
+        return metadata
+
+    enriched = dict(metadata)
+    app_id = _optional_text(enriched.get("app_id"))
+    enriched["agentguard_agent_id"] = canonical_agent_id
+    if app_id:
+        enriched["external_agent_id"] = _workflow_agent_id(app_id)
+    if registered_agent.get("agent_identity_code"):
+        enriched["agent_identity_code"] = registered_agent.get("agent_identity_code")
+    if registered_agent.get("public_key_thumbprint"):
+        enriched["agent_public_key_thumbprint"] = registered_agent.get("public_key_thumbprint")
+    user_agent = registration.get("user_agent") or {}
+    if "bound" in user_agent:
+        enriched["agentguard_user_bound"] = bool(user_agent.get("bound"))
+    return enriched
+
+
+def _runtime_workflow_agent_registration(metadata: dict[str, Any]) -> dict[str, Any] | None:
+    app_id = _optional_text(metadata.get("app_id"))
+    if not app_id or not os.getenv("AGENTGUARD_SERVER_URL"):
+        return None
+    agent_type = "workflow"
+    tenant_id = _optional_text(metadata.get("tenant_id"))
+    provider_instance_id = _dify_provider_instance_id()
+    cache_key = ("dify", provider_instance_id or "", tenant_id or "", app_id, agent_type)
+    with _runtime_agent_registrations_lock:
+        cached = _runtime_agent_registrations.get(cache_key)
+    if cached is not None:
+        return cached
+
+    app_info = _dify_app_info_for_runtime_registration(app_id)
+    account_email = (
+        _optional_text(metadata.get("dify_user_email"))
+        or _optional_text(metadata.get("external_account_email"))
+        or _optional_text(app_info.get("account_email"))
+    )
+    name = _optional_text(app_info.get("name")) or _optional_text(metadata.get("app_name"))
+    description = _optional_text(app_info.get("description")) or _optional_text(metadata.get("app_description"))
+
+    session_id = f"dify-workflow-runtime-register:{app_id}"
+    session_key = _catalog_session_key(app_id, _optional_text(metadata.get("workflow_id")) or "runtime")
+    remote = RemoteGuardClient(
+        os.getenv("AGENTGUARD_SERVER_URL") or None,
+        api_key=os.getenv("AGENTGUARD_API_KEY") or None,
+        session_id=session_id,
+        agent_id=_workflow_agent_id(app_id),
+        session_key=session_key,
+        timeout_s=_env_float("AGENTGUARD_DIFY_CATALOG_SYNC_TIMEOUT_S", 5.0),
+        retries=int(_env_float("AGENTGUARD_DIFY_CATALOG_SYNC_RETRIES", 1.0)),
+    )
+    if not remote.enabled:
+        return None
+
+    registration_metadata = dict(metadata)
+    registration_metadata.update(
+        {
+            "adapter": "dify",
+            "dify_runtime": "workflow_api",
+            "runtime_registration": True,
+            "app_id": app_id,
+            "tenant_id": tenant_id,
+            "external_agent_id": _workflow_agent_id(app_id),
+        }
+    )
+    if account_email:
+        registration_metadata.update(
+            {
+                "external_provider": "dify",
+                "external_account_email": account_email.lower(),
+                "dify_user_email": account_email.lower(),
+            }
+        )
+
+    try:
+        registration = _register_dify_agent(
+            remote,
+            agent_id=_workflow_agent_id(app_id),
+            agent_type=agent_type,
+            external_agent_id=app_id,
+            tenant_id=tenant_id,
+            account_email=account_email,
+            name=name,
+            description=description,
+            metadata=registration_metadata,
+        )
+    except Exception:
+        return None
+    if not registration:
+        return None
+
+    with _runtime_agent_registrations_lock:
+        _runtime_agent_registrations[cache_key] = registration
+    return registration
 
 
 def _run_with_ephemeral_guard(metadata: dict[str, Any], call: Any, *, reason: str) -> Any:
@@ -2148,6 +2260,9 @@ def _session_id(metadata: dict[str, Any]) -> str:
 
 
 def _agent_id(metadata: dict[str, Any]) -> str:
+    canonical_agent_id = _optional_text(metadata.get("agentguard_agent_id"))
+    if canonical_agent_id:
+        return canonical_agent_id
     if _optional_text(metadata.get("dify_runtime")) == "workflow_api":
         app_id = _optional_text(metadata.get("app_id"))
         if app_id:
@@ -2820,6 +2935,30 @@ def _sync_workflow_tools_to_agentguard(app: Any, workflow: Any, tools: list[dict
     )
     if not remote.enabled:
         return None
+    registration = _register_dify_agent(
+        remote,
+        agent_id=agent_id,
+        agent_type="workflow",
+        external_agent_id=app_id,
+        tenant_id=_optional_text(getattr(app, "tenant_id", None) or getattr(workflow, "tenant_id", None)),
+        account_email=account_email,
+        name=_optional_text(getattr(app, "name", None)),
+        description=_optional_text(getattr(app, "description", None)),
+        metadata=metadata,
+    )
+    if registration:
+        registered_agent = registration.get("agent") or {}
+        canonical_agent_id = _optional_text(registered_agent.get("agent_id"))
+        if canonical_agent_id:
+            agent_id = canonical_agent_id
+            context.agent_id = canonical_agent_id
+            remote.agent_id = canonical_agent_id
+            metadata["external_agent_id"] = _workflow_agent_id(app_id)
+        metadata["agent_identity_code"] = registered_agent.get("agent_identity_code")
+        metadata["agent_public_key_thumbprint"] = (
+            registered_agent.get("public_key_thumbprint")
+        )
+        metadata["agentguard_user_bound"] = bool((registration.get("user_agent") or {}).get("bound"))
     remote.register_session(context)
     result = remote.sync_tools(context, tools)
     _remember_catalog_fingerprint(fingerprint_key, fingerprint)
@@ -2881,8 +3020,97 @@ def _dify_account_email_for_app(app: Any) -> str | None:
     return email.lower() if email and "@" in email else None
 
 
+def _dify_app_info_for_runtime_registration(app_id: str) -> dict[str, str]:
+    try:
+        from extensions.ext_database import db  # type: ignore
+        from sqlalchemy import select  # type: ignore
+    except Exception:
+        return {}
+
+    app_cls = None
+    for module_name in ("models.model", "models"):
+        try:
+            module = __import__(module_name, fromlist=["App"])
+            app_cls = getattr(module, "App", None)
+        except Exception:
+            app_cls = None
+        if app_cls is not None:
+            break
+    if app_cls is None:
+        return {}
+
+    try:
+        stmt = select(app_cls).where(app_cls.id == app_id)
+        session = db.session
+        app = None
+        if hasattr(session, "scalar"):
+            app = session.scalar(stmt)
+        elif hasattr(session, "execute"):
+            result = session.execute(stmt)
+            if hasattr(result, "scalar_one_or_none"):
+                app = result.scalar_one_or_none()
+            elif hasattr(result, "scalars"):
+                scalars = result.scalars()
+                app = scalars.first() if hasattr(scalars, "first") else None
+        if app is None:
+            return {}
+        info: dict[str, str] = {}
+        account_email = _dify_account_email_for_app(app)
+        if account_email:
+            info["account_email"] = account_email
+        name = _optional_text(getattr(app, "name", None))
+        if name:
+            info["name"] = name
+        description = _optional_text(getattr(app, "description", None))
+        if description:
+            info["description"] = description
+        return info
+    except Exception:
+        return {}
+
+
 def _workflow_agent_id(app_id: str) -> str:
     return f"dify-workflow:{app_id}"
+
+
+def _register_dify_agent(
+    remote: RemoteGuardClient,
+    *,
+    agent_id: str,
+    agent_type: str,
+    external_agent_id: str,
+    tenant_id: str | None,
+    account_email: str | None,
+    name: str | None,
+    description: str | None,
+    metadata: dict[str, Any],
+) -> dict[str, Any] | None:
+    register = getattr(remote, "register_agent", None)
+    if not callable(register):
+        return None
+    provider_instance_id = _dify_provider_instance_id()
+    payload = build_agent_registration_payload(
+        provider="dify",
+        provider_instance_id=provider_instance_id,
+        tenant_id=tenant_id,
+        external_agent_id=external_agent_id,
+        agent_type=agent_type,
+        name=name,
+        description=description,
+        account_email=account_email,
+        metadata=metadata,
+    )
+    return register(payload)
+
+
+def _dify_provider_instance_id() -> str:
+    return (
+        os.getenv("AGENTGUARD_DIFY_INSTANCE_ID")
+        or os.getenv("DIFY_DEPLOYMENT_ID")
+        or os.getenv("DIFY_BASE_URL")
+        or os.getenv("CONSOLE_API_URL")
+        or ""
+    ).strip()
 
 
 def _nested_value(value: dict[str, Any], path: tuple[str, ...]) -> Any:

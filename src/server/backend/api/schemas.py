@@ -45,6 +45,19 @@ class ToolSyncRequest(_ApiModel):
     tools: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class AgentRegisterRequest(_ApiModel):
+    provider: str
+    external_agent_id: str
+    agent_type: str
+    public_key_jwk: dict[str, Any]
+    account_email: str | None = None
+    provider_instance_id: str | None = None
+    tenant_id: str | None = None
+    name: str | None = None
+    description: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class SkillReportRequest(_ApiModel):
     context: dict[str, Any] = Field(default_factory=dict)
     skills: list[dict[str, Any]] = Field(default_factory=list)

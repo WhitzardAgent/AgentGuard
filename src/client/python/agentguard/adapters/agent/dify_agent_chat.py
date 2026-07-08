@@ -29,6 +29,7 @@ from agentguard.schemas import events as ev
 from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.decisions import DecisionType, GuardDecision
 from agentguard.tools.metadata import ToolMetadata
+from agentguard.u_guard.agent_keys import build_agent_registration_payload
 from agentguard.u_guard.remote_client import RemoteGuardClient
 from agentguard.utils.errors import AdapterError
 from agentguard.utils.json import safe_dumps
@@ -1190,6 +1191,30 @@ def _sync_tools_to_agentguard(app: Any, tools: list[dict[str, Any]]) -> dict[str
     )
     if not remote.enabled:
         return None
+    registration = _register_dify_agent(
+        remote,
+        agent_id=agent_id,
+        agent_type="agent_chat",
+        external_agent_id=app_id,
+        tenant_id=_optional_text(getattr(app, "tenant_id", None)),
+        account_email=account_email,
+        name=_optional_text(getattr(app, "name", None)),
+        description=_optional_text(getattr(app, "description", None)),
+        metadata=metadata,
+    )
+    if registration:
+        registered_agent = registration.get("agent") or {}
+        canonical_agent_id = _optional_text(registered_agent.get("agent_id"))
+        if canonical_agent_id:
+            agent_id = canonical_agent_id
+            context.agent_id = canonical_agent_id
+            remote.agent_id = canonical_agent_id
+            metadata["external_agent_id"] = f"dify-agent-chat:{app_id}"
+        metadata["agent_identity_code"] = registered_agent.get("agent_identity_code")
+        metadata["agent_public_key_thumbprint"] = (
+            registered_agent.get("public_key_thumbprint")
+        )
+        metadata["agentguard_user_bound"] = bool((registration.get("user_agent") or {}).get("bound"))
     remote.register_session(context)
     result = remote.sync_tools(context, tools)
     _remember_catalog_fingerprint(fingerprint_key, fingerprint)
@@ -1244,6 +1269,46 @@ def _dify_account_email_for_app(app: Any) -> str | None:
     except Exception:
         return None
     return email.lower() if email and "@" in email else None
+
+
+def _register_dify_agent(
+    remote: RemoteGuardClient,
+    *,
+    agent_id: str,
+    agent_type: str,
+    external_agent_id: str,
+    tenant_id: str | None,
+    account_email: str | None,
+    name: str | None,
+    description: str | None,
+    metadata: dict[str, Any],
+) -> dict[str, Any] | None:
+    register = getattr(remote, "register_agent", None)
+    if not callable(register):
+        return None
+    provider_instance_id = _dify_provider_instance_id()
+    payload = build_agent_registration_payload(
+        provider="dify",
+        provider_instance_id=provider_instance_id,
+        tenant_id=tenant_id,
+        external_agent_id=external_agent_id,
+        agent_type=agent_type,
+        name=name,
+        description=description,
+        account_email=account_email,
+        metadata=metadata,
+    )
+    return register(payload)
+
+
+def _dify_provider_instance_id() -> str:
+    return (
+        os.getenv("AGENTGUARD_DIFY_INSTANCE_ID")
+        or os.getenv("DIFY_DEPLOYMENT_ID")
+        or os.getenv("DIFY_BASE_URL")
+        or os.getenv("CONSOLE_API_URL")
+        or ""
+    ).strip()
 
 
 def _catalog_session_key(app_id: str, config_id: str | None = None) -> str:

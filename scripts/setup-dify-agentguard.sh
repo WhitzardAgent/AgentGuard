@@ -12,7 +12,7 @@ APP_IDS=""
 NODE_IDS=""
 SERVER_URL="http://host.docker.internal:38080"
 CONSOLE_URL=""
-API_KEY=""
+API_KEY="${AGENTGUARD_API_KEY:-}"
 POLICY=""
 BOOTSTRAP_DIR=""
 OUTPUT_FILE=""
@@ -124,6 +124,10 @@ if [ -z "$DIFY_DIR" ]; then
     exit 2
 fi
 
+if [ -z "$API_KEY" ] && [ -f "$AGENTGUARD_ROOT/.env" ]; then
+    API_KEY="$(grep -E '^AGENTGUARD_API_KEY=' "$AGENTGUARD_ROOT/.env" | tail -n 1 | cut -d= -f2- || true)"
+fi
+
 DIFY_DIR="$(cd "$DIFY_DIR" && pwd)"
 DIFY_DOCKER_DIR="$DIFY_DIR/docker"
 if [ ! -d "$DIFY_DOCKER_DIR" ]; then
@@ -179,6 +183,7 @@ services:
       AGENTGUARD_DIFY_APP_IDS: "$APP_IDS"
       AGENTGUARD_DIFY_NODE_IDS: "$NODE_IDS"
       AGENTGUARD_ENVIRONMENT: "dify"
+      AGENTGUARD_AGENT_KEY_DIR: "/app/api/storage/agentguard/agent_keys"
       PYTHONPATH: "/agentguard-dify-bootstrap:/agentguard/src/client/python:/agentguard/src:/app/api"
     volumes:
       - $AGENTGUARD_ROOT:/agentguard:ro
@@ -196,6 +201,7 @@ services:
       AGENTGUARD_DIFY_APP_IDS: "$APP_IDS"
       AGENTGUARD_DIFY_NODE_IDS: "$NODE_IDS"
       AGENTGUARD_ENVIRONMENT: "dify"
+      AGENTGUARD_AGENT_KEY_DIR: "/app/api/storage/agentguard/agent_keys"
       PYTHONPATH: "/agentguard-dify-bootstrap:/agentguard/src/client/python:/agentguard/src:/app/api"
     volumes:
       - $AGENTGUARD_ROOT:/agentguard:ro

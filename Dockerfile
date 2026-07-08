@@ -25,7 +25,7 @@ WORKDIR /opt/agentguard
 
 # Dependencies first for better layer caching.
 COPY pyproject.toml README.md ./
-RUN pip install "pydantic>=2.5,<3.0" "fastapi>=0.110" "uvicorn>=0.27" "pymysql>=1.1"
+RUN pip install "pydantic>=2.5,<3.0" "cryptography>=42" "fastapi>=0.110" "uvicorn>=0.27" "pymysql>=1.1"
 
 # Server source + shared source (PYTHONPATH layout, no editable install needed).
 COPY src/server ./src/server

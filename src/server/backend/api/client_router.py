@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 
 from backend.api.schemas import (
+    AgentRegisterRequest,
     GuardDecideRequest,
     GuardDecideResponse,
     McpReportRequest,
@@ -17,6 +18,9 @@ from backend.api.schemas import (
     TraceUploadRequest,
 )
 from backend.app_state import get_console, get_manager, get_skills
+from backend.api.auth import configured_backend_api_key
+from backend.agents.store import AgentStore
+from backend.database import DatabaseUnavailable
 from shared.schemas.context import RuntimeContext
 from backend.runtime.policy.snapshot_builder import snapshot_dict
 
@@ -83,6 +87,50 @@ def sync_tools(req: ToolSyncRequest, request: Request) -> dict[str, Any]:
     if result is None:
         raise HTTPException(status_code=400, detail="agent_id is required")
     return {"status": "ok", **result}
+
+
+@router.post("/v1/server/agents/register")
+def register_agent(req: AgentRegisterRequest, request: Request) -> dict[str, Any]:
+    _validate_adapter_api_key(request)
+    try:
+        result = AgentStore().register_agent(
+            provider=req.provider,
+            provider_instance_id=req.provider_instance_id,
+            tenant_id=req.tenant_id,
+            external_agent_id=req.external_agent_id,
+            agent_type=req.agent_type,
+            name=req.name,
+            description=req.description,
+            account_email=req.account_email,
+            public_key_jwk=req.public_key_jwk,
+            metadata=req.metadata,
+        )
+    except DatabaseUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    agent = result.agent
+    return {
+        "status": "ok",
+        "agent": {
+            "agent_id": agent.agent_id,
+            "agent_identity_code": agent.agent_identity_code,
+            "provider": agent.provider,
+            "provider_instance_id": agent.provider_instance_id,
+            "tenant_id": agent.tenant_id,
+            "external_agent_id": agent.external_agent_id,
+            "agent_type": agent.agent_type,
+            "public_key_thumbprint": agent.public_key_thumbprint,
+            "status": agent.status,
+        },
+        "user_agent": {
+            "user_id": result.user_id,
+            "account_email": result.account_email,
+            "bound": result.user_id is not None,
+            "created": result.user_binding_created,
+            "updated": result.user_binding_updated,
+        },
+    }
 
 
 @router.post("/v1/server/skills/report")
@@ -189,6 +237,19 @@ def _validate_client_session(request: Request) -> None:
             raise PermissionError("unknown client session")
     except PermissionError as exc:
         raise _session_key_error(exc) from exc
+
+
+def _validate_adapter_api_key(request: Request) -> None:
+    expected = configured_backend_api_key()
+    if not expected:
+        return
+    bearer = request.headers.get("authorization") or ""
+    scheme, _, token = bearer.partition(" ")
+    provided = request.headers.get("x-api-key") or (token.strip() if scheme.lower() == "bearer" else "")
+    if not provided:
+        raise HTTPException(status_code=401, detail="missing adapter API key")
+    if provided != expected:
+        raise HTTPException(status_code=403, detail="invalid adapter API key")
 
 
 def _session_key_error(exc: PermissionError) -> HTTPException:

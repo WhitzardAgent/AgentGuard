@@ -46,6 +46,10 @@
     window.AgentGuardUI?.showToast?.(message, tone);
   }
 
+  function selectedAgentDisplayName() {
+    return String(shell?.getState?.().selectedAgentLabel || state.selectedAgentId || "").trim();
+  }
+
   function escapeHtml(value) {
     return String(value ?? "")
       .replace(/&/g, "&amp;")
@@ -486,7 +490,7 @@
 
   function renderSelection() {
     if (selectedAgentLabel) {
-      selectedAgentLabel.textContent = state.selectedAgentId || t("the selected agent");
+      selectedAgentLabel.textContent = selectedAgentDisplayName() || t("the selected agent");
     }
     if (selectionCount) {
       selectionCount.textContent = t(`${state.selected.size} selected`);
@@ -516,12 +520,12 @@
       return;
     }
     if (state.loading) {
-      syncStatus.textContent = t(`Loading MCP services for ${state.selectedAgentId}...`);
+      syncStatus.textContent = t(`Loading MCP services for ${selectedAgentDisplayName()}...`);
       return;
     }
     const syncedAt = data.getLastMcpSyncTime?.();
     syncStatus.textContent = state.mcps.length
-      ? t(`Loaded ${state.mcps.length} MCP services for ${state.selectedAgentId}. Last updated: ${syncedAt || "just now"}`)
+      ? t(`Loaded ${state.mcps.length} MCP services for ${selectedAgentDisplayName()}. Last updated: ${syncedAt || "just now"}`)
       : t(`Loaded MCP catalog just now.`);
   }
 

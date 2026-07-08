@@ -67,6 +67,14 @@ class RemoteGuardClient:
         approval_path: str = "/v1/server/approvals/{ticket_id}",
         register_path: str = "/v1/server/session/register",
         unregister_path: str = "/v1/server/session/unregister",
+        agent_register_path: str = "/v1/server/agents/register",
+        runtime_session_create_path: str = "/v1/server/session/create",
+        runtime_session_refresh_path: str = "/v1/server/session/refresh",
+        runtime_session_close_path: str = "/v1/server/session/close",
+        session_token: str | None = None,
+        dpop_proof_factory: Any | None = None,
+        use_dpop_auth: bool = False,
+        legacy_identity_headers: bool = True,
         approval_wait_timeout_s: float = 600.0,
         approval_wait_chunk_s: float = 25.0,
     ) -> None:
@@ -88,6 +96,14 @@ class RemoteGuardClient:
         self.approval_path = approval_path
         self.register_path = register_path
         self.unregister_path = unregister_path
+        self.agent_register_path = agent_register_path
+        self.runtime_session_create_path = runtime_session_create_path
+        self.runtime_session_refresh_path = runtime_session_refresh_path
+        self.runtime_session_close_path = runtime_session_close_path
+        self.session_token = session_token
+        self.dpop_proof_factory = dpop_proof_factory
+        self.use_dpop_auth = use_dpop_auth
+        self.legacy_identity_headers = legacy_identity_headers
         self.approval_wait_timeout_s = approval_wait_timeout_s
         self.approval_wait_chunk_s = max(1.0, approval_wait_chunk_s)
         self.breaker = CircuitBreaker()
@@ -173,6 +189,11 @@ class RemoteGuardClient:
         }
         return self._post(self.tool_sync_path, body)
 
+    def register_agent(self, agent: dict[str, Any]) -> dict[str, Any]:
+        if not self.enabled:
+            raise RemoteGuardError("no server_url configured")
+        return self._post(self.agent_register_path, dict(agent))
+
     def register_session(self, context: RuntimeContext) -> dict[str, Any]:
         if not self.enabled:
             raise RemoteGuardError("no server_url configured")
@@ -182,6 +203,21 @@ class RemoteGuardClient:
         if not self.enabled:
             raise RemoteGuardError("no server_url configured")
         return self._post(self.unregister_path, {})
+
+    def create_runtime_session(self, body: dict[str, Any]) -> dict[str, Any]:
+        if not self.enabled:
+            raise RemoteGuardError("no server_url configured")
+        return self._post(self.runtime_session_create_path, dict(body))
+
+    def refresh_runtime_session(self) -> dict[str, Any]:
+        if not self.enabled:
+            raise RemoteGuardError("no server_url configured")
+        return self._post(self.runtime_session_refresh_path, {})
+
+    def close_runtime_session(self) -> dict[str, Any]:
+        if not self.enabled:
+            raise RemoteGuardError("no server_url configured")
+        return self._post(self.runtime_session_close_path, {})
 
     def upload_trace_async(
         self,
@@ -207,17 +243,24 @@ class RemoteGuardClient:
         return thread
 
     # ---- transport -----------------------------------------------------
-    def _headers(self) -> dict[str, str]:
+    def _headers(self, *, method: str | None = None, url: str | None = None) -> dict[str, str]:
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
-        if self.api_key:
+        if self.use_dpop_auth:
+            if self.session_token:
+                headers["Authorization"] = f"DPoP {self.session_token}"
+            elif self.api_key:
+                headers["Authorization"] = f"Bearer {self.api_key}"
+            if callable(self.dpop_proof_factory) and method and url:
+                headers["DPoP"] = str(self.dpop_proof_factory(method, url, self.session_token))
+        elif self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
-        if self.session_id:
+        if self.session_id and self.legacy_identity_headers:
             headers["X-AgentGuard-Session-Id"] = self.session_id
-        if self.agent_id:
+        if self.agent_id and self.legacy_identity_headers:
             headers["X-AgentGuard-Agent-Id"] = self.agent_id
-        if self.user_id:
+        if self.user_id and self.legacy_identity_headers:
             headers["X-AgentGuard-User-Id"] = self.user_id
-        if self.session_key:
+        if self.session_key and self.legacy_identity_headers:
             headers["X-AgentGuard-Session-Key"] = self.session_key
         if self.user_ticket:
             headers["X-AgentGuard-User-Ticket"] = self.user_ticket
@@ -228,7 +271,12 @@ class RemoteGuardClient:
         data = safe_dumps(body).encode("utf-8") if body is not None else None
         last_exc: Exception | None = None
         for attempt in range(self.retries + 1):
-            req = urllib.request.Request(url, data=data, headers=self._headers(), method=method)
+            req = urllib.request.Request(
+                url,
+                data=data,
+                headers=self._headers(method=method, url=url),
+                method=method,
+            )
             try:
                 with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
                     raw = resp.read().decode("utf-8")

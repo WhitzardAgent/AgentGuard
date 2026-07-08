@@ -67,6 +67,10 @@
     return String(shell?.getState?.().selectedAgentId || "").trim();
   }
 
+  function getSelectedAgentLabel() {
+    return String(shell?.getState?.().selectedAgentLabel || getSelectedAgentId() || "").trim();
+  }
+
   function showToast(message, tone) {
     window.AgentGuardUI.showToast(message, tone);
   }
@@ -339,7 +343,7 @@
     elements.metricDenyCount.textContent = formatNumber(overview.denyCount);
     elements.metricPendingApprovals.textContent = formatNumber(overview.pendingApprovals);
     elements.metricDenyRate.textContent = formatPercent(overview.denyRate);
-    elements.agentId.textContent = getSelectedAgentId() || "--";
+    elements.agentId.textContent = getSelectedAgentLabel() || "--";
     elements.ruleVersion.textContent = state.health?.rule_version || "--";
     elements.mode.textContent = state.health?.mode || "--";
     elements.runtimeMode.textContent = state.health?.runtime_mode || "--";
@@ -691,7 +695,7 @@
     state.selectedAuditIndex = 0;
     shell?.setPageContext({
       title: "Runtime Overview",
-      description: `Inspect agent-scoped runtime metrics, traffic, approvals, and audit activity for ${String(event?.detail?.agentId || getSelectedAgentId() || "the selected agent")}.`,
+      description: `Inspect agent-scoped runtime metrics, traffic, approvals, and audit activity for ${String(event?.detail?.agentLabel || getSelectedAgentLabel() || "the selected agent")}.`,
     });
     refreshAll().catch(() => {
       renderAll();

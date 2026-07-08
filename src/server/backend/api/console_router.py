@@ -6,6 +6,7 @@ real server state (policy store, live traffic, approvals) via ConsoleState.
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from fastapi import APIRouter, Cookie
@@ -13,6 +14,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from backend.api.schemas import McpDetectRequest
+from backend.agents.store import AgentRecord, AgentStore
 from backend.app_state import get_console
 from backend.database import DatabaseUnavailable
 from backend.user.router import SESSION_COOKIE, get_user_store
@@ -55,13 +57,30 @@ def _err(message: str, status: int) -> JSONResponse:
     return JSONResponse({"ok": False, "error": message}, status_code=status)
 
 
+# ---- agents -----------------------------------------------------------
+@router.get("/v1/backend/agents")
+def list_agents(
+    agentguard_user_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+) -> list[dict[str, Any]]:
+    visible = _visible_scope(agentguard_user_session)
+    if not visible["agent_ids"]:
+        return []
+    try:
+        records = AgentStore().list_agents(visible["agent_ids"])
+    except DatabaseUnavailable:
+        return []
+    return [_agent_record_to_console_item(record) for record in records]
+
+
 # ---- tools -------------------------------------------------------------
 @router.get("/v1/backend/tools")
 def list_tools(
     agentguard_user_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
 ) -> list[dict[str, Any]]:
+    visible = _visible_scope(agentguard_user_session)
     return get_console().tools(
-        visible_to_external_accounts=_visible_external_accounts(agentguard_user_session)
+        visible_to_external_accounts=visible["external_accounts"],
+        visible_agent_ids=visible["agent_ids"],
     )
 
 
@@ -70,9 +89,11 @@ def list_agent_tools(
     agent_id: str,
     agentguard_user_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
 ) -> list[dict[str, Any]]:
+    visible = _visible_scope(agentguard_user_session)
     return get_console().tools(
         agent_id,
-        visible_to_external_accounts=_visible_external_accounts(agentguard_user_session),
+        visible_to_external_accounts=visible["external_accounts"],
+        visible_agent_ids=visible["agent_ids"],
     )
 
 
@@ -89,8 +110,10 @@ def patch_tool_labels(agent_id: str, tool_name: str, body: LabelBody) -> Any:
 def list_skills(
     agentguard_user_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
 ) -> list[dict[str, Any]]:
+    visible = _visible_scope(agentguard_user_session)
     return get_console().skills(
-        visible_to_external_accounts=_visible_external_accounts(agentguard_user_session)
+        visible_to_external_accounts=visible["external_accounts"],
+        visible_agent_ids=visible["agent_ids"],
     )
 
 
@@ -99,9 +122,11 @@ def list_agent_skills(
     agent_id: str,
     agentguard_user_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
 ) -> list[dict[str, Any]]:
+    visible = _visible_scope(agentguard_user_session)
     return get_console().skills(
         agent_id,
-        visible_to_external_accounts=_visible_external_accounts(agentguard_user_session),
+        visible_to_external_accounts=visible["external_accounts"],
+        visible_agent_ids=visible["agent_ids"],
     )
 
 
@@ -123,8 +148,10 @@ def detect_agent_skills(agent_id: str, body: SkillDetectBody) -> Any:
 def list_mcps(
     agentguard_user_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
 ) -> list[dict[str, Any]]:
+    visible = _visible_scope(agentguard_user_session)
     return get_console().mcps(
-        visible_to_external_accounts=_visible_external_accounts(agentguard_user_session)
+        visible_to_external_accounts=visible["external_accounts"],
+        visible_agent_ids=visible["agent_ids"],
     )
 
 
@@ -133,9 +160,11 @@ def list_agent_mcps(
     agent_id: str,
     agentguard_user_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
 ) -> list[dict[str, Any]]:
+    visible = _visible_scope(agentguard_user_session)
     return get_console().mcps(
         agent_id,
-        visible_to_external_accounts=_visible_external_accounts(agentguard_user_session),
+        visible_to_external_accounts=visible["external_accounts"],
+        visible_agent_ids=visible["agent_ids"],
     )
 
 
@@ -266,16 +295,63 @@ def deny_ticket(ticket_id: str, body: ApprovalBody | None = None) -> Any:
 def _visible_external_accounts(
     session_token: str | None,
 ) -> set[tuple[str, str]]:
+    return _visible_scope(session_token)["external_accounts"]
+
+
+def _visible_scope(session_token: str | None) -> dict[str, set[Any]]:
     if not session_token:
-        return set()
+        return {"external_accounts": set(), "agent_ids": set()}
     try:
         store = get_user_store()
         user = store.user_for_session(session_token)
         if user is None:
-            return set()
-        return {
+            return {"external_accounts": set(), "agent_ids": set()}
+        external_accounts = {
             (item.provider.lower(), item.account_email.lower())
             for item in store.list_external_accounts(user)
         }
+        agent_ids = AgentStore().agent_ids_for_user(user.id)
+        return {"external_accounts": external_accounts, "agent_ids": agent_ids}
     except DatabaseUnavailable:
-        return set()
+        return {"external_accounts": set(), "agent_ids": set()}
+
+
+def _agent_record_to_console_item(record: AgentRecord) -> dict[str, Any]:
+    metadata = _safe_json_object(record.metadata_json)
+    external_agent_id = str(record.external_agent_id or metadata.get("external_agent_id") or "").strip()
+    app_id = str(metadata.get("app_id") or "").strip()
+    display_agent_id = str(
+        metadata.get("display_agent_id")
+        or external_agent_id
+        or app_id
+        or record.name
+        or record.agent_id
+    ).strip()
+    provider = str(record.provider or metadata.get("external_provider") or metadata.get("provider") or "").strip()
+    agent_type = str(record.agent_type or metadata.get("agent_type") or "").strip()
+    return {
+        "agent_id": record.agent_id,
+        "display_agent_id": display_agent_id,
+        "external_agent_id": external_agent_id or app_id,
+        "external_provider": provider,
+        "agent_type": agent_type,
+        "name": record.name or "",
+        "description": record.description or "",
+        "status": record.status,
+        "tool_count": 0,
+        "tool_names": [],
+        "skill_count": 0,
+        "skill_names": [],
+        "mcp_count": 0,
+        "mcp_names": [],
+    }
+
+
+def _safe_json_object(value: str | None) -> dict[str, Any]:
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}

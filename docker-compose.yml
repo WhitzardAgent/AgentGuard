@@ -61,6 +61,11 @@ services:
       FRONTEND_PORT: 38008
       AGENTGUARD_API_BASE: http://server:38080
       AGENTGUARD_API_KEY: "${AGENTGUARD_API_KEY:-sk-agentguard-backend-X9m42Vq7Tz8nL3pA6cR0yH5uJ1sWfKdE}"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:38008/ >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     depends_on:
       server:
         condition: service_healthy

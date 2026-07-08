@@ -1057,6 +1057,42 @@ def test_workflow_make_guard_uses_workflow_run_session_and_stores_metadata(monke
     assert guard.context.metadata["node_type"] == "code"
 
 
+def test_workflow_make_guard_prefers_registered_agentguard_agent_id(monkeypatch):
+    _install_fake_legacy_dify_modules(monkeypatch)
+    dify_adapter = _fresh_adapter(monkeypatch)
+
+    monkeypatch.setattr(
+        dify_adapter,
+        "_runtime_workflow_agent_registration",
+        lambda metadata: {
+            "agent": {
+                "agent_id": "ag_canonical",
+                "agent_identity_code": "agic_test",
+                "public_key_thumbprint": "jkt_test",
+            },
+            "user_agent": {"bound": True},
+        },
+    )
+    metadata = {
+        "adapter": "dify",
+        "dify_runtime": "workflow_api",
+        "app_id": "app-1",
+        "workflow_id": "workflow-1",
+        "workflow_run_id": "workflow-run-1",
+        "node_id": "node-1",
+        "node_type": "llm",
+    }
+
+    guard = dify_adapter._make_guard(metadata)
+
+    assert guard.context.agent_id == "ag_canonical"
+    assert guard.context.metadata["agentguard_agent_id"] == "ag_canonical"
+    assert guard.context.metadata["external_agent_id"] == "dify-workflow:app-1"
+    assert guard.context.metadata["agent_identity_code"] == "agic_test"
+    assert guard.context.metadata["agent_public_key_thumbprint"] == "jkt_test"
+    assert guard.context.metadata["agentguard_user_bound"] is True
+
+
 def test_workflow_catalog_sync_reports_published_workflow_tools(monkeypatch):
     _install_fake_workflow_catalog_modules(monkeypatch)
     dify_adapter = _fresh_adapter(monkeypatch)
@@ -1142,6 +1178,49 @@ def test_workflow_catalog_sync_skips_unchanged_tools(monkeypatch):
         ("register", "dify-workflow:app-1"),
         ("sync", "dify-workflow:app-1", 4),
     ]
+
+
+def test_workflow_catalog_sync_uses_registered_agentguard_agent_id(monkeypatch):
+    fake = _install_fake_workflow_catalog_modules(monkeypatch)
+    dify_adapter = _fresh_adapter(monkeypatch)
+    monkeypatch.setenv("AGENTGUARD_SERVER_URL", "http://agentguard.test")
+    registered = []
+    synced = []
+
+    class FakeRemote:
+        enabled = True
+
+        def __init__(self, *args, **kwargs):
+            self.agent_id = kwargs.get("agent_id")
+
+        def register_session(self, context):
+            registered.append((self.agent_id, context.to_dict()))
+
+        def sync_tools(self, context, tools):
+            synced.append((self.agent_id, context.to_dict(), list(tools)))
+            return {"tool_count": len(tools)}
+
+    monkeypatch.setattr(dify_adapter, "RemoteGuardClient", FakeRemote)
+    monkeypatch.setattr(
+        dify_adapter,
+        "_register_dify_agent",
+        lambda *args, **kwargs: {
+            "agent": {
+                "agent_id": "ag_canonical",
+                "agent_identity_code": "agic_test",
+                "public_key_thumbprint": "jkt_test",
+            },
+            "user_agent": {"bound": True},
+        },
+    )
+
+    result = dify_adapter._sync_workflow_tool_catalog(fake.app, fake.workflow)
+
+    assert result["agent_id"] == "ag_canonical"
+    assert registered[0][0] == "ag_canonical"
+    assert registered[0][1]["agent_id"] == "ag_canonical"
+    assert registered[0][1]["metadata"]["external_agent_id"] == "dify-workflow:app-1"
+    assert synced[0][1]["agent_id"] == "ag_canonical"
 
 
 def test_workflow_catalog_sync_keeps_agent_id_stable_across_publish_ids(monkeypatch):

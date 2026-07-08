@@ -23,6 +23,10 @@ let toolCatalog = [];
 let labelRows = [];
 let selectedAgentId = shell?.getState?.().selectedAgentId || "";
 
+function selectedAgentDisplayName() {
+  return String(shell?.getState?.().selectedAgentLabel || selectedAgentId || "").trim();
+}
+
 shell?.setPageContext({
   title: "Tool Labels",
   description: "Inspect the tool catalog, tune label values, and keep the shared label surface clean.",
@@ -320,7 +324,7 @@ async function refreshToolCatalog({ manual = false } = {}) {
     return;
   }
   refreshToolsButton.disabled = true;
-  updateSyncStatus(manual ? `Refreshing ${selectedAgentId} tools...` : `Syncing ${selectedAgentId} tools...`);
+  updateSyncStatus(manual ? `Refreshing ${selectedAgentDisplayName()} tools...` : `Syncing ${selectedAgentDisplayName()} tools...`);
 
   try {
     toolCatalog = await toolData.refreshToolCatalog(selectedAgentId);
@@ -332,7 +336,7 @@ async function refreshToolCatalog({ manual = false } = {}) {
     }
 
     const syncedAt = toolData.getLastToolSyncTime();
-    updateSyncStatus(`Synced ${toolCatalog.length} tools for ${selectedAgentId}. Last updated: ${syncedAt || "just now"}`);
+    updateSyncStatus(`Synced ${toolCatalog.length} tools for ${selectedAgentDisplayName()}. Last updated: ${syncedAt || "just now"}`);
     shell?.setToolStatus(syncedAt ? `Last synced ${syncedAt}` : "Synced just now");
     if (manual) {
       showToast("Tool catalog refreshed.", "success");

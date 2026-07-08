@@ -54,6 +54,10 @@
     window.AgentGuardUI?.showToast?.(message, tone);
   }
 
+  function selectedAgentDisplayName() {
+    return String(shell?.getState?.().selectedAgentLabel || state.selectedAgentId || "").trim();
+  }
+
   function escapeHtml(value) {
     return String(value ?? "")
       .replace(/&/g, "&amp;")
@@ -591,7 +595,7 @@
   }
 
   function renderStatus(message = "") {
-    selectedAgentLabel.textContent = state.selectedAgentId || t("the selected agent");
+    selectedAgentLabel.textContent = selectedAgentDisplayName() || t("the selected agent");
     if (message) {
       syncStatus.textContent = t(message);
       return;
@@ -601,7 +605,7 @@
       return;
     }
     if (state.loading) {
-      syncStatus.textContent = t(`Loading skills for ${state.selectedAgentId}...`);
+      syncStatus.textContent = t(`Loading skills for ${selectedAgentDisplayName()}...`);
       return;
     }
     if (state.detecting) {
@@ -611,7 +615,7 @@
     }
     const syncedAt = data?.getLastSkillSyncTime?.();
     if (syncedAt) {
-      syncStatus.textContent = t(`Loaded ${state.skills.length} skills for ${state.selectedAgentId}. Last updated: ${syncedAt}`);
+      syncStatus.textContent = t(`Loaded ${state.skills.length} skills for ${selectedAgentDisplayName()}. Last updated: ${syncedAt}`);
     } else {
       syncStatus.textContent = t("Loaded skill catalog just now.");
     }

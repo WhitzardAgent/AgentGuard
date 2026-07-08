@@ -10,6 +10,7 @@
     currentUserLabel: "",
   };
   const SELECTED_AGENT_KEY = "agentguard.selectedAgentId";
+  const AGENT_CATALOG_KEY = "agentguard.agentCatalog";
   const SELECTED_PLUGIN_KEY = "agentguard.selectedPluginName";
   const CURRENT_USER_KEY = "agentguard.currentUserLabel";
   const AGENT_SELECTION_PATH = "/agents.html";
@@ -96,12 +97,32 @@
     element.textContent = String(value || "");
   }
 
+  function selectedAgentDisplayLabel() {
+    const agentId = String(state.selectedAgentId || "").trim();
+    if (!agentId) {
+      return "";
+    }
+    try {
+      const parsed = JSON.parse(window.localStorage?.getItem(AGENT_CATALOG_KEY) || "[]");
+      if (Array.isArray(parsed)) {
+        const match = parsed.find((item) => String(item?.agent_id || "").trim() === agentId);
+        const label = String(match?.display_agent_id || match?.external_agent_id || "").trim();
+        if (label) {
+          return label;
+        }
+      }
+    } catch {
+      // Ignore localStorage read issues in preview mode.
+    }
+    return agentId;
+  }
+
   function render() {
     setText("sidebar-api-status", state.apiStatus);
     setText("sidebar-tool-status", state.toolStatus);
     setText("sidebar-page-title", state.pageTitle);
     setText("sidebar-page-description", state.pageDescription);
-    setText("sidebar-selected-agent", state.selectedAgentId || "");
+    setText("sidebar-selected-agent", selectedAgentDisplayLabel());
     setText("sidebar-current-user", state.currentUserLabel || "");
 
     const selectedAgentWrap = getElement("sidebar-selected-agent-wrap");
@@ -259,7 +280,10 @@
     if (changed) {
       setSelectedPlugin("");
     }
-    dispatchSelectionEvent("agentguard:selected-agent-change", { agentId: normalized });
+    dispatchSelectionEvent("agentguard:selected-agent-change", {
+      agentId: normalized,
+      agentLabel: selectedAgentDisplayLabel(),
+    });
     enforceSelectedAgentAccess();
     render();
   }
@@ -270,7 +294,7 @@
 
   window.AgentGuardShell = {
     getState() {
-      return { ...state };
+      return { ...state, selectedAgentLabel: selectedAgentDisplayLabel() };
     },
     render,
     setApiStatus,

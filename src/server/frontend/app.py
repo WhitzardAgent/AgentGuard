@@ -142,6 +142,10 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
             self._proxy("v1/user/external-accounts", method="GET", query=query)
             return
 
+        if path == "/api/agents":
+            self._proxy("agents", method="GET", query=query)
+            return
+
         if path.startswith("/api/agents/") and "/runtime/" in path:
             upstream_path = path.removeprefix("/api/")
             self._proxy(upstream_path, method="GET", query=query)

@@ -46,6 +46,10 @@
     window.AgentGuardUI.showToast(message, tone);
   }
 
+  function selectedAgentDisplayName() {
+    return String(shell?.getState?.().selectedAgentLabel || state.selectedAgentId || "").trim();
+  }
+
   function scopeItems(scope) {
     const key = SCOPE_COPY[scope]?.availableKey || "remote_plugins";
     return Array.isArray(state.available[key]) ? state.available[key].slice() : [];
@@ -133,7 +137,7 @@
   }
 
   function renderPluginLists() {
-    selectedAgentLabel.textContent = state.selectedAgentId || "the selected agent";
+    selectedAgentLabel.textContent = selectedAgentDisplayName() || "the selected agent";
     renderScopeList("server", remotePluginList, remotePluginStatus);
     renderScopeList("client", localPluginList, localPluginStatus);
   }
@@ -148,7 +152,7 @@
       return;
     }
     if (state.loading) {
-      statusText.textContent = `Updating plugin config for ${state.selectedAgentId}...`;
+      statusText.textContent = `Updating plugin config for ${selectedAgentDisplayName()}...`;
       return;
     }
     if (serverNames.length || clientNames.length) {
@@ -157,18 +161,18 @@
         : "Current plugins";
       const serverText = serverNames.length ? serverNames.join(", ") : "none";
       const clientText = clientNames.length ? clientNames.join(", ") : "none";
-      statusText.textContent = `${sourceText} for ${state.selectedAgentId}: server [${serverText}], client [${clientText}].`;
+      statusText.textContent = `${sourceText} for ${selectedAgentDisplayName()}: server [${serverText}], client [${clientText}].`;
       return;
     }
     if (!hasConfig) {
-      statusText.textContent = `No plugin config has been applied to ${state.selectedAgentId} yet.`;
+      statusText.textContent = `No plugin config has been applied to ${selectedAgentDisplayName()} yet.`;
       return;
     }
     if (configSource === "server_default") {
-      statusText.textContent = `Using server default plugin config for ${state.selectedAgentId}.`;
+      statusText.textContent = `Using server default plugin config for ${selectedAgentDisplayName()}.`;
       return;
     }
-    statusText.textContent = `Loaded plugin config for ${state.selectedAgentId}.`;
+    statusText.textContent = `Loaded plugin config for ${selectedAgentDisplayName()}.`;
   }
 
   async function loadPluginState({ manual = false } = {}) {

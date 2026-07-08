@@ -11,9 +11,11 @@ import time
 from collections import deque
 from typing import Any
 
+from backend.agents.store import AgentStore
 from backend.console.dsl import ParsedRule, parse_source, rule_to_console_dict
 from backend.console.mcp_record import McpRecord
 from backend.console.skill_record import SkillRecord
+from backend.database import DatabaseUnavailable
 from backend.runtime.manager import RuntimeManager
 from shared.rules.llm_dsl_generator import (
     LLMRuleGeneratorWorkflow,
@@ -48,6 +50,7 @@ class ConsoleState:
         self._skills: dict[tuple[str, str], SkillRecord] = {}
         self._mcps: dict[tuple[str, str], McpRecord] = {}
         self._agent_external_accounts: dict[str, set[tuple[str, str]]] = {}
+        self._agent_display_metadata: dict[str, dict[str, str]] = {}
 
         self._traffic: deque[dict[str, Any]] = deque(maxlen=1000)
         self._audit: deque[dict[str, Any]] = deque(maxlen=1000)
@@ -59,6 +62,7 @@ class ConsoleState:
         self,
         *,
         visible_to_external_accounts: set[tuple[str, str]] | None = None,
+        visible_agent_ids: set[str] | None = None,
     ) -> list[str]:
         agent_ids = (
             {owner for owner, _ in self._tools}
@@ -69,7 +73,8 @@ class ConsoleState:
             agent_ids = {
                 agent_id
                 for agent_id in agent_ids
-                if self._agent_visible_to_external_accounts(
+                if self._agent_visible_to_agent_ids(agent_id, visible_agent_ids)
+                or self._agent_visible_to_external_accounts(
                     agent_id,
                     visible_to_external_accounts,
                 )
@@ -81,27 +86,38 @@ class ConsoleState:
         agent_id: str | None = None,
         *,
         visible_to_external_accounts: set[tuple[str, str]] | None = None,
+        visible_agent_ids: set[str] | None = None,
     ) -> list[dict[str, Any]]:
         with self._lock:
             items = list(self._tools.values())
+        items = self._merge_persistent_tools(
+            items,
+            agent_id=agent_id,
+            visible_agent_ids=visible_agent_ids,
+        )
         if agent_id:
             items = [t for t in items if t["owner_agent_id"] == agent_id]
         if visible_to_external_accounts is not None:
             items = [
                 t
                 for t in items
-                if self._agent_visible_to_external_accounts(
+                if self._agent_visible_to_agent_ids(
+                    str(t.get("owner_agent_id") or ""),
+                    visible_agent_ids,
+                )
+                or self._agent_visible_to_external_accounts(
                     str(t.get("owner_agent_id") or ""),
                     visible_to_external_accounts,
                 )
             ]
-        return [dict(t) for t in items]
+        return [self._with_agent_display_metadata(dict(t), str(t.get("owner_agent_id") or "")) for t in items]
 
     def skills(
         self,
         agent_id: str | None = None,
         *,
         visible_to_external_accounts: set[tuple[str, str]] | None = None,
+        visible_agent_ids: set[str] | None = None,
     ) -> list[dict[str, Any]]:
         with self._lock:
             items = list(self._skills.values())
@@ -111,18 +127,20 @@ class ConsoleState:
             items = [
                 s
                 for s in items
-                if self._agent_visible_to_external_accounts(
+                if self._agent_visible_to_agent_ids(s.agent_id, visible_agent_ids)
+                or self._agent_visible_to_external_accounts(
                     s.agent_id,
                     visible_to_external_accounts,
                 )
             ]
-        return [s.to_dict() for s in items]
+        return [self._with_agent_display_metadata(s.to_dict(), s.agent_id) for s in items]
 
     def mcps(
         self,
         agent_id: str | None = None,
         *,
         visible_to_external_accounts: set[tuple[str, str]] | None = None,
+        visible_agent_ids: set[str] | None = None,
     ) -> list[dict[str, Any]]:
         with self._lock:
             items = list(self._mcps.values())
@@ -132,12 +150,13 @@ class ConsoleState:
             items = [
                 m
                 for m in items
-                if self._agent_visible_to_external_accounts(
+                if self._agent_visible_to_agent_ids(m.agent_id, visible_agent_ids)
+                or self._agent_visible_to_external_accounts(
                     m.agent_id,
                     visible_to_external_accounts,
                 )
             ]
-        return [m.to_dict() for m in items]
+        return [self._with_agent_display_metadata(m.to_dict(), m.agent_id) for m in items]
 
     def skill_record(self, agent_id: str, skill_unique_id: str) -> SkillRecord | None:
         normalized_agent_id = str(agent_id or "").strip()
@@ -168,6 +187,7 @@ class ConsoleState:
         if not agent_id or not name:
             return None
         external_accounts = _external_accounts_from_context(ctx)
+        display_metadata = _agent_display_metadata_from_context(ctx)
 
         incoming_labels = dict(tool.get("labels") or {})
         labels = {
@@ -190,12 +210,19 @@ class ConsoleState:
             record = {
                 "owner_agent_id": agent_id,
                 "name": name,
+                "description": str(tool.get("description") or ""),
                 "labels": merged_labels,
                 "input_params": input_params or list(existing.get("input_params") or []),
+                "capabilities": _string_list(tool.get("capabilities") or existing.get("capabilities")),
+                "required_args": _string_list(tool.get("required_args") or input_params or existing.get("required_args")),
+                "schema": dict(tool.get("schema") or existing.get("schema") or {}),
+                "metadata": dict(tool.get("metadata") or existing.get("metadata") or {}),
             }
             self._tools[(agent_id, name)] = record
             self._record_agent_external_accounts(agent_id, external_accounts)
-            return dict(record)
+            self._record_agent_display_metadata(agent_id, display_metadata)
+        self._persist_agent_tool(agent_id, record)
+        return self._with_agent_display_metadata(dict(record), agent_id)
 
     def sync_tools(
         self,
@@ -209,6 +236,7 @@ class ConsoleState:
         if not agent_id:
             return None
         external_accounts = _external_accounts_from_context(ctx)
+        display_metadata = _agent_display_metadata_from_context(ctx)
 
         synced: list[dict[str, Any]] = []
         seen_names: set[str] = set()
@@ -239,13 +267,19 @@ class ConsoleState:
                 record = {
                     "owner_agent_id": agent_id,
                     "name": name,
+                    "description": str(tool.get("description") or ""),
                     "labels": labels,
                     "input_params": input_params,
+                    "capabilities": _string_list(tool.get("capabilities") or labels.get("tags")),
+                    "required_args": _string_list(tool.get("required_args") or input_params),
+                    "schema": dict(tool.get("schema") or {}),
+                    "metadata": dict(tool.get("metadata") or {}),
                 }
                 self._tools[(agent_id, name)] = record
                 synced.append(dict(record))
 
             self._record_agent_external_accounts(agent_id, external_accounts)
+            self._record_agent_display_metadata(agent_id, display_metadata)
             stale_keys = [
                 key
                 for key in self._tools
@@ -254,7 +288,12 @@ class ConsoleState:
             for key in stale_keys:
                 self._tools.pop(key, None)
 
-        return {"agent_id": agent_id, "tool_count": len(synced), "tools": synced}
+        self._persist_agent_tools(agent_id, synced)
+        return {
+            "agent_id": agent_id,
+            "tool_count": len(synced),
+            "tools": [self._with_agent_display_metadata(item, agent_id) for item in synced],
+        }
 
     def register_skills(
         self,
@@ -271,6 +310,7 @@ class ConsoleState:
         if not agent_id:
             return None
         external_accounts = _external_accounts_from_context(ctx)
+        display_metadata = _agent_display_metadata_from_context(ctx)
 
         normalized: list[SkillRecord] = []
         for item in skills:
@@ -291,10 +331,14 @@ class ConsoleState:
             for record in normalized:
                 self._skills[(agent_id, record.skill_unique_id)] = record
             self._record_agent_external_accounts(agent_id, external_accounts)
+            self._record_agent_display_metadata(agent_id, display_metadata)
             return {
                 "owner_agent_id": agent_id,
                 "skill_count": len(normalized),
-                "skills": [item.to_dict() for item in normalized],
+                "skills": [
+                    self._with_agent_display_metadata(item.to_dict(), agent_id)
+                    for item in normalized
+                ],
                 "scan": scan_options,
             }
 
@@ -313,6 +357,7 @@ class ConsoleState:
         if not agent_id:
             return None
         external_accounts = _external_accounts_from_context(ctx)
+        display_metadata = _agent_display_metadata_from_context(ctx)
 
         normalized: list[McpRecord] = []
         for item in mcps:
@@ -333,10 +378,14 @@ class ConsoleState:
             for record in normalized:
                 self._mcps[(agent_id, record.mcp_unique_id)] = record
             self._record_agent_external_accounts(agent_id, external_accounts)
+            self._record_agent_display_metadata(agent_id, display_metadata)
             return {
                 "owner_agent_id": agent_id,
                 "mcp_count": len(normalized),
-                "mcps": [item.to_dict() for item in normalized],
+                "mcps": [
+                    self._with_agent_display_metadata(item.to_dict(), agent_id)
+                    for item in normalized
+                ],
                 "scan": scan_options,
             }
 
@@ -350,6 +399,97 @@ class ConsoleState:
         current = self._agent_external_accounts.setdefault(agent_id, set())
         current.update(external_accounts)
 
+    def _record_agent_display_metadata(
+        self,
+        agent_id: str,
+        metadata: dict[str, str],
+    ) -> None:
+        if not agent_id or not metadata:
+            return
+        current = self._agent_display_metadata.setdefault(agent_id, {})
+        for key, value in metadata.items():
+            if value:
+                current[key] = value
+
+    def _with_agent_display_metadata(
+        self,
+        item: dict[str, Any],
+        agent_id: str,
+    ) -> dict[str, Any]:
+        metadata = self._agent_display_metadata.get(str(agent_id or "").strip()) or {}
+        if metadata:
+            item.update(metadata)
+        return item
+
+    def _merge_persistent_tools(
+        self,
+        items: list[dict[str, Any]],
+        *,
+        agent_id: str | None,
+        visible_agent_ids: set[str] | None,
+    ) -> list[dict[str, Any]]:
+        persistent = self._persistent_tools(agent_id=agent_id, visible_agent_ids=visible_agent_ids)
+        if not persistent:
+            return items
+        merged: dict[tuple[str, str], dict[str, Any]] = {}
+        for item in persistent:
+            owner = str(item.get("owner_agent_id") or "").strip()
+            name = str(item.get("name") or "").strip()
+            if owner and name:
+                merged[(owner, name)] = item
+        for item in items:
+            owner = str(item.get("owner_agent_id") or "").strip()
+            name = str(item.get("name") or "").strip()
+            if owner and name:
+                merged[(owner, name)] = item
+        return list(merged.values())
+
+    def _persistent_tools(
+        self,
+        *,
+        agent_id: str | None = None,
+        visible_agent_ids: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        try:
+            store = AgentStore()
+            if agent_id:
+                records = store.list_agent_tools(agent_id=agent_id)
+            elif visible_agent_ids is not None:
+                records = store.list_agent_tools(agent_ids=visible_agent_ids)
+            else:
+                return []
+        except DatabaseUnavailable:
+            return []
+        return [
+            self._with_agent_display_metadata(record.to_console_dict(), record.agent_id)
+            for record in records
+        ]
+
+    def _persistent_tool_record(self, agent_id: str, tool_name: str) -> dict[str, Any] | None:
+        tools = self._persistent_tools(agent_id=agent_id)
+        for tool in tools:
+            if str(tool.get("name") or "") == tool_name:
+                return tool
+        return None
+
+    def _persist_agent_tool(self, agent_id: str, tool: dict[str, Any]) -> None:
+        try:
+            AgentStore().upsert_agent_tool(agent_id, tool)
+        except DatabaseUnavailable:
+            return
+
+    def _persist_agent_tools(self, agent_id: str, tools: list[dict[str, Any]]) -> None:
+        try:
+            AgentStore().sync_agent_tools(agent_id, tools)
+        except DatabaseUnavailable:
+            return
+
+    def _persist_tool_labels(self, agent_id: str, tool_name: str, labels: dict[str, Any]) -> None:
+        try:
+            AgentStore().update_agent_tool_labels(agent_id, tool_name, labels)
+        except DatabaseUnavailable:
+            return
+
     def _agent_visible_to_external_accounts(
         self,
         agent_id: str,
@@ -358,6 +498,15 @@ class ConsoleState:
         if not agent_id or not visible_accounts:
             return False
         return bool(self._agent_external_accounts.get(agent_id, set()) & visible_accounts)
+
+    def _agent_visible_to_agent_ids(
+        self,
+        agent_id: str,
+        visible_agent_ids: set[str] | None,
+    ) -> bool:
+        if visible_agent_ids is None:
+            return False
+        return str(agent_id or "").strip() in visible_agent_ids
 
     def detect_skills(
         self,
@@ -513,14 +662,20 @@ class ConsoleState:
         with self._lock:
             tool = self._tools.get((agent_id, tool_name))
             if tool is None:
-                return None
+                persistent = self._persistent_tool_record(agent_id, tool_name)
+                if persistent is None:
+                    return None
+                tool = persistent
+                self._tools[(agent_id, tool_name)] = tool
             cur = tool["labels"]
             for key in ("boundary", "sensitivity", "integrity"):
                 if labels.get(key):
                     cur[key] = labels[key]
             if "tags" in labels and isinstance(labels["tags"], list):
                 cur["tags"] = labels["tags"]
-            return dict(tool)
+            updated = dict(tool)
+        self._persist_tool_labels(agent_id, tool_name, labels)
+        return updated
 
     def tool_record(
         self,
@@ -533,7 +688,9 @@ class ConsoleState:
             return None
         with self._lock:
             record = self._tools.get((normalized_agent_id, normalized_tool_name))
-            return dict(record) if record is not None else None
+        if record is not None:
+            return dict(record)
+        return self._persistent_tool_record(normalized_agent_id, normalized_tool_name)
 
     # ---- rules ---------------------------------------------------------
     def check(self, source: str) -> dict[str, Any]:
@@ -1015,6 +1172,12 @@ def _optional_string(value: Any) -> str | None:
     return text or None
 
 
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if str(item).strip()]
+
+
 def _external_accounts_from_context(ctx: dict[str, Any]) -> set[tuple[str, str]]:
     metadata = _safe_dict(ctx.get("metadata"))
     values = {**ctx, **metadata}
@@ -1042,6 +1205,46 @@ def _external_accounts_from_context(ctx: dict[str, Any]) -> set[tuple[str, str]]
     if not normalized_provider or "@" not in normalized_email:
         return set()
     return {(normalized_provider, normalized_email)}
+
+
+def _agent_display_metadata_from_context(ctx: dict[str, Any]) -> dict[str, str]:
+    metadata = _safe_dict(ctx.get("metadata"))
+    values = {**ctx, **metadata}
+
+    provider = _optional_string(
+        values.get("external_provider")
+        or values.get("provider")
+        or values.get("external_account_provider")
+    )
+    adapter = str(values.get("adapter") or "").strip().lower()
+    if not provider and adapter.startswith("dify"):
+        provider = "dify"
+    provider = provider.strip().lower() if provider else ""
+
+    external_agent_id = _optional_string(values.get("external_agent_id"))
+    app_id = _optional_string(values.get("app_id"))
+    display_agent_id = _optional_string(values.get("display_agent_id"))
+    agent_type = _optional_string(values.get("agent_type"))
+    dify_runtime = str(values.get("dify_runtime") or "").strip().lower()
+
+    if not agent_type and provider == "dify":
+        if adapter == "dify_agent_chat" or dify_runtime == "agent_chat":
+            agent_type = "agent_chat"
+        elif adapter == "dify" or dify_runtime in {"workflow_api", "legacy_api"}:
+            agent_type = "workflow"
+
+    if provider == "dify":
+        display_agent_id = display_agent_id or app_id or external_agent_id
+    else:
+        display_agent_id = display_agent_id or external_agent_id
+
+    result = {
+        "external_provider": provider,
+        "external_agent_id": external_agent_id or app_id or "",
+        "display_agent_id": display_agent_id or "",
+        "agent_type": agent_type or "",
+    }
+    return {key: value for key, value in result.items() if value}
 
 
 def _plugin_summary(plugin_result: dict[str, Any]) -> list[dict[str, Any]]:

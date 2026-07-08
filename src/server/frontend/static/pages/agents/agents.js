@@ -23,6 +23,35 @@
     agentSyncStatus.textContent = message;
   }
 
+  function escapeHtml(value) {
+    return String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function agentDisplayName(agent) {
+    return String(agent?.display_agent_id || agent?.external_agent_id || agent?.agent_id || "").trim();
+  }
+
+  function agentSubtitle(agent, agentId) {
+    const parts = [];
+    const provider = String(agent?.external_provider || "").trim();
+    const type = String(agent?.agent_type || "").trim();
+    if (provider) {
+      parts.push(provider);
+    }
+    if (type) {
+      parts.push(type);
+    }
+    if (agentId && agentDisplayName(agent) !== agentId) {
+      parts.push(`AgentGuard ${agentId}`);
+    }
+    return parts.join(" | ");
+  }
+
   function renderAgentList() {
     agentList.innerHTML = "";
     const items = Array.isArray(agentCatalog) ? agentCatalog.slice() : [];
@@ -34,6 +63,8 @@
 
     items.forEach((agent) => {
       const agentId = String(agent?.agent_id || "").trim();
+      const displayName = agentDisplayName(agent) || agentId;
+      const subtitle = agentSubtitle(agent, agentId);
       const toolCount = Number(agent?.tool_count || 0);
       const skillCount = Number(agent?.skill_count || 0);
       const mcpCount = Number(agent?.mcp_count || 0);
@@ -55,20 +86,21 @@
 
       card.innerHTML = `
         <div class="agent-list-top">
-          <strong>${agentId}</strong>
+          <strong>${escapeHtml(displayName)}</strong>
           <span class="pill">${toolCount} tool${toolCount === 1 ? "" : "s"}</span>
           <span class="pill">${skillCount} skill${skillCount === 1 ? "" : "s"}</span>
           <span class="pill">${mcpCount} MCP${mcpCount === 1 ? "" : "s"}</span>
         </div>
-        <p class="subtle">${toolPreviewText || "No tools registered."}</p>
-        <p class="subtle">${skillPreviewText ? `Skills: ${skillPreviewText}` : "No skills registered."}</p>
-        <p class="subtle">${mcpPreviewText ? `MCP: ${mcpPreviewText}` : "No MCP services registered."}</p>
+        ${subtitle ? `<p class="subtle">${escapeHtml(subtitle)}</p>` : ""}
+        <p class="subtle">${escapeHtml(toolPreviewText || "No tools registered.")}</p>
+        <p class="subtle">${escapeHtml(skillPreviewText ? `Skills: ${skillPreviewText}` : "No skills registered.")}</p>
+        <p class="subtle">${escapeHtml(mcpPreviewText ? `MCP: ${mcpPreviewText}` : "No MCP services registered.")}</p>
       `;
 
       card.addEventListener("click", () => {
         shell?.setSelectedAgent?.(agentId);
         renderAgentList();
-        showToast(`Now watching ${agentId}.`, "success");
+        showToast(`Now watching ${displayName}.`, "success");
         if (typeof window !== "undefined" && window.location) {
           window.location.assign("/plugins.html");
         }
