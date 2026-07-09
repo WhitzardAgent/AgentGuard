@@ -1,10 +1,13 @@
 """Auth Broker for Dify runtime sessions."""
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from backend.agents.store import AgentStore
+from backend.auth.agent_identity import AgentIdentityProofError, verify_agent_identity_proof
 from backend.auth.dpop import DPoPError, verify_dpop_proof
 from backend.auth.models import AuthContext, RuntimeSession
 from backend.auth.replay_store import DPoPReplayError, DPoPReplayStore, get_replay_store
@@ -46,11 +49,13 @@ class DifyAuthBroker:
         replay_store: DPoPReplayStore | None = None,
         token_service: RuntimeTokenService | None = None,
         user_store: UserStore | None = None,
+        agent_store: AgentStore | None = None,
     ) -> None:
         self.session_store = session_store or get_runtime_session_store()
         self.replay_store = replay_store or get_replay_store()
         self.token_service = token_service or RuntimeTokenService()
         self.user_store = user_store or UserStore()
+        self.agent_store = agent_store or AgentStore()
 
     def create_session(
         self,
@@ -62,6 +67,8 @@ class DifyAuthBroker:
         external_user_id: str | None,
         metadata: dict[str, Any] | None,
         dpop_proof: str | None,
+        agent_proof: str | None,
+        request_body: dict[str, Any],
         method: str,
         url: str,
     ) -> RuntimeSessionIssue:
@@ -85,6 +92,15 @@ class DifyAuthBroker:
             url=url,
             access_token=None,
             expected_jkt=None,
+        )
+        self._verify_agent_identity_proof(
+            agent_id=agent_id,
+            user_id=mapping.user_id,
+            proof=agent_proof,
+            method=method,
+            url=url,
+            body=request_body,
+            dpop_jkt=verification.jkt,
         )
         existing = (
             self.session_store.find_active_external_session(
@@ -216,6 +232,49 @@ class DifyAuthBroker:
         except DPoPReplayError as exc:
             raise RuntimeAuthUnauthorized(str(exc)) from exc
         except DPoPError as exc:
+            raise RuntimeAuthUnauthorized(str(exc)) from exc
+
+    def _verify_agent_identity_proof(
+        self,
+        *,
+        agent_id: str,
+        user_id: int,
+        proof: str | None,
+        method: str,
+        url: str,
+        body: dict[str, Any],
+        dpop_jkt: str,
+    ) -> None:
+        agent = self.agent_store.get_agent(agent_id)
+        if agent is None or agent.status != "active":
+            raise RuntimeAuthForbidden("AgentGuard agent is not registered or active")
+        if not agent.public_key_jwk:
+            raise RuntimeAuthForbidden("AgentGuard agent has no public key")
+        if agent_id not in self.agent_store.agent_ids_for_user(int(user_id)):
+            raise RuntimeAuthForbidden("AgentGuard agent is not available to this user")
+        try:
+            public_key_jwk = (
+                dict(agent.public_key_jwk)
+                if isinstance(agent.public_key_jwk, dict)
+                else json.loads(agent.public_key_jwk)
+            )
+        except Exception as exc:
+            raise RuntimeAuthForbidden("AgentGuard agent public key is invalid") from exc
+        try:
+            verification = verify_agent_identity_proof(
+                proof,
+                agent_id=agent_id,
+                public_key_jwk=public_key_jwk,
+                expected_kid=agent.public_key_thumbprint,
+                method=method,
+                url=url,
+                body=body,
+                dpop_jkt=dpop_jkt,
+            )
+            self.replay_store.remember(jkt=f"agent:{verification.kid}", jti=verification.jti)
+        except DPoPReplayError as exc:
+            raise RuntimeAuthUnauthorized(str(exc)) from exc
+        except AgentIdentityProofError as exc:
             raise RuntimeAuthUnauthorized(str(exc)) from exc
 
     def _active_session(self, session_id: str) -> RuntimeSession:

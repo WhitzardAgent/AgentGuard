@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+from agentguard.u_guard.agent_keys import AgentIdentityKey
 from agentguard.u_guard.dpop import DPoPKey
 from backend.auth.broker import DifyAuthBroker, RuntimeAuthForbidden, RuntimeAuthUnauthorized
 from backend.auth.models import RuntimeSession, RuntimeToken
@@ -17,6 +20,33 @@ from backend.user.store import ExternalAccountMapping
 CREATE_URL = "http://agentguard.test/v1/server/session/create"
 REFRESH_URL = "http://agentguard.test/v1/server/session/refresh"
 CLOSE_URL = "http://agentguard.test/v1/server/session/close"
+AGENT_ID = "dify-agent-chat:app-1"
+AGENT_KEY = AgentIdentityKey(Ed25519PrivateKey.generate())
+
+
+class FakeAgentStore:
+    def __init__(self, *, active: bool = True, bound: bool = True) -> None:
+        self.active = active
+        self.bound = bound
+
+    def get_agent(self, agent_id: str):
+        if agent_id != AGENT_ID and agent_id != "ag_workflow":
+            return None
+        return dataclass_record(
+            agent_id=agent_id,
+            status="active" if self.active else "disabled",
+            public_key_jwk=json.dumps(AGENT_KEY.public_jwk, sort_keys=True, separators=(",", ":")),
+            public_key_thumbprint=AGENT_KEY.thumbprint,
+        )
+
+    def agent_ids_for_user(self, user_id: int) -> set[str]:
+        if not self.bound:
+            return set()
+        return {AGENT_ID, "ag_workflow"}
+
+
+def dataclass_record(**kwargs):
+    return type("Record", (), kwargs)()
 
 
 class FakeUserStore:
@@ -134,27 +164,49 @@ class FakeRuntimeSessionStore:
         )
 
 
-def _broker(*, bound: bool = True, ttl_seconds: int = 900):
+def _broker(*, bound: bool = True, agent_bound: bool = True, ttl_seconds: int = 900):
     store = FakeRuntimeSessionStore()
     replay = FakeReplayStore()
     broker = DifyAuthBroker(
         session_store=store,
         replay_store=replay,
         user_store=FakeUserStore(bound=bound),
+        agent_store=FakeAgentStore(bound=agent_bound),
         token_service=RuntimeTokenService(secret="test-secret", ttl_seconds=ttl_seconds),
     )
     return broker, store
 
 
+def _body(*, agent_id: str = AGENT_ID, external_session_id: str | None = "conversation-1"):
+    body = {
+        "provider": "dify",
+        "agent_id": agent_id,
+        "account_email": "alice@example.com",
+        "external_user_id": "dify-user-1",
+        "metadata": {"app_id": "app-1"},
+    }
+    if external_session_id:
+        body["external_session_id"] = external_session_id
+    return body
+
+
+def _agent_proof(key: DPoPKey, body: dict[str, Any], *, agent_id: str | None = None, url: str = CREATE_URL):
+    return AGENT_KEY.sign_session_create_proof(
+        agent_id=agent_id or str(body["agent_id"]),
+        method="POST",
+        url=url,
+        body=body,
+        dpop_jkt=key.thumbprint,
+    )
+
+
 def _create(broker: DifyAuthBroker, key: DPoPKey):
+    body = _body()
     return broker.create_session(
-        provider="dify",
-        external_session_id="conversation-1",
-        agent_id="dify-agent-chat:app-1",
-        account_email="alice@example.com",
-        external_user_id="dify-user-1",
-        metadata={"app_id": "app-1"},
+        **body,
         dpop_proof=key.proof("POST", CREATE_URL),
+        agent_proof=_agent_proof(key, body),
+        request_body=body,
         method="POST",
         url=CREATE_URL,
     )
@@ -172,14 +224,13 @@ def test_dify_session_create_issues_runtime_token_for_bound_email():
 def test_dify_session_create_allows_missing_external_session_id():
     broker, _ = _broker()
     key = DPoPKey()
+    body = _body(agent_id="ag_workflow", external_session_id=None)
     issue = broker.create_session(
-        provider="dify",
+        **body,
         external_session_id=None,
-        agent_id="ag_workflow",
-        account_email="alice@example.com",
-        external_user_id="dify-user-1",
-        metadata={"app_id": "app-1", "node_execution_id": "node-1"},
         dpop_proof=key.proof("POST", CREATE_URL),
+        agent_proof=_agent_proof(key, body),
+        request_body=body,
         method="POST",
         url=CREATE_URL,
     )
@@ -200,14 +251,12 @@ def test_dify_session_create_is_idempotent_for_same_external_session():
     broker, _ = _broker()
     key = DPoPKey()
     first = _create(broker, key)
+    body = _body()
     second = broker.create_session(
-        provider="dify",
-        external_session_id="conversation-1",
-        agent_id="dify-agent-chat:app-1",
-        account_email="alice@example.com",
-        external_user_id="dify-user-1",
-        metadata={},
+        **body,
         dpop_proof=key.proof("POST", CREATE_URL),
+        agent_proof=_agent_proof(key, body),
+        request_body=body,
         method="POST",
         url=CREATE_URL,
     )
@@ -219,15 +268,13 @@ def test_dify_session_create_is_idempotent_for_same_external_session():
 def test_dpop_proof_replay_is_rejected():
     broker, _ = _broker()
     key = DPoPKey()
+    body = _body()
     proof = key.proof("POST", CREATE_URL)
     payload = {
-        "provider": "dify",
-        "external_session_id": "conversation-1",
-        "agent_id": "dify-agent-chat:app-1",
-        "account_email": "alice@example.com",
-        "external_user_id": "dify-user-1",
-        "metadata": {},
+        **body,
         "dpop_proof": proof,
+        "agent_proof": _agent_proof(key, body),
+        "request_body": body,
         "method": "POST",
         "url": CREATE_URL,
     }
@@ -239,16 +286,105 @@ def test_dpop_proof_replay_is_rejected():
 def test_dpop_method_mismatch_is_rejected():
     broker, _ = _broker()
     key = DPoPKey()
+    body = _body()
 
     with pytest.raises(RuntimeAuthUnauthorized):
         broker.create_session(
-            provider="dify",
-            external_session_id="conversation-1",
-            agent_id="dify-agent-chat:app-1",
-            account_email="alice@example.com",
-            external_user_id="dify-user-1",
-            metadata={},
+            **body,
             dpop_proof=key.proof("GET", CREATE_URL),
+            agent_proof=_agent_proof(key, body),
+            request_body=body,
+            method="POST",
+            url=CREATE_URL,
+        )
+
+
+def test_missing_agent_identity_proof_is_rejected():
+    broker, _ = _broker()
+    key = DPoPKey()
+    body = _body()
+
+    with pytest.raises(RuntimeAuthUnauthorized):
+        broker.create_session(
+            **body,
+            dpop_proof=key.proof("POST", CREATE_URL),
+            agent_proof=None,
+            request_body=body,
+            method="POST",
+            url=CREATE_URL,
+        )
+
+
+def test_agent_identity_proof_dpop_binding_mismatch_is_rejected():
+    broker, _ = _broker()
+    key = DPoPKey()
+    other_key = DPoPKey()
+    body = _body()
+
+    with pytest.raises(RuntimeAuthUnauthorized):
+        broker.create_session(
+            **body,
+            dpop_proof=key.proof("POST", CREATE_URL),
+            agent_proof=_agent_proof(other_key, body),
+            request_body=body,
+            method="POST",
+            url=CREATE_URL,
+        )
+
+
+def test_agent_identity_proof_body_hash_mismatch_is_rejected():
+    broker, _ = _broker()
+    key = DPoPKey()
+    body = _body()
+    signed_body = {**body, "account_email": "mallory@example.com"}
+
+    with pytest.raises(RuntimeAuthUnauthorized):
+        broker.create_session(
+            **body,
+            dpop_proof=key.proof("POST", CREATE_URL),
+            agent_proof=_agent_proof(key, signed_body),
+            request_body=body,
+            method="POST",
+            url=CREATE_URL,
+        )
+
+
+def test_agent_not_available_to_user_is_rejected():
+    broker, _ = _broker(agent_bound=False)
+    key = DPoPKey()
+    body = _body()
+
+    with pytest.raises(RuntimeAuthForbidden):
+        broker.create_session(
+            **body,
+            dpop_proof=key.proof("POST", CREATE_URL),
+            agent_proof=_agent_proof(key, body),
+            request_body=body,
+            method="POST",
+            url=CREATE_URL,
+        )
+
+
+def test_agent_identity_proof_replay_is_rejected():
+    broker, _ = _broker()
+    key = DPoPKey()
+    body = _body()
+    agent_proof = _agent_proof(key, body)
+
+    broker.create_session(
+        **body,
+        dpop_proof=key.proof("POST", CREATE_URL),
+        agent_proof=agent_proof,
+        request_body=body,
+        method="POST",
+        url=CREATE_URL,
+    )
+    with pytest.raises(RuntimeAuthUnauthorized):
+        broker.create_session(
+            **body,
+            dpop_proof=key.proof("POST", CREATE_URL),
+            agent_proof=agent_proof,
+            request_body=body,
             method="POST",
             url=CREATE_URL,
         )

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from agentguard.u_guard.dpop import DPoPKey
+from agentguard.u_guard.agent_keys import load_or_create_agent_key
 from agentguard.u_guard.remote_client import RemoteGuardClient
 
 
@@ -43,6 +44,7 @@ class DifyRuntimeAuthManager:
         server_url: str | None,
         api_key: str | None,
         agent_id: str,
+        agent_identity_key_id: str | None,
         external_session_id: str | None,
         account_email: str | None,
         external_user_id: str | None,
@@ -68,6 +70,7 @@ class DifyRuntimeAuthManager:
             state,
             server_url=server_url,
             api_key=api_key,
+            agent_identity_key_id=agent_identity_key_id,
             account_email=account_email,
             external_user_id=external_user_id,
             metadata=metadata,
@@ -123,6 +126,7 @@ class DifyRuntimeAuthManager:
         *,
         server_url: str,
         api_key: str | None,
+        agent_identity_key_id: str | None,
         account_email: str,
         external_user_id: str | None,
         metadata: dict[str, Any],
@@ -145,8 +149,38 @@ class DifyRuntimeAuthManager:
         }
         if state.external_session_id:
             body["external_session_id"] = state.external_session_id
-        result = client.create_runtime_session(body)
+        result = client.create_runtime_session(
+            body,
+            extra_headers_factory=self._agent_identity_headers_factory(
+                state,
+                agent_identity_key_id=agent_identity_key_id,
+            ),
+        )
         self._update_state(state, result)
+
+    def _agent_identity_headers_factory(
+        self,
+        state: DifyRuntimeAuthState,
+        *,
+        agent_identity_key_id: str | None,
+    ):
+        key_id = _optional_text(agent_identity_key_id)
+        if not key_id:
+            return None
+        agent_key = load_or_create_agent_key(key_id)
+
+        def _headers(method: str, url: str, body: dict[str, Any]) -> dict[str, str]:
+            return {
+                "X-AgentGuard-Agent-Proof": agent_key.sign_session_create_proof(
+                    agent_id=state.agent_id,
+                    method=method,
+                    url=url,
+                    body=body,
+                    dpop_jkt=state.dpop_key.thumbprint,
+                )
+            }
+
+        return _headers
 
     def _refresh(
         self,

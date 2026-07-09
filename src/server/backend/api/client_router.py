@@ -230,6 +230,8 @@ def create_runtime_session(req: RuntimeSessionCreateRequest, request: Request) -
             external_user_id=req.external_user_id,
             metadata=req.metadata,
             dpop_proof=request.headers.get("dpop"),
+            agent_proof=request.headers.get("x-agentguard-agent-proof"),
+            request_body=req.model_dump(exclude_none=True),
             method=request.method,
             url=str(request.url),
         )

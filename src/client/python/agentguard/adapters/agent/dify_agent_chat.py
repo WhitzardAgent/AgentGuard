@@ -30,7 +30,7 @@ from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.decisions import DecisionType, GuardDecision
 from agentguard.tools.metadata import ToolMetadata
 from agentguard.adapters.agent.dify_runtime_auth import manager as _runtime_auth_manager
-from agentguard.u_guard.agent_keys import build_agent_registration_payload
+from agentguard.u_guard.agent_keys import agent_identity_key_id, build_agent_registration_payload
 from agentguard.u_guard.remote_client import RemoteGuardClient
 from agentguard.utils.errors import AdapterError
 from agentguard.utils.json import safe_dumps
@@ -495,6 +495,7 @@ def _runtime_auth_for_metadata(
             server_url=os.getenv("AGENTGUARD_SERVER_URL") or None,
             api_key=os.getenv("AGENTGUARD_API_KEY") or None,
             agent_id=agent_id,
+            agent_identity_key_id=_optional_text(metadata.get("agent_identity_key_id")),
             external_session_id=external_session_id,
             cache_key=external_session_id
             or _internal_session_key_from_metadata(metadata, fallback_session_id=fallback_session_id),
@@ -559,6 +560,8 @@ def _metadata_with_registered_agent_chat_agent(metadata: dict[str, Any]) -> dict
         enriched["agent_identity_code"] = registered_agent.get("agent_identity_code")
     if registered_agent.get("public_key_thumbprint"):
         enriched["agent_public_key_thumbprint"] = registered_agent.get("public_key_thumbprint")
+    if registration.get("agent_identity_key_id"):
+        enriched["agent_identity_key_id"] = registration.get("agent_identity_key_id")
     user_agent = registration.get("user_agent") or {}
     if "bound" in user_agent:
         enriched["agentguard_user_bound"] = bool(user_agent.get("bound"))
@@ -1520,6 +1523,13 @@ def _register_dify_agent(
     if not callable(register):
         return None
     provider_instance_id = _dify_provider_instance_id()
+    key_id = agent_identity_key_id(
+        provider="dify",
+        provider_instance_id=provider_instance_id,
+        tenant_id=tenant_id,
+        external_agent_id=external_agent_id,
+        agent_type=agent_type,
+    )
     payload = build_agent_registration_payload(
         provider="dify",
         provider_instance_id=provider_instance_id,
@@ -1531,7 +1541,11 @@ def _register_dify_agent(
         account_email=account_email,
         metadata=metadata,
     )
-    return register(payload)
+    registration = register(payload)
+    if isinstance(registration, dict):
+        registration = dict(registration)
+        registration["agent_identity_key_id"] = key_id
+    return registration
 
 
 def _dify_provider_instance_id() -> str:

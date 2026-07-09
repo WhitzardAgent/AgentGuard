@@ -211,10 +211,15 @@ class RemoteGuardClient:
             raise RemoteGuardError("no server_url configured")
         return self._post(self.unregister_path, {})
 
-    def create_runtime_session(self, body: dict[str, Any]) -> dict[str, Any]:
+    def create_runtime_session(
+        self,
+        body: dict[str, Any],
+        *,
+        extra_headers_factory: Any | None = None,
+    ) -> dict[str, Any]:
         if not self.enabled:
             raise RemoteGuardError("no server_url configured")
-        return self._post(self.runtime_session_create_path, dict(body))
+        return self._post(self.runtime_session_create_path, dict(body), extra_headers_factory=extra_headers_factory)
 
     def refresh_runtime_session(self) -> dict[str, Any]:
         if not self.enabled:
@@ -273,15 +278,25 @@ class RemoteGuardClient:
             headers["X-AgentGuard-User-Ticket"] = self.user_ticket
         return headers
 
-    def _request(self, method: str, path: str, body: dict | None) -> dict[str, Any]:
+    def _request(
+        self,
+        method: str,
+        path: str,
+        body: dict | None,
+        *,
+        extra_headers_factory: Any | None = None,
+    ) -> dict[str, Any]:
         url = f"{self.server_url}{path}"
         data = safe_dumps(body).encode("utf-8") if body is not None else None
         last_exc: Exception | None = None
         for attempt in range(self.retries + 1):
+            headers = self._headers(method=method, url=url)
+            if callable(extra_headers_factory):
+                headers.update(dict(extra_headers_factory(method, url, body or {}) or {}))
             req = urllib.request.Request(
                 url,
                 data=data,
-                headers=self._headers(method=method, url=url),
+                headers=headers,
                 method=method,
             )
             try:
@@ -312,8 +327,14 @@ class RemoteGuardClient:
             raise last_exc
         raise RemoteGuardError(f"remote guard call failed: {last_exc}")
 
-    def _post(self, path: str, body: dict) -> dict[str, Any]:
-        return self._request("POST", path, body)
+    def _post(
+        self,
+        path: str,
+        body: dict,
+        *,
+        extra_headers_factory: Any | None = None,
+    ) -> dict[str, Any]:
+        return self._request("POST", path, body, extra_headers_factory=extra_headers_factory)
 
     def _get(self, path: str) -> dict[str, Any]:
         return self._request("GET", path, None)

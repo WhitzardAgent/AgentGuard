@@ -5,7 +5,9 @@ import base64
 import hashlib
 import json
 import os
+import secrets
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -63,6 +65,40 @@ class AgentIdentityKey:
             format=serialization.PrivateFormat.PKCS8,
             encryption_algorithm=serialization.NoEncryption(),
         )
+
+    def sign_session_create_proof(
+        self,
+        *,
+        agent_id: str,
+        method: str,
+        url: str,
+        body: dict[str, Any],
+        dpop_jkt: str,
+        ttl_seconds: int = 60,
+    ) -> str:
+        if self._private_key is None:
+            raise RuntimeError("agent identity key has no private signing material")
+        now = int(time.time())
+        header = {
+            "typ": "agentguard-agent-proof+jwt",
+            "alg": "EdDSA",
+            "kid": self.thumbprint,
+        }
+        payload = {
+            "iss": str(agent_id),
+            "sub": str(agent_id),
+            "aud": "agentguard:runtime-session-create",
+            "jti": f"agp_{secrets.token_urlsafe(18)}",
+            "iat": now,
+            "exp": now + max(1, int(ttl_seconds)),
+            "htm": method.upper(),
+            "htu": url,
+            "body_sha256": canonical_body_sha256(body),
+            "dpop_jkt": str(dpop_jkt),
+        }
+        signing_input = f"{_b64url_json(header)}.{_b64url_json(payload)}"
+        signature = self._private_key.sign(signing_input.encode("ascii"))
+        return f"{signing_input}.{_b64url(signature)}"
 
 
 def load_or_create_agent_key(stable_id: str) -> AgentIdentityKey:
@@ -133,6 +169,23 @@ def build_agent_registration_payload(
             "agent_public_key_thumbprint": key.thumbprint,
         },
     }
+
+
+def agent_identity_key_id(
+    *,
+    provider: str,
+    external_agent_id: str,
+    agent_type: str,
+    provider_instance_id: str | None = None,
+    tenant_id: str | None = None,
+) -> str:
+    return stable_agent_key_id(
+        provider=provider,
+        provider_instance_id=provider_instance_id,
+        tenant_id=tenant_id,
+        external_agent_id=external_agent_id,
+        agent_type=agent_type,
+    )
 
 
 def stable_agent_key_id(
@@ -228,5 +281,27 @@ def _b64url(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
 
 
+def _b64url_json(value: dict[str, Any]) -> str:
+    return _b64url(json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+
+
 def _optional_text(value: Any) -> str:
     return str(value).strip() if value is not None else ""
+
+
+def canonical_body_sha256(body: dict[str, Any]) -> str:
+    canonical = json.dumps(
+        _strip_none(body),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return _b64url(hashlib.sha256(canonical).digest())
+
+
+def _strip_none(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _strip_none(item) for key, item in value.items() if item is not None}
+    if isinstance(value, list):
+        return [_strip_none(item) for item in value if item is not None]
+    return value

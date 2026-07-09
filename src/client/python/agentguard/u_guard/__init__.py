@@ -6,7 +6,9 @@ from agentguard.u_guard.enforcer import EnforcementResult, UGuardEnforcer
 from agentguard.u_guard.fallback import FallbackGuard
 from agentguard.u_guard.agent_keys import (
     AgentIdentityKey,
+    agent_identity_key_id,
     build_agent_registration_payload,
+    canonical_body_sha256,
     load_or_create_agent_key,
     stable_agent_key_id,
 )
@@ -25,7 +27,9 @@ __all__ = [
     "LocalGuardEngine",
     "LocalEvaluation",
     "AgentIdentityKey",
+    "agent_identity_key_id",
     "build_agent_registration_payload",
+    "canonical_body_sha256",
     "load_or_create_agent_key",
     "stable_agent_key_id",
     "RemoteGuardClient",
