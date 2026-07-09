@@ -967,7 +967,7 @@ def test_runtime_page_renders_shared_sidebar_and_active_nav():
 
     assert status == 200
     assert 'id="app-sidebar"' in body
-    assert 'href="/">Home</a>' in body
+    assert 'href="/home.html">Home</a>' in body
     assert 'href="/agents.html">Agents</a>' in body
     assert 'href="/plugins.html"' in body
     assert 'href="/user.html">User</a>' in body
@@ -982,9 +982,19 @@ def test_runtime_page_renders_shared_sidebar_and_active_nav():
     assert 'id="runtime-session-body"' in body
 
 
-def test_home_page_renders_intro_and_home_active_nav():
+def test_login_page_is_root_entrypoint():
     with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
         status, body = _text_request("GET", preview.url, "/")
+
+    assert status == 200
+    assert "Sign in to AgentGuard" in body
+    assert 'id="login-form"' in body
+    assert 'id="app-sidebar"' not in body
+
+
+def test_home_page_renders_intro_and_home_active_nav():
+    with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+        status, body = _text_request("GET", preview.url, "/home.html")
 
     assert status == 200
     assert "AgentGuard Home" in body
@@ -993,7 +1003,7 @@ def test_home_page_renders_intro_and_home_active_nav():
     assert "DashBoard" in body
     assert 'href="/agents.html"' in body
     assert 'href="/plugins.html"' in body
-    assert '<a class="sidebar-nav-item active" href="/">Home</a>' in body
+    assert '<a class="sidebar-nav-item active" href="/home.html">Home</a>' in body
     assert 'href="/labels.html"' in body
     assert 'data-rule-based-required="true"' in body
 

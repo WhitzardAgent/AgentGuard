@@ -15,6 +15,7 @@
   const CURRENT_USER_KEY = "agentguard.currentUserLabel";
   const AGENT_SELECTION_PATH = "/agents.html";
   const PLUGIN_SELECTION_PATH = "/plugins.html";
+  const LOGIN_PATH = "/login.html";
   const AGENT_REQUIRED_PATHS = new Set([
     "/plugins.html",
     "/skills.html",
@@ -61,6 +62,16 @@
       return;
     }
     window.location.replace(AGENT_SELECTION_PATH);
+  }
+
+  function redirectToLogin() {
+    if (typeof window === "undefined" || !window.location) {
+      return;
+    }
+    const path = currentPath() || "/home.html";
+    const search = String(window.location.search || "");
+    const next = encodeURIComponent(`${path}${search}`);
+    window.location.replace(`${LOGIN_PATH}?next=${next}`);
   }
 
   function redirectToPluginSelection() {
@@ -197,12 +208,41 @@
     state.selectedAgentId = readSelectedAgentId();
     state.selectedPluginName = readSelectedPluginName();
     state.currentUserLabel = readCurrentUserLabel() || "Current User";
-    enforceSelectedAgentAccess();
 
     const clearButton = getElement("sidebar-clear-agent");
     clearButton?.addEventListener("click", () => {
       setSelectedAgent("");
     });
+  }
+
+  async function requireAuthenticatedUser() {
+    if (
+      typeof window === "undefined"
+      || !window.location
+      || typeof fetch !== "function"
+    ) {
+      return true;
+    }
+    try {
+      const response = await fetch("/api/user/me", {
+        credentials: "same-origin",
+        headers: { "Accept": "application/json" },
+      });
+      if (!response.ok) {
+        throw new Error("not signed in");
+      }
+      const payload = await response.json().catch(() => ({}));
+      if (!payload.user) {
+        throw new Error("not signed in");
+      }
+      setCurrentUser(payload.user.username || "");
+      enforceSelectedAgentAccess();
+      return true;
+    } catch {
+      setCurrentUser("");
+      redirectToLogin();
+      return false;
+    }
   }
 
   function setPageContext(nextState) {
@@ -291,6 +331,7 @@
   applySidebarState();
   initSelectedAgentState();
   render();
+  requireAuthenticatedUser();
 
   window.AgentGuardShell = {
     getState() {
@@ -303,5 +344,6 @@
     setSelectedAgent,
     setSelectedPlugin,
     setToolStatus,
+    requireAuthenticatedUser,
   };
 })();

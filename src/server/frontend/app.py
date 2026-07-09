@@ -50,8 +50,12 @@ def _proxy_timeout_seconds() -> float:
 PROXY_TIMEOUT_SECONDS = _proxy_timeout_seconds()
 
 PAGE_ROUTES = {
-    "/": "home.html",
-    "/index.html": "home.html",
+    "/": "login.html",
+    "/index.html": "login.html",
+    "/login": "login.html",
+    "/login.html": "login.html",
+    "/home": "home.html",
+    "/home.html": "home.html",
     "/agents": "agents.html",
     "/agents.html": "agents.html",
     "/plugins": "plugins.html",
@@ -71,6 +75,7 @@ PAGE_ROUTES = {
 }
 
 PAGE_TAB_KEYS = {
+    "login.html": "",
     "home.html": "home",
     "agents.html": "agents",
     "plugins.html": "plugins",

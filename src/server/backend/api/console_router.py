@@ -365,7 +365,10 @@ def _visible_scope(session_token: str | None) -> dict[str, Any]:
             (item.provider.lower(), item.account_email.lower())
             for item in store.list_external_accounts(user)
         }
-        agent_ids = AgentStore().agent_ids_for_user(user.id)
+        try:
+            agent_ids = AgentStore().agent_ids_for_user(user.id)
+        except DatabaseUnavailable:
+            agent_ids = set()
         return {"external_accounts": external_accounts, "agent_ids": agent_ids, "user_id": user.id}
     except DatabaseUnavailable:
         return {"external_accounts": set(), "agent_ids": set(), "user_id": None}

@@ -23,40 +23,12 @@
       </section>
 
       <section class="grid two">
-        <div class="card" id="auth-card">
+        <div class="card" id="profile-card">
           <div class="heading-row">
-            <h3>Sign In</h3>
+            <h3>Current User</h3>
+            <button class="btn" id="logout-button" type="button" hidden>Logout</button>
           </div>
-          <form class="form-grid" id="login-form">
-            <label>
-              <span>Username</span>
-              <input id="login-username" autocomplete="username" required minlength="3" maxlength="255">
-            </label>
-            <label>
-              <span>Password</span>
-              <input id="login-password" type="password" autocomplete="current-password" required minlength="8">
-            </label>
-            <div class="form-grid-actions">
-              <button class="btn primary" type="submit">Sign In</button>
-            </div>
-          </form>
-
-          <div class="heading-row">
-            <h3>Create Account</h3>
-          </div>
-          <form class="form-grid" id="register-form">
-            <label>
-              <span>Username</span>
-              <input id="register-username" autocomplete="username" required minlength="3" maxlength="255">
-            </label>
-            <label>
-              <span>Password</span>
-              <input id="register-password" type="password" autocomplete="new-password" required minlength="8">
-            </label>
-            <div class="form-grid-actions">
-              <button class="btn" type="submit">Register</button>
-            </div>
-          </form>
+          <p class="subtle" id="user-status">Checking sign-in status...</p>
         </div>
 
         <div class="card" id="dify-card" hidden>
@@ -90,14 +62,6 @@
             </table>
           </div>
         </div>
-
-        <div class="card" id="profile-card">
-          <div class="heading-row">
-            <h3>Current User</h3>
-            <button class="btn" id="logout-button" type="button" hidden>Logout</button>
-          </div>
-          <p class="subtle" id="user-status">Not signed in.</p>
-        </div>
       </section>
     </main>
 
@@ -114,8 +78,6 @@
   </script>
   <script>
     (function () {
-      const loginForm = document.getElementById("login-form");
-      const registerForm = document.getElementById("register-form");
       const logoutButton = document.getElementById("logout-button");
       const statusNode = document.getElementById("user-status");
       const difyCard = document.getElementById("dify-card");
@@ -131,13 +93,6 @@
         toast.textContent = message;
         toast.className = `toast ${tone || "success"} show`;
         window.setTimeout(() => toast.classList.remove("show"), 2600);
-      }
-
-      function formPayload(prefix) {
-        return {
-          username: document.getElementById(`${prefix}-username`).value.trim(),
-          password: document.getElementById(`${prefix}-password`).value,
-        };
       }
 
       async function api(path, options) {
@@ -184,8 +139,6 @@
           : "Not signed in.";
         logoutButton.hidden = !signedIn;
         difyCard.hidden = !signedIn;
-        loginForm.hidden = signedIn;
-        registerForm.hidden = signedIn;
         if (!signedIn) {
           externalAccountListCard.hidden = true;
           externalAccountList.innerHTML = "";
@@ -232,36 +185,10 @@
           renderExternalAccounts(externalPayload.external_accounts || []);
         } catch {
           renderUser(null);
+          const next = encodeURIComponent(`${window.location.pathname}${window.location.search || ""}`);
+          window.location.replace(`/login.html?next=${next}`);
         }
       }
-
-      loginForm.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        try {
-          const payload = await api("/api/user/login", {
-            method: "POST",
-            body: JSON.stringify(formPayload("login")),
-          });
-          renderUser(payload.user);
-          await refresh();
-          showToast("Signed in.", "success");
-        } catch (error) {
-          showToast(error.message || "Login failed.", "warning");
-        }
-      });
-
-      registerForm.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        try {
-          await api("/api/user/register", {
-            method: "POST",
-            body: JSON.stringify(formPayload("register")),
-          });
-          showToast("Account created. You can sign in now.", "success");
-        } catch (error) {
-          showToast(error.message || "Registration failed.", "warning");
-        }
-      });
 
       logoutButton.addEventListener("click", async () => {
         try {
@@ -271,6 +198,7 @@
         }
         renderUser(null);
         showToast("Signed out.", "success");
+        window.setTimeout(() => window.location.replace("/login.html"), 300);
       });
 
       difyBindForm.addEventListener("submit", async (event) => {

@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign In - AgentGuard</title>
+  <link rel="stylesheet" href="/static/common/styles.css">
+</head>
+<body class="auth-page">
+  <main class="auth-shell">
+    <section class="auth-panel" aria-labelledby="auth-title">
+      <div class="auth-brand">AgentGuard</div>
+      <p class="page-kicker">Control Plane</p>
+      <h1 id="auth-title">Sign in to AgentGuard</h1>
+      <p class="subtle">Use your AgentGuard account to enter the console.</p>
+
+      <form class="auth-form" id="login-form">
+        <label>
+          <span>Username</span>
+          <input id="login-username" autocomplete="username" required minlength="3" maxlength="255" autofocus>
+        </label>
+        <label>
+          <span>Password</span>
+          <input id="login-password" type="password" autocomplete="current-password" required minlength="8">
+        </label>
+        <button class="btn primary auth-submit" id="login-submit" type="submit">Sign In</button>
+      </form>
+
+      <div class="auth-register" id="register-panel" hidden>
+        <div class="auth-divider"></div>
+        <form class="auth-form" id="register-form">
+          <label>
+            <span>New Username</span>
+            <input id="register-username" autocomplete="username" required minlength="3" maxlength="255">
+          </label>
+          <label>
+            <span>New Password</span>
+            <input id="register-password" type="password" autocomplete="new-password" required minlength="8">
+          </label>
+          <button class="btn auth-submit" id="register-submit" type="submit">Create Account</button>
+        </form>
+      </div>
+
+      <button class="auth-link-button" id="toggle-register" type="button">Create an account</button>
+    </section>
+    <div class="toast" id="toast"></div>
+  </main>
+
+  <script>
+    (function () {
+      const loginForm = document.getElementById("login-form");
+      const registerForm = document.getElementById("register-form");
+      const registerPanel = document.getElementById("register-panel");
+      const toggleRegister = document.getElementById("toggle-register");
+      const loginSubmit = document.getElementById("login-submit");
+      const registerSubmit = document.getElementById("register-submit");
+
+      function showToast(message, tone) {
+        const toast = document.getElementById("toast");
+        if (!toast) {
+          return;
+        }
+        toast.textContent = message;
+        toast.className = `toast ${tone || "success"} show`;
+        window.setTimeout(() => toast.classList.remove("show"), 2600);
+      }
+
+      async function api(path, options) {
+        const response = await fetch(path, {
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json", "Accept": "application/json" },
+          ...options,
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload.detail || payload.error || `HTTP ${response.status}`);
+        }
+        return payload;
+      }
+
+      function nextPath() {
+        const params = new URLSearchParams(window.location.search);
+        const next = String(params.get("next") || "").trim();
+        if (!next || !next.startsWith("/") || next.startsWith("//") || next.startsWith("/login")) {
+          return "/user.html";
+        }
+        return next;
+      }
+
+      function setLoading(button, loading) {
+        button.disabled = loading;
+        button.classList.toggle("is-loading", loading);
+      }
+
+      function setCurrentUser(user) {
+        try {
+          if (user?.username) {
+            window.localStorage?.setItem("agentguard.currentUserLabel", user.username);
+          }
+        } catch {
+          // Ignore localStorage write issues.
+        }
+      }
+
+      async function redirectIfAlreadySignedIn() {
+        try {
+          const payload = await api("/api/user/me");
+          if (payload.user) {
+            setCurrentUser(payload.user);
+            window.location.replace(nextPath());
+          }
+        } catch {
+          // Stay on the login page.
+        }
+      }
+
+      toggleRegister.addEventListener("click", () => {
+        const show = registerPanel.hidden;
+        registerPanel.hidden = !show;
+        toggleRegister.textContent = show ? "Use an existing account" : "Create an account";
+      });
+
+      loginForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        setLoading(loginSubmit, true);
+        try {
+          const payload = await api("/api/user/login", {
+            method: "POST",
+            body: JSON.stringify({
+              username: document.getElementById("login-username").value.trim(),
+              password: document.getElementById("login-password").value,
+            }),
+          });
+          setCurrentUser(payload.user);
+          window.location.replace(nextPath());
+        } catch (error) {
+          showToast(error.message || "Login failed.", "warning");
+        } finally {
+          setLoading(loginSubmit, false);
+        }
+      });
+
+      registerForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        setLoading(registerSubmit, true);
+        try {
+          await api("/api/user/register", {
+            method: "POST",
+            body: JSON.stringify({
+              username: document.getElementById("register-username").value.trim(),
+              password: document.getElementById("register-password").value,
+            }),
+          });
+          registerPanel.hidden = true;
+          toggleRegister.textContent = "Create an account";
+          showToast("Account created. Sign in with it.", "success");
+        } catch (error) {
+          showToast(error.message || "Registration failed.", "warning");
+        } finally {
+          setLoading(registerSubmit, false);
+        }
+      });
+
+      redirectIfAlreadySignedIn();
+    })();
+  </script>
+</body>
+</html>
