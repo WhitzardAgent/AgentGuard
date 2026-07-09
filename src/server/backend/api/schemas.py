@@ -58,6 +58,15 @@ class AgentRegisterRequest(_ApiModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class AgentCatalogSyncRequest(_ApiModel):
+    provider: str
+    agent_type: str
+    external_agent_ids: list[str] = Field(default_factory=list)
+    provider_instance_id: str | None = None
+    tenant_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class SkillReportRequest(_ApiModel):
     context: dict[str, Any] = Field(default_factory=dict)
     skills: list[dict[str, Any]] = Field(default_factory=list)
@@ -72,6 +81,15 @@ class McpReportRequest(_ApiModel):
 
 class SessionRegisterRequest(_ApiModel):
     context: dict[str, Any] = Field(default_factory=dict)
+
+
+class RuntimeSessionCreateRequest(_ApiModel):
+    provider: str
+    external_session_id: str | None = None
+    agent_id: str
+    account_email: str
+    external_user_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class PluginConfigUpdateRequest(_ApiModel):

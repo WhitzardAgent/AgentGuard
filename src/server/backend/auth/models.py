@@ -12,7 +12,7 @@ class RuntimeSession:
     agent_id: str
     user_id: int
     provider: str
-    external_session_id: str
+    external_session_id: str | None
     external_account_email: str
     dpop_jkt: str
     status: str
@@ -57,4 +57,3 @@ class AuthContext:
         if self.external_session_id:
             metadata["external_session_id"] = self.external_session_id
         return metadata
-

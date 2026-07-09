@@ -437,6 +437,7 @@ def test_agent_chat_catalog_sync_reports_enabled_tools(monkeypatch):
 
     registered = []
     synced = []
+    agent_syncs = []
 
     class FakeRemote:
         def __init__(self, *args, **kwargs):
@@ -449,6 +450,10 @@ def test_agent_chat_catalog_sync_reports_enabled_tools(monkeypatch):
         def sync_tools(self, context, tools):
             synced.append((context.to_dict(), list(tools)))
             return {"status": "ok", "tool_count": len(tools)}
+
+        def sync_agents(self, catalog):
+            agent_syncs.append(dict(catalog))
+            return {"status": "ok", "deactivated_count": 0}
 
     monkeypatch.setattr(adapter, "RemoteGuardClient", FakeRemote)
     monkeypatch.setattr(adapter, "_published_agent_chat_apps", lambda: [app])
@@ -467,6 +472,19 @@ def test_agent_chat_catalog_sync_reports_enabled_tools(monkeypatch):
     assert registered[0]["metadata"]["external_account_email"] == "alice@example.com"
     assert synced[0][0]["agent_id"] == "dify-agent-chat:app-1"
     assert synced[0][0]["metadata"]["dify_user_email"] == "alice@example.com"
+    assert agent_syncs == [
+        {
+            "provider": "dify",
+            "provider_instance_id": "",
+            "agent_type": "agent_chat",
+            "external_agent_ids": ["app-1"],
+            "metadata": {
+                "adapter": "dify_agent_chat",
+                "dify_runtime": "agent_chat",
+                "catalog_sync": True,
+            },
+        }
+    ]
     assert [tool["name"] for tool in synced[0][1]] == ["weekday"]
     assert synced[0][1][0]["input_params"] == ["year", "month", "day"]
 
@@ -623,6 +641,108 @@ def test_agent_chat_session_id_uses_conversation_before_message(monkeypatch):
     assert guard.context.user_id == "user-1"
     assert guard.context.metadata["message_id"] == "message-1"
     assert guard.context.task_id == "task-1"
+
+
+def test_agent_chat_make_guard_uses_dpop_runtime_session(monkeypatch):
+    adapter = _fresh_adapter(monkeypatch)
+    monkeypatch.setenv("AGENTGUARD_SERVER_URL", "http://agentguard.test")
+    monkeypatch.setenv("AGENTGUARD_API_KEY", "sk-test")
+    monkeypatch.setattr(
+        adapter,
+        "_runtime_agent_chat_registration",
+        lambda metadata: {
+            "agent": {
+                "agent_id": "ag_agent_chat",
+                "agent_identity_code": "agic_chat",
+            },
+            "user_agent": {"bound": True},
+        },
+    )
+
+    calls = []
+
+    class FakeRuntimeAuth:
+        session_id = "ags_dify_chat"
+        session_token = "runtime-token-chat"
+        canonical_user_id = "7"
+
+        def proof(self, method, url, access_token=None):
+            return "proof"
+
+    def ensure(**kwargs):
+        calls.append(kwargs)
+        return FakeRuntimeAuth()
+
+    monkeypatch.setattr(adapter._runtime_auth_manager, "ensure", ensure)
+
+    guard = adapter._make_guard(
+        {
+            "app_id": "app-1",
+            "conversation_id": "conversation-1",
+            "message_id": "message-1",
+            "user_id": "dify-user-1",
+            "dify_user_email": "alice@example.com",
+        }
+    )
+
+    assert calls[0]["agent_id"] == "ag_agent_chat"
+    assert calls[0]["external_session_id"] == "conversation-1"
+    assert calls[0]["account_email"] == "alice@example.com"
+    assert calls[0]["external_user_id"] == "dify-user-1"
+    assert guard.context.session_id == "ags_dify_chat"
+    assert guard.context.agent_id == "ag_agent_chat"
+    assert guard.context.user_id == "7"
+    assert guard._remote.use_dpop_auth is True
+    assert guard._remote.legacy_identity_headers is False
+    assert guard._auto_close_runtime_session is False
+
+
+def test_agent_chat_runtime_auth_does_not_map_message_id_as_external_session(monkeypatch):
+    adapter = _fresh_adapter(monkeypatch)
+    monkeypatch.setenv("AGENTGUARD_SERVER_URL", "http://agentguard.test")
+    monkeypatch.setenv("AGENTGUARD_API_KEY", "sk-test")
+    monkeypatch.setattr(
+        adapter,
+        "_runtime_agent_chat_registration",
+        lambda metadata: {
+            "agent": {
+                "agent_id": "ag_agent_chat",
+                "agent_identity_code": "agic_chat",
+            },
+            "user_agent": {"bound": True},
+        },
+    )
+
+    calls = []
+
+    class FakeRuntimeAuth:
+        session_id = "ags_dify_chat_internal"
+        session_token = "runtime-token-chat"
+        canonical_user_id = "7"
+
+        def proof(self, method, url, access_token=None):
+            return "proof"
+
+    def ensure(**kwargs):
+        calls.append(kwargs)
+        return FakeRuntimeAuth()
+
+    monkeypatch.setattr(adapter._runtime_auth_manager, "ensure", ensure)
+
+    guard = adapter._make_guard(
+        {
+            "app_id": "app-1",
+            "message_id": "message-1",
+            "user_id": "dify-user-1",
+            "dify_user_email": "alice@example.com",
+        }
+    )
+
+    assert calls[0]["external_session_id"] is None
+    assert calls[0]["cache_key"].startswith("agentguard-internal:dify-agent-chat:app-1:dify-user-1")
+    assert calls[0]["metadata"]["agentguard_internal_session_key"] == calls[0]["cache_key"]
+    assert "external_session_id" not in calls[0]["metadata"]
+    assert guard.context.session_id == "ags_dify_chat_internal"
 
 
 def test_agent_chat_registers_only_runtime_enabled_tools_and_emits_events(monkeypatch):

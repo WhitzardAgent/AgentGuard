@@ -239,9 +239,10 @@ class AgentStore:
     def agent_ids_for_user(self, user_id: int) -> set[str]:
         rows = self.db.fetchall(
             """
-            SELECT agent_id
-            FROM user_agents
-            WHERE user_id = %s
+            SELECT ua.agent_id
+            FROM user_agents ua
+            JOIN agents a ON a.agent_id = ua.agent_id
+            WHERE ua.user_id = %s AND a.status = 'active'
             """,
             (int(user_id),),
         )
@@ -253,7 +254,7 @@ class AgentStore:
             if not normalized_agent_ids:
                 return []
             records = [self.get_agent(agent_id) for agent_id in normalized_agent_ids]
-            return [record for record in records if record is not None]
+            return [record for record in records if record is not None and record.status == "active"]
         rows = self.db.fetchall(
             """
             SELECT a.agent_id, a.agent_identity_code, e.provider, e.provider_instance_id,
@@ -262,10 +263,76 @@ class AgentStore:
                    a.created_at, a.updated_at, a.last_seen_at
             FROM agents a
             LEFT JOIN agent_external_identities e ON e.agent_id = a.agent_id
+            WHERE a.status = 'active'
             ORDER BY a.updated_at DESC, a.created_at DESC
             """,
         )
         return [_agent_from_row(row) for row in rows]
+
+    def sync_provider_agents(
+        self,
+        *,
+        provider: str,
+        agent_type: str,
+        external_agent_ids: list[str],
+        provider_instance_id: str | None = None,
+        tenant_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        clean_provider = _normalize_provider(provider)
+        clean_provider_instance_id = _normalize_optional_key(provider_instance_id)
+        clean_agent_type = _normalize_required(agent_type, "agent_type")
+        clean_tenant_id = _normalize_optional_key(tenant_id)
+        seen_external_ids = {
+            _normalize_required(item, "external_agent_id")
+            for item in external_agent_ids
+            if _optional_text(item)
+        }
+        where = [
+            "e.provider = %s",
+            "e.provider_instance_id = %s",
+            "e.agent_type = %s",
+        ]
+        params: list[Any] = [clean_provider, clean_provider_instance_id, clean_agent_type]
+        if clean_tenant_id:
+            where.append("e.tenant_id = %s")
+            params.append(clean_tenant_id)
+        rows = self.db.fetchall(
+            f"""
+            SELECT e.agent_id, e.external_agent_id, a.status
+            FROM agent_external_identities e
+            JOIN agents a ON a.agent_id = e.agent_id
+            WHERE {' AND '.join(where)}
+            """,
+            tuple(params),
+        )
+        stale_agent_ids = [
+            str(row["agent_id"])
+            for row in rows
+            if str(row.get("status") or "active") == "active"
+            and str(row["external_agent_id"]) not in seen_external_ids
+        ]
+        if stale_agent_ids:
+            placeholders = ", ".join(["%s"] * len(stale_agent_ids))
+            self.db.execute(
+                f"""
+                UPDATE agents
+                SET status = 'deleted',
+                    metadata_json = COALESCE(%s, metadata_json),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE agent_id IN ({placeholders})
+                """,
+                (_metadata_json(metadata), *stale_agent_ids),
+            )
+        return {
+            "provider": clean_provider,
+            "provider_instance_id": clean_provider_instance_id,
+            "tenant_id": clean_tenant_id,
+            "agent_type": clean_agent_type,
+            "seen_external_agent_count": len(seen_external_ids),
+            "deactivated_count": len(stale_agent_ids),
+            "deactivated_agent_ids": stale_agent_ids,
+        }
 
     def upsert_agent_tool(self, agent_id: str, tool: dict[str, Any]) -> AgentToolRecord | None:
         record = _agent_tool_from_payload(agent_id, tool)

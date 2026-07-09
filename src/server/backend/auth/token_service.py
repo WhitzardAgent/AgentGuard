@@ -49,7 +49,7 @@ class RuntimeTokenService:
         user_id: int | str,
         dpop_jkt: str,
         provider: str,
-        external_session_id: str,
+        external_session_id: str | None,
     ) -> IssuedToken:
         now = int(time.time())
         token_jti = f"rtok_{secrets.token_urlsafe(18)}"
@@ -64,9 +64,10 @@ class RuntimeTokenService:
             "uid": str(user_id),
             "scope": ["runtime"],
             "provider": provider,
-            "external_session_id": external_session_id,
             "cnf": {"jkt": dpop_jkt},
         }
+        if external_session_id:
+            payload["external_session_id"] = external_session_id
         return IssuedToken(
             token=_encode_jwt({"typ": "JWT", "alg": "HS256"}, payload, self.secret),
             token_jti=token_jti,
@@ -153,4 +154,3 @@ def _int_env(name: str, default: int) -> int:
         return max(1, int(raw))
     except ValueError:
         return default
-

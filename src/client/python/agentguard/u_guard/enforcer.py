@@ -139,11 +139,15 @@ class UGuardEnforcer:
             )
             decision.metadata.setdefault("route", "remote")
             return decision, "remote"
-        except RemoteGuardError:
+        except RemoteGuardError as exc:
             self.sync_buffer.restore_front(cached_entries)
+            detail = str(exc).strip()
+            reason = "Remote decision unavailable; event requires server judgement."
+            if detail:
+                reason = f"{reason} ({detail})"
             decision = GuardDecision.require_remote_review(
-                "Remote decision unavailable; event requires server judgement.",
+                reason,
                 risk_signals=list(event.risk_signals),
-                metadata={"route": "remote_unavailable"},
+                metadata={"route": "remote_unavailable", "remote_error": detail},
             )
             return decision, "remote_unavailable"

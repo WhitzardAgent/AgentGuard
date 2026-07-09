@@ -17,6 +17,7 @@ class RuntimeSessionStore:
     def ensure_schema(self) -> None:
         for statement in _SCHEMA:
             self.db.execute(statement)
+        self._ensure_nullable_external_session_id()
 
     def find_active_external_session(
         self,
@@ -48,7 +49,7 @@ class RuntimeSessionStore:
         agent_id: str,
         user_id: int,
         provider: str,
-        external_session_id: str,
+        external_session_id: str | None,
         external_account_email: str,
         dpop_jkt: str,
         metadata: dict[str, Any] | None = None,
@@ -67,7 +68,7 @@ class RuntimeSessionStore:
                 agent_id,
                 int(user_id),
                 _normalize_provider(provider),
-                external_session_id,
+                _optional_text(external_session_id),
                 _normalize_email(external_account_email),
                 dpop_jkt,
                 _metadata_json(metadata),
@@ -156,6 +157,11 @@ class RuntimeSessionStore:
             (token_jti,),
         )
 
+    def _ensure_nullable_external_session_id(self) -> None:
+        column = self.db.fetchone("SHOW COLUMNS FROM runtime_sessions LIKE 'external_session_id'")
+        if column and str(column.get("Null") or "").upper() == "NO":
+            self.db.execute("ALTER TABLE runtime_sessions MODIFY external_session_id VARCHAR(255) NULL")
+
 
 def ensure_runtime_session_schema() -> None:
     RuntimeSessionStore().ensure_schema()
@@ -172,7 +178,7 @@ _SCHEMA = [
       agent_id VARCHAR(255) NOT NULL,
       user_id INT NOT NULL,
       provider VARCHAR(64) NOT NULL,
-      external_session_id VARCHAR(255) NOT NULL,
+      external_session_id VARCHAR(255) NULL,
       external_account_email VARCHAR(255) NOT NULL,
       dpop_jkt VARCHAR(255) NOT NULL,
       status VARCHAR(32) NOT NULL DEFAULT 'active',
@@ -213,7 +219,7 @@ def _session_from_row(row: dict[str, Any]) -> RuntimeSession:
         agent_id=str(row["agent_id"]),
         user_id=int(row["user_id"]),
         provider=str(row["provider"]),
-        external_session_id=str(row["external_session_id"]),
+        external_session_id=_optional_text(row.get("external_session_id")),
         external_account_email=str(row["external_account_email"]),
         dpop_jkt=str(row["dpop_jkt"]),
         status=str(row["status"]),
@@ -263,4 +269,3 @@ def _coerce_datetime(value: Any) -> datetime:
             return value.replace(tzinfo=timezone.utc)
         return value.astimezone(timezone.utc)
     return datetime.fromisoformat(str(value)).replace(tzinfo=timezone.utc)
-

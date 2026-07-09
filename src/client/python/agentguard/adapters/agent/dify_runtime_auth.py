@@ -13,7 +13,8 @@ from agentguard.u_guard.remote_client import RemoteGuardClient
 @dataclass
 class DifyRuntimeAuthState:
     agent_id: str
-    external_session_id: str
+    cache_key: str
+    external_session_id: str | None
     dpop_key: DPoPKey
     session_id: str | None = None
     session_token: str | None = None
@@ -32,9 +33,9 @@ class DifyRuntimeAuthManager:
         self._states: dict[tuple[str, str], DifyRuntimeAuthState] = {}
         self._lock = threading.Lock()
 
-    def get(self, agent_id: str, external_session_id: str) -> DifyRuntimeAuthState | None:
+    def get(self, agent_id: str, cache_key: str) -> DifyRuntimeAuthState | None:
         with self._lock:
-            return self._states.get((agent_id, external_session_id))
+            return self._states.get((agent_id, cache_key))
 
     def ensure(
         self,
@@ -42,16 +43,17 @@ class DifyRuntimeAuthManager:
         server_url: str | None,
         api_key: str | None,
         agent_id: str,
-        external_session_id: str,
+        external_session_id: str | None,
         account_email: str | None,
         external_user_id: str | None,
         metadata: dict[str, Any],
         timeout_s: float,
         retries: int,
+        cache_key: str | None = None,
     ) -> DifyRuntimeAuthState | None:
         if not server_url or not account_email:
             return None
-        state = self._state(agent_id, external_session_id)
+        state = self._state(agent_id, cache_key or external_session_id, external_session_id=external_session_id)
         if state.token_valid():
             return state
         if state.session_token:
@@ -74,16 +76,25 @@ class DifyRuntimeAuthManager:
         )
         return state if state.session_token else None
 
-    def _state(self, agent_id: str, external_session_id: str) -> DifyRuntimeAuthState:
+    def _state(
+        self,
+        agent_id: str,
+        cache_key: str | None,
+        *,
+        external_session_id: str | None,
+    ) -> DifyRuntimeAuthState:
+        cache_key = _optional_text(cache_key) or f"agentguard-internal:{time.time_ns()}"
+        external_session_id = _optional_text(external_session_id)
         with self._lock:
-            state = self._states.get((agent_id, external_session_id))
+            state = self._states.get((agent_id, cache_key))
             if state is None:
                 state = DifyRuntimeAuthState(
                     agent_id=agent_id,
+                    cache_key=cache_key,
                     external_session_id=external_session_id,
                     dpop_key=DPoPKey(),
                 )
-                self._states[(agent_id, external_session_id)] = state
+                self._states[(agent_id, cache_key)] = state
             return state
 
     def _client(
@@ -125,16 +136,16 @@ class DifyRuntimeAuthManager:
             timeout_s=timeout_s,
             retries=retries,
         )
-        result = client.create_runtime_session(
-            {
-                "provider": "dify",
-                "external_session_id": state.external_session_id,
-                "agent_id": state.agent_id,
-                "account_email": account_email,
-                "external_user_id": external_user_id,
-                "metadata": metadata,
-            }
-        )
+        body = {
+            "provider": "dify",
+            "agent_id": state.agent_id,
+            "account_email": account_email,
+            "external_user_id": external_user_id,
+            "metadata": metadata,
+        }
+        if state.external_session_id:
+            body["external_session_id"] = state.external_session_id
+        result = client.create_runtime_session(body)
         self._update_state(state, result)
 
     def _refresh(
@@ -173,4 +184,3 @@ def _optional_text(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
-

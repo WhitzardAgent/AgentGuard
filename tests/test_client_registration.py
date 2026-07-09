@@ -5,6 +5,51 @@ from agentguard.guard import AgentGuard
 from agentguard.u_guard.remote_client import RemoteGuardClient
 
 
+def test_python_client_closes_dpop_runtime_session_by_default(monkeypatch):
+    calls: list[str] = []
+
+    def fake_close_runtime_session(self: RemoteGuardClient):
+        calls.append(self.session_id or "")
+        return {"status": "closed"}
+
+    monkeypatch.setattr(RemoteGuardClient, "close_runtime_session", fake_close_runtime_session)
+    monkeypatch.setattr(RemoteGuardClient, "unregister_session", lambda self: (_ for _ in ()).throw(AssertionError()))
+
+    guard = AgentGuard(
+        "ags-runtime",
+        server_url="http://server.test",
+        session_token="runtime-token",
+        dpop_proof_factory=lambda method, url, access_token=None: "proof",
+        use_dpop_auth=True,
+        auto_register_session=False,
+    )
+
+    guard.close()
+
+    assert calls == ["ags-runtime"]
+
+
+def test_python_client_can_keep_dpop_runtime_session_open_on_close(monkeypatch):
+    monkeypatch.setattr(
+        RemoteGuardClient,
+        "close_runtime_session",
+        lambda self: (_ for _ in ()).throw(AssertionError("runtime session should stay open")),
+    )
+    monkeypatch.setattr(RemoteGuardClient, "unregister_session", lambda self: (_ for _ in ()).throw(AssertionError()))
+
+    guard = AgentGuard(
+        "ags-runtime",
+        server_url="http://server.test",
+        session_token="runtime-token",
+        dpop_proof_factory=lambda method, url, access_token=None: "proof",
+        use_dpop_auth=True,
+        auto_register_session=False,
+        auto_close_runtime_session=False,
+    )
+
+    guard.close()
+
+
 def test_python_client_registers_remote_session_once_on_init(monkeypatch):
     calls: list[dict] = []
 

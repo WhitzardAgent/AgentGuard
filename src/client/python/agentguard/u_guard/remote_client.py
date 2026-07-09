@@ -68,6 +68,7 @@ class RemoteGuardClient:
         register_path: str = "/v1/server/session/register",
         unregister_path: str = "/v1/server/session/unregister",
         agent_register_path: str = "/v1/server/agents/register",
+        agent_sync_path: str = "/v1/server/agents/sync",
         runtime_session_create_path: str = "/v1/server/session/create",
         runtime_session_refresh_path: str = "/v1/server/session/refresh",
         runtime_session_close_path: str = "/v1/server/session/close",
@@ -97,6 +98,7 @@ class RemoteGuardClient:
         self.register_path = register_path
         self.unregister_path = unregister_path
         self.agent_register_path = agent_register_path
+        self.agent_sync_path = agent_sync_path
         self.runtime_session_create_path = runtime_session_create_path
         self.runtime_session_refresh_path = runtime_session_refresh_path
         self.runtime_session_close_path = runtime_session_close_path
@@ -194,6 +196,11 @@ class RemoteGuardClient:
             raise RemoteGuardError("no server_url configured")
         return self._post(self.agent_register_path, dict(agent))
 
+    def sync_agents(self, catalog: dict[str, Any]) -> dict[str, Any]:
+        if not self.enabled:
+            raise RemoteGuardError("no server_url configured")
+        return self._post(self.agent_sync_path, dict(catalog))
+
     def register_session(self, context: RuntimeContext) -> dict[str, Any]:
         if not self.enabled:
             raise RemoteGuardError("no server_url configured")
@@ -282,11 +289,27 @@ class RemoteGuardClient:
                     raw = resp.read().decode("utf-8")
                 self.breaker.record_success()
                 return safe_loads(raw, fallback={}) or {}
+            except urllib.error.HTTPError as exc:
+                body = ""
+                try:
+                    body = exc.read().decode("utf-8", errors="replace")
+                except Exception:
+                    body = ""
+                last_exc = RemoteGuardError(
+                    f"remote guard call failed: HTTP {exc.code} {exc.reason}"
+                    + (f" body={body}" if body else "")
+                )
+                if 500 <= int(exc.code) < 600 and attempt < self.retries:
+                    time.sleep(min(0.2 * (2**attempt), 1.0))
+                    continue
+                break
             except (urllib.error.URLError, TimeoutError, OSError) as exc:
                 last_exc = exc
                 if attempt < self.retries:
                     time.sleep(min(0.2 * (2**attempt), 1.0))
         self.breaker.record_failure()
+        if isinstance(last_exc, RemoteGuardError):
+            raise last_exc
         raise RemoteGuardError(f"remote guard call failed: {last_exc}")
 
     def _post(self, path: str, body: dict) -> dict[str, Any]:

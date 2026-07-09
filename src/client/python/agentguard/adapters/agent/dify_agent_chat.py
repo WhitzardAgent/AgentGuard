@@ -29,6 +29,7 @@ from agentguard.schemas import events as ev
 from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.decisions import DecisionType, GuardDecision
 from agentguard.tools.metadata import ToolMetadata
+from agentguard.adapters.agent.dify_runtime_auth import manager as _runtime_auth_manager
 from agentguard.u_guard.agent_keys import build_agent_registration_payload
 from agentguard.u_guard.remote_client import RemoteGuardClient
 from agentguard.utils.errors import AdapterError
@@ -55,6 +56,8 @@ _catalog_fingerprints: dict[str, str] = {}
 _catalog_fingerprints_lock = threading.Lock()
 _config_update_hook_installed = False
 _config_update_hook_lock = threading.Lock()
+_runtime_agent_registrations: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
+_runtime_agent_registrations_lock = threading.Lock()
 
 
 def install_dify_agent_chat_adapter() -> dict[str, Any]:
@@ -420,18 +423,34 @@ def _metadata_from_runner_args(args: tuple[Any, ...], kwargs: dict[str, Any]) ->
 def _make_guard(metadata: dict[str, Any]) -> Any:
     from agentguard import AgentGuard
 
-    agent_id = metadata.get("app_id") or metadata.get("conversation_id") or "dify-agent-chat"
-    session_id = _session_id_from_metadata(metadata, agent_id)
+    metadata = _metadata_with_registered_agent_chat_agent(metadata)
+    app_or_agent_id = metadata.get("app_id") or metadata.get("conversation_id") or "dify-agent-chat"
+    fallback_agent_id = f"dify-agent-chat:{app_or_agent_id}"
+    agent_id = _optional_text(metadata.get("agentguard_agent_id")) or fallback_agent_id
+    session_id = _session_id_from_metadata(metadata, app_or_agent_id)
+    runtime_auth = _runtime_auth_for_metadata(metadata, agent_id=agent_id, fallback_session_id=session_id)
+    if runtime_auth is not None:
+        session_id = runtime_auth.session_id or session_id
+        if runtime_auth.canonical_user_id:
+            metadata["agentguard_user_id"] = runtime_auth.canonical_user_id
+            metadata["user_id"] = runtime_auth.canonical_user_id
+        metadata["agentguard_session_id"] = session_id
     guard = AgentGuard(
         session_id,
-        user_id=metadata.get("user_id"),
-        agent_id=f"dify-agent-chat:{agent_id}",
+        user_id=runtime_auth.canonical_user_id if runtime_auth is not None else metadata.get("user_id"),
+        agent_id=agent_id,
         policy=os.getenv("AGENTGUARD_POLICY") or None,
         server_url=os.getenv("AGENTGUARD_SERVER_URL") or None,
         api_key=os.getenv("AGENTGUARD_API_KEY") or None,
         environment=os.getenv("AGENTGUARD_ENVIRONMENT") or "dify",
         sandbox="noop",
         plugin_config=_plugin_config(),
+        session_token=runtime_auth.session_token if runtime_auth is not None else None,
+        dpop_proof_factory=runtime_auth.proof if runtime_auth is not None else None,
+        use_dpop_auth=runtime_auth is not None,
+        legacy_identity_headers=runtime_auth is None,
+        auto_register_session=runtime_auth is None,
+        auto_close_runtime_session=runtime_auth is None,
     )
     guard.context.metadata.update(metadata)
     if metadata.get("task_id"):
@@ -446,6 +465,178 @@ def _session_id_from_metadata(metadata: dict[str, Any], agent_id: str) -> str:
         or metadata.get("task_id")
         or f"dify-agent-chat:{agent_id}"
     )
+
+
+def _runtime_auth_for_metadata(
+    metadata: dict[str, Any],
+    *,
+    agent_id: str,
+    fallback_session_id: str,
+) -> Any | None:
+    account_email = _runtime_account_email(metadata)
+    external_session_id = _external_session_id_from_metadata(metadata)
+    if not account_email:
+        return None
+    auth_metadata = {
+        **metadata,
+        "external_provider": "dify",
+        "external_account_email": account_email,
+        "dify_user_email": account_email,
+    }
+    if external_session_id:
+        auth_metadata["external_session_id"] = external_session_id
+    else:
+        auth_metadata["agentguard_internal_session_key"] = _internal_session_key_from_metadata(
+            metadata,
+            fallback_session_id=fallback_session_id,
+        )
+    try:
+        return _runtime_auth_manager.ensure(
+            server_url=os.getenv("AGENTGUARD_SERVER_URL") or None,
+            api_key=os.getenv("AGENTGUARD_API_KEY") or None,
+            agent_id=agent_id,
+            external_session_id=external_session_id,
+            cache_key=external_session_id
+            or _internal_session_key_from_metadata(metadata, fallback_session_id=fallback_session_id),
+            account_email=account_email,
+            external_user_id=_optional_text(metadata.get("user_id")),
+            metadata=auth_metadata,
+            timeout_s=_env_float("AGENTGUARD_DIFY_RUNTIME_AUTH_TIMEOUT_S", 5.0),
+            retries=int(_env_float("AGENTGUARD_DIFY_RUNTIME_AUTH_RETRIES", 1.0)),
+        )
+    except Exception:
+        return None
+
+
+def _external_session_id_from_metadata(metadata: dict[str, Any]) -> str | None:
+    return _optional_text(metadata.get("conversation_id"))
+
+
+def _internal_session_key_from_metadata(metadata: dict[str, Any], *, fallback_session_id: str) -> str:
+    return ":".join(
+        [
+            "agentguard-internal:dify-agent-chat",
+            _optional_text(metadata.get("app_id")) or "app",
+            _optional_text(metadata.get("user_id")) or "user",
+            _optional_text(metadata.get("message_id"))
+            or _optional_text(metadata.get("task_id"))
+            or fallback_session_id,
+        ]
+    )
+
+
+def _runtime_account_email(metadata: dict[str, Any]) -> str | None:
+    for key in ("dify_user_email", "external_account_email", "account_email", "user_email"):
+        email = _optional_text(metadata.get(key))
+        if email and "@" in email:
+            return email.lower()
+    app_id = _optional_text(metadata.get("app_id"))
+    if not app_id:
+        return None
+    try:
+        app = _agent_chat_app_by_id(app_id)
+        return _dify_account_email_for_app(app) if app is not None else None
+    except Exception:
+        return None
+
+
+def _metadata_with_registered_agent_chat_agent(metadata: dict[str, Any]) -> dict[str, Any]:
+    if _optional_text(metadata.get("agentguard_agent_id")):
+        return metadata
+    registration = _runtime_agent_chat_registration(metadata)
+    if not registration:
+        return metadata
+    registered_agent = registration.get("agent") or {}
+    canonical_agent_id = _optional_text(registered_agent.get("agent_id"))
+    if not canonical_agent_id:
+        return metadata
+    enriched = dict(metadata)
+    app_id = _optional_text(enriched.get("app_id"))
+    enriched["agentguard_agent_id"] = canonical_agent_id
+    if app_id:
+        enriched["external_agent_id"] = f"dify-agent-chat:{app_id}"
+    if registered_agent.get("agent_identity_code"):
+        enriched["agent_identity_code"] = registered_agent.get("agent_identity_code")
+    if registered_agent.get("public_key_thumbprint"):
+        enriched["agent_public_key_thumbprint"] = registered_agent.get("public_key_thumbprint")
+    user_agent = registration.get("user_agent") or {}
+    if "bound" in user_agent:
+        enriched["agentguard_user_bound"] = bool(user_agent.get("bound"))
+    account_email = _runtime_account_email(enriched)
+    if account_email:
+        enriched["external_provider"] = "dify"
+        enriched["external_account_email"] = account_email
+        enriched["dify_user_email"] = account_email
+    return enriched
+
+
+def _runtime_agent_chat_registration(metadata: dict[str, Any]) -> dict[str, Any] | None:
+    app_id = _optional_text(metadata.get("app_id"))
+    if not app_id or not os.getenv("AGENTGUARD_SERVER_URL"):
+        return None
+    agent_type = "agent_chat"
+    tenant_id = _optional_text(metadata.get("tenant_id"))
+    provider_instance_id = _dify_provider_instance_id()
+    cache_key = ("dify", provider_instance_id or "", tenant_id or "", app_id, agent_type)
+    with _runtime_agent_registrations_lock:
+        cached = _runtime_agent_registrations.get(cache_key)
+    if cached is not None:
+        return cached
+
+    app = None
+    try:
+        app = _agent_chat_app_by_id(app_id)
+    except Exception:
+        app = None
+    account_email = _runtime_account_email(metadata)
+    name = _optional_text(getattr(app, "name", None)) or _optional_text(metadata.get("app_name"))
+    description = _optional_text(getattr(app, "description", None)) or _optional_text(metadata.get("app_description"))
+    remote = RemoteGuardClient(
+        os.getenv("AGENTGUARD_SERVER_URL") or None,
+        api_key=os.getenv("AGENTGUARD_API_KEY") or None,
+        timeout_s=_env_float("AGENTGUARD_DIFY_CATALOG_SYNC_TIMEOUT_S", 5.0),
+        retries=int(_env_float("AGENTGUARD_DIFY_CATALOG_SYNC_RETRIES", 1.0)),
+    )
+    if not remote.enabled:
+        return None
+    registration_metadata = dict(metadata)
+    registration_metadata.update(
+        {
+            "adapter": "dify_agent_chat",
+            "dify_runtime": "agent_chat",
+            "runtime_registration": True,
+            "app_id": app_id,
+            "tenant_id": tenant_id,
+            "external_agent_id": f"dify-agent-chat:{app_id}",
+        }
+    )
+    if account_email:
+        registration_metadata.update(
+            {
+                "external_provider": "dify",
+                "external_account_email": account_email,
+                "dify_user_email": account_email,
+            }
+        )
+    try:
+        registration = _register_dify_agent(
+            remote,
+            agent_id=f"dify-agent-chat:{app_id}",
+            agent_type=agent_type,
+            external_agent_id=app_id,
+            tenant_id=tenant_id,
+            account_email=account_email,
+            name=name,
+            description=description,
+            metadata=registration_metadata,
+        )
+    except Exception:
+        return None
+    if not registration:
+        return None
+    with _runtime_agent_registrations_lock:
+        _runtime_agent_registrations[cache_key] = registration
+    return registration
 
 
 def _flush_guard(guard: Any, *, reason: str) -> None:
@@ -1038,7 +1229,49 @@ def _sync_published_agent_catalog_once() -> dict[str, Any]:
         result = _sync_app_tool_catalog(app)
         if result is not None:
             synced.append(result)
-    return {"app_count": len(apps), "synced": synced}
+    catalog_sync = _sync_dify_agent_catalog_to_agentguard(
+        agent_type="agent_chat",
+        external_agent_ids=[
+            app_id
+            for app_id in (_optional_text(getattr(app, "id", None)) for app in apps)
+            if app_id
+        ],
+    )
+    result: dict[str, Any] = {"app_count": len(apps), "synced": synced}
+    if catalog_sync and not catalog_sync.get("skipped"):
+        result["agent_catalog_sync"] = catalog_sync
+    return result
+
+
+def _sync_dify_agent_catalog_to_agentguard(
+    *,
+    agent_type: str,
+    external_agent_ids: list[str],
+) -> dict[str, Any] | None:
+    if _env_csv("AGENTGUARD_DIFY_APP_IDS"):
+        return {"skipped": True, "reason": "app_id_filter_active"}
+    remote = RemoteGuardClient(
+        os.getenv("AGENTGUARD_SERVER_URL") or None,
+        api_key=os.getenv("AGENTGUARD_API_KEY") or None,
+        timeout_s=_env_float("AGENTGUARD_DIFY_CATALOG_SYNC_TIMEOUT_S", 5.0),
+        retries=int(_env_float("AGENTGUARD_DIFY_CATALOG_SYNC_RETRIES", 1.0)),
+    )
+    sync_agents = getattr(remote, "sync_agents", None)
+    if not remote.enabled or not callable(sync_agents):
+        return None
+    return sync_agents(
+        {
+            "provider": "dify",
+            "provider_instance_id": _dify_provider_instance_id(),
+            "agent_type": agent_type,
+            "external_agent_ids": sorted(set(external_agent_ids)),
+            "metadata": {
+                "adapter": "dify_agent_chat",
+                "dify_runtime": "agent_chat",
+                "catalog_sync": True,
+            },
+        }
+    )
 
 
 def _published_agent_chat_apps() -> list[Any]:

@@ -6,10 +6,12 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 
 from backend.api.schemas import (
+    AgentCatalogSyncRequest,
     AgentRegisterRequest,
     GuardDecideRequest,
     GuardDecideResponse,
     McpReportRequest,
+    RuntimeSessionCreateRequest,
     SessionRegisterRequest,
     SkillReportRequest,
     SkillRunRequest,
@@ -20,6 +22,13 @@ from backend.api.schemas import (
 from backend.app_state import get_console, get_manager, get_skills
 from backend.api.auth import configured_backend_api_key
 from backend.agents.store import AgentStore
+from backend.auth.broker import AuthBrokerError, get_dify_auth_broker
+from backend.auth.dependencies import (
+    apply_auth_context_to_context,
+    authenticate_dpop_request,
+    dpop_access_token,
+)
+from backend.auth.models import AuthContext
 from backend.database import DatabaseUnavailable
 from shared.schemas.context import RuntimeContext
 from backend.runtime.policy.snapshot_builder import snapshot_dict
@@ -33,8 +42,10 @@ _skills = get_skills()
 
 @router.post("/v1/server/guard/decide", response_model=GuardDecideResponse)
 def guard_decide(req: GuardDecideRequest, request: Request) -> GuardDecideResponse:
+    auth = _authenticate_runtime(request)
     body = req.model_dump()
-    body["_transport"] = _transport_metadata(request, enforce_session_key=True)
+    body["context"] = apply_auth_context_to_context(body.get("context") or {}, auth)
+    body["_transport"] = _transport_metadata(request, enforce_session_key=auth is None, auth=auth)
     try:
         result = _manager.decide(body)
     except PermissionError as exc:
@@ -44,9 +55,9 @@ def guard_decide(req: GuardDecideRequest, request: Request) -> GuardDecideRespon
 
 @router.get("/v1/server/approvals/{ticket_id}")
 def approval_status(ticket_id: str, request: Request, wait_ms: int = 0) -> dict[str, Any]:
-    _validate_client_session(request)
+    auth = _authenticate_runtime(request)
     ticket = _manager.review_queue.get(ticket_id)
-    if ticket is None or not _ticket_belongs_to_request(ticket, request):
+    if ticket is None or not _ticket_belongs_to_request(ticket, request, auth=auth):
         raise HTTPException(status_code=404, detail="ticket not found")
     waited = _manager.review_queue.wait(ticket_id, timeout_s=max(wait_ms, 0) / 1000.0)
     if waited is None:
@@ -56,14 +67,23 @@ def approval_status(ticket_id: str, request: Request, wait_ms: int = 0) -> dict[
 
 @router.get("/v1/server/policy/snapshot")
 def policy_snapshot(request: Request) -> dict:
-    _validate_client_session(request)
+    _authenticate_runtime(request)
     return snapshot_dict(_manager.policy.store)
 
 
 @router.post("/v1/server/trace/upload")
 def trace_upload(req: TraceUploadRequest, request: Request) -> dict:
+    auth = _authenticate_runtime(request)
     trace = req.model_dump()
-    trace["_transport"] = _transport_metadata(request, enforce_session_key=True)
+    if auth is not None:
+        trace.update(
+            {
+                "session_id": auth.session_id,
+                "agent_id": auth.agent_id,
+                "user_id": auth.user_id,
+            }
+        )
+    trace["_transport"] = _transport_metadata(request, enforce_session_key=auth is None, auth=auth)
     try:
         count = _manager.record_uploaded_trace(trace)
     except PermissionError as exc:
@@ -73,8 +93,9 @@ def trace_upload(req: TraceUploadRequest, request: Request) -> dict:
 
 @router.post("/v1/server/tools/report")
 def report_tool(req: ToolReportRequest, request: Request) -> dict[str, Any]:
-    _validate_client_session(request)
-    tool = _console.register_tool(req.context, req.tool)
+    auth = _authenticate_runtime(request)
+    context = apply_auth_context_to_context(req.context, auth)
+    tool = _console.register_tool(context, req.tool)
     if tool is None:
         raise HTTPException(status_code=400, detail="agent_id and tool.name are required")
     return {"status": "ok", "tool": tool}
@@ -82,8 +103,9 @@ def report_tool(req: ToolReportRequest, request: Request) -> dict[str, Any]:
 
 @router.post("/v1/server/tools/sync")
 def sync_tools(req: ToolSyncRequest, request: Request) -> dict[str, Any]:
-    _validate_client_session(request)
-    result = _console.sync_tools(req.context, req.tools)
+    auth = _authenticate_runtime(request)
+    context = apply_auth_context_to_context(req.context, auth)
+    result = _console.sync_tools(context, req.tools)
     if result is None:
         raise HTTPException(status_code=400, detail="agent_id is required")
     return {"status": "ok", **result}
@@ -133,10 +155,30 @@ def register_agent(req: AgentRegisterRequest, request: Request) -> dict[str, Any
     }
 
 
+@router.post("/v1/server/agents/sync")
+def sync_agents(req: AgentCatalogSyncRequest, request: Request) -> dict[str, Any]:
+    _validate_adapter_api_key(request)
+    try:
+        result = AgentStore().sync_provider_agents(
+            provider=req.provider,
+            provider_instance_id=req.provider_instance_id,
+            tenant_id=req.tenant_id,
+            agent_type=req.agent_type,
+            external_agent_ids=req.external_agent_ids,
+            metadata=req.metadata,
+        )
+    except DatabaseUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "ok", **result}
+
+
 @router.post("/v1/server/skills/report")
 def report_skills(req: SkillReportRequest, request: Request) -> dict[str, Any]:
-    _validate_client_session(request)
-    result = _console.register_skills(req.context, req.skills, req.scan)
+    auth = _authenticate_runtime(request)
+    context = apply_auth_context_to_context(req.context, auth)
+    result = _console.register_skills(context, req.skills, req.scan)
     if result is None:
         raise HTTPException(status_code=400, detail="agent_id is required")
     return {
@@ -148,8 +190,9 @@ def report_skills(req: SkillReportRequest, request: Request) -> dict[str, Any]:
 
 @router.post("/v1/server/mcps/report")
 def report_mcps(req: McpReportRequest, request: Request) -> dict[str, Any]:
-    _validate_client_session(request)
-    result = _console.register_mcps(req.context, req.mcps, req.scan)
+    auth = _authenticate_runtime(request)
+    context = apply_auth_context_to_context(req.context, auth)
+    result = _console.register_mcps(context, req.mcps, req.scan)
     if result is None:
         raise HTTPException(status_code=400, detail="agent_id is required")
     return {
@@ -175,9 +218,73 @@ def register_session(req: SessionRegisterRequest, request: Request) -> dict[str,
     return {"status": "ok", "session": record}
 
 
+@router.post("/v1/server/session/create")
+def create_runtime_session(req: RuntimeSessionCreateRequest, request: Request) -> dict[str, Any]:
+    _validate_adapter_api_key(request)
+    try:
+        issue = get_dify_auth_broker().create_session(
+            provider=req.provider,
+            external_session_id=req.external_session_id,
+            agent_id=req.agent_id,
+            account_email=req.account_email,
+            external_user_id=req.external_user_id,
+            metadata=req.metadata,
+            dpop_proof=request.headers.get("dpop"),
+            method=request.method,
+            url=str(request.url),
+        )
+    except DatabaseUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except AuthBrokerError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    _register_auth_context(_auth_context_from_issue(issue), request)
+    return _runtime_session_issue_payload(issue)
+
+
+@router.post("/v1/server/session/refresh")
+def refresh_runtime_session(request: Request) -> dict[str, Any]:
+    _reject_legacy_identity_headers(request)
+    token = dpop_access_token(request)
+    if token is None:
+        raise HTTPException(status_code=401, detail="missing DPoP access token")
+    try:
+        issue = get_dify_auth_broker().refresh_session(
+            token=token,
+            dpop_proof=request.headers.get("dpop"),
+            method=request.method,
+            url=str(request.url),
+        )
+    except DatabaseUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except AuthBrokerError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    _register_auth_context(_auth_context_from_issue(issue), request)
+    return _runtime_session_issue_payload(issue)
+
+
+@router.post("/v1/server/session/close")
+def close_runtime_session(request: Request) -> dict[str, Any]:
+    _reject_legacy_identity_headers(request)
+    token = dpop_access_token(request)
+    if token is None:
+        raise HTTPException(status_code=401, detail="missing DPoP access token")
+    try:
+        auth = get_dify_auth_broker().close_session(
+            token=token,
+            dpop_proof=request.headers.get("dpop"),
+            method=request.method,
+            url=str(request.url),
+        )
+    except DatabaseUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except AuthBrokerError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    return {"status": "ok", "session_id": auth.session_id, "closed": True}
+
+
 @router.post("/v1/server/skills/run")
 def skills_run(req: SkillRunRequest, request: Request) -> dict:
-    _validate_client_session(request)
+    _authenticate_runtime(request)
     return _skills.run(req.model_dump())
 
 
@@ -208,15 +315,44 @@ def _client_ip(request: Request) -> str | None:
     return request.client.host if request.client else None
 
 
-def _transport_metadata(request: Request, *, enforce_session_key: bool) -> dict[str, Any]:
+def _transport_metadata(
+    request: Request,
+    *,
+    enforce_session_key: bool,
+    auth: AuthContext | None = None,
+) -> dict[str, Any]:
     return {
         "client_ip": _client_ip(request),
-        "client_key": request.headers.get("x-agentguard-session-key"),
+        "client_key": None if auth is not None else request.headers.get("x-agentguard-session-key"),
         "user_ticket": request.headers.get("x-agentguard-user-ticket"),
-        "agent_id": request.headers.get("x-agentguard-agent-id"),
-        "user_id": request.headers.get("x-agentguard-user-id"),
+        "agent_id": auth.agent_id if auth is not None else request.headers.get("x-agentguard-agent-id"),
+        "user_id": auth.user_id if auth is not None else request.headers.get("x-agentguard-user-id"),
         "enforce_session_key": enforce_session_key,
     }
+
+
+def _authenticate_runtime(request: Request) -> AuthContext | None:
+    auth = authenticate_dpop_request(request)
+    if auth is not None:
+        _register_auth_context(auth, request)
+        return auth
+    _validate_client_session(request)
+    return None
+
+
+def _register_auth_context(auth: AuthContext, request: Request) -> None:
+    context = RuntimeContext(
+        session_id=auth.session_id,
+        agent_id=auth.agent_id,
+        user_id=auth.user_id,
+        metadata=auth.to_metadata(),
+    )
+    _manager.register_client_session(
+        context,
+        client_ip=_client_ip(request),
+        enforce_key=False,
+        push_config=False,
+    )
 
 
 def _validate_client_session(request: Request) -> None:
@@ -252,6 +388,50 @@ def _validate_adapter_api_key(request: Request) -> None:
         raise HTTPException(status_code=403, detail="invalid adapter API key")
 
 
+def _reject_legacy_identity_headers(request: Request) -> None:
+    legacy = [
+        "x-agentguard-session-id",
+        "x-agentguard-agent-id",
+        "x-agentguard-user-id",
+        "x-agentguard-session-key",
+    ]
+    present = [name for name in legacy if request.headers.get(name)]
+    if present:
+        raise HTTPException(
+            status_code=400,
+            detail=f"legacy identity headers are not allowed with DPoP: {', '.join(present)}",
+        )
+
+
+def _runtime_session_issue_payload(issue: Any) -> dict[str, Any]:
+    session = issue.session
+    return {
+        "status": "ok",
+        "agent_id": session.agent_id,
+        "session_id": session.session_id,
+        "user_id": str(session.user_id),
+        "session_token": issue.session_token,
+        "issued_at": issue.issued_at,
+        "expires_at": issue.expires_at,
+        "auth_method": "dify_api_key_dpop",
+        "external_session_id": session.external_session_id,
+    }
+
+
+def _auth_context_from_issue(issue: Any) -> AuthContext:
+    session = issue.session
+    return AuthContext(
+        session_id=session.session_id,
+        agent_id=session.agent_id,
+        user_id=str(session.user_id),
+        token_jti=issue.token_jti,
+        dpop_jkt=session.dpop_jkt,
+        external_provider=session.provider,
+        external_session_id=session.external_session_id,
+        scope=["runtime"],
+    )
+
+
 def _session_key_error(exc: PermissionError) -> HTTPException:
     message = str(exc)
     if "user ticket validation is unavailable" in message:
@@ -280,8 +460,19 @@ def _identity_metadata_from_request(request: Request) -> dict[str, Any]:
     }
 
 
-def _ticket_belongs_to_request(ticket: dict[str, Any], request: Request) -> bool:
+def _ticket_belongs_to_request(
+    ticket: dict[str, Any],
+    request: Request,
+    *,
+    auth: AuthContext | None = None,
+) -> bool:
     principal = dict(ticket.get("principal") or {})
+    if auth is not None:
+        return (
+            str(principal.get("session_id") or "") == auth.session_id
+            and str(principal.get("agent_id") or "") == auth.agent_id
+            and str(principal.get("user_id") or "") == auth.user_id
+        )
     return (
         str(principal.get("session_id") or "")
         == str(request.headers.get("x-agentguard-session-id") or "")

@@ -56,7 +56,7 @@ class DifyAuthBroker:
         self,
         *,
         provider: str,
-        external_session_id: str,
+        external_session_id: str | None,
         agent_id: str,
         account_email: str,
         external_user_id: str | None,
@@ -71,7 +71,7 @@ class DifyAuthBroker:
         account_email = _clean_email(account_email)
         if not account_email:
             raise BadAuthRequest("account_email is required")
-        external_session_id = _required_text(external_session_id, "external_session_id")
+        external_session_id = _optional_text(external_session_id)
         agent_id = _required_text(agent_id, "agent_id")
         mapping = self.user_store.external_account_by_provider_email(
             provider=provider,
@@ -86,10 +86,14 @@ class DifyAuthBroker:
             access_token=None,
             expected_jkt=None,
         )
-        existing = self.session_store.find_active_external_session(
-            provider=provider,
-            external_session_id=external_session_id,
-            agent_id=agent_id,
+        existing = (
+            self.session_store.find_active_external_session(
+                provider=provider,
+                external_session_id=external_session_id,
+                agent_id=agent_id,
+            )
+            if external_session_id
+            else None
         )
         if existing is not None:
             if existing.user_id != mapping.user_id:
@@ -255,6 +259,11 @@ def _required_text(value: Any, field: str) -> str:
     return text
 
 
+def _optional_text(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
 def _clean_provider(value: str) -> str:
     return str(value or "").strip().lower()
 
@@ -266,4 +275,3 @@ def _clean_email(value: str) -> str:
 def _expired(value: datetime) -> bool:
     dt = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc).timestamp() <= datetime.now(timezone.utc).timestamp()
-

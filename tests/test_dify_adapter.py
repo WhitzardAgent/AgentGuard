@@ -1093,6 +1093,145 @@ def test_workflow_make_guard_prefers_registered_agentguard_agent_id(monkeypatch)
     assert guard.context.metadata["agentguard_user_bound"] is True
 
 
+def test_workflow_make_guard_uses_dpop_runtime_session(monkeypatch):
+    _install_fake_legacy_dify_modules(monkeypatch)
+    dify_adapter = _fresh_adapter(monkeypatch)
+    monkeypatch.setenv("AGENTGUARD_SERVER_URL", "http://agentguard.test")
+    monkeypatch.setenv("AGENTGUARD_API_KEY", "sk-test")
+    monkeypatch.setattr(
+        dify_adapter,
+        "_runtime_workflow_agent_registration",
+        lambda metadata: {
+            "agent": {
+                "agent_id": "ag_workflow",
+                "agent_identity_code": "agic_workflow",
+            },
+            "user_agent": {"bound": True},
+        },
+    )
+
+    calls = []
+
+    class FakeRuntimeAuth:
+        session_id = "ags_dify_workflow"
+        session_token = "runtime-token-workflow"
+        canonical_user_id = "7"
+
+        def proof(self, method, url, access_token=None):
+            return "proof"
+
+    def ensure(**kwargs):
+        calls.append(kwargs)
+        return FakeRuntimeAuth()
+
+    monkeypatch.setattr(dify_adapter._runtime_auth_manager, "ensure", ensure)
+
+    guard = dify_adapter._make_guard(
+        {
+            "adapter": "dify",
+            "dify_runtime": "workflow_api",
+            "app_id": "app-1",
+            "workflow_id": "workflow-1",
+            "workflow_run_id": "workflow-run-1",
+            "node_execution_id": "node-exec-1",
+            "user_id": "dify-user-1",
+            "dify_user_email": "alice@example.com",
+        }
+    )
+
+    assert calls[0]["agent_id"] == "ag_workflow"
+    assert calls[0]["external_session_id"] == "workflow-run-1"
+    assert calls[0]["account_email"] == "alice@example.com"
+    assert calls[0]["external_user_id"] == "dify-user-1"
+    assert guard.context.session_id == "ags_dify_workflow"
+    assert guard.context.agent_id == "ag_workflow"
+    assert guard.context.user_id == "7"
+    assert guard._remote.use_dpop_auth is True
+    assert guard._remote.legacy_identity_headers is False
+    assert guard._auto_close_runtime_session is False
+
+
+def test_workflow_metadata_reads_workflow_run_id_from_dict_graph_params(monkeypatch):
+    dify_adapter = _fresh_adapter(monkeypatch)
+    node = types.SimpleNamespace(
+        node_id="node-1",
+        execution_id="node-exec-1",
+        node_type="llm",
+        title="LLM",
+        graph_init_params={
+            "workflow_id": "workflow-1",
+            "workflow_run_id": "workflow-run-from-dict",
+        },
+        run_context=types.SimpleNamespace(
+            tenant_id="tenant-1",
+            user_id="user-1",
+            app_id="app-1",
+            invoke_from="debugger",
+        ),
+    )
+    node_factory = types.SimpleNamespace(graph_init_params=node.graph_init_params)
+    node_config = {"id": "node-1", "data": {"type": "llm", "title": "LLM"}}
+
+    metadata = dify_adapter._metadata_from_workflow_node(node, node_factory, node_config)
+
+    assert metadata["workflow_id"] == "workflow-1"
+    assert metadata["workflow_run_id"] == "workflow-run-from-dict"
+
+
+def test_workflow_runtime_auth_does_not_map_node_execution_id_as_external_session(monkeypatch):
+    _install_fake_legacy_dify_modules(monkeypatch)
+    dify_adapter = _fresh_adapter(monkeypatch)
+    monkeypatch.setenv("AGENTGUARD_SERVER_URL", "http://agentguard.test")
+    monkeypatch.setenv("AGENTGUARD_API_KEY", "sk-test")
+    monkeypatch.setattr(
+        dify_adapter,
+        "_runtime_workflow_agent_registration",
+        lambda metadata: {
+            "agent": {
+                "agent_id": "ag_workflow",
+                "agent_identity_code": "agic_workflow",
+            },
+            "user_agent": {"bound": True},
+        },
+    )
+
+    calls = []
+
+    class FakeRuntimeAuth:
+        session_id = "ags_dify_internal"
+        session_token = "runtime-token-workflow"
+        canonical_user_id = "7"
+
+        def proof(self, method, url, access_token=None):
+            return "proof"
+
+    def ensure(**kwargs):
+        calls.append(kwargs)
+        return FakeRuntimeAuth()
+
+    monkeypatch.setattr(dify_adapter._runtime_auth_manager, "ensure", ensure)
+
+    guard = dify_adapter._make_guard(
+        {
+            "adapter": "dify",
+            "dify_runtime": "workflow_api",
+            "app_id": "app-1",
+            "workflow_id": "workflow-1",
+            "node_execution_id": "node-exec-1",
+            "node_id": "node-1",
+            "user_id": "dify-user-1",
+            "dify_user_email": "alice@example.com",
+        }
+    )
+
+    assert calls[0]["external_session_id"] is None
+    assert calls[0]["cache_key"].startswith("agentguard-internal:dify:workflow_api:app-1:workflow-1")
+    assert calls[0]["cache_key"].endswith(":node-exec-1")
+    assert calls[0]["metadata"]["agentguard_internal_session_key"] == calls[0]["cache_key"]
+    assert "external_session_id" not in calls[0]["metadata"]
+    assert guard.context.session_id == "ags_dify_internal"
+
+
 def test_workflow_catalog_sync_reports_published_workflow_tools(monkeypatch):
     _install_fake_workflow_catalog_modules(monkeypatch)
     dify_adapter = _fresh_adapter(monkeypatch)
@@ -1100,6 +1239,7 @@ def test_workflow_catalog_sync_reports_published_workflow_tools(monkeypatch):
 
     registered = []
     synced = []
+    agent_syncs = []
 
     class FakeRemote:
         def __init__(self, *args, **kwargs):
@@ -1112,6 +1252,10 @@ def test_workflow_catalog_sync_reports_published_workflow_tools(monkeypatch):
         def sync_tools(self, context, tools):
             synced.append((context.to_dict(), list(tools)))
             return {"status": "ok", "tool_count": len(tools)}
+
+        def sync_agents(self, catalog):
+            agent_syncs.append(dict(catalog))
+            return {"status": "ok", "deactivated_count": 0}
 
     monkeypatch.setattr(dify_adapter, "RemoteGuardClient", FakeRemote)
     monkeypatch.setattr(
@@ -1138,6 +1282,19 @@ def test_workflow_catalog_sync_reports_published_workflow_tools(monkeypatch):
     assert registered[0]["metadata"]["external_account_email"] == "alice@example.com"
     assert synced[0][0]["agent_id"] == "dify-workflow:app-1"
     assert synced[0][0]["metadata"]["dify_user_email"] == "alice@example.com"
+    assert agent_syncs == [
+        {
+            "provider": "dify",
+            "provider_instance_id": "",
+            "agent_type": "workflow",
+            "external_agent_ids": ["app-1"],
+            "metadata": {
+                "adapter": "dify",
+                "dify_runtime": "workflow_api",
+                "catalog_sync": True,
+            },
+        }
+    ]
     tools = {tool["name"]: tool for tool in synced[0][1]}
     assert sorted(tools) == ["google_search", "local_script", "web_search", "weekday"]
     assert tools["weekday"]["input_params"] == ["year", "month"]

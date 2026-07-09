@@ -169,6 +169,26 @@ def test_dify_session_create_issues_runtime_token_for_bound_email():
     assert issue.session_token
 
 
+def test_dify_session_create_allows_missing_external_session_id():
+    broker, _ = _broker()
+    key = DPoPKey()
+    issue = broker.create_session(
+        provider="dify",
+        external_session_id=None,
+        agent_id="ag_workflow",
+        account_email="alice@example.com",
+        external_user_id="dify-user-1",
+        metadata={"app_id": "app-1", "node_execution_id": "node-1"},
+        dpop_proof=key.proof("POST", CREATE_URL),
+        method="POST",
+        url=CREATE_URL,
+    )
+
+    assert issue.session.external_session_id is None
+    claims = broker.token_service.verify(issue.session_token)
+    assert "external_session_id" not in claims
+
+
 def test_dify_session_create_rejects_unbound_email():
     broker, _ = _broker(bound=False)
 

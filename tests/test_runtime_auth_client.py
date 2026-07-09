@@ -25,3 +25,18 @@ def test_remote_client_dpop_mode_omits_legacy_identity_headers():
     assert "X-AgentGuard-User-Id" not in headers
     assert "X-AgentGuard-Session-Key" not in headers
 
+
+def test_remote_client_dpop_create_session_uses_bearer_key_without_access_token():
+    client = RemoteGuardClient(
+        "http://agentguard.test",
+        api_key="sk-test",
+        dpop_proof_factory=lambda method, url, token: f"proof:{method}:{url}:{token}",
+        use_dpop_auth=True,
+        legacy_identity_headers=False,
+    )
+
+    headers = client._headers(method="POST", url="http://agentguard.test/v1/server/session/create")
+
+    assert headers["Authorization"] == "Bearer sk-test"
+    assert headers["DPoP"] == "proof:POST:http://agentguard.test/v1/server/session/create:None"
+    assert "X-AgentGuard-Session-Id" not in headers

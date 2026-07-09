@@ -52,6 +52,12 @@ class AgentGuard:
         plugin_config: str | dict[str, Any] | None = None,
         session_key: str | None = None,
         user_ticket: str | None = None,
+        session_token: str | None = None,
+        dpop_proof_factory: Any | None = None,
+        use_dpop_auth: bool = False,
+        legacy_identity_headers: bool = True,
+        auto_register_session: bool = True,
+        auto_close_runtime_session: bool = True,
     ) -> None:
         plugin_payload = _plugin_config_payload(plugin_config)
         snapshot = self._load_snapshot(policy)
@@ -79,6 +85,10 @@ class AgentGuard:
             user_id=self.context.user_id,
             session_key=self.session_key,
             user_ticket=user_ticket,
+            session_token=session_token,
+            dpop_proof_factory=dpop_proof_factory,
+            use_dpop_auth=use_dpop_auth,
+            legacy_identity_headers=legacy_identity_headers,
             timeout_s=remote_timeout_s,
             retries=remote_retries,
         )
@@ -94,6 +104,7 @@ class AgentGuard:
         self._lifecycle = Lifecycle()
         self._bus = EventBus()
         self._config_api: ClientConfigAPIServer | None = None
+        self._auto_close_runtime_session = auto_close_runtime_session
 
         self.runtime = HarnessRuntime(
             context=self.context,
@@ -123,7 +134,8 @@ class AgentGuard:
             if server_url
             else None
         )
-        self._register_remote_session()
+        if auto_register_session:
+            self._register_remote_session()
 
     # ---- policy --------------------------------------------------------
     @staticmethod
@@ -330,7 +342,11 @@ class AgentGuard:
     def close(self) -> None:
         self.runtime.sync_local_cache_now(reason="session_close")
         try:
-            self._remote.unregister_session()
+            if getattr(self._remote, "use_dpop_auth", False):
+                if self._auto_close_runtime_session:
+                    self._remote.close_runtime_session()
+            else:
+                self._remote.unregister_session()
         except Exception:
             pass
         self.stop_config_api()

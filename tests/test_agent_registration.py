@@ -17,6 +17,11 @@ class FakeDB:
     def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> int:
         if "CREATE TABLE" in sql:
             return 0
+        if "SET status = 'deleted'" in sql:
+            for agent_id in params[1:]:
+                if str(agent_id) in self.agents:
+                    self.agents[str(agent_id)]["status"] = "deleted"
+            return len(params[1:])
         if "INSERT INTO agent_tools" in sql:
             row = {
                 "agent_id": params[0],
@@ -160,6 +165,21 @@ class FakeDB:
         return None
 
     def fetchall(self, sql: str, params: tuple[Any, ...] | None = None):
+        if "FROM agent_external_identities e" in sql:
+            provider, provider_instance_id, agent_type = params[:3]
+            tenant_id = params[3] if len(params) > 3 else None
+            rows = []
+            for identity in self.agent_external_identities:
+                if identity["provider"] != provider:
+                    continue
+                if identity["provider_instance_id"] != provider_instance_id:
+                    continue
+                if identity["agent_type"] != agent_type:
+                    continue
+                if tenant_id is not None and identity["tenant_id"] != tenant_id:
+                    continue
+                rows.append({**identity, "status": self.agents[identity["agent_id"]]["status"]})
+            return rows
         if "FROM agent_tools" in sql:
             if "WHERE agent_id = %s" in sql:
                 return [row for row in self.agent_tools if row["agent_id"] == params[0]]
@@ -169,7 +189,10 @@ class FakeDB:
             return list(self.agent_tools)
         if "FROM user_agents" in sql:
             user_id = int(params[0])
-            return [row for row in self.user_agents if row["user_id"] == user_id]
+            rows = [row for row in self.user_agents if row["user_id"] == user_id]
+            if "JOIN agents" in sql:
+                rows = [row for row in rows if self.agents[row["agent_id"]]["status"] == "active"]
+            return rows
         return []
 
 
@@ -274,3 +297,39 @@ def test_sync_agent_tools_persists_and_replaces_catalog():
     assert updated is not None
     assert updated.to_console_dict()["labels"]["boundary"] == "external"
     assert updated.to_console_dict()["labels"]["tags"] == ["calendar"]
+
+
+def test_provider_agent_sync_deactivates_missing_dify_agents():
+    db = FakeDB()
+    db.user_external_accounts.append(
+        {"user_id": 7, "provider": "dify", "account_email": "alice@example.com"}
+    )
+    store = AgentStore(db)
+    first = store.register_agent(
+        provider="dify",
+        provider_instance_id="local-dify",
+        external_agent_id="app-1",
+        agent_type="workflow",
+        account_email="alice@example.com",
+        public_key_jwk=PUBLIC_JWK,
+    ).agent
+    stale = store.register_agent(
+        provider="dify",
+        provider_instance_id="local-dify",
+        external_agent_id="app-2",
+        agent_type="workflow",
+        account_email="alice@example.com",
+        public_key_jwk=PUBLIC_JWK,
+    ).agent
+
+    result = store.sync_provider_agents(
+        provider="dify",
+        provider_instance_id="local-dify",
+        agent_type="workflow",
+        external_agent_ids=["app-1"],
+    )
+
+    assert result["deactivated_agent_ids"] == [stale.agent_id]
+    assert db.agents[stale.agent_id]["status"] == "deleted"
+    assert store.agent_ids_for_user(7) == {first.agent_id}
+    assert store.list_agents({first.agent_id, stale.agent_id}) == [first]
