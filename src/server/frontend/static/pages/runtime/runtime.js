@@ -21,6 +21,7 @@
     health: null,
     agentStats: null,
     traffic: [],
+    sessions: [],
     approvals: [],
     auditRows: [],
     selectedAuditIndex: 0,
@@ -29,6 +30,7 @@
       health: "",
       stats: "",
       traffic: "",
+      sessions: "",
       approvals: "",
       audit: "",
     },
@@ -47,6 +49,7 @@
     mode: document.getElementById("runtime-mode"),
     runtimeMode: document.getElementById("runtime-runtime-mode"),
     uptime: document.getElementById("runtime-uptime"),
+    sessionBody: document.getElementById("runtime-session-body"),
     timeline: document.getElementById("runtime-timeline"),
     approvalList: document.getElementById("runtime-approval-list"),
     auditBody: document.getElementById("runtime-audit-body"),
@@ -144,6 +147,19 @@
     });
   }
 
+  function formatDateTime(value) {
+    if (!value) {
+      return "--";
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return "--";
+    }
+    return date.toLocaleString(currentLocaleTag(), {
+      hour12: false,
+    });
+  }
+
   function formatUptime(seconds) {
     if (typeof seconds !== "number" || Number.isNaN(seconds)) {
       return "--";
@@ -180,6 +196,19 @@
   function fetchTraffic({ n = 30, action = "", tool = "" } = {}) {
     const agentId = getSelectedAgentId();
     return api.fetchJson(`/api/agents/${encodeURIComponent(agentId)}/runtime/traffic${api.buildQuery({ n, action, tool })}`);
+  }
+
+  function fetchSessions({ n = 50, status = "all" } = {}) {
+    const agentId = getSelectedAgentId();
+    return api.fetchJson(`/api/agents/${encodeURIComponent(agentId)}/runtime/sessions${api.buildQuery({ n, status })}`);
+  }
+
+  function closeRuntimeSession(sessionId) {
+    const agentId = getSelectedAgentId();
+    return api.fetchJson(
+      `/api/agents/${encodeURIComponent(agentId)}/runtime/sessions/${encodeURIComponent(sessionId)}/close`,
+      { method: "POST" },
+    );
   }
 
   function fetchApprovals() {
@@ -224,6 +253,21 @@
       rules,
       reason: String(item?.reason || "").trim(),
       pluginSummary: pluginSummary.map(normalizePluginSummaryItem).filter((entry) => entry.name),
+    };
+  }
+
+  function normalizeSessionItem(item) {
+    return {
+      sessionId: String(item?.session_id || "-"),
+      provider: String(item?.provider || "-"),
+      externalSessionId: String(item?.external_session_id || "-"),
+      externalAccountEmail: String(item?.external_account_email || "-"),
+      status: String(item?.status || "unknown").toLowerCase(),
+      createdAt: formatDateTime(item?.created_at),
+      lastSeenAt: formatDateTime(item?.last_seen_at),
+      closedAt: formatDateTime(item?.closed_at),
+      activeTokenCount: Number(item?.active_token_count || 0),
+      latestTokenExpiresAt: formatDateTime(item?.latest_token_expires_at),
     };
   }
 
@@ -399,6 +443,43 @@
     });
   }
 
+  function renderSessions() {
+    elements.sessionBody.innerHTML = "";
+    if (state.errors.sessions) {
+      const row = document.createElement("tr");
+      row.innerHTML = `<td colspan="11"><div class="empty-state">${escapeHtml(state.errors.sessions)}</div></td>`;
+      elements.sessionBody.appendChild(row);
+      return;
+    }
+    if (!state.sessions.length) {
+      const row = document.createElement("tr");
+      row.innerHTML = '<td colspan="11"><div class="empty-state">No runtime sessions have been created for this agent yet.</div></td>';
+      elements.sessionBody.appendChild(row);
+      return;
+    }
+
+    state.sessions.forEach((item) => {
+      const row = document.createElement("tr");
+      const canClose = item.status === "active";
+      row.innerHTML = `
+        <td>${escapeHtml(item.sessionId)}</td>
+        <td>${escapeHtml(item.provider)}</td>
+        <td>${escapeHtml(item.externalSessionId)}</td>
+        <td>${escapeHtml(item.externalAccountEmail)}</td>
+        <td><span class="pill ${canClose ? "" : "muted"}">${escapeHtml(item.status.toUpperCase())}</span></td>
+        <td>${escapeHtml(item.createdAt)}</td>
+        <td>${escapeHtml(item.lastSeenAt)}</td>
+        <td>${escapeHtml(item.closedAt)}</td>
+        <td>${escapeHtml(formatNumber(item.activeTokenCount))}</td>
+        <td>${escapeHtml(item.latestTokenExpiresAt)}</td>
+        <td>
+          ${canClose ? `<button class="btn" type="button" data-session-action="close" data-session-id="${escapeHtml(item.sessionId)}">Close</button>` : "-"}
+        </td>
+      `;
+      elements.sessionBody.appendChild(row);
+    });
+  }
+
   function renderApprovals() {
     elements.approvalList.innerHTML = "";
     if (state.errors.approvals) {
@@ -538,6 +619,7 @@
 
   function renderAll() {
     renderOverview();
+    renderSessions();
     renderTimeline();
     renderApprovals();
     renderAuditTable();
@@ -558,6 +640,8 @@
         state.agentStats = null;
       } else if (sectionName === "traffic") {
         state.traffic = [];
+      } else if (sectionName === "sessions") {
+        state.sessions = [];
       } else if (sectionName === "approvals") {
         state.approvals = [];
       } else if (sectionName === "audit") {
@@ -587,6 +671,19 @@
       return items.map(normalizeTrafficItem);
     }, (items) => {
       state.traffic = items;
+    });
+    state.lastUpdatedAt = Date.now();
+    renderAll();
+  }
+
+  async function refreshSessions() {
+    await runSectionLoad("sessions", () => fetchSessions({ n: 50, status: "all" }), (items) => {
+      if (!Array.isArray(items)) {
+        throw new Error("Sessions payload has an unexpected format.");
+      }
+      return items.map(normalizeSessionItem);
+    }, (items) => {
+      state.sessions = items;
     });
     state.lastUpdatedAt = Date.now();
     renderAll();
@@ -634,6 +731,14 @@
       }, (items) => {
         state.traffic = items;
       }),
+      runSectionLoad("sessions", () => fetchSessions({ n: 50, status: "all" }), (items) => {
+        if (!Array.isArray(items)) {
+          throw new Error("Sessions payload has an unexpected format.");
+        }
+        return items.map(normalizeSessionItem);
+      }, (items) => {
+        state.sessions = items;
+      }),
       runSectionLoad("approvals", fetchApprovals, (items) => {
         if (!Array.isArray(items)) {
           throw new Error("Approvals payload has an unexpected format.");
@@ -679,9 +784,29 @@
     }
   }
 
+  async function handleSessionAction(sessionId) {
+    if (!sessionId || state.actionInFlight) {
+      return;
+    }
+    state.actionInFlight = true;
+    renderAll();
+    try {
+      await closeRuntimeSession(sessionId);
+      showToast(`Closed session ${sessionId}.`, "success");
+      await refreshAll();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Failed to close runtime session.", "warning");
+      renderAll();
+    } finally {
+      state.actionInFlight = false;
+      renderAll();
+    }
+  }
+
   function startPolling() {
     pollers.push(window.setInterval(() => {
       refreshOverview().catch(() => {});
+      refreshSessions().catch(() => {});
       refreshAudit().catch(() => {});
     }, REFRESH_INTERVALS.slow));
 
@@ -728,6 +853,18 @@
       );
     });
 
+    elements.sessionBody.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+      const button = target.closest("[data-session-action]");
+      if (!(button instanceof HTMLElement)) {
+        return;
+      }
+      handleSessionAction(String(button.dataset.sessionId || ""));
+    });
+
     elements.auditBody.addEventListener("click", (event) => {
       const target = event.target;
       if (!(target instanceof HTMLElement)) {
@@ -760,6 +897,8 @@
     fetchStats: fetchAgentStats,
     fetchAgentStats,
     fetchTraffic,
+    fetchSessions,
+    closeRuntimeSession,
     fetchApprovals,
     approveTicket,
     denyTicket,

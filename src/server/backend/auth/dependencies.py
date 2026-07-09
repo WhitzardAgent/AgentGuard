@@ -52,6 +52,7 @@ def apply_auth_context_to_context(
         return dict(context or {})
     updated = dict(context or {})
     metadata = dict(updated.get("metadata") or {})
+    metadata.pop("client_session_key", None)
     metadata.update(auth.to_metadata())
     updated.update(
         {

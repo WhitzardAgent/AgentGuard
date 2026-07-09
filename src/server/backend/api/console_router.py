@@ -7,6 +7,7 @@ real server state (policy store, live traffic, approvals) via ConsoleState.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Cookie
@@ -16,6 +17,8 @@ from pydantic import BaseModel, Field
 from backend.api.schemas import McpDetectRequest
 from backend.agents.store import AgentRecord, AgentStore
 from backend.app_state import get_console
+from backend.auth.models import RuntimeSessionSummary
+from backend.auth.session_store import get_runtime_session_store
 from backend.database import DatabaseUnavailable
 from backend.user.router import SESSION_COOKIE, get_user_store
 
@@ -278,6 +281,58 @@ def agent_audit(agent_id: str, n: int = 20) -> list[dict[str, Any]]:
     return get_console().audit_recent(agent_id, n)
 
 
+@router.get("/v1/backend/agents/{agent_id}/runtime/sessions")
+def agent_runtime_sessions(
+    agent_id: str,
+    status: str = "active",
+    n: int = 50,
+    agentguard_user_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+) -> Any:
+    visible = _visible_scope(agentguard_user_session)
+    user_id = visible.get("user_id")
+    if user_id is None:
+        return _err("login required", 401)
+    if agent_id not in visible["agent_ids"]:
+        return _err("agent not visible", 403)
+    try:
+        summaries = get_runtime_session_store().list_sessions(
+            agent_id=agent_id,
+            user_id=int(user_id),
+            status=status,
+            limit=n,
+        )
+    except DatabaseUnavailable:
+        return []
+    return [_runtime_session_summary_to_item(summary) for summary in summaries]
+
+
+@router.post("/v1/backend/agents/{agent_id}/runtime/sessions/{session_id}/close")
+def close_agent_runtime_session(
+    agent_id: str,
+    session_id: str,
+    agentguard_user_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+) -> Any:
+    visible = _visible_scope(agentguard_user_session)
+    user_id = visible.get("user_id")
+    if user_id is None:
+        return _err("login required", 401)
+    if agent_id not in visible["agent_ids"]:
+        return _err("agent not visible", 403)
+    try:
+        store = get_runtime_session_store()
+        session = store.get_session(session_id)
+        if session is None or session.agent_id != agent_id or session.user_id != int(user_id):
+            return _err("runtime session not found", 404)
+        store.close_session(session_id)
+        updated = store.list_sessions(agent_id=agent_id, user_id=int(user_id), status="all", limit=200)
+    except DatabaseUnavailable:
+        return _err("database unavailable", 503)
+    for summary in updated:
+        if summary.session.session_id == session_id:
+            return {"ok": True, "session": _runtime_session_summary_to_item(summary)}
+    return {"ok": True, "session": {"session_id": session_id, "status": "closed"}}
+
+
 @router.post("/v1/backend/approvals/{ticket_id}/approve")
 def approve_ticket(ticket_id: str, body: ApprovalBody | None = None) -> Any:
     if get_console().resolve_ticket(ticket_id, approved=True, note=(body.note if body else "")):
@@ -298,22 +353,49 @@ def _visible_external_accounts(
     return _visible_scope(session_token)["external_accounts"]
 
 
-def _visible_scope(session_token: str | None) -> dict[str, set[Any]]:
+def _visible_scope(session_token: str | None) -> dict[str, Any]:
     if not session_token:
-        return {"external_accounts": set(), "agent_ids": set()}
+        return {"external_accounts": set(), "agent_ids": set(), "user_id": None}
     try:
         store = get_user_store()
         user = store.user_for_session(session_token)
         if user is None:
-            return {"external_accounts": set(), "agent_ids": set()}
+            return {"external_accounts": set(), "agent_ids": set(), "user_id": None}
         external_accounts = {
             (item.provider.lower(), item.account_email.lower())
             for item in store.list_external_accounts(user)
         }
         agent_ids = AgentStore().agent_ids_for_user(user.id)
-        return {"external_accounts": external_accounts, "agent_ids": agent_ids}
+        return {"external_accounts": external_accounts, "agent_ids": agent_ids, "user_id": user.id}
     except DatabaseUnavailable:
-        return {"external_accounts": set(), "agent_ids": set()}
+        return {"external_accounts": set(), "agent_ids": set(), "user_id": None}
+
+
+def _runtime_session_summary_to_item(summary: RuntimeSessionSummary) -> dict[str, Any]:
+    session = summary.session
+    return {
+        "session_id": session.session_id,
+        "agent_id": session.agent_id,
+        "user_id": str(session.user_id),
+        "provider": session.provider,
+        "external_session_id": session.external_session_id,
+        "external_account_email": session.external_account_email,
+        "status": session.status,
+        "created_at": _datetime_payload(session.created_at),
+        "last_seen_at": _datetime_payload(session.last_seen_at),
+        "closed_at": _datetime_payload(session.closed_at),
+        "active_token_count": summary.active_token_count,
+        "latest_token_expires_at": _datetime_payload(summary.latest_token_expires_at),
+        "latest_token_issued_at": _datetime_payload(summary.latest_token_issued_at),
+    }
+
+
+def _datetime_payload(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat()
 
 
 def _agent_record_to_console_item(record: AgentRecord) -> dict[str, Any]:

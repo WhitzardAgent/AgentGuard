@@ -34,6 +34,14 @@ class RuntimeToken:
 
 
 @dataclass(frozen=True)
+class RuntimeSessionSummary:
+    session: RuntimeSession
+    active_token_count: int = 0
+    latest_token_expires_at: datetime | None = None
+    latest_token_issued_at: datetime | None = None
+
+
+@dataclass(frozen=True)
 class AuthContext:
     session_id: str
     agent_id: str

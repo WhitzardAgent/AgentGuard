@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import sys
 import threading
 import time
@@ -45,6 +46,10 @@ _current_metadata: contextvars.ContextVar[dict[str, Any]] = contextvars.ContextV
     "agentguard_dify_metadata",
     default={},
 )
+_current_run_key: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "agentguard_dify_run_key",
+    default=None,
+)
 _catalog_sync_started = False
 _catalog_sync_lock = threading.Lock()
 _catalog_fingerprints: dict[str, str] = {}
@@ -66,6 +71,7 @@ def install_dify_adapter() -> dict[str, Any]:
     legacy_status = _install_legacy_api_hooks()
     v2_status = _install_agent_v2_hooks()
     publish_status = _install_publish_catalog_hooks()
+    generate_status = _install_app_generate_hooks()
     catalog_sync = start_dify_workflow_catalog_sync()
     return {
         "enabled": True,
@@ -79,6 +85,7 @@ def install_dify_adapter() -> dict[str, Any]:
             "legacy_api": legacy_status,
             "agent_v2": v2_status,
             "publish_catalog": publish_status,
+            "app_generate": generate_status,
         },
         "catalog_sync": catalog_sync,
     }
@@ -222,6 +229,45 @@ def _install_workflow_api_hooks() -> dict[str, Any]:
     }
 
 
+def _install_app_generate_hooks() -> dict[str, Any]:
+    try:
+        from services.app_generate_service import AppGenerateService  # type: ignore
+    except Exception as exc:
+        return {
+            "patched": False,
+            "reason": "dify_import_failed",
+            "error": str(exc),
+        }
+    return {"patched": _patch_app_generate_service(AppGenerateService)}
+
+
+def _patch_app_generate_service(service_cls: Any) -> bool:
+    descriptor = service_cls.__dict__.get("generate")
+    original = descriptor.__func__ if isinstance(descriptor, (classmethod, staticmethod)) else descriptor
+    if original is None:
+        original = getattr(service_cls, "generate", None)
+    if not callable(original) or _is_patched(original):
+        return False
+
+    @functools.wraps(original)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        run_key = _new_agentguard_run_id()
+        token_run = _current_run_key.set(run_key)
+        try:
+            result = original(*args, **kwargs)
+        finally:
+            if "result" not in locals() or not _is_generator_like(result):
+                _current_run_key.reset(token_run)
+        if _is_generator_like(result):
+            _current_run_key.reset(token_run)
+            return _run_key_scoped_generator(result, run_key)
+        return result
+
+    _mark_patched(wrapper, original)
+    setattr(service_cls, "generate", _restore_descriptor(descriptor, wrapper))
+    return True
+
+
 def _patch_runner(runner_cls: Any) -> bool:
     original = getattr(runner_cls, "_run_agent", None)
     if not callable(original) or _is_patched(original):
@@ -306,14 +352,17 @@ def _wrap_workflow_node_run(node: Any, node_factory: Any, node_config: Any) -> b
                 reason="dify_workflow_node_complete",
             )
         if _active_guard() is not None:
-            token_meta = _current_metadata.set(_merged_metadata(metadata))
+            scoped_metadata = _merged_metadata(metadata)
+            scoped_guard = _active_guard()
+            token_meta = _current_metadata.set(scoped_metadata)
             try:
                 result = _run_workflow_node_as_tool(node, metadata, lambda: original(*args, **kwargs))
             finally:
                 if "result" not in locals() or not _is_generator_like(result):
                     _current_metadata.reset(token_meta)
             if _is_generator_like(result):
-                return _metadata_scoped_generator(result, token_meta)
+                _current_metadata.reset(token_meta)
+                return _metadata_scoped_generator(result, scoped_metadata, guard=scoped_guard)
             return result
         return _run_with_ephemeral_guard(
             metadata,
@@ -336,7 +385,9 @@ def _run_workflow_node_with_context(metadata: dict[str, Any], call: Any, *, reas
             lambda: _report_workflow_node_catalog_if_needed(metadata) or call(),
             reason=reason,
         )
-    token_meta = _current_metadata.set(_merged_metadata(metadata))
+    scoped_metadata = _merged_metadata(metadata)
+    scoped_guard = _active_guard()
+    token_meta = _current_metadata.set(scoped_metadata)
     try:
         _report_workflow_node_catalog_if_needed(metadata)
         result = call()
@@ -344,7 +395,8 @@ def _run_workflow_node_with_context(metadata: dict[str, Any], call: Any, *, reas
         if "result" not in locals() or not _is_generator_like(result):
             _current_metadata.reset(token_meta)
     if _is_generator_like(result):
-        return _metadata_scoped_generator(result, token_meta)
+        _current_metadata.reset(token_meta)
+        return _metadata_scoped_generator(result, scoped_metadata, guard=scoped_guard)
     return result
 
 
@@ -377,26 +429,86 @@ def _patch_legacy_model_invoke_llm(model_instance_cls: Any) -> bool:
     @functools.wraps(original)
     def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
         call = _legacy_llm_call_from_args(args, kwargs)
-        decision = _guard_legacy_llm_input(self, call)
-        blocked = _blocked_llm_value(decision)
-        if blocked is not None:
-            raise AdapterError(blocked)
-        try:
-            result = original(self, *args, **kwargs)
-        except Exception as exc:
-            _guard_legacy_llm_output(self, {"error": str(exc)}, call, error=str(exc))
-            raise
-        if _is_generator_like(result):
-            return _wrap_legacy_llm_generator(self, result, call)
-        decision = _guard_legacy_llm_output(self, result, call)
-        blocked = _blocked_llm_value(decision)
-        if blocked is not None:
-            raise AdapterError(blocked)
-        return result
+        return _run_legacy_llm_with_runtime_guard(self, args, kwargs, call, original)
 
     _mark_patched(wrapper, original)
     setattr(model_instance_cls, "invoke_llm", wrapper)
     return True
+
+
+def _run_legacy_llm_with_runtime_guard(
+    model: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    call: dict[str, Any],
+    original: Any,
+) -> Any:
+    metadata = dict(_current_metadata.get({}) or {})
+    if _should_replace_legacy_guard_for_dpop(metadata):
+        metadata = _metadata_with_registered_workflow_agent(metadata)
+        guard = _make_guard(metadata)
+        if not _guard_uses_dpop(guard):
+            _flush_guard(guard, reason="dify_legacy_llm_no_dpop")
+            return _run_legacy_llm_call(model, args, kwargs, call, original)
+        token_guard = _current_guard.set(guard)
+        token_meta = _current_metadata.set(metadata)
+        try:
+            result = _run_legacy_llm_call(model, args, kwargs, call, original)
+        except Exception:
+            _flush_guard(guard, reason="dify_legacy_llm_complete")
+            _current_metadata.reset(token_meta)
+            _current_guard.reset(token_guard)
+            raise
+        if _is_generator_like(result):
+            _current_metadata.reset(token_meta)
+            _current_guard.reset(token_guard)
+            return _guarded_generator(result, guard, metadata, reason="dify_legacy_llm_complete")
+        _flush_guard(guard, reason="dify_legacy_llm_complete")
+        _current_metadata.reset(token_meta)
+        _current_guard.reset(token_guard)
+        return result
+    return _run_legacy_llm_call(model, args, kwargs, call, original)
+
+
+def _run_legacy_llm_call(
+    model: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    call: dict[str, Any],
+    original: Any,
+) -> Any:
+    decision = _guard_legacy_llm_input(model, call)
+    blocked = _blocked_llm_value(decision)
+    if blocked is not None:
+        raise AdapterError(blocked)
+    try:
+        result = original(model, *args, **kwargs)
+    except Exception as exc:
+        _guard_legacy_llm_output(model, {"error": str(exc)}, call, error=str(exc))
+        raise
+    if _is_generator_like(result):
+        return _wrap_legacy_llm_generator(model, result, call)
+    decision = _guard_legacy_llm_output(model, result, call)
+    blocked = _blocked_llm_value(decision)
+    if blocked is not None:
+        raise AdapterError(blocked)
+    return result
+
+
+def _should_replace_legacy_guard_for_dpop(metadata: dict[str, Any]) -> bool:
+    guard = _active_guard()
+    if _guard_uses_dpop(guard):
+        return False
+    return bool(os.getenv("AGENTGUARD_SERVER_URL") and _optional_text(metadata.get("app_id")))
+
+
+def _guard_uses_dpop(guard: Any | None) -> bool:
+    remote = getattr(guard, "_remote", None)
+    return bool(
+        remote is not None
+        and getattr(remote, "use_dpop_auth", False)
+        and getattr(remote, "session_token", None)
+    )
 
 
 def _patch_legacy_tool_agent_invoke(tool_engine_cls: Any) -> bool:
@@ -440,12 +552,19 @@ def _patch_workflow_tool_generic_invoke(tool_engine_cls: Any) -> bool:
         blocked = _blocked_tool_value(decision, call["tool_name"])
         if blocked is not None:
             return _workflow_blocked_tool_generator(blocked)
+        scoped_guard = _active_guard()
+        scoped_metadata = _merged_metadata(_workflow_tool_metadata(call, "tool_runtime"))
         try:
             response = original(*args, **kwargs)
         except Exception as exc:
             _guard_workflow_tool_result(call, None, error=str(exc))
             raise
-        return _wrap_workflow_tool_generator(response, call)
+        return _wrap_workflow_tool_generator(
+            response,
+            call,
+            guard=scoped_guard,
+            metadata=scoped_metadata,
+        )
 
     _mark_patched(wrapper, original)
     setattr(tool_engine_cls, "generic_invoke", wrapper)
@@ -1355,6 +1474,13 @@ def _metadata_from_env_filter_defaults() -> dict[str, Any]:
 def _metadata_from_workflow_node(node: Any, node_factory: Any, node_config: Any) -> dict[str, Any]:
     dify_ctx = _workflow_run_context(node, node_factory)
     graph_init_params = getattr(node, "graph_init_params", None) or getattr(node_factory, "graph_init_params", None)
+    graph_runtime_state = (
+        getattr(node, "graph_runtime_state", None)
+        or getattr(node_factory, "graph_runtime_state", None)
+        or _get_attr_or_key(graph_init_params, "graph_runtime_state")
+    )
+    system_workflow_run_id = _workflow_system_text(graph_runtime_state, "workflow_run_id")
+    system_conversation_id = _workflow_system_text(graph_runtime_state, "conversation_id")
     node_data = (
         getattr(node, "node_data", None)
         or getattr(node, "data", None)
@@ -1389,12 +1515,19 @@ def _metadata_from_workflow_node(node: Any, node_factory: Any, node_config: Any)
             or _get_attr_or_key(graph_init_params, "workflow_id_")
         ),
         "workflow_run_id": _optional_text(
-            getattr(dify_ctx, "workflow_run_id", None)
+            system_workflow_run_id
+            or getattr(dify_ctx, "workflow_run_id", None)
             or getattr(dify_ctx, "trace_session_id", None)
             or _get_attr_or_key(graph_init_params, "workflow_run_id")
             or _get_attr_or_key(graph_init_params, "workflow_execution_id")
         ),
+        "conversation_id": _optional_text(
+            system_conversation_id
+            or getattr(dify_ctx, "conversation_id", None)
+            or _get_attr_or_key(graph_init_params, "conversation_id")
+        ),
         "invoke_from": _optional_text(getattr(dify_ctx, "invoke_from", None)),
+        "agentguard_run_id": _optional_text(_current_run_key.get()),
     }
     return {key: value for key, value in metadata.items() if value is not None}
 
@@ -1428,6 +1561,46 @@ def _workflow_run_context(node: Any, node_factory: Any) -> Any:
         return DifyRunContext.model_validate(raw)
     except Exception:
         return getattr(node, "run_context", None)
+
+
+def _workflow_system_text(graph_runtime_state: Any, key: str) -> str | None:
+    variable_pool = _get_attr_or_key(graph_runtime_state, "variable_pool")
+    if variable_pool is None:
+        return None
+    try:
+        from core.workflow.system_variables import SystemVariableKey, get_system_text  # type: ignore
+
+        system_key = (
+            SystemVariableKey.WORKFLOW_EXECUTION_ID
+            if key == "workflow_run_id"
+            else SystemVariableKey.CONVERSATION_ID
+            if key == "conversation_id"
+            else key
+        )
+        text = get_system_text(variable_pool, system_key)
+        if _optional_text(text):
+            return _optional_text(text)
+    except Exception:
+        pass
+
+    for selector in (("sys", key), ["sys", key], ("system", key), [key]):
+        try:
+            segment = variable_pool.get(selector)
+        except Exception:
+            continue
+        text = _optional_text(getattr(segment, "text", None))
+        if text:
+            return text
+        value = _optional_text(getattr(segment, "value", None))
+        if value:
+            return value
+    try:
+        values = variable_pool.get_by_prefix("sys")
+    except Exception:
+        values = None
+    if isinstance(values, dict):
+        return _optional_text(values.get(key))
+    return None
 
 
 def _merged_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
@@ -1862,19 +2035,33 @@ def _legacy_stream_output_payload(chunks: list[Any]) -> dict[str, Any]:
     return _llm_output_payload_from_text(output, thought=thought)
 
 
-def _wrap_workflow_tool_generator(result: Any, call: dict[str, Any]) -> Generator[Any, None, None]:
+def _wrap_workflow_tool_generator(
+    result: Any,
+    call: dict[str, Any],
+    *,
+    guard: Any | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> Generator[Any, None, None]:
+    token_guard = _current_guard.set(guard) if guard is not None else None
+    token_meta = _current_metadata.set(metadata) if metadata is not None else None
     chunks: list[Any] = []
     try:
-        for chunk in result:
-            chunks.append(chunk)
-            yield chunk
-    except Exception as exc:
-        _guard_workflow_tool_result(call, _workflow_tool_result_payload(chunks), error=str(exc))
-        raise
-    decision = _guard_workflow_tool_result(call, _workflow_tool_result_payload(chunks))
-    blocked_result = _blocked_result_value(decision, call["tool_name"])
-    if blocked_result is not None:
-        yield from _workflow_blocked_tool_generator(blocked_result)
+        try:
+            for chunk in result:
+                chunks.append(chunk)
+                yield chunk
+        except Exception as exc:
+            _guard_workflow_tool_result(call, _workflow_tool_result_payload(chunks), error=str(exc))
+            raise
+        decision = _guard_workflow_tool_result(call, _workflow_tool_result_payload(chunks))
+        blocked_result = _blocked_result_value(decision, call["tool_name"])
+        if blocked_result is not None:
+            yield from _workflow_blocked_tool_generator(blocked_result)
+    finally:
+        if token_meta is not None:
+            _current_metadata.reset(token_meta)
+        if token_guard is not None:
+            _current_guard.reset(token_guard)
 
 
 def _workflow_tool_result_payload(chunks: list[Any]) -> str:
@@ -2107,6 +2294,7 @@ def _runtime_auth_for_metadata(
     agent_id: str,
     fallback_session_id: str,
 ) -> Any | None:
+    metadata = dict(metadata)
     account_email = _runtime_account_email(metadata)
     external_session_id = _external_session_id_from_metadata(metadata)
     if not account_email:
@@ -2120,6 +2308,8 @@ def _runtime_auth_for_metadata(
     if external_session_id:
         auth_metadata["external_session_id"] = external_session_id
     else:
+        metadata.setdefault("agentguard_run_id", _current_run_key.get() or _new_agentguard_run_id())
+        auth_metadata["agentguard_run_id"] = metadata["agentguard_run_id"]
         auth_metadata["agentguard_internal_session_key"] = _internal_session_key_from_metadata(
             metadata,
             fallback_session_id=fallback_session_id,
@@ -2146,9 +2336,11 @@ def _runtime_auth_for_metadata(
 def _external_session_id_from_metadata(metadata: dict[str, Any]) -> str | None:
     if _optional_text(metadata.get("dify_runtime")) == "workflow_api":
         return (
-            _optional_text(metadata.get("workflow_run_id"))
+            _optional_text(metadata.get("conversation_id"))
+            or _optional_text(metadata.get("workflow_run_id"))
             or _optional_text(metadata.get("trace_session_id"))
-            or _optional_text(metadata.get("conversation_id"))
+            or _optional_text(metadata.get("message_id"))
+            or _optional_text(metadata.get("task_id"))
         )
     return _optional_text(metadata.get("conversation_id"))
 
@@ -2162,10 +2354,10 @@ def _internal_session_key_from_metadata(metadata: dict[str, Any], *, fallback_se
         _optional_text(metadata.get("user_id")) or "user",
         _optional_text(metadata.get("invoke_from")) or "invoke",
     ]
-    node_execution_id = _optional_text(metadata.get("node_execution_id"))
-    if node_execution_id:
-        parts.append(node_execution_id)
-    else:
+    run_id = _optional_text(metadata.get("agentguard_run_id")) or _optional_text(_current_run_key.get())
+    if run_id:
+        parts.append(run_id)
+    if all(part in {"agentguard-internal:dify", "runtime", "app", "workflow", "user", "invoke"} for part in parts):
         parts.append(fallback_session_id)
     return ":".join(parts)
 
@@ -2310,7 +2502,9 @@ def _run_with_ephemeral_guard(metadata: dict[str, Any], call: Any, *, reason: st
         _current_guard.reset(token_guard)
         raise
     if _is_generator_like(result):
-        return _guarded_generator(result, guard, token_guard, token_meta, reason=reason)
+        _current_metadata.reset(token_meta)
+        _current_guard.reset(token_guard)
+        return _guarded_generator(result, guard, metadata, reason=reason)
     _flush_guard(guard, reason=reason)
     _current_metadata.reset(token_meta)
     _current_guard.reset(token_guard)
@@ -2320,11 +2514,12 @@ def _run_with_ephemeral_guard(metadata: dict[str, Any], call: Any, *, reason: st
 def _guarded_generator(
     result: Any,
     guard: Any,
-    token_guard: contextvars.Token[Any],
-    token_meta: contextvars.Token[dict[str, Any]],
+    metadata: dict[str, Any],
     *,
     reason: str,
 ) -> Generator[Any, None, None]:
+    token_guard = _current_guard.set(guard)
+    token_meta = _current_metadata.set(metadata)
     try:
         yield from result
     finally:
@@ -2333,14 +2528,32 @@ def _guarded_generator(
         _current_guard.reset(token_guard)
 
 
+def _run_key_scoped_generator(result: Any, run_key: str) -> Generator[Any, None, None]:
+    token_run = _current_run_key.set(run_key)
+    try:
+        yield from result
+    finally:
+        _current_run_key.reset(token_run)
+
+
 def _metadata_scoped_generator(
     result: Any,
-    token_meta: contextvars.Token[dict[str, Any]],
+    metadata: dict[str, Any],
+    *,
+    guard: Any | None = None,
 ) -> Generator[Any, None, None]:
+    token_guard = _current_guard.set(guard) if guard is not None else None
+    token_meta = _current_metadata.set(metadata)
     try:
         yield from result
     finally:
         _current_metadata.reset(token_meta)
+        if token_guard is not None:
+            _current_guard.reset(token_guard)
+
+
+def _new_agentguard_run_id() -> str:
+    return f"agr_{secrets.token_urlsafe(12)}"
 
 
 def _session_id(metadata: dict[str, Any]) -> str:

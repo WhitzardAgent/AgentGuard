@@ -1226,10 +1226,206 @@ def test_workflow_runtime_auth_does_not_map_node_execution_id_as_external_sessio
 
     assert calls[0]["external_session_id"] is None
     assert calls[0]["cache_key"].startswith("agentguard-internal:dify:workflow_api:app-1:workflow-1")
-    assert calls[0]["cache_key"].endswith(":node-exec-1")
+    assert "node-exec-1" not in calls[0]["cache_key"]
     assert calls[0]["metadata"]["agentguard_internal_session_key"] == calls[0]["cache_key"]
     assert "external_session_id" not in calls[0]["metadata"]
     assert guard.context.session_id == "ags_dify_internal"
+
+
+def test_workflow_metadata_reads_session_ids_from_graph_runtime_state(monkeypatch):
+    _install_fake_legacy_dify_modules(monkeypatch)
+    dify_adapter = _fresh_adapter(monkeypatch)
+
+    class Segment:
+        def __init__(self, text):
+            self.text = text
+            self.value = text
+
+    class VariablePool:
+        def get(self, selector):
+            values = {
+                ("sys", "workflow_run_id"): "workflow-run-from-state",
+                ("sys", "conversation_id"): "conversation-from-state",
+            }
+            value = values.get(tuple(selector))
+            return Segment(value) if value else None
+
+    node = types.SimpleNamespace(
+        node_id="node-1",
+        node_data=types.SimpleNamespace(type="llm", title="LLM"),
+        graph_init_params=types.SimpleNamespace(workflow_id="workflow-1"),
+    )
+    node_factory = types.SimpleNamespace(
+        graph_runtime_state=types.SimpleNamespace(variable_pool=VariablePool()),
+        _dify_context=types.SimpleNamespace(
+            tenant_id="tenant-1",
+            user_id="user-1",
+            app_id="app-1",
+            workflow_id="workflow-1",
+            invoke_from="debugger",
+        ),
+    )
+
+    metadata = dify_adapter._metadata_from_workflow_node(
+        node,
+        node_factory,
+        {"id": "node-1", "data": {"type": "llm", "title": "LLM"}},
+    )
+
+    assert metadata["workflow_run_id"] == "workflow-run-from-state"
+    assert metadata["conversation_id"] == "conversation-from-state"
+    assert dify_adapter._external_session_id_from_metadata(metadata) == "conversation-from-state"
+
+
+def test_workflow_external_session_prefers_conversation_over_run(monkeypatch):
+    dify_adapter = _fresh_adapter(monkeypatch)
+
+    first = dify_adapter._external_session_id_from_metadata(
+        {
+            "dify_runtime": "workflow_api",
+            "conversation_id": "conversation-1",
+            "workflow_run_id": "workflow-run-1",
+        }
+    )
+    second = dify_adapter._external_session_id_from_metadata(
+        {
+            "dify_runtime": "workflow_api",
+            "conversation_id": "conversation-1",
+            "workflow_run_id": "workflow-run-2",
+        }
+    )
+
+    assert first == "conversation-1"
+    assert second == "conversation-1"
+
+
+def test_workflow_runtime_auth_fallback_key_is_unique_per_unmapped_run(monkeypatch):
+    _install_fake_legacy_dify_modules(monkeypatch)
+    dify_adapter = _fresh_adapter(monkeypatch)
+    monkeypatch.setenv("AGENTGUARD_SERVER_URL", "http://agentguard.test")
+    monkeypatch.setenv("AGENTGUARD_API_KEY", "sk-test")
+    monkeypatch.setattr(
+        dify_adapter,
+        "_runtime_workflow_agent_registration",
+        lambda metadata: {
+            "agent": {
+                "agent_id": "ag_workflow",
+                "agent_identity_code": "agic_workflow",
+            },
+            "user_agent": {"bound": True},
+        },
+    )
+    run_ids = iter(["agr_run_a", "agr_run_b"])
+    monkeypatch.setattr(dify_adapter, "_new_agentguard_run_id", lambda: next(run_ids))
+
+    calls = []
+
+    class FakeRuntimeAuth:
+        session_id = "ags_dify_internal"
+        session_token = "runtime-token-workflow"
+        canonical_user_id = "7"
+
+        def proof(self, method, url, access_token=None):
+            return "proof"
+
+    def ensure(**kwargs):
+        calls.append(kwargs)
+        return FakeRuntimeAuth()
+
+    monkeypatch.setattr(dify_adapter._runtime_auth_manager, "ensure", ensure)
+    metadata = {
+        "adapter": "dify",
+        "dify_runtime": "workflow_api",
+        "app_id": "app-1",
+        "workflow_id": "workflow-1",
+        "node_execution_id": "node-exec-1",
+        "node_id": "node-1",
+        "user_id": "dify-user-1",
+        "dify_user_email": "alice@example.com",
+    }
+
+    dify_adapter._make_guard(dict(metadata))
+    dify_adapter._make_guard(dict(metadata))
+
+    assert calls[0]["external_session_id"] is None
+    assert calls[1]["external_session_id"] is None
+    assert calls[0]["cache_key"] != calls[1]["cache_key"]
+    assert calls[0]["cache_key"].endswith(":agr_run_a")
+    assert calls[1]["cache_key"].endswith(":agr_run_b")
+
+
+def test_workflow_runtime_auth_fallback_key_reuses_current_run_scope(monkeypatch):
+    _install_fake_legacy_dify_modules(monkeypatch)
+    dify_adapter = _fresh_adapter(monkeypatch)
+    monkeypatch.setenv("AGENTGUARD_SERVER_URL", "http://agentguard.test")
+    monkeypatch.setenv("AGENTGUARD_API_KEY", "sk-test")
+    monkeypatch.setattr(
+        dify_adapter,
+        "_runtime_workflow_agent_registration",
+        lambda metadata: {
+            "agent": {
+                "agent_id": "ag_workflow",
+                "agent_identity_code": "agic_workflow",
+            },
+            "user_agent": {"bound": True},
+        },
+    )
+
+    calls = []
+
+    class FakeRuntimeAuth:
+        session_id = "ags_dify_internal"
+        session_token = "runtime-token-workflow"
+        canonical_user_id = "7"
+
+        def proof(self, method, url, access_token=None):
+            return "proof"
+
+    monkeypatch.setattr(
+        dify_adapter._runtime_auth_manager,
+        "ensure",
+        lambda **kwargs: calls.append(kwargs) or FakeRuntimeAuth(),
+    )
+    metadata = {
+        "adapter": "dify",
+        "dify_runtime": "workflow_api",
+        "app_id": "app-1",
+        "workflow_id": "workflow-1",
+        "node_id": "node-1",
+        "user_id": "dify-user-1",
+        "dify_user_email": "alice@example.com",
+    }
+
+    token = dify_adapter._current_run_key.set("agr_scoped")
+    try:
+        dify_adapter._make_guard(dict(metadata))
+        dify_adapter._make_guard(dict(metadata))
+    finally:
+        dify_adapter._current_run_key.reset(token)
+
+    assert calls[0]["cache_key"] == calls[1]["cache_key"]
+    assert calls[0]["cache_key"].endswith(":agr_scoped")
+
+
+def test_app_generate_classmethod_patch_preserves_binding(monkeypatch):
+    dify_adapter = _fresh_adapter(monkeypatch)
+    monkeypatch.setattr(dify_adapter, "_new_agentguard_run_id", lambda: "agr_generate")
+
+    class Service:
+        calls = []
+
+        @classmethod
+        def generate(cls, *, app_model, user):
+            cls.calls.append((app_model, user, dify_adapter._current_run_key.get()))
+            return "ok"
+
+    assert dify_adapter._patch_app_generate_service(Service) is True
+
+    result = Service.generate(app_model="app-1", user="user-1")
+
+    assert result == "ok"
+    assert Service.calls == [("app-1", "user-1", "agr_generate")]
+    assert dify_adapter._current_run_key.get() is None
 
 
 def test_workflow_catalog_sync_reports_published_workflow_tools(monkeypatch):
@@ -1582,6 +1778,39 @@ def test_workflow_tool_node_emits_events(monkeypatch):
     assert guard.reported_tools[0].name == "web_search"
 
 
+def test_workflow_tool_generator_restores_context_during_iteration(monkeypatch):
+    fake = _install_fake_legacy_dify_modules(monkeypatch)
+    dify_adapter = _fresh_adapter(monkeypatch)
+    dify_adapter.install_dify_adapter()
+
+    from agentguard import AgentGuard
+
+    guard = AgentGuard("workflow-tool-deferred-test", sandbox="noop")
+    guard.context.metadata.update({"dify_runtime": "workflow_api", "dify_user_email": "admin@example.com"})
+    token_guard = dify_adapter._current_guard.set(guard)
+    token_meta = dify_adapter._current_metadata.set(dict(guard.context.metadata))
+    try:
+        result = fake.ToolEngine.generic_invoke(
+            fake.FakeTool(),
+            {"q": "today news"},
+            "user-1",
+            types.SimpleNamespace(),
+            0,
+            conversation_id="conversation-1",
+            app_id="ce0aa322-1f3f-4ab9-8329-3af8588c7480",
+            message_id="message-1",
+        )
+    finally:
+        dify_adapter._current_metadata.reset(token_meta)
+        dify_adapter._current_guard.reset(token_guard)
+
+    chunks = list(result)
+
+    assert chunks[0].message.text == "workflow tool result:today news"
+    assert _event_types(guard) == ["tool_invoke", "tool_result"]
+    assert guard.trace.entries[1].event.metadata["dify_user_email"] == "admin@example.com"
+
+
 def test_workflow_tool_catalog_reports_again_for_new_guard(monkeypatch):
     fake = _install_fake_legacy_dify_modules(monkeypatch)
     dify_adapter = _fresh_adapter(monkeypatch)
@@ -1803,6 +2032,127 @@ def test_legacy_agent_node_llm_and_tool_hooks_emit_events(monkeypatch):
     assert len(guard.reported_tools) == 1
     assert guard.reported_tools[0].name == "web_search"
     assert guard.reported_tools[0].required_args == ["q"]
+
+
+def test_workflow_legacy_llm_hook_replaces_legacy_guard_with_dpop_guard(monkeypatch):
+    fake = _install_fake_legacy_dify_modules(monkeypatch)
+    monkeypatch.setenv("AGENTGUARD_SERVER_URL", "http://agentguard.test")
+    dify_adapter = _fresh_adapter(monkeypatch)
+    dify_adapter.install_dify_adapter()
+
+    class RecordingRuntime:
+        def __init__(self):
+            self.calls = []
+
+        def guard(self, event, phase="before"):
+            self.calls.append((event.event_type.value, phase))
+            return types.SimpleNamespace(decision=GuardDecision.allow())
+
+        def sync_local_cache_now(self, reason=""):
+            self.calls.append(("flush", reason))
+
+    class FakeGuard:
+        def __init__(self, *, dpop: bool):
+            self.runtime = RecordingRuntime()
+            self.context = types.SimpleNamespace(session_id="legacy", agent_id="ag_workflow", user_id="7")
+            self._remote = types.SimpleNamespace(
+                use_dpop_auth=dpop,
+                session_token="runtime-token" if dpop else None,
+            )
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    legacy_guard = FakeGuard(dpop=False)
+    dpop_guard = FakeGuard(dpop=True)
+    created = []
+
+    def make_guard(metadata):
+        created.append(metadata)
+        return dpop_guard
+
+    monkeypatch.setattr(dify_adapter, "_make_guard", make_guard)
+    monkeypatch.setattr(
+        dify_adapter,
+        "_metadata_with_registered_workflow_agent",
+        lambda metadata: {**metadata, "dify_user_email": "alice@example.com", "agentguard_agent_id": "ag_workflow"},
+    )
+    token_guard = dify_adapter._current_guard.set(legacy_guard)
+    token_meta = dify_adapter._current_metadata.set(
+        {
+            "adapter": "dify",
+            "dify_runtime": "workflow_api",
+            "app_id": "app-1",
+            "workflow_id": "workflow-1",
+            "user_id": "dify-user-1",
+        }
+    )
+    try:
+        chunks = list(
+            fake.ModelInstance().invoke_llm(
+                [types.SimpleNamespace(content="query")],
+                stream=True,
+            )
+        )
+    finally:
+        dify_adapter._current_metadata.reset(token_meta)
+        dify_adapter._current_guard.reset(token_guard)
+
+    assert len(chunks) == 2
+    assert created
+    assert created[0]["dify_user_email"] == "alice@example.com"
+    assert legacy_guard.runtime.calls == []
+    assert dpop_guard.runtime.calls[:2] == [("llm_input", "before"), ("llm_output", "after")]
+    assert dpop_guard.closed is True
+
+
+def test_workflow_generator_restores_context_during_iteration(monkeypatch):
+    fake = _install_fake_legacy_dify_modules(monkeypatch)
+    monkeypatch.setenv("AGENTGUARD_SERVER_URL", "http://agentguard.test")
+    dify_adapter = _fresh_adapter(monkeypatch)
+    dify_adapter.install_dify_adapter()
+
+    class RecordingRuntime:
+        def __init__(self):
+            self.calls = []
+
+        def guard(self, event, phase="before"):
+            self.calls.append((event.event_type.value, phase, event.metadata.get("node_id")))
+            return types.SimpleNamespace(decision=GuardDecision.allow())
+
+        def sync_local_cache_now(self, reason=""):
+            self.calls.append(("flush", reason, None))
+
+    class FakeGuard:
+        def __init__(self):
+            self.runtime = RecordingRuntime()
+            self.context = types.SimpleNamespace(session_id="ags_dify", agent_id="ag_workflow", user_id="7")
+            self._remote = types.SimpleNamespace(use_dpop_auth=True, session_token="runtime-token")
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    guard = FakeGuard()
+    monkeypatch.setattr(dify_adapter, "_make_guard", lambda metadata: guard)
+    node = fake.DifyNodeFactory().create_node(
+        {"id": "llm-node-1", "data": {"type": "llm", "title": "LLM"}}
+    )
+
+    generated = node.run()
+
+    assert dify_adapter._current_guard.get() is None
+    assert dify_adapter._current_metadata.get({}) == {}
+
+    chunks = list(generated)
+
+    assert len(chunks) == 2
+    assert guard.runtime.calls[:2] == [
+        ("llm_input", "before", "llm-node-1"),
+        ("llm_output", "after", "llm-node-1"),
+    ]
+    assert guard.closed is True
 
 
 def test_legacy_llm_tool_call_only_output_is_null(monkeypatch):

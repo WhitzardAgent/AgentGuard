@@ -514,16 +514,12 @@ def _external_session_id_from_metadata(metadata: dict[str, Any]) -> str | None:
 
 
 def _internal_session_key_from_metadata(metadata: dict[str, Any], *, fallback_session_id: str) -> str:
-    return ":".join(
-        [
-            "agentguard-internal:dify-agent-chat",
-            _optional_text(metadata.get("app_id")) or "app",
-            _optional_text(metadata.get("user_id")) or "user",
-            _optional_text(metadata.get("message_id"))
-            or _optional_text(metadata.get("task_id"))
-            or fallback_session_id,
-        ]
-    )
+    app_id = _optional_text(metadata.get("app_id")) or "app"
+    user_id = _optional_text(metadata.get("user_id")) or "user"
+    parts = ["agentguard-internal:dify-agent-chat", app_id, user_id]
+    if app_id == "app" and user_id == "user":
+        parts.append(fallback_session_id)
+    return ":".join(parts)
 
 
 def _runtime_account_email(metadata: dict[str, Any]) -> str | None:

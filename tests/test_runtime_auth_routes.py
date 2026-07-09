@@ -124,3 +124,37 @@ def test_dpop_runtime_route_rejects_legacy_identity_headers(monkeypatch):
 
     assert response.status_code == 400
     assert "legacy identity headers" in response.json()["detail"]
+
+
+def test_dpop_guard_decide_ignores_body_client_session_key(monkeypatch):
+    monkeypatch.setattr("backend.auth.dependencies.get_dify_auth_broker", lambda: FakeBroker())
+    client = TestClient(create_app())
+
+    def payload(client_key: str) -> dict:
+        return {
+            "request_id": f"req-{client_key}",
+            "context": {
+                "session_id": "self-reported-session",
+                "agent_id": "self-reported-agent",
+                "user_id": "self-reported-user",
+                "metadata": {"client_session_key": client_key},
+            },
+            "current_event": {
+                "event_type": "tool_invoke",
+                "payload": {
+                    "tool_name": "daily_chat",
+                    "arguments": {"query": "hello"},
+                    "capabilities": ["dify_tool"],
+                },
+                "risk_signals": [],
+            },
+            "trajectory_window": [],
+            "local_signals": [],
+        }
+
+    headers = {"Authorization": "DPoP token", "DPoP": "proof"}
+    first = client.post("/v1/server/guard/decide", headers=headers, json=payload("legacy-a"))
+    second = client.post("/v1/server/guard/decide", headers=headers, json=payload("legacy-b"))
+
+    assert first.status_code == 200
+    assert second.status_code == 200

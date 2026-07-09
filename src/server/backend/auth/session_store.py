@@ -6,7 +6,7 @@ import secrets
 from datetime import datetime, timezone
 from typing import Any
 
-from backend.auth.models import RuntimeSession, RuntimeToken
+from backend.auth.models import RuntimeSession, RuntimeSessionSummary, RuntimeToken
 from backend.database import MySQLDatabase, get_database
 
 
@@ -91,6 +91,51 @@ class RuntimeSessionStore:
             (session_id,),
         )
         return _session_from_row(row) if row else None
+
+    def list_sessions(
+        self,
+        *,
+        agent_id: str | None = None,
+        user_id: int | None = None,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> list[RuntimeSessionSummary]:
+        filters: list[str] = []
+        params: list[Any] = []
+        if agent_id:
+            filters.append("s.agent_id = %s")
+            params.append(agent_id)
+        if user_id is not None:
+            filters.append("s.user_id = %s")
+            params.append(int(user_id))
+        normalized_status = _normalize_status_filter(status)
+        if normalized_status:
+            filters.append("s.status = %s")
+            params.append(normalized_status)
+        where = f"WHERE {' AND '.join(filters)}" if filters else ""
+        params.append(_clamp_limit(limit))
+        rows = self.db.fetchall(
+            f"""
+            SELECT
+              s.session_id, s.agent_id, s.user_id, s.provider, s.external_session_id,
+              s.external_account_email, s.dpop_jkt, s.status, s.metadata_json,
+              s.created_at, s.last_seen_at, s.closed_at,
+              COALESCE(SUM(CASE WHEN t.status = 'active' THEN 1 ELSE 0 END), 0) AS active_token_count,
+              MAX(CASE WHEN t.status = 'active' THEN t.expires_at ELSE NULL END) AS latest_token_expires_at,
+              MAX(t.issued_at) AS latest_token_issued_at
+            FROM runtime_sessions s
+            LEFT JOIN runtime_tokens t ON t.session_id = s.session_id
+            {where}
+            GROUP BY
+              s.session_id, s.agent_id, s.user_id, s.provider, s.external_session_id,
+              s.external_account_email, s.dpop_jkt, s.status, s.metadata_json,
+              s.created_at, s.last_seen_at, s.closed_at
+            ORDER BY COALESCE(s.last_seen_at, s.created_at) DESC, s.created_at DESC
+            LIMIT %s
+            """,
+            tuple(params),
+        )
+        return [_session_summary_from_row(row) for row in rows]
 
     def touch_session(self, session_id: str) -> None:
         self.db.execute(
@@ -242,6 +287,23 @@ def _token_from_row(row: dict[str, Any]) -> RuntimeToken:
     )
 
 
+def _session_summary_from_row(row: dict[str, Any]) -> RuntimeSessionSummary:
+    return RuntimeSessionSummary(
+        session=_session_from_row(row),
+        active_token_count=int(row.get("active_token_count") or 0),
+        latest_token_expires_at=(
+            _coerce_datetime(row["latest_token_expires_at"])
+            if row.get("latest_token_expires_at")
+            else None
+        ),
+        latest_token_issued_at=(
+            _coerce_datetime(row["latest_token_issued_at"])
+            if row.get("latest_token_issued_at")
+            else None
+        ),
+    )
+
+
 def _metadata_json(value: dict[str, Any] | None) -> str | None:
     if not value:
         return None
@@ -261,6 +323,23 @@ def _optional_text(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _normalize_status_filter(value: str | None) -> str | None:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"", "all", "*"}:
+        return None
+    if normalized in {"active", "closed"}:
+        return normalized
+    return "active"
+
+
+def _clamp_limit(value: int) -> int:
+    try:
+        limit = int(value)
+    except (TypeError, ValueError):
+        return 50
+    return max(1, min(limit, 200))
 
 
 def _coerce_datetime(value: Any) -> datetime:

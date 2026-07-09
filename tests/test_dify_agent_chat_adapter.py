@@ -740,6 +740,7 @@ def test_agent_chat_runtime_auth_does_not_map_message_id_as_external_session(mon
 
     assert calls[0]["external_session_id"] is None
     assert calls[0]["cache_key"].startswith("agentguard-internal:dify-agent-chat:app-1:dify-user-1")
+    assert "message-1" not in calls[0]["cache_key"]
     assert calls[0]["metadata"]["agentguard_internal_session_key"] == calls[0]["cache_key"]
     assert "external_session_id" not in calls[0]["metadata"]
     assert guard.context.session_id == "ags_dify_chat_internal"

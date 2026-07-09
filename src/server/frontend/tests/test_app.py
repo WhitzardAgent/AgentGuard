@@ -931,6 +931,36 @@ def test_agent_plugin_available_get_proxy_forwards_request():
     assert observed["path"] == "/v1/backend/agents/agent-a/plugins/available"
 
 
+def test_runtime_session_close_proxy_forwards_request():
+    observed: dict[str, object] = {}
+
+    class UpstreamHandler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            observed["path"] = self.path
+            body = json.dumps({"ok": True, "session": {"session_id": "ags_1", "status": "closed"}}).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    with _ThreadedServer(UpstreamHandler) as upstream:
+        with patched_proxy_target(upstream.url):
+            with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+                status, payload = _json_request(
+                    "POST",
+                    preview.url,
+                    "/api/agents/ag_1/runtime/sessions/ags_1/close",
+                )
+
+    assert status == 200
+    assert payload["ok"] is True
+    assert observed["path"] == "/v1/backend/agents/ag_1/runtime/sessions/ags_1/close"
+
+
 def test_runtime_page_renders_shared_sidebar_and_active_nav():
     with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
         status, body = _text_request("GET", preview.url, "/runtime.html")
@@ -948,6 +978,8 @@ def test_runtime_page_renders_shared_sidebar_and_active_nav():
     assert 'id="runtime-audit-summary"' in body
     assert 'id="runtime-audit-arguments"' in body
     assert 'id="runtime-audit-result"' in body
+    assert "Runtime Sessions" in body
+    assert 'id="runtime-session-body"' in body
 
 
 def test_home_page_renders_intro_and_home_active_nav():

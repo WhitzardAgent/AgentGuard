@@ -241,6 +241,11 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
             self._proxy(upstream_path, method="POST", query=query)
             return
 
+        if path.startswith("/api/agents/") and "/runtime/" in path:
+            upstream_path = path.removeprefix("/api/")
+            self._proxy(upstream_path, method="POST", query=query)
+            return
+
         if path.startswith("/api/approvals/") and (
             path.endswith("/approve") or path.endswith("/deny")
         ):
