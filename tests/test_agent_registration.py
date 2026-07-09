@@ -11,6 +11,7 @@ class FakeDB:
         self.agent_external_identities: list[dict[str, Any]] = []
         self.user_external_accounts: list[dict[str, Any]] = []
         self.user_agents: list[dict[str, Any]] = []
+        self.agent_credentials: list[dict[str, Any]] = []
         self.agent_tools: list[dict[str, Any]] = []
         self.next_id = 1
 
@@ -22,6 +23,24 @@ class FakeDB:
                 if str(agent_id) in self.agents:
                     self.agents[str(agent_id)]["status"] = "deleted"
             return len(params[1:])
+        if "UPDATE agent_credentials" in sql and "status = 'rotated'" in sql:
+            agent_id, thumbprint = params
+            for row in self.agent_credentials:
+                if (
+                    row["agent_id"] == agent_id
+                    and row["status"] == "active"
+                    and row["public_key_thumbprint"] != thumbprint
+                ):
+                    row["status"] = "rotated"
+            return 1
+        if "UPDATE agent_credentials" in sql:
+            public_key_jwk, metadata_json, credential_id = params
+            for row in self.agent_credentials:
+                if row["credential_id"] == credential_id:
+                    row["public_key_jwk"] = public_key_jwk
+                    row["metadata_json"] = metadata_json or row.get("metadata_json")
+                    return 1
+            return 0
         if "INSERT INTO agent_tools" in sql:
             row = {
                 "agent_id": params[0],
@@ -128,9 +147,44 @@ class FakeDB:
             self.next_id += 1
             self.user_agents.append(row)
             return row["id"]
+        if "INSERT INTO agent_credentials" in sql:
+            row = {
+                "credential_id": params[0],
+                "agent_id": params[1],
+                "public_key_jwk": params[2],
+                "public_key_thumbprint": params[3],
+                "issuer": "agentguard-local",
+                "valid_from": None,
+                "valid_to": None,
+                "status": "active",
+                "revoked_at": None,
+                "metadata_json": params[4],
+                "created_at": None,
+                "updated_at": None,
+                "last_seen_at": None,
+            }
+            for index, existing in enumerate(self.agent_credentials):
+                if (
+                    existing["agent_id"] == row["agent_id"]
+                    and existing["public_key_thumbprint"] == row["public_key_thumbprint"]
+                ):
+                    self.agent_credentials[index] = {**existing, **row, "credential_id": existing["credential_id"]}
+                    return self.next_id
+            self.agent_credentials.append(row)
+            return self.next_id
         raise AssertionError(sql)
 
     def fetchone(self, sql: str, params: tuple[Any, ...] | None = None):
+        if "FROM agent_credentials" in sql:
+            agent_id, thumbprint = params
+            for row in self.agent_credentials:
+                if (
+                    row["agent_id"] == agent_id
+                    and row["public_key_thumbprint"] == thumbprint
+                    and row["status"] == "active"
+                ):
+                    return row
+            return None
         if "FROM agents a" in sql and "WHERE a.agent_id" in sql:
             agent = self.agents.get(str(params[0]))
             if agent is None:
@@ -223,6 +277,9 @@ def test_register_agent_creates_user_agent_binding_for_bound_dify_email():
     assert result.user_binding_created is True
     assert db.agent_external_identities[0]["external_agent_id"] == "app-1"
     assert db.agent_external_identities[0]["agent_id"] == result.agent.agent_id
+    assert result.credential.agent_id == result.agent.agent_id
+    assert result.credential.status == "active"
+    assert db.agent_credentials[0]["public_key_thumbprint"] == result.agent.public_key_thumbprint
     assert db.user_agents[0]["agent_id"] == result.agent.agent_id
     assert store.agent_ids_for_user(7) == {result.agent.agent_id}
     assert store.list_agents({result.agent.agent_id})[0].external_agent_id == "app-1"

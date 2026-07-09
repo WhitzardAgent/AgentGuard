@@ -34,10 +34,28 @@ class AgentRecord:
 @dataclass(frozen=True)
 class AgentRegistrationResult:
     agent: AgentRecord
+    credential: "AgentCredentialRecord"
     user_id: int | None
     account_email: str | None
     user_binding_created: bool
     user_binding_updated: bool
+
+
+@dataclass(frozen=True)
+class AgentCredentialRecord:
+    credential_id: str
+    agent_id: str
+    public_key_jwk: str
+    public_key_thumbprint: str
+    issuer: str = "agentguard-local"
+    valid_from: datetime | None = None
+    valid_to: datetime | None = None
+    status: str = "active"
+    revoked_at: datetime | None = None
+    metadata_json: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    last_seen_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -82,6 +100,7 @@ class AgentStore:
         for statement in _SCHEMA:
             self.db.execute(statement)
         _ensure_agent_tool_columns(self.db)
+        _backfill_agent_credentials_from_agents(self.db)
 
     def register_agent(
         self,
@@ -199,6 +218,12 @@ class AgentStore:
             agent = self.get_agent(clean_agent_id)
         if agent is None:
             raise RuntimeError("failed to register agent")
+        credential = self._upsert_agent_credential(
+            agent_id=agent.agent_id,
+            public_key_jwk=clean_public_jwk,
+            public_key_thumbprint=thumbprint,
+            metadata=metadata,
+        )
 
         user_id = self._user_id_for_external_account(clean_provider, clean_email)
         created = False
@@ -213,6 +238,7 @@ class AgentStore:
             )
         return AgentRegistrationResult(
             agent=agent,
+            credential=credential,
             user_id=user_id,
             account_email=clean_email,
             user_binding_created=created,
@@ -247,6 +273,28 @@ class AgentStore:
             (int(user_id),),
         )
         return {str(row["agent_id"]) for row in rows}
+
+    def get_active_credential(
+        self,
+        *,
+        agent_id: str,
+        public_key_thumbprint: str,
+    ) -> AgentCredentialRecord | None:
+        row = self.db.fetchone(
+            """
+            SELECT credential_id, agent_id, public_key_jwk, public_key_thumbprint,
+                   issuer, valid_from, valid_to, status, revoked_at, metadata_json,
+                   created_at, updated_at, last_seen_at
+            FROM agent_credentials
+            WHERE agent_id = %s
+              AND public_key_thumbprint = %s
+              AND status = 'active'
+              AND (valid_to IS NULL OR valid_to > UTC_TIMESTAMP())
+            LIMIT 1
+            """,
+            (agent_id, public_key_thumbprint),
+        )
+        return _agent_credential_from_row(row) if row else None
 
     def list_agents(self, agent_ids: set[str] | None = None) -> list[AgentRecord]:
         if agent_ids is not None:
@@ -506,6 +554,81 @@ class AgentStore:
         )
         return False, True
 
+    def _upsert_agent_credential(
+        self,
+        *,
+        agent_id: str,
+        public_key_jwk: dict[str, Any],
+        public_key_thumbprint: str,
+        metadata: dict[str, Any] | None,
+    ) -> AgentCredentialRecord:
+        credential = self.get_active_credential(
+            agent_id=agent_id,
+            public_key_thumbprint=public_key_thumbprint,
+        )
+        public_key_json = json.dumps(public_key_jwk, sort_keys=True, separators=(",", ":"))
+        metadata_json = _metadata_json(metadata)
+        if credential is not None:
+            self.db.execute(
+                """
+                UPDATE agent_credentials
+                SET public_key_jwk = %s,
+                    metadata_json = COALESCE(%s, metadata_json),
+                    last_seen_at = UTC_TIMESTAMP(),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE credential_id = %s
+                """,
+                (public_key_json, metadata_json, credential.credential_id),
+            )
+            refreshed = self.get_active_credential(
+                agent_id=agent_id,
+                public_key_thumbprint=public_key_thumbprint,
+            )
+            if refreshed is not None:
+                return refreshed
+
+        self.db.execute(
+            """
+            UPDATE agent_credentials
+            SET status = 'rotated',
+                revoked_at = COALESCE(revoked_at, UTC_TIMESTAMP()),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE agent_id = %s AND status = 'active' AND public_key_thumbprint <> %s
+            """,
+            (agent_id, public_key_thumbprint),
+        )
+        credential_id = _new_agent_credential_id()
+        self.db.insert(
+            """
+            INSERT INTO agent_credentials (
+              credential_id, agent_id, public_key_jwk, public_key_thumbprint,
+              issuer, valid_from, valid_to, status, metadata_json, last_seen_at
+            )
+            VALUES (%s, %s, %s, %s, 'agentguard-local', UTC_TIMESTAMP(), NULL, 'active', %s, UTC_TIMESTAMP())
+            ON DUPLICATE KEY UPDATE
+              public_key_jwk = VALUES(public_key_jwk),
+              status = 'active',
+              revoked_at = NULL,
+              metadata_json = COALESCE(VALUES(metadata_json), metadata_json),
+              last_seen_at = UTC_TIMESTAMP(),
+              updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                credential_id,
+                agent_id,
+                public_key_json,
+                public_key_thumbprint,
+                metadata_json,
+            ),
+        )
+        credential = self.get_active_credential(
+            agent_id=agent_id,
+            public_key_thumbprint=public_key_thumbprint,
+        )
+        if credential is None:
+            raise RuntimeError("failed to register agent credential")
+        return credential
+
 
 def ensure_agent_schema() -> None:
     AgentStore().ensure_schema()
@@ -575,6 +698,30 @@ _SCHEMA = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS agent_credentials (
+      credential_id VARCHAR(255) PRIMARY KEY,
+      agent_id VARCHAR(255) NOT NULL,
+      public_key_jwk JSON NOT NULL,
+      public_key_thumbprint VARCHAR(255) NOT NULL,
+      issuer VARCHAR(255) NOT NULL DEFAULT 'agentguard-local',
+      valid_from TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      valid_to TIMESTAMP NULL,
+      status VARCHAR(32) NOT NULL DEFAULT 'active',
+      revoked_at TIMESTAMP NULL,
+      metadata_json JSON NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      last_seen_at TIMESTAMP NULL,
+      UNIQUE KEY uniq_agent_credentials_agent_thumbprint (agent_id, public_key_thumbprint),
+      INDEX idx_agent_credentials_agent_id (agent_id),
+      INDEX idx_agent_credentials_status (status),
+      INDEX idx_agent_credentials_valid_to (valid_to),
+      CONSTRAINT fk_agent_credentials_agent
+        FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+        ON DELETE CASCADE
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS agent_tools (
       id INT AUTO_INCREMENT PRIMARY KEY,
       agent_id VARCHAR(255) NOT NULL,
@@ -616,6 +763,32 @@ def _ensure_agent_tool_columns(db: MySQLDatabase) -> None:
         db.execute("ALTER TABLE agent_tools ADD COLUMN raw_payload_json JSON NULL AFTER metadata_json")
 
 
+def _backfill_agent_credentials_from_agents(db: MySQLDatabase) -> None:
+    try:
+        db.execute(
+            """
+            INSERT IGNORE INTO agent_credentials (
+              credential_id, agent_id, public_key_jwk, public_key_thumbprint,
+              issuer, valid_from, valid_to, status, metadata_json, last_seen_at
+            )
+            SELECT CONCAT('agcred_', SHA2(CONCAT(agent_id, ':', public_key_thumbprint), 256)),
+                   agent_id, public_key_jwk, public_key_thumbprint,
+                   'agentguard-local-backfill',
+                   COALESCE(created_at, UTC_TIMESTAMP()),
+                   NULL,
+                   'active',
+                   metadata_json,
+                   last_seen_at
+            FROM agents
+            WHERE status = 'active'
+              AND public_key_jwk IS NOT NULL
+              AND public_key_thumbprint IS NOT NULL
+            """
+        )
+    except Exception:
+        return
+
+
 def _agent_from_row(row: dict[str, Any]) -> AgentRecord:
     return AgentRecord(
         agent_id=str(row["agent_id"]),
@@ -630,6 +803,24 @@ def _agent_from_row(row: dict[str, Any]) -> AgentRecord:
         public_key_jwk=_optional_text(row.get("public_key_jwk")),
         public_key_thumbprint=_optional_text(row.get("public_key_thumbprint")),
         status=str(row["status"]),
+        metadata_json=_optional_text(row.get("metadata_json")),
+        created_at=_coerce_datetime(row.get("created_at")) if row.get("created_at") else None,
+        updated_at=_coerce_datetime(row.get("updated_at")) if row.get("updated_at") else None,
+        last_seen_at=_coerce_datetime(row.get("last_seen_at")) if row.get("last_seen_at") else None,
+    )
+
+
+def _agent_credential_from_row(row: dict[str, Any]) -> AgentCredentialRecord:
+    return AgentCredentialRecord(
+        credential_id=str(row["credential_id"]),
+        agent_id=str(row["agent_id"]),
+        public_key_jwk=_optional_text(row.get("public_key_jwk")) or "{}",
+        public_key_thumbprint=str(row["public_key_thumbprint"]),
+        issuer=str(row.get("issuer") or "agentguard-local"),
+        valid_from=_coerce_datetime(row.get("valid_from")) if row.get("valid_from") else None,
+        valid_to=_coerce_datetime(row.get("valid_to")) if row.get("valid_to") else None,
+        status=str(row.get("status") or "active"),
+        revoked_at=_coerce_datetime(row.get("revoked_at")) if row.get("revoked_at") else None,
         metadata_json=_optional_text(row.get("metadata_json")),
         created_at=_coerce_datetime(row.get("created_at")) if row.get("created_at") else None,
         updated_at=_coerce_datetime(row.get("updated_at")) if row.get("updated_at") else None,
@@ -743,6 +934,10 @@ def _external_identity_hash(
 
 def _new_agent_id() -> str:
     return f"ag_{secrets.token_urlsafe(18)}"
+
+
+def _new_agent_credential_id() -> str:
+    return f"agcred_{secrets.token_urlsafe(18)}"
 
 
 def _metadata_json(value: dict[str, Any] | None) -> str | None:

@@ -1,6 +1,7 @@
 """Auth Broker for Dify runtime sessions."""
 from __future__ import annotations
 
+import base64
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -248,24 +249,31 @@ class DifyAuthBroker:
         agent = self.agent_store.get_agent(agent_id)
         if agent is None or agent.status != "active":
             raise RuntimeAuthForbidden("AgentGuard agent is not registered or active")
-        if not agent.public_key_jwk:
-            raise RuntimeAuthForbidden("AgentGuard agent has no public key")
         if agent_id not in self.agent_store.agent_ids_for_user(int(user_id)):
             raise RuntimeAuthForbidden("AgentGuard agent is not available to this user")
+        proof_kid = _agent_proof_kid(proof)
+        if not proof_kid:
+            raise RuntimeAuthUnauthorized("AgentGuard agent identity proof missing key id")
+        credential = self.agent_store.get_active_credential(
+            agent_id=agent_id,
+            public_key_thumbprint=proof_kid,
+        )
+        if credential is None:
+            raise RuntimeAuthForbidden("AgentGuard agent credential is not active")
         try:
             public_key_jwk = (
-                dict(agent.public_key_jwk)
-                if isinstance(agent.public_key_jwk, dict)
-                else json.loads(agent.public_key_jwk)
+                dict(credential.public_key_jwk)
+                if isinstance(credential.public_key_jwk, dict)
+                else json.loads(credential.public_key_jwk)
             )
         except Exception as exc:
-            raise RuntimeAuthForbidden("AgentGuard agent public key is invalid") from exc
+            raise RuntimeAuthForbidden("AgentGuard agent credential public key is invalid") from exc
         try:
             verification = verify_agent_identity_proof(
                 proof,
                 agent_id=agent_id,
                 public_key_jwk=public_key_jwk,
-                expected_kid=agent.public_key_thumbprint,
+                expected_kid=credential.public_key_thumbprint,
                 method=method,
                 url=url,
                 body=body,
@@ -334,3 +342,18 @@ def _clean_email(value: str) -> str:
 def _expired(value: datetime) -> bool:
     dt = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc).timestamp() <= datetime.now(timezone.utc).timestamp()
+
+
+def _agent_proof_kid(proof: str | None) -> str | None:
+    if not proof:
+        return None
+    try:
+        header_b64 = proof.split(".", 1)[0]
+        padding = "=" * (-len(header_b64) % 4)
+        data = json.loads(base64.urlsafe_b64decode((header_b64 + padding).encode("ascii")).decode("utf-8"))
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    kid = str(data.get("kid") or "").strip()
+    return kid or None

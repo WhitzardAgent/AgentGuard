@@ -97,24 +97,6 @@
             <button class="btn" id="logout-button" type="button" hidden>Logout</button>
           </div>
           <p class="subtle" id="user-status">Not signed in.</p>
-          <div class="toolbar" id="ticket-toolbar" hidden>
-            <button class="btn primary" id="generate-ticket-button" type="button">Generate Ticket</button>
-            <button class="btn" id="copy-ticket-button" type="button" hidden>Copy Ticket</button>
-          </div>
-          <div class="empty-state" id="ticket-output" hidden></div>
-          <div class="table-card" id="ticket-list-card" hidden>
-            <table>
-              <thead>
-                <tr>
-                  <th>Prefix</th>
-                  <th>Expires</th>
-                  <th>Last Used</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody id="ticket-list"></tbody>
-            </table>
-          </div>
         </div>
       </section>
     </main>
@@ -140,13 +122,6 @@
       const difyBindForm = document.getElementById("dify-bind-form");
       const externalAccountListCard = document.getElementById("external-account-list-card");
       const externalAccountList = document.getElementById("external-account-list");
-      const ticketToolbar = document.getElementById("ticket-toolbar");
-      const generateTicketButton = document.getElementById("generate-ticket-button");
-      const copyTicketButton = document.getElementById("copy-ticket-button");
-      const ticketOutput = document.getElementById("ticket-output");
-      const ticketListCard = document.getElementById("ticket-list-card");
-      const ticketList = document.getElementById("ticket-list");
-      let currentTicket = "";
 
       function showToast(message, tone) {
         const toast = document.getElementById("toast");
@@ -208,16 +183,12 @@
           ? `Signed in as ${user.username} (user #${user.id}).`
           : "Not signed in.";
         logoutButton.hidden = !signedIn;
-        ticketToolbar.hidden = !signedIn;
         difyCard.hidden = !signedIn;
         loginForm.hidden = signedIn;
         registerForm.hidden = signedIn;
         if (!signedIn) {
-          ticketOutput.hidden = true;
-          ticketListCard.hidden = true;
           externalAccountListCard.hidden = true;
           externalAccountList.innerHTML = "";
-          currentTicket = "";
           clearCatalogCaches();
         }
         updateShellUser(user);
@@ -244,23 +215,6 @@
         `).join("");
       }
 
-      function renderTickets(tickets) {
-        if (!tickets.length) {
-          ticketListCard.hidden = true;
-          ticketList.innerHTML = "";
-          return;
-        }
-        ticketListCard.hidden = false;
-        ticketList.innerHTML = tickets.map((ticket) => `
-          <tr>
-            <td>${escapeHtml(ticket.ticket_prefix || "")}</td>
-            <td>${escapeHtml(ticket.expires_at || "")}</td>
-            <td>${escapeHtml(ticket.last_used_at || "-")}</td>
-            <td>${ticket.expired ? "Expired" : "Active"}</td>
-          </tr>
-        `).join("");
-      }
-
       function escapeHtml(value) {
         return String(value)
           .replaceAll("&", "&amp;")
@@ -274,8 +228,6 @@
         try {
           const payload = await api("/api/user/me");
           renderUser(payload.user);
-          const ticketPayload = await api("/api/user/tickets");
-          renderTickets(ticketPayload.tickets || []);
           const externalPayload = await api("/api/user/external-accounts?provider=dify");
           renderExternalAccounts(externalPayload.external_accounts || []);
         } catch {
@@ -356,34 +308,6 @@
           showToast("Dify account unbound.", "success");
         } catch (error) {
           showToast(error.message || "Failed to unbind Dify account.", "warning");
-        }
-      });
-
-      generateTicketButton.addEventListener("click", async () => {
-        try {
-          const payload = await api("/api/user/tickets", { method: "POST", body: "{}" });
-          currentTicket = payload.ticket || "";
-          ticketOutput.hidden = false;
-          ticketOutput.textContent = currentTicket
-            ? `Ticket: ${currentTicket}\nExpires: ${payload.expires_at}`
-            : "Ticket generated.";
-          copyTicketButton.hidden = !currentTicket;
-          await refresh();
-          showToast("Ticket generated.", "success");
-        } catch (error) {
-          showToast(error.message || "Failed to generate ticket.", "warning");
-        }
-      });
-
-      copyTicketButton.addEventListener("click", async () => {
-        if (!currentTicket) {
-          return;
-        }
-        try {
-          await navigator.clipboard.writeText(currentTicket);
-          showToast("Ticket copied.", "success");
-        } catch {
-          showToast("Copy failed.", "warning");
         }
       });
 

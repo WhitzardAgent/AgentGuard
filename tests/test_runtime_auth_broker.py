@@ -25,9 +25,16 @@ AGENT_KEY = AgentIdentityKey(Ed25519PrivateKey.generate())
 
 
 class FakeAgentStore:
-    def __init__(self, *, active: bool = True, bound: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        active: bool = True,
+        bound: bool = True,
+        credential_active: bool = True,
+    ) -> None:
         self.active = active
         self.bound = bound
+        self.credential_active = credential_active
 
     def get_agent(self, agent_id: str):
         if agent_id != AGENT_ID and agent_id != "ag_workflow":
@@ -43,6 +50,20 @@ class FakeAgentStore:
         if not self.bound:
             return set()
         return {AGENT_ID, "ag_workflow"}
+
+    def get_active_credential(self, *, agent_id: str, public_key_thumbprint: str):
+        if not self.credential_active or public_key_thumbprint != AGENT_KEY.thumbprint:
+            return None
+        if agent_id != AGENT_ID and agent_id != "ag_workflow":
+            return None
+        return dataclass_record(
+            credential_id="agcred_test",
+            agent_id=agent_id,
+            public_key_jwk=json.dumps(AGENT_KEY.public_jwk, sort_keys=True, separators=(",", ":")),
+            public_key_thumbprint=AGENT_KEY.thumbprint,
+            issuer="agentguard-local",
+            status="active",
+        )
 
 
 def dataclass_record(**kwargs):
@@ -164,14 +185,20 @@ class FakeRuntimeSessionStore:
         )
 
 
-def _broker(*, bound: bool = True, agent_bound: bool = True, ttl_seconds: int = 900):
+def _broker(
+    *,
+    bound: bool = True,
+    agent_bound: bool = True,
+    credential_active: bool = True,
+    ttl_seconds: int = 900,
+):
     store = FakeRuntimeSessionStore()
     replay = FakeReplayStore()
     broker = DifyAuthBroker(
         session_store=store,
         replay_store=replay,
         user_store=FakeUserStore(bound=bound),
-        agent_store=FakeAgentStore(bound=agent_bound),
+        agent_store=FakeAgentStore(bound=agent_bound, credential_active=credential_active),
         token_service=RuntimeTokenService(secret="test-secret", ttl_seconds=ttl_seconds),
     )
     return broker, store
@@ -351,6 +378,22 @@ def test_agent_identity_proof_body_hash_mismatch_is_rejected():
 
 def test_agent_not_available_to_user_is_rejected():
     broker, _ = _broker(agent_bound=False)
+    key = DPoPKey()
+    body = _body()
+
+    with pytest.raises(RuntimeAuthForbidden):
+        broker.create_session(
+            **body,
+            dpop_proof=key.proof("POST", CREATE_URL),
+            agent_proof=_agent_proof(key, body),
+            request_body=body,
+            method="POST",
+            url=CREATE_URL,
+        )
+
+
+def test_inactive_agent_credential_is_rejected():
+    broker, _ = _broker(credential_active=False)
     key = DPoPKey()
     body = _body()
 

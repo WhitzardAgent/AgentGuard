@@ -132,6 +132,7 @@ def register_agent(req: AgentRegisterRequest, request: Request) -> dict[str, Any
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     agent = result.agent
+    credential = result.credential
     return {
         "status": "ok",
         "agent": {
@@ -144,6 +145,15 @@ def register_agent(req: AgentRegisterRequest, request: Request) -> dict[str, Any
             "agent_type": agent.agent_type,
             "public_key_thumbprint": agent.public_key_thumbprint,
             "status": agent.status,
+        },
+        "credential": {
+            "credential_id": credential.credential_id,
+            "agent_id": credential.agent_id,
+            "public_key_thumbprint": credential.public_key_thumbprint,
+            "issuer": credential.issuer,
+            "status": credential.status,
+            "valid_from": credential.valid_from.isoformat() if credential.valid_from else None,
+            "valid_to": credential.valid_to.isoformat() if credential.valid_to else None,
         },
         "user_agent": {
             "user_id": result.user_id,
