@@ -262,6 +262,7 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
             "/api/user/register",
             "/api/user/login",
             "/api/user/logout",
+            "/api/user/password",
             "/api/user/tickets",
         }:
             self._proxy(f"v1/user/{path.rsplit('/', 1)[-1]}", method="POST", query=query)

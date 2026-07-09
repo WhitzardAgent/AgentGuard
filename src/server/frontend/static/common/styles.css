@@ -3412,6 +3412,29 @@ textarea {
   gap: 16px;
 }
 
+#password-change-form {
+  grid-template-areas:
+    "current new"
+    ". confirm"
+    "actions actions";
+}
+
+#password-change-form label:nth-of-type(1) {
+  grid-area: current;
+}
+
+#password-change-form label:nth-of-type(2) {
+  grid-area: new;
+}
+
+#password-change-form label:nth-of-type(3) {
+  grid-area: confirm;
+}
+
+#password-change-form .form-grid-actions {
+  grid-area: actions;
+}
+
 .form-grid button.primary {
   padding: 9px 16px;
   border-radius: var(--radius-sm);
@@ -3462,6 +3485,14 @@ textarea {
 @media (max-width: 720px) {
   .form-grid {
     grid-template-columns: 1fr;
+  }
+
+  #password-change-form {
+    grid-template-areas:
+      "current"
+      "new"
+      "confirm"
+      "actions";
   }
 }
 

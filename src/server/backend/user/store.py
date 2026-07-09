@@ -110,6 +110,33 @@ class UserStore:
             raise InvalidCredentials("invalid username or password")
         return _user_from_row(row)
 
+    def change_password(
+        self,
+        user: User,
+        *,
+        current_password: str,
+        new_password: str,
+    ) -> None:
+        _validate_password(new_password)
+        row = self.db.fetchone(
+            "SELECT password_hash FROM users WHERE id = %s",
+            (user.id,),
+        )
+        if not row or not verify_password(
+            current_password,
+            str(row.get("password_hash") or ""),
+        ):
+            raise InvalidCredentials("invalid username or password")
+        self.db.execute(
+            """
+            UPDATE users
+            SET password_hash = %s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+            """,
+            (hash_password(new_password), user.id),
+        )
+
     def create_web_session(self, user: User) -> SessionIssue:
         ttl = _int_env(SESSION_TTL_ENV, DEFAULT_SESSION_TTL_SECONDS)
         token = _new_token("ags")

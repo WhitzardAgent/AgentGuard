@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 
+from backend.agents.store import AgentRecord
 from backend.api.app import create_app
 from backend.database.config import parse_mysql_url
 from backend.user.passwords import hash_password, verify_password
@@ -37,6 +38,25 @@ class FakeUserStore:
         if not record or record[1] != password:
             raise InvalidCredentials("invalid username or password")
         return record[0]
+
+    def change_password(
+        self,
+        user: User,
+        *,
+        current_password: str,
+        new_password: str,
+    ) -> None:
+        if len(new_password) < 8:
+            raise ValueError("password must be at least 8 characters")
+        for username, record in list(self.users.items()):
+            record_user, password = record
+            if record_user.id != user.id:
+                continue
+            if password != current_password:
+                raise InvalidCredentials("invalid username or password")
+            self.users[username] = (record_user, new_password)
+            return
+        raise InvalidCredentials("invalid username or password")
 
     def create_web_session(self, user: User) -> SessionIssue:
         token = f"session-{user.id}"
@@ -144,7 +164,7 @@ def test_user_register_login_me_ticket_and_logout(monkeypatch):
         json={"username": "alice", "password": "correct horse"},
     )
     assert registered.status_code == 200
-    assert registered.json()["user"] == {"id": 1, "username": "alice"}
+    assert registered.json()["user"] == {"id": 1, "username": "alice", "is_admin": False}
 
     duplicate = client.post(
         "/v1/user/register",
@@ -168,6 +188,7 @@ def test_user_register_login_me_ticket_and_logout(monkeypatch):
     me = client.get("/v1/user/me")
     assert me.status_code == 200
     assert me.json()["user"]["username"] == "alice"
+    assert me.json()["user"]["is_admin"] is False
 
     ticket = client.post("/v1/user/tickets")
     assert ticket.status_code == 200
@@ -197,6 +218,59 @@ def test_user_register_login_me_ticket_and_logout(monkeypatch):
     logout = client.post("/v1/user/logout")
     assert logout.status_code == 200
     assert client.get("/v1/user/me").status_code == 401
+
+
+def test_logged_in_user_can_change_password(monkeypatch):
+    store = FakeUserStore()
+    monkeypatch.setattr("backend.user.router.get_user_store", lambda: store)
+    client = TestClient(create_app())
+
+    unauthenticated = client.post(
+        "/v1/user/password",
+        json={"current_password": "correct horse", "new_password": "better horse"},
+    )
+    assert unauthenticated.status_code == 401
+
+    client.post("/v1/user/register", json={"username": "alice", "password": "correct horse"})
+    login = client.post(
+        "/v1/user/login",
+        json={"username": "alice", "password": "correct horse"},
+    )
+    assert login.status_code == 200
+
+    too_short = client.post(
+        "/v1/user/password",
+        json={"current_password": "correct horse", "new_password": "short"},
+    )
+    assert too_short.status_code == 422
+
+    wrong_current = client.post(
+        "/v1/user/password",
+        json={"current_password": "wrong horse", "new_password": "better horse"},
+    )
+    assert wrong_current.status_code == 401
+    assert store.authenticate("alice", "correct horse").username == "alice"
+
+    changed = client.post(
+        "/v1/user/password",
+        json={"current_password": "correct horse", "new_password": "better horse"},
+    )
+    assert changed.status_code == 200
+    assert changed.json() == {"status": "ok"}
+    assert client.get("/v1/user/me").status_code == 200
+
+    logout = client.post("/v1/user/logout")
+    assert logout.status_code == 200
+    old_login = client.post(
+        "/v1/user/login",
+        json={"username": "alice", "password": "correct horse"},
+    )
+    assert old_login.status_code == 401
+    new_login = client.post(
+        "/v1/user/login",
+        json={"username": "alice", "password": "better horse"},
+    )
+    assert new_login.status_code == 200
 
 
 def test_dify_email_can_only_bind_one_agentguard_user(monkeypatch):
@@ -233,6 +307,61 @@ def test_console_visibility_requires_logged_in_user(monkeypatch):
     assert _visible_external_accounts(None) == set()
     assert _visible_external_accounts("missing-session") == set()
     assert _visible_external_accounts(session.token) == {("dify", "alice@example.com")}
+
+
+def test_admin_user_payload_and_visibility_are_unrestricted(monkeypatch):
+    store = FakeUserStore()
+    admin = User(id=1, username="AgentGuardAdmin", profile_json='{"role":"admin"}')
+    store.users[admin.username] = (admin, "correct horse")
+    session = store.create_web_session(admin)
+    monkeypatch.setattr("backend.user.router.get_user_store", lambda: store)
+    monkeypatch.setattr("backend.api.console_router.get_user_store", lambda: store)
+
+    class FakeAgentStore:
+        def list_agents(self, agent_ids=None):
+            assert agent_ids is None
+            return [
+                AgentRecord(
+                    agent_id="ag_1",
+                    agent_identity_code="code-1",
+                    status="active",
+                    name="Agent One",
+                ),
+                AgentRecord(
+                    agent_id="ag_2",
+                    agent_identity_code="code-2",
+                    status="active",
+                    name="Agent Two",
+                ),
+            ]
+
+        def agent_ids_for_user(self, user_id: int):
+            raise AssertionError("admin visibility should not query user agent ids")
+
+    monkeypatch.setattr("backend.api.console_router.AgentStore", FakeAgentStore)
+    client = TestClient(create_app())
+
+    me = client.get("/v1/user/me", cookies={"agentguard_user_session": session.token})
+    assert me.status_code == 200
+    assert me.json()["user"] == {
+        "id": 1,
+        "username": "AgentGuardAdmin",
+        "is_admin": True,
+    }
+
+    from backend.api.console_router import _visible_scope
+
+    visible = _visible_scope(session.token)
+    assert visible["is_admin"] is True
+    assert visible["agent_ids"] is None
+    assert visible["external_accounts"] is None
+
+    agents = client.get(
+        "/v1/backend/agents",
+        cookies={"agentguard_user_session": session.token},
+    )
+    assert agents.status_code == 200
+    assert [item["agent_id"] for item in agents.json()] == ["ag_1", "ag_2"]
 
 
 def test_password_hashes_are_not_plaintext():

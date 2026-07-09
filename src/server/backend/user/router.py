@@ -8,6 +8,7 @@ from fastapi import APIRouter, Cookie, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from backend.database import DatabaseUnavailable
+from backend.user.permissions import is_admin_user
 from backend.user.store import (
     DuplicateExternalAccount,
     DuplicateUsername,
@@ -25,6 +26,11 @@ SESSION_COOKIE = "agentguard_user_session"
 class Credentials(BaseModel):
     username: str = Field(min_length=3, max_length=255)
     password: str = Field(min_length=8)
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str = Field(min_length=1)
+    new_password: str = Field(min_length=8)
 
 
 class DifyBindRequest(BaseModel):
@@ -78,6 +84,25 @@ def current_user(
 ) -> dict[str, Any]:
     user = _current_user_or_401(agentguard_user_session)
     return {"user": _user_payload(user)}
+
+
+@router.post("/v1/user/password")
+def change_password(
+    req: PasswordChangeRequest,
+    agentguard_user_session: str | None = Cookie(default=None),
+) -> dict[str, str]:
+    user = _current_user_or_401(agentguard_user_session)
+    try:
+        _store_or_503().change_password(
+            user,
+            current_password=req.current_password,
+            new_password=req.new_password,
+        )
+    except InvalidCredentials as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "ok"}
 
 
 @router.post("/v1/user/tickets")
@@ -179,7 +204,7 @@ def _set_session_cookie(response: Response, token: str, expires_at: datetime) ->
 
 
 def _user_payload(user: User) -> dict[str, Any]:
-    return {"id": user.id, "username": user.username}
+    return {"id": user.id, "username": user.username, "is_admin": is_admin_user(user)}
 
 
 def _ticket_payload(item: dict[str, Any]) -> dict[str, Any]:

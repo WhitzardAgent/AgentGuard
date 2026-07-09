@@ -11,6 +11,8 @@ from backend.auth.models import RuntimeSession, RuntimeSessionSummary
 
 class FakeUserStore:
     def user_for_session(self, token: str):
+        if token == "admin-session":
+            return SimpleNamespace(id=1, profile_json='{"role":"admin"}')
         if token != "session-1":
             return None
         return SimpleNamespace(id=7)
@@ -28,11 +30,11 @@ class FakeAgentStore:
 
 
 class FakeRuntimeSessionStore:
-    def __init__(self) -> None:
+    def __init__(self, *, user_id: int = 7) -> None:
         self.session = RuntimeSession(
             session_id="ags_dify_1",
             agent_id="ag_1",
-            user_id=7,
+            user_id=user_id,
             provider="dify",
             external_session_id=None,
             external_account_email="alice@example.com",
@@ -43,8 +45,10 @@ class FakeRuntimeSessionStore:
         )
         self.closed = False
 
-    def list_sessions(self, *, agent_id: str, user_id: int, status: str, limit: int):
-        if agent_id != "ag_1" or user_id != 7:
+    def list_sessions(self, *, agent_id: str, user_id: int | None, status: str, limit: int):
+        if agent_id != "ag_1":
+            return []
+        if user_id is not None and user_id != self.session.user_id:
             return []
         session = self.session
         return [
@@ -131,3 +135,27 @@ def test_agent_runtime_session_close_marks_session_closed(monkeypatch):
     assert payload["ok"] is True
     assert payload["session"]["status"] == "closed"
     assert payload["session"]["active_token_count"] == 0
+
+
+def test_admin_runtime_sessions_can_read_and_close_other_user_sessions(monkeypatch):
+    store = FakeRuntimeSessionStore(user_id=9)
+    _patch_console_dependencies(monkeypatch, store, agent_ids=set())
+    client = TestClient(create_app())
+
+    sessions = client.get(
+        "/v1/backend/agents/ag_1/runtime/sessions?status=all",
+        cookies={"agentguard_user_session": "admin-session"},
+    )
+
+    assert sessions.status_code == 200
+    payload = sessions.json()
+    assert payload[0]["session_id"] == "ags_dify_1"
+    assert payload[0]["user_id"] == "9"
+
+    closed = client.post(
+        "/v1/backend/agents/ag_1/runtime/sessions/ags_dify_1/close",
+        cookies={"agentguard_user_session": "admin-session"},
+    )
+
+    assert closed.status_code == 200
+    assert closed.json()["session"]["status"] == "closed"

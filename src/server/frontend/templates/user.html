@@ -31,6 +31,29 @@
           <p class="subtle" id="user-status">Checking sign-in status...</p>
         </div>
 
+        <div class="card" id="password-card" hidden>
+          <div class="heading-row">
+            <h3>Change Password</h3>
+          </div>
+          <form class="form-grid" id="password-change-form">
+            <label>
+              <span>Current Password</span>
+              <input id="current-password" type="password" autocomplete="current-password" required>
+            </label>
+            <label>
+              <span>New Password</span>
+              <input id="new-password" type="password" autocomplete="new-password" required minlength="8">
+            </label>
+            <label>
+              <span>Confirm New Password</span>
+              <input id="confirm-new-password" type="password" autocomplete="new-password" required minlength="8">
+            </label>
+            <div class="form-grid-actions">
+              <button class="btn primary" type="submit">Update Password</button>
+            </div>
+          </form>
+        </div>
+
         <div class="card" id="dify-card" hidden>
           <div class="heading-row">
             <h3>Dify Account</h3>
@@ -80,6 +103,8 @@
     (function () {
       const logoutButton = document.getElementById("logout-button");
       const statusNode = document.getElementById("user-status");
+      const passwordCard = document.getElementById("password-card");
+      const passwordChangeForm = document.getElementById("password-change-form");
       const difyCard = document.getElementById("dify-card");
       const difyBindForm = document.getElementById("dify-bind-form");
       const externalAccountListCard = document.getElementById("external-account-list-card");
@@ -138,8 +163,10 @@
           ? `Signed in as ${user.username} (user #${user.id}).`
           : "Not signed in.";
         logoutButton.hidden = !signedIn;
+        passwordCard.hidden = !signedIn;
         difyCard.hidden = !signedIn;
         if (!signedIn) {
+          passwordChangeForm.reset();
           externalAccountListCard.hidden = true;
           externalAccountList.innerHTML = "";
           clearCatalogCaches();
@@ -199,6 +226,30 @@
         renderUser(null);
         showToast("Signed out.", "success");
         window.setTimeout(() => window.location.replace("/login.html"), 300);
+      });
+
+      passwordChangeForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const currentPassword = document.getElementById("current-password").value;
+        const newPassword = document.getElementById("new-password").value;
+        const confirmPassword = document.getElementById("confirm-new-password").value;
+        if (newPassword !== confirmPassword) {
+          showToast("New passwords do not match.", "warning");
+          return;
+        }
+        try {
+          await api("/api/user/password", {
+            method: "POST",
+            body: JSON.stringify({
+              current_password: currentPassword,
+              new_password: newPassword,
+            }),
+          });
+          passwordChangeForm.reset();
+          showToast("Password updated.", "success");
+        } catch (error) {
+          showToast(error.message || "Failed to update password.", "warning");
+        }
       });
 
       difyBindForm.addEventListener("submit", async (event) => {

@@ -20,6 +20,7 @@ from backend.app_state import get_console
 from backend.auth.models import RuntimeSessionSummary
 from backend.auth.session_store import get_runtime_session_store
 from backend.database import DatabaseUnavailable
+from backend.user.permissions import is_admin_user
 from backend.user.router import SESSION_COOKIE, get_user_store
 
 router = APIRouter()
@@ -66,7 +67,7 @@ def list_agents(
     agentguard_user_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
 ) -> list[dict[str, Any]]:
     visible = _visible_scope(agentguard_user_session)
-    if not visible["agent_ids"]:
+    if visible["agent_ids"] is not None and not visible["agent_ids"]:
         return []
     try:
         records = AgentStore().list_agents(visible["agent_ids"])
@@ -292,12 +293,13 @@ def agent_runtime_sessions(
     user_id = visible.get("user_id")
     if user_id is None:
         return _err("login required", 401)
-    if agent_id not in visible["agent_ids"]:
+    if not _agent_visible(visible, agent_id):
         return _err("agent not visible", 403)
+    session_user_id = None if visible.get("is_admin") else int(user_id)
     try:
         summaries = get_runtime_session_store().list_sessions(
             agent_id=agent_id,
-            user_id=int(user_id),
+            user_id=session_user_id,
             status=status,
             limit=n,
         )
@@ -316,15 +318,21 @@ def close_agent_runtime_session(
     user_id = visible.get("user_id")
     if user_id is None:
         return _err("login required", 401)
-    if agent_id not in visible["agent_ids"]:
+    if not _agent_visible(visible, agent_id):
         return _err("agent not visible", 403)
+    is_admin = bool(visible.get("is_admin"))
+    session_user_id = None if is_admin else int(user_id)
     try:
         store = get_runtime_session_store()
         session = store.get_session(session_id)
-        if session is None or session.agent_id != agent_id or session.user_id != int(user_id):
+        if (
+            session is None
+            or session.agent_id != agent_id
+            or (not is_admin and session.user_id != int(user_id))
+        ):
             return _err("runtime session not found", 404)
         store.close_session(session_id)
-        updated = store.list_sessions(agent_id=agent_id, user_id=int(user_id), status="all", limit=200)
+        updated = store.list_sessions(agent_id=agent_id, user_id=session_user_id, status="all", limit=200)
     except DatabaseUnavailable:
         return _err("database unavailable", 503)
     for summary in updated:
@@ -349,18 +357,20 @@ def deny_ticket(ticket_id: str, body: ApprovalBody | None = None) -> Any:
 
 def _visible_external_accounts(
     session_token: str | None,
-) -> set[tuple[str, str]]:
+) -> set[tuple[str, str]] | None:
     return _visible_scope(session_token)["external_accounts"]
 
 
 def _visible_scope(session_token: str | None) -> dict[str, Any]:
     if not session_token:
-        return {"external_accounts": set(), "agent_ids": set(), "user_id": None}
+        return {"external_accounts": set(), "agent_ids": set(), "user_id": None, "is_admin": False}
     try:
         store = get_user_store()
         user = store.user_for_session(session_token)
         if user is None:
-            return {"external_accounts": set(), "agent_ids": set(), "user_id": None}
+            return {"external_accounts": set(), "agent_ids": set(), "user_id": None, "is_admin": False}
+        if is_admin_user(user):
+            return {"external_accounts": None, "agent_ids": None, "user_id": user.id, "is_admin": True}
         external_accounts = {
             (item.provider.lower(), item.account_email.lower())
             for item in store.list_external_accounts(user)
@@ -369,9 +379,21 @@ def _visible_scope(session_token: str | None) -> dict[str, Any]:
             agent_ids = AgentStore().agent_ids_for_user(user.id)
         except DatabaseUnavailable:
             agent_ids = set()
-        return {"external_accounts": external_accounts, "agent_ids": agent_ids, "user_id": user.id}
+        return {
+            "external_accounts": external_accounts,
+            "agent_ids": agent_ids,
+            "user_id": user.id,
+            "is_admin": False,
+        }
     except DatabaseUnavailable:
-        return {"external_accounts": set(), "agent_ids": set(), "user_id": None}
+        return {"external_accounts": set(), "agent_ids": set(), "user_id": None, "is_admin": False}
+
+
+def _agent_visible(visible: dict[str, Any], agent_id: str) -> bool:
+    visible_agent_ids = visible.get("agent_ids")
+    if visible_agent_ids is None:
+        return True
+    return str(agent_id or "").strip() in visible_agent_ids
 
 
 def _runtime_session_summary_to_item(summary: RuntimeSessionSummary) -> dict[str, Any]:

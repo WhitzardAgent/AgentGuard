@@ -191,6 +191,49 @@ def test_user_proxy_forwards_set_cookie_and_cookie_header():
     assert observed["cookie"] == "agentguard_user_session=session-1"
 
 
+def test_user_password_proxy_forwards_cookie_and_payload():
+    observed: dict[str, object] = {}
+
+    class UpstreamHandler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            observed["path"] = self.path
+            observed["cookie"] = self.headers.get("Cookie")
+            length = int(self.headers.get("Content-Length", "0"))
+            observed["body"] = self.rfile.read(length).decode("utf-8")
+            body = json.dumps({"status": "ok"}).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    with _ThreadedServer(UpstreamHandler) as upstream:
+        with patched_proxy_target(upstream.url):
+            with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+                status, _, raw = _raw_request(
+                    "POST",
+                    preview.url,
+                    "/api/user/password",
+                    {
+                        "current_password": "correct horse",
+                        "new_password": "better horse",
+                    },
+                    headers={"Cookie": "agentguard_user_session=session-1"},
+                )
+
+    assert status == 200
+    assert json.loads(raw.decode("utf-8")) == {"status": "ok"}
+    assert observed["path"] == "/v1/user/password"
+    assert observed["cookie"] == "agentguard_user_session=session-1"
+    assert json.loads(str(observed["body"])) == {
+        "current_password": "correct horse",
+        "new_password": "better horse",
+    }
+
+
 def test_user_external_account_proxy_forwards_requests():
     observed: dict[str, object] = {}
 
