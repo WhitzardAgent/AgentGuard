@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import inspect
 from typing import Any, Callable, Protocol, runtime_checkable
 
 from agentguard.tools.metadata import ToolMetadata
@@ -16,6 +17,13 @@ class LLMInputNormalization:
 @dataclass(slots=True)
 class LLMOutputNormalization:
     payload: Any
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class LLMInputDenormalization:
+    args: tuple[Any, ...]
+    kwargs: dict[str, Any]
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -53,6 +61,17 @@ class AgentEventNormalizer(Protocol):
         fn: Callable[..., Any] | None = None,
         owner: Any = None,
     ) -> LLMOutputNormalization: ...
+
+    def denormalize_llm_input(
+        self,
+        *,
+        label: str,
+        payload: Any,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        fn: Callable[..., Any] | None = None,
+        owner: Any = None,
+    ) -> LLMInputDenormalization: ...
 
     def normalize_tool_invoke(
         self,
@@ -164,6 +183,28 @@ class _FallbackAgentEventNormalizer:
             metadata=self._metadata(label=label, owner=owner),
         )
 
+    def denormalize_llm_input(
+        self,
+        *,
+        label: str,
+        payload: Any,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        fn: Callable[..., Any] | None = None,
+        owner: Any = None,
+    ) -> LLMInputDenormalization:
+        denormalized = denormalize_llm_input_payload(
+            payload=payload,
+            args=args,
+            kwargs=kwargs,
+            fn=fn,
+        )
+        return LLMInputDenormalization(
+            args=denormalized.args,
+            kwargs=denormalized.kwargs,
+            metadata=self._metadata(label=label, owner=owner),
+        )
+
     def normalize_tool_invoke(
         self,
         *,
@@ -199,11 +240,137 @@ class _FallbackAgentEventNormalizer:
 DEFAULT_AGENT_EVENT_NORMALIZER = _FallbackAgentEventNormalizer()
 
 
+def denormalize_llm_input_payload(
+    *,
+    payload: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    fn: Callable[..., Any] | None = None,
+) -> LLMInputDenormalization:
+    current_args = list(args)
+    current_kwargs = dict(kwargs)
+
+    if isinstance(payload, dict):
+        if "input" in payload:
+            current_args, current_kwargs = _replace_primary_llm_input(
+                payload["input"],
+                args=current_args,
+                kwargs=current_kwargs,
+                fn=fn,
+                preferred_keys=("input", "messages", "msg"),
+            )
+            extra_args = payload.get("args")
+            if isinstance(extra_args, (list, tuple)):
+                current_args = current_args[:1] + list(extra_args)
+            elif extra_args is not None and len(current_args) <= 1:
+                current_args = current_args[:1] + [extra_args]
+            _merge_llm_payload_kwargs(
+                current_kwargs,
+                payload,
+                skip_keys={"label", "input", "args"},
+            )
+            return LLMInputDenormalization(args=tuple(current_args), kwargs=current_kwargs)
+
+        if "messages" in payload or "msg" in payload:
+            primary_key = "messages" if "messages" in payload else "msg"
+            current_args, current_kwargs = _replace_primary_llm_input(
+                payload[primary_key],
+                args=current_args,
+                kwargs=current_kwargs,
+                fn=fn,
+                preferred_keys=(primary_key, "input"),
+            )
+            _merge_llm_payload_kwargs(
+                current_kwargs,
+                payload,
+                skip_keys={"label", primary_key},
+            )
+            return LLMInputDenormalization(args=tuple(current_args), kwargs=current_kwargs)
+
+        if "args" in payload or "kwargs" in payload:
+            raw_args = payload.get("args", current_args)
+            raw_kwargs = payload.get("kwargs", current_kwargs)
+            next_args = tuple(raw_args) if isinstance(raw_args, (list, tuple)) else (raw_args,)
+            next_kwargs = dict(raw_kwargs) if isinstance(raw_kwargs, dict) else dict(current_kwargs)
+            return LLMInputDenormalization(args=next_args, kwargs=next_kwargs)
+
+    if not current_args and not current_kwargs:
+        return LLMInputDenormalization(args=(payload,), kwargs={})
+
+    current_args, current_kwargs = _replace_primary_llm_input(
+        payload,
+        args=current_args,
+        kwargs=current_kwargs,
+        fn=fn,
+        preferred_keys=("input", "messages", "msg"),
+    )
+    return LLMInputDenormalization(args=tuple(current_args), kwargs=current_kwargs)
+
+
+def _replace_primary_llm_input(
+    value: Any,
+    *,
+    args: list[Any],
+    kwargs: dict[str, Any],
+    fn: Callable[..., Any] | None = None,
+    preferred_keys: tuple[str, ...],
+) -> tuple[list[Any], dict[str, Any]]:
+    for key in preferred_keys:
+        if key in kwargs:
+            kwargs[key] = value
+            return args, kwargs
+
+    if args:
+        args[0] = value
+        return args, kwargs
+
+    for key in preferred_keys:
+        if _function_accepts_keyword(fn, key):
+            kwargs[key] = value
+            return args, kwargs
+
+    kwargs[preferred_keys[0] if preferred_keys else "input"] = value
+    return args, kwargs
+
+
+def _merge_llm_payload_kwargs(
+    kwargs: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    skip_keys: set[str],
+) -> None:
+    for key, value in payload.items():
+        if key in skip_keys:
+            continue
+        if key == "kwargs" and isinstance(value, dict):
+            kwargs.update(value)
+            continue
+        kwargs[key] = value
+
+
+def _function_accepts_keyword(fn: Callable[..., Any] | None, key: str) -> bool:
+    if not callable(fn):
+        return False
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return False
+    param = sig.parameters.get(key)
+    if param is None:
+        return False
+    return param.kind in {
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        inspect.Parameter.KEYWORD_ONLY,
+    }
+
+
 __all__ = [
     "AgentEventNormalizer",
     "DEFAULT_AGENT_EVENT_NORMALIZER",
+    "LLMInputDenormalization",
     "LLMInputNormalization",
     "LLMOutputNormalization",
     "ToolInvokeNormalization",
     "ToolResultNormalization",
+    "denormalize_llm_input_payload",
 ]

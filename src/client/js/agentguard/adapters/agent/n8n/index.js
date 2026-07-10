@@ -26,6 +26,7 @@ const WORKFLOW_NODE_CACHE = new Map();
 const MAX_GUARDS = 128;
 let catalogSyncStarted = false;
 const AI_TOOL_CONNECTION_TYPE = "ai_tool";
+const MAX_LLM_LOOPBACK_ATTEMPTS = 3;
 
 const PROVIDER_SIDE_BUILT_IN_TOOLS = new Set([
   "web_search",
@@ -466,6 +467,101 @@ function blockedLLMResponse(decision, request = {}) {
     return syntheticBlockedStream(reason);
   }
   return syntheticResponsesPayload(reason, request && request.model);
+}
+
+function coerceLoopbackPayload(payload) {
+  if (typeof payload !== "string") {
+    return payload;
+  }
+  const text = payload.trim();
+  if (!text || !["{", "["].includes(text[0])) {
+    return payload;
+  }
+  try {
+    return JSON.parse(text);
+  } catch (_) {
+    return payload;
+  }
+}
+
+function denormalizeResponsesInput(payload) {
+  if (Array.isArray(payload)) {
+    return payload.map((item) => denormalizeResponsesMessage(item));
+  }
+  if (payload && typeof payload === "object") {
+    if (Array.isArray(payload.input)) {
+      return denormalizeResponsesInput(payload.input);
+    }
+    if (Array.isArray(payload.messages)) {
+      return denormalizeResponsesInput(payload.messages);
+    }
+    return [denormalizeResponsesMessage(payload)];
+  }
+  return [denormalizeResponsesMessage(payload)];
+}
+
+function denormalizeResponsesMessage(message) {
+  if (message && typeof message === "object" && !Array.isArray(message)) {
+    return {
+      role: message.role || message.type || "user",
+      content: normalizeValue(
+        Object.prototype.hasOwnProperty.call(message, "content")
+          ? message.content
+          : Object.prototype.hasOwnProperty.call(message, "text")
+            ? message.text
+            : message
+      ),
+    };
+  }
+  return {
+    role: "user",
+    content: typeof message === "string" ? message : safeString(message),
+  };
+}
+
+function applyLoopbackToResponsesRequest(request = {}, processedContent = "") {
+  const payload = coerceLoopbackPayload(processedContent);
+  return {
+    ...(request || {}),
+    input: denormalizeResponsesInput(payload),
+  };
+}
+
+function applyLoopbackToNodeParameters(parameters = {}, processedContent = "") {
+  const payload = coerceLoopbackPayload(processedContent);
+  const nextMessages = denormalizeResponsesInput(payload);
+  const sourceKey = (
+    parameters.responses && Array.isArray(parameters.responses.values)
+      ? "responses"
+      : parameters.messages && Array.isArray(parameters.messages.values)
+        ? "messages"
+        : "responses"
+  );
+  const currentSource = isPlainObject(parameters[sourceKey]) ? parameters[sourceKey] : {};
+  const currentValues = Array.isArray(currentSource.values) ? currentSource.values : [];
+  return {
+    ...parameters,
+    [sourceKey]: {
+      ...currentSource,
+      values: nextMessages.map((message, index) => ({
+        ...(isPlainObject(currentValues[index]) ? currentValues[index] : {}),
+        role: message.role || "user",
+        content: message.content,
+      })),
+    },
+  };
+}
+
+function applyLoopbackToRunNodeArgs(args = {}, processedContent = "") {
+  const node = args && args.node;
+  const parameters = isPlainObject(node && node.parameters) ? node.parameters : {};
+  return {
+    ...(args || {}),
+    node: {
+      ...(node || {}),
+      parameters: applyLoopbackToNodeParameters(parameters, processedContent),
+    },
+  };
 }
 
 async function* syntheticBlockedStream(reason) {
@@ -1152,18 +1248,40 @@ function patchOpenAI(moduleExports) {
       if (!matchesConfiguredFilters(context)) {
         return original.call(this, request, requestOptions);
       }
-      const beforeDecision = await guardLLMBefore(request, context);
-      const beforeBlocked = blockedToolValue(beforeDecision, "llm");
-      if (beforeBlocked) {
-        return blockedLLMResponse(beforeDecision, request);
+      let currentRequest = request;
+      let attempts = 0;
+      while (true) {
+        const beforeDecision = await guardLLMBefore(currentRequest, context);
+        if (beforeDecision.decision_type === DecisionType.LOOP_BACK_TO_LLM) {
+          if (attempts >= MAX_LLM_LOOPBACK_ATTEMPTS) {
+            return blockedLLMResponse(beforeDecision, currentRequest);
+          }
+          currentRequest = applyLoopbackToResponsesRequest(currentRequest, beforeDecision.processed_content);
+          attempts += 1;
+          continue;
+        }
+        const beforeBlocked = blockedToolValue(beforeDecision, "llm");
+        if (beforeBlocked) {
+          return blockedLLMResponse(beforeDecision, currentRequest);
+        }
+        const raw = await original.call(this, currentRequest, requestOptions);
+        if (currentRequest && currentRequest.stream && raw && typeof raw[Symbol.asyncIterator] === "function") {
+          return wrapOpenAIStream(raw, context);
+        }
+        const afterDecision = await guardLLMAfter(raw, context);
+        if (afterDecision.decision_type === DecisionType.LOOP_BACK_TO_LLM) {
+          if (attempts >= MAX_LLM_LOOPBACK_ATTEMPTS) {
+            return blockedLLMResponse(afterDecision, currentRequest);
+          }
+          currentRequest = applyLoopbackToResponsesRequest(currentRequest, afterDecision.processed_content);
+          attempts += 1;
+          continue;
+        }
+        const afterBlocked = blockedResultValue(afterDecision, "llm");
+        return afterBlocked
+          ? syntheticResponsesPayload(afterBlocked.reason || afterDecision.reason, currentRequest && currentRequest.model)
+          : raw;
       }
-      const raw = await original.call(this, request, requestOptions);
-      if (request && request.stream && raw && typeof raw[Symbol.asyncIterator] === "function") {
-        return wrapOpenAIStream(raw, context);
-      }
-      const afterDecision = await guardLLMAfter(raw, context);
-      const afterBlocked = blockedResultValue(afterDecision, "llm");
-      return afterBlocked ? syntheticResponsesPayload(afterBlocked.reason || afterDecision.reason, request && request.model) : raw;
     };
     Klass.prototype.completionWithRetry[PATCHED] = true;
   }
@@ -1397,37 +1515,73 @@ function patchN8nCore(moduleExports) {
 }
 
 async function guardedRunNodeLLM(original, target, args) {
-  const { workflow, executionData, runExecutionData, runIndex, additionalData, mode, abortSignal, subNodeExecutionResults, context, node } = args;
-  const request = llmRequestFromRunNodeExecution(executionData, node, runExecutionData);
+  const { workflow, runIndex, additionalData, mode, abortSignal, subNodeExecutionResults, context, node } = args;
   const llmContext = {
     ...context,
     llm_node: true,
     llm_provider: providerFromLLMNode(node),
   };
-  const beforeDecision = await guardLLMBefore(request, llmContext, {
-    event_source: "n8n_run_node_llm",
-    provider: providerFromLLMNode(node),
-    node_parameters: normalizeValue((node && node.parameters) || {}),
-  });
-  const beforeBlocked = blockedToolValue(beforeDecision, "llm");
-  if (beforeBlocked) {
-    flushGuardAsync(llmContext);
-    return n8nLLMRunNodeResult(blockedLLMResponse(beforeDecision, request));
-  }
+  let currentArgs = { ...(args || {}) };
+  let attempts = 0;
   try {
-    const result = await original.call(target, workflow, executionData, runExecutionData, runIndex, additionalData, mode, abortSignal, subNodeExecutionResults);
-    const output = llmOutputFromRunNodeResult(result);
-    const afterDecision = await guardLLMAfter(output, llmContext, {
-      event_source: "n8n_run_node_llm",
-      provider: providerFromLLMNode(node),
-      node_parameters: normalizeValue((node && node.parameters) || {}),
-    });
-    const afterBlocked = blockedResultValue(afterDecision, "llm");
-    return afterBlocked ? n8nLLMRunNodeResult(syntheticResponsesPayload(afterBlocked.reason || afterDecision.reason, request.model)) : result;
+    while (true) {
+      const request = llmRequestFromRunNodeExecution(
+        currentArgs.executionData,
+        currentArgs.node,
+        currentArgs.runExecutionData
+      );
+      const beforeDecision = await guardLLMBefore(request, llmContext, {
+        event_source: "n8n_run_node_llm",
+        provider: providerFromLLMNode(currentArgs.node),
+        node_parameters: normalizeValue((currentArgs.node && currentArgs.node.parameters) || {}),
+      });
+      if (beforeDecision.decision_type === DecisionType.LOOP_BACK_TO_LLM) {
+        if (attempts >= MAX_LLM_LOOPBACK_ATTEMPTS) {
+          return n8nLLMRunNodeResult(blockedLLMResponse(beforeDecision, request));
+        }
+        currentArgs = applyLoopbackToRunNodeArgs(currentArgs, beforeDecision.processed_content);
+        attempts += 1;
+        continue;
+      }
+      const beforeBlocked = blockedToolValue(beforeDecision, "llm");
+      if (beforeBlocked) {
+        return n8nLLMRunNodeResult(blockedLLMResponse(beforeDecision, request));
+      }
+
+      const result = await original.call(
+        target,
+        workflow,
+        currentArgs.executionData,
+        currentArgs.runExecutionData,
+        runIndex,
+        additionalData,
+        mode,
+        abortSignal,
+        subNodeExecutionResults
+      );
+      const output = llmOutputFromRunNodeResult(result);
+      const afterDecision = await guardLLMAfter(output, llmContext, {
+        event_source: "n8n_run_node_llm",
+        provider: providerFromLLMNode(currentArgs.node),
+        node_parameters: normalizeValue((currentArgs.node && currentArgs.node.parameters) || {}),
+      });
+      if (afterDecision.decision_type === DecisionType.LOOP_BACK_TO_LLM) {
+        if (attempts >= MAX_LLM_LOOPBACK_ATTEMPTS) {
+          return n8nLLMRunNodeResult(blockedLLMResponse(afterDecision, request));
+        }
+        currentArgs = applyLoopbackToRunNodeArgs(currentArgs, afterDecision.processed_content);
+        attempts += 1;
+        continue;
+      }
+      const afterBlocked = blockedResultValue(afterDecision, "llm");
+      return afterBlocked
+        ? n8nLLMRunNodeResult(syntheticResponsesPayload(afterBlocked.reason || afterDecision.reason, request.model))
+        : result;
+    }
   } catch (error) {
     await guardLLMAfter({ output_text: "", output: [], status: "error", error: safeString(error) }, llmContext, {
       event_source: "n8n_run_node_llm",
-      provider: providerFromLLMNode(node),
+      provider: providerFromLLMNode(currentArgs.node),
       error: safeString(error && error.message ? error.message : error),
     });
     throw error;
@@ -2336,6 +2490,9 @@ process.once("beforeExit", () => {
 module.exports = {
   installN8nAdapter,
   _private: {
+    applyLoopbackToNodeParameters,
+    applyLoopbackToResponsesRequest,
+    applyLoopbackToRunNodeArgs,
     extractProviderBuiltInTools,
     extractWorkflowTools,
     hasNonMainConnection,
@@ -2355,6 +2512,7 @@ module.exports = {
     isRunNodeLLMExecution,
     llmOutputFromRunNodeResult,
     llmRequestFromRunNodeExecution,
+    denormalizeResponsesInput,
     normalizeLLMOutput,
     normalizeResponsesInput,
     nodeNameToToolName,

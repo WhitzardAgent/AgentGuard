@@ -128,6 +128,56 @@ def test_metagpt_llm_output_splits_structured_reasoning():
     }
 
 
+def test_metagpt_denormalize_llm_input_rebuilds_message_only_payload():
+    adapter = MetaGPTAgentAdapter()
+    llm = FakeMetaGPTLLM()
+
+    denormalized = adapter.denormalize_llm_input(
+        label="aask",
+        payload="rewritten request",
+        args=(),
+        kwargs={"msg": "old request", "system_msgs": ["sys"], "temperature": 0},
+        fn=llm.aask,
+        owner=llm,
+    )
+
+    assert denormalized.args == ()
+    assert denormalized.kwargs == {
+        "msg": "rewritten request",
+        "system_msgs": ["sys"],
+        "temperature": 0,
+    }
+    assert denormalized.metadata["adapter"] == "metagpt"
+
+
+def test_metagpt_denormalize_llm_input_rebuilds_structured_payload():
+    adapter = MetaGPTAgentAdapter()
+    llm = FakeMetaGPTLLM()
+
+    denormalized = adapter.denormalize_llm_input(
+        label="aask",
+        payload={
+            "messages": "rewritten request",
+            "system_msgs": ["system"],
+            "format_msgs": ["format"],
+            "images": ["img://1"],
+            "kwargs": {"temperature": 0.7},
+        },
+        args=("old request",),
+        kwargs={"system_msgs": ["old-system"], "temperature": 0},
+        fn=llm.aask,
+        owner=llm,
+    )
+
+    assert denormalized.args == ("rewritten request",)
+    assert denormalized.kwargs == {
+        "system_msgs": ["system"],
+        "temperature": 0.7,
+        "format_msgs": ["format"],
+        "images": ["img://1"],
+    }
+
+
 @pytest.mark.asyncio
 async def test_attach_metagpt_patches_data_interpreter_execute_code_run():
     calls = []

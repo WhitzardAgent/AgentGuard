@@ -1,10 +1,12 @@
 "use strict";
 
 const {
+  LLMInputDenormalization,
   LLMInputNormalization,
   LLMOutputNormalization,
   ToolInvokeNormalization,
   ToolResultNormalization,
+  denormalizeLLMInputPayload,
 } = require("./normalization");
 const {
   isGuarded,
@@ -159,6 +161,20 @@ class BaseAgentAdapter {
     void fn;
     return new LLMOutputNormalization({
       payload: this.normalizeValue(output),
+      metadata: this._metadata({ label, owner }),
+    });
+  }
+
+  denormalize_llm_input({ label, payload, args = [], kwargs = {}, fn = null, owner = null } = {}) {
+    const denormalized = denormalizeLLMInputPayload({
+      payload,
+      args,
+      kwargs,
+      fn,
+    });
+    return new LLMInputDenormalization({
+      args: denormalized.args,
+      kwargs: denormalized.kwargs,
       metadata: this._metadata({ label, owner }),
     });
   }

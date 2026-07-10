@@ -7,6 +7,7 @@ const { DEFAULT_AGENT_EVENT_NORMALIZER } = require("./normalization");
 
 const PATCHED_ATTR = "__agentguard_patched__";
 const WRAPPED_ATTR = "__agentguard_wrapped__";
+const MAX_LLM_LOOPBACK_ATTEMPTS = 3;
 
 function isGuarded(obj) {
   return Boolean(obj && (obj[PATCHED_ATTR] || obj[WRAPPED_ATTR]));
@@ -304,6 +305,13 @@ function blockedLLMValue(decision) {
   if (decision.decision_type === DecisionType.DENY) {
     return { agentguard: "blocked", reason: decision.reason };
   }
+  if (decision.decision_type === DecisionType.LOOP_BACK_TO_LLM) {
+    return {
+      agentguard: "loop_back_to_llm",
+      reason: decision.reason,
+      decision: decision.processed_content,
+    };
+  }
   if (decision.decision_type === DecisionType.SANITIZE) {
     return { agentguard: "sanitized", reason: decision.reason };
   }
@@ -383,6 +391,82 @@ function makeGuardedTool(
   return markGuarded(wrapper);
 }
 
+async function runGuardedLLM(
+  guard,
+  fn,
+  {
+    label,
+    args = [],
+    kwargs = {},
+    normalizer = null,
+    owner = null,
+    callTarget = null,
+    blockedValue = blockedLLMValue,
+  } = {}
+) {
+  const resolved = resolveNormalizer(normalizer);
+  let currentArgs = Array.isArray(args) ? [...args] : [];
+  let currentKwargs = isPlainObject(kwargs) ? { ...kwargs } : {};
+  let attempts = 0;
+
+  while (true) {
+    const beforeDecision = await guardLLMBefore(guard, {
+      label,
+      args: currentArgs,
+      kwargs: currentKwargs,
+      normalizer: resolved,
+      fn,
+      owner,
+    });
+    if (beforeDecision.decision_type === DecisionType.LOOP_BACK_TO_LLM) {
+      if (attempts >= MAX_LLM_LOOPBACK_ATTEMPTS) {
+        return blockedValue(beforeDecision);
+      }
+      ({ args: currentArgs, kwargs: currentKwargs } = loopbackLLMArgs(beforeDecision, {
+        label,
+        args: currentArgs,
+        kwargs: currentKwargs,
+        normalizer: resolved,
+        fn,
+        owner,
+      }));
+      attempts += 1;
+      continue;
+    }
+
+    const beforeBlocked = blockedValue(beforeDecision);
+    if (beforeBlocked !== null) {
+      return beforeBlocked;
+    }
+
+    const raw = await invokeLLM(fn, currentArgs, { callTarget, kwargs: currentKwargs });
+    const decision = await guardLLMAfter(guard, raw, {
+      label,
+      normalizer: resolved,
+      fn,
+      owner,
+    });
+    if (decision.decision_type === DecisionType.LOOP_BACK_TO_LLM) {
+      if (attempts >= MAX_LLM_LOOPBACK_ATTEMPTS) {
+        return blockedValue(decision);
+      }
+      ({ args: currentArgs, kwargs: currentKwargs } = loopbackLLMArgs(decision, {
+        label,
+        args: currentArgs,
+        kwargs: currentKwargs,
+        normalizer: resolved,
+        fn,
+        owner,
+      }));
+      attempts += 1;
+      continue;
+    }
+
+    const blocked = blockedValue(decision);
+    return blocked !== null ? blocked : raw;
+  }
+}
+
 function makeGuardedLLMCallable(
   guard,
   fn,
@@ -394,27 +478,14 @@ function makeGuardedLLMCallable(
 
   const wrapper = async (...args) => {
     try {
-      const beforeDecision = await guardLLMBefore(guard, {
+      return await runGuardedLLM(guard, fn, {
         label,
         args,
+        kwargs: {},
         normalizer,
-        fn,
         owner,
+        callTarget,
       });
-      const beforeBlocked = blockedLLMValue(beforeDecision);
-      if (beforeBlocked !== null) {
-        return beforeBlocked;
-      }
-
-      const raw = await (callTarget != null ? fn.apply(callTarget, args) : fn(...args));
-      const decision = await guardLLMAfter(guard, raw, {
-        label,
-        normalizer,
-        fn,
-        owner,
-      });
-      const blocked = blockedLLMValue(decision);
-      return blocked !== null ? blocked : raw;
     } catch (error) {
       await syncLocalCacheNow(guard, { reason: "client_error" });
       throw error;
@@ -423,6 +494,52 @@ function makeGuardedLLMCallable(
     }
   };
   return markGuarded(wrapper);
+}
+
+function loopbackLLMArgs(
+  decision,
+  { label, args = [], kwargs = {}, normalizer, fn = null, owner = null } = {}
+) {
+  const payload = coerceLoopbackPayload(decision && decision.processed_content);
+  const denormalized = normalizer.denormalize_llm_input({
+    label,
+    payload,
+    args,
+    kwargs,
+    fn,
+    owner,
+  });
+  return {
+    args: Array.isArray(denormalized.args) ? [...denormalized.args] : [],
+    kwargs: isPlainObject(denormalized.kwargs) ? { ...denormalized.kwargs } : {},
+  };
+}
+
+function coerceLoopbackPayload(payload) {
+  if (typeof payload !== "string") {
+    return payload;
+  }
+  const text = payload.trim();
+  if (!text || !["{", "["].includes(text[0])) {
+    return payload;
+  }
+  try {
+    return JSON.parse(text);
+  } catch (_) {
+    return payload;
+  }
+}
+
+async function invokeLLM(fn, args, { callTarget = null, kwargs = {} } = {}) {
+  const nextArgs = Array.isArray(args) ? [...args] : [];
+  if (isPlainObject(kwargs) && Object.keys(kwargs).length) {
+    if (!nextArgs.length) {
+      nextArgs.push(kwargs);
+    } else if (isPlainObject(nextArgs[0])) {
+      nextArgs[0] = { ...nextArgs[0], ...kwargs };
+    }
+  }
+  return callTarget != null ? fn.apply(callTarget, nextArgs) : fn(...nextArgs);
 }
 
 function resolveAttrPath(obj, path) {
@@ -440,6 +557,10 @@ function resolveAttrPath(obj, path) {
   }
   const leaf = parts[parts.length - 1];
   return [target, leaf, target ? target[leaf] : undefined];
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function patchLLMMethods(
@@ -488,6 +609,7 @@ module.exports = {
   markPatched,
   patchLLMMethods,
   registerToolMetadata,
+  runGuardedLLM,
   setAttr,
   toolName,
 };

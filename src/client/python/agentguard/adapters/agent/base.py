@@ -6,10 +6,12 @@ import inspect
 from typing import Any, Callable
 
 from agentguard.adapters.agent.normalization import (
+    LLMInputDenormalization,
     LLMInputNormalization,
     LLMOutputNormalization,
     ToolInvokeNormalization,
     ToolResultNormalization,
+    denormalize_llm_input_payload,
 )
 from agentguard.schemas.context import RuntimeContext
 from agentguard.tools.metadata import ToolMetadata
@@ -150,6 +152,28 @@ class BaseAgentAdapter:
         _ = fn
         return LLMOutputNormalization(
             payload=self.normalize_value(output),
+            metadata=self._metadata(label=label, owner=owner),
+        )
+
+    def denormalize_llm_input(
+        self,
+        *,
+        label: str,
+        payload: Any,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        fn: Callable[..., Any] | None = None,
+        owner: Any = None,
+    ) -> LLMInputDenormalization:
+        denormalized = denormalize_llm_input_payload(
+            payload=payload,
+            args=args,
+            kwargs=kwargs,
+            fn=fn,
+        )
+        return LLMInputDenormalization(
+            args=denormalized.args,
+            kwargs=denormalized.kwargs,
             metadata=self._metadata(label=label, owner=owner),
         )
 

@@ -14,6 +14,14 @@ class LLMOutputNormalization {
   }
 }
 
+class LLMInputDenormalization {
+  constructor(data = {}) {
+    this.args = Array.isArray(data.args) ? [...data.args] : [];
+    this.kwargs = { ...(data.kwargs || {}) };
+    this.metadata = { ...(data.metadata || {}) };
+  }
+}
+
 class ToolInvokeNormalization {
   constructor(data = {}) {
     this.arguments = { ...(data.arguments || {}) };
@@ -122,6 +130,20 @@ class FallbackAgentEventNormalizer {
     });
   }
 
+  denormalize_llm_input({ label, payload, args = [], kwargs = {}, fn = null, owner = null } = {}) {
+    const denormalized = denormalizeLLMInputPayload({
+      payload,
+      args,
+      kwargs,
+      fn,
+    });
+    return new LLMInputDenormalization({
+      args: denormalized.args,
+      kwargs: denormalized.kwargs,
+      metadata: this._metadata({ label, owner }),
+    });
+  }
+
   normalize_tool_invoke({ tool_metadata, arguments: arguments_ = {}, fn = null, owner = null } = {}) {
     void fn;
     return new ToolInvokeNormalization({
@@ -144,10 +166,100 @@ class FallbackAgentEventNormalizer {
 
 const DEFAULT_AGENT_EVENT_NORMALIZER = new FallbackAgentEventNormalizer();
 
+function denormalizeLLMInputPayload({ payload, args = [], kwargs = {}, fn = null } = {}) {
+  void fn;
+  let currentArgs = Array.isArray(args) ? [...args] : [];
+  let currentKwargs = isPlainObject(kwargs) ? { ...kwargs } : {};
+
+  if (isPlainObject(payload)) {
+    if (Object.prototype.hasOwnProperty.call(payload, "input")) {
+      [currentArgs, currentKwargs] = replacePrimaryLLMInput(payload.input, {
+        args: currentArgs,
+        kwargs: currentKwargs,
+        preferredKeys: ["input", "messages", "msg"],
+      });
+      if (Array.isArray(payload.args)) {
+        currentArgs = [...currentArgs.slice(0, 1), ...payload.args];
+      } else if (Object.prototype.hasOwnProperty.call(payload, "args")) {
+        currentArgs = [...currentArgs.slice(0, 1), payload.args];
+      }
+      mergeLLMPayloadKwargs(currentKwargs, payload, { skipKeys: new Set(["label", "input", "args"]) });
+      return new LLMInputDenormalization({ args: currentArgs, kwargs: currentKwargs });
+    }
+
+    if (Object.prototype.hasOwnProperty.call(payload, "messages") || Object.prototype.hasOwnProperty.call(payload, "msg")) {
+      const primaryKey = Object.prototype.hasOwnProperty.call(payload, "messages") ? "messages" : "msg";
+      [currentArgs, currentKwargs] = replacePrimaryLLMInput(payload[primaryKey], {
+        args: currentArgs,
+        kwargs: currentKwargs,
+        preferredKeys: [primaryKey, "input"],
+      });
+      mergeLLMPayloadKwargs(currentKwargs, payload, { skipKeys: new Set(["label", primaryKey]) });
+      return new LLMInputDenormalization({ args: currentArgs, kwargs: currentKwargs });
+    }
+
+    if (Object.prototype.hasOwnProperty.call(payload, "args") || Object.prototype.hasOwnProperty.call(payload, "kwargs")) {
+      const rawArgs = Object.prototype.hasOwnProperty.call(payload, "args") ? payload.args : currentArgs;
+      const rawKwargs = isPlainObject(payload.kwargs) ? payload.kwargs : currentKwargs;
+      return new LLMInputDenormalization({
+        args: Array.isArray(rawArgs) ? [...rawArgs] : [rawArgs],
+        kwargs: { ...rawKwargs },
+      });
+    }
+  }
+
+  if (!currentArgs.length && !Object.keys(currentKwargs).length) {
+    return new LLMInputDenormalization({ args: [payload], kwargs: {} });
+  }
+
+  [currentArgs, currentKwargs] = replacePrimaryLLMInput(payload, {
+    args: currentArgs,
+    kwargs: currentKwargs,
+    preferredKeys: ["input", "messages", "msg"],
+  });
+  return new LLMInputDenormalization({ args: currentArgs, kwargs: currentKwargs });
+}
+
+function replacePrimaryLLMInput(value, { args = [], kwargs = {}, preferredKeys = [] } = {}) {
+  for (const key of preferredKeys) {
+    if (Object.prototype.hasOwnProperty.call(kwargs, key)) {
+      kwargs[key] = value;
+      return [args, kwargs];
+    }
+  }
+
+  if (args.length) {
+    args[0] = value;
+    return [args, kwargs];
+  }
+
+  kwargs[preferredKeys[0] || "input"] = value;
+  return [args, kwargs];
+}
+
+function mergeLLMPayloadKwargs(kwargs, payload, { skipKeys = new Set() } = {}) {
+  for (const [key, value] of Object.entries(payload || {})) {
+    if (skipKeys.has(key)) {
+      continue;
+    }
+    if (key === "kwargs" && isPlainObject(value)) {
+      Object.assign(kwargs, value);
+      continue;
+    }
+    kwargs[key] = value;
+  }
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 module.exports = {
   DEFAULT_AGENT_EVENT_NORMALIZER,
+  LLMInputDenormalization,
   LLMInputNormalization,
   LLMOutputNormalization,
   ToolInvokeNormalization,
   ToolResultNormalization,
+  denormalizeLLMInputPayload,
 };

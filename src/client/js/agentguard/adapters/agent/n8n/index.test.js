@@ -135,6 +135,79 @@ test("llmRequestFromRunNodeExecution resolves referenced chat trigger input", ()
   ]);
 });
 
+test("denormalizeResponsesInput rebuilds normalized loopback messages", () => {
+  assert.deepEqual(
+    _private.denormalizeResponsesInput([
+      { role: "system", content: "你是一名写作助手" },
+      { role: "user", content: "重写后的输入" },
+    ]),
+    [
+      { role: "system", content: "你是一名写作助手" },
+      { role: "user", content: "重写后的输入" },
+    ]
+  );
+});
+
+test("applyLoopbackToResponsesRequest rewrites request input only", () => {
+  const request = _private.applyLoopbackToResponsesRequest(
+    {
+      model: "gpt-4.1",
+      stream: false,
+      tools: [{ type: "web_search" }],
+      input: [{ role: "user", content: "原始输入" }],
+    },
+    JSON.stringify([
+      { role: "system", content: "你是一名问题分类助手" },
+      { role: "user", content: "重写后的输入" },
+    ])
+  );
+
+  assert.equal(request.model, "gpt-4.1");
+  assert.equal(request.stream, false);
+  assert.deepEqual(request.tools, [{ type: "web_search" }]);
+  assert.deepEqual(request.input, [
+    { role: "system", content: "你是一名问题分类助手" },
+    { role: "user", content: "重写后的输入" },
+  ]);
+});
+
+test("applyLoopbackToRunNodeArgs rewrites node response messages only", () => {
+  const rewritten = _private.applyLoopbackToRunNodeArgs(
+    {
+      node: {
+        type: "@n8n/n8n-nodes-langchain.openAi",
+        parameters: {
+          modelId: { value: "chatgpt-4o-latest" },
+          responses: {
+            values: [
+              { role: "system", content: "原始 system" },
+              { role: "user", content: "原始 user" },
+            ],
+          },
+          builtInTools: { webSearch: true },
+        },
+      },
+      executionData: {
+        data: {
+          main: [[{ json: { chatInput: "原始输入" } }]],
+        },
+      },
+    },
+    JSON.stringify([
+      { role: "system", content: "重写 system" },
+      { role: "user", content: "重写 user" },
+    ])
+  );
+
+  assert.equal(rewritten.node.parameters.modelId.value, "chatgpt-4o-latest");
+  assert.deepEqual(rewritten.node.parameters.builtInTools, { webSearch: true });
+  assert.deepEqual(rewritten.node.parameters.responses.values, [
+    { role: "system", content: "重写 system" },
+    { role: "user", content: "重写 user" },
+  ]);
+  assert.deepEqual(rewritten.executionData.data.main[0][0].json, { chatInput: "原始输入" });
+});
+
 test("llmOutputFromRunNodeResult extracts n8n OpenAI node output", () => {
   assert.deepEqual(
     _private.llmOutputFromRunNodeResult({

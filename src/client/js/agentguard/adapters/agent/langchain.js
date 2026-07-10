@@ -1,6 +1,7 @@
 "use strict";
 
 const {
+  LLMInputDenormalization,
   LLMInputNormalization,
   LLMOutputNormalization,
   ToolInvokeNormalization,
@@ -9,13 +10,12 @@ const {
 const { BaseAgentAdapter } = require("./base");
 const {
   bindArguments,
-  guardLLMAfter,
-  guardLLMBefore,
   guardToolAfter,
   guardToolBefore,
   isGuarded,
   markGuarded,
   registerToolMetadata,
+  runGuardedLLM,
   setAttr,
   toolName,
 } = require("./patching");
@@ -99,6 +99,20 @@ class LangChainAgentAdapter extends BaseAgentAdapter {
     void fn;
     return new LLMInputNormalization({
       payload: normalizeLangchainRequest(args, kwargs),
+      metadata: this._langchainMeta({ label, owner }),
+    });
+  }
+
+  denormalize_llm_input({ label, payload, args = [], kwargs = {}, fn = null, owner = null } = {}) {
+    const denormalized = denormalizeLangchainRequest({
+      payload,
+      args,
+      kwargs,
+      fn,
+    });
+    return new LLMInputDenormalization({
+      args: denormalized.args,
+      kwargs: denormalized.kwargs,
       metadata: this._langchainMeta({ label, owner }),
     });
   }
@@ -417,6 +431,83 @@ function normalizeLangchainRequest(args, kwargs = {}) {
   return payload;
 }
 
+function denormalizeLangchainRequest({ payload, args = [], kwargs = {}, fn = null } = {}) {
+  void fn;
+  const currentArgs = Array.isArray(args) ? [...args] : [];
+  const currentKwargs = {};
+
+  if (Array.isArray(payload)) {
+    return new LLMInputDenormalization({
+      args: applyLangchainPrimaryInput(payload, currentArgs),
+      kwargs: currentKwargs,
+    });
+  }
+
+  if (!payload || typeof payload !== "object") {
+    return new LLMInputDenormalization({
+      args: applyLangchainPrimaryInput(payload, currentArgs),
+      kwargs: currentKwargs,
+    });
+  }
+
+  const nextArgs = applyLangchainPrimaryInput(
+    Object.prototype.hasOwnProperty.call(payload, "input") ? payload.input : payload,
+    currentArgs
+  );
+  const nextOptions = buildLangchainInvokeOptions(nextArgs[1], payload);
+  if (nextOptions !== null) {
+    nextArgs[1] = nextOptions;
+  }
+  return new LLMInputDenormalization({
+    args: nextArgs,
+    kwargs: currentKwargs,
+  });
+}
+
+function applyLangchainPrimaryInput(value, args = []) {
+  const nextArgs = [...args];
+  if (
+    nextArgs.length
+    && isPlainObject(nextArgs[0])
+    && Object.prototype.hasOwnProperty.call(nextArgs[0], "messages")
+    && Array.isArray(value)
+  ) {
+    nextArgs[0] = { ...nextArgs[0], messages: value };
+    return nextArgs;
+  }
+  if (nextArgs.length) {
+    nextArgs[0] = value;
+    return nextArgs;
+  }
+  return [value];
+}
+
+function buildLangchainInvokeOptions(currentValue, payload) {
+  const hasConfig = Object.prototype.hasOwnProperty.call(payload, "config");
+  const hasStop = Object.prototype.hasOwnProperty.call(payload, "stop");
+  const hasKwargs = isPlainObject(payload.kwargs) && Object.keys(payload.kwargs).length > 0;
+  const currentOptions = isPlainObject(currentValue) ? { ...currentValue } : {};
+
+  if (!hasConfig && !hasStop && !hasKwargs) {
+    return currentValue === undefined ? null : currentValue;
+  }
+
+  if (hasConfig) {
+    if (isPlainObject(payload.config)) {
+      Object.assign(currentOptions, payload.config);
+    } else {
+      return payload.config;
+    }
+  }
+  if (hasStop) {
+    currentOptions.stop = payload.stop;
+  }
+  if (hasKwargs) {
+    Object.assign(currentOptions, payload.kwargs);
+  }
+  return currentOptions;
+}
+
 function normalizeLangchainOutput(output) {
   const messages = extractLangchainMessages(output);
   if (messages.length === 1) {
@@ -711,27 +802,15 @@ function installLangchainAgentNodeLLMBinding(guard, binding, adapter) {
 
   const wrapper = async (...args) => {
     try {
-      const beforeDecision = await guardLLMBefore(guard, {
+      return await runGuardedLLM(guard, fn, {
         label,
         args,
+        kwargs: {},
         normalizer: adapter,
-        fn,
         owner,
+        callTarget: owner,
+        blockedValue: (decision) => blockedLangchainLLMValue(decision, { label }),
       });
-      const beforeBlocked = blockedLangchainLLMValue(beforeDecision, { label });
-      if (beforeBlocked !== null) {
-        return beforeBlocked;
-      }
-
-      const raw = await fn.apply(owner, args);
-      const decision = await guardLLMAfter(guard, raw, {
-        label,
-        normalizer: adapter,
-        fn,
-        owner,
-      });
-      const blocked = blockedLangchainLLMValue(decision, { label });
-      return blocked !== null ? blocked : raw;
     } catch (error) {
       if (guard && guard.runtime && typeof guard.runtime.sync_local_cache_now === "function") {
         await guard.runtime.sync_local_cache_now({ reason: "client_error" });
@@ -840,6 +919,16 @@ function blockedLangchainLLMValue(decision, { label = "model" } = {}) {
         agentguard: "blocked",
         reason: decision.reason,
         decision: decision.decision_type,
+      },
+      { label }
+    );
+  }
+  if (decision.decision_type === DecisionType.LOOP_BACK_TO_LLM) {
+    return langchainLLMNodeResponse(
+      {
+        agentguard: "loop_back_to_llm",
+        reason: decision.reason,
+        decision: decision.processed_content,
       },
       { label }
     );
@@ -991,6 +1080,10 @@ function isLangchainToolCall(value) {
       && typeof value.name === "string"
       && Object.prototype.hasOwnProperty.call(value, "args")
   );
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 let _langchainToolMessageClass;

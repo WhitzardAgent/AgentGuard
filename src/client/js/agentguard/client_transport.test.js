@@ -464,6 +464,101 @@ test("js langchain adapter patches direct agent.model invoke", async () => {
   await guard.close();
 });
 
+test("js langchain adapter denormalizes invoke payload into original call shape", () => {
+  const { LangChainAgentAdapter } = require("./adapters/agent/langchain");
+
+  class Model {
+    async invoke(input, options = {}) {
+      return { input, options };
+    }
+  }
+
+  const adapter = new LangChainAgentAdapter();
+  const model = new Model();
+  const denormalized = adapter.denormalize_llm_input({
+    label: "invoke",
+    payload: {
+      input: "rewritten prompt",
+      config: { metadata: { source: "guard" } },
+      stop: ["!"],
+      kwargs: { temperature: 0.3 },
+    },
+    args: ["original prompt", { tags: ["orig"] }],
+    fn: model.invoke,
+    owner: model,
+  });
+
+  assert.deepEqual(denormalized.args, [
+    "rewritten prompt",
+    {
+      tags: ["orig"],
+      metadata: { source: "guard" },
+      stop: ["!"],
+      temperature: 0.3,
+    },
+  ]);
+  assert.deepEqual(denormalized.kwargs, {});
+  assert.equal(denormalized.metadata.adapter, "langchain");
+});
+
+test("js langchain adapter loops back to llm with rewritten direct model input", async () => {
+  const { AgentGuard } = require("./guard");
+  const { DecisionType, GuardDecision } = require("./schemas/decisions");
+
+  const calls = [];
+
+  class Model {
+    async invoke(prompt, options = {}) {
+      calls.push([prompt, options]);
+      return `reply:${prompt}:${(options.stop || []).join(",")}`;
+    }
+  }
+
+  class Agent {
+    constructor() {
+      this.model = new Model();
+    }
+  }
+
+  const guard = new AgentGuard("js-langchain-loopback-direct-model", { sandbox: "noop" });
+  const agent = new Agent();
+  let inputCount = 0;
+
+  guard.runtime.guard = async (event) => {
+    if (event && event.event_type === "llm_input") {
+      inputCount += 1;
+      if (inputCount === 1) {
+        return {
+          decision: new GuardDecision({
+            decision_type: DecisionType.LOOP_BACK_TO_LLM,
+            reason: "rewrite prompt",
+            processed_content: JSON.stringify({
+              input: "rewritten prompt",
+              stop: ["!"],
+            }),
+          }),
+        };
+      }
+    }
+    return { decision: GuardDecision.allow("ok") };
+  };
+
+  const patched = guard.attach_langchain(agent, { wrap_tools: false });
+  const result = await agent.model.invoke("hello", { tags: ["orig"] });
+
+  assert.equal(patched.tools, 0);
+  assert.equal(patched.llm, 1);
+  assert.equal(result, "reply:rewritten prompt:!");
+  assert.deepEqual(calls, [[
+    "rewritten prompt",
+    {
+      tags: ["orig"],
+      stop: ["!"],
+    },
+  ]]);
+  await guard.close();
+});
+
 test("js langchain adapter patches classic agent.llm_chain.llm", async () => {
   const { AgentGuard } = require("./guard");
 
@@ -534,6 +629,72 @@ test("js langchain adapter patches real createAgent agent.invoke llm path", asyn
     guard.trace.entries.filter((entry) => entry.event && entry.event.event_type === "llm_output").length,
     1
   );
+  await guard.close();
+});
+
+test("js langchain adapter loops back on model_request runnable while preserving wrapper state", async () => {
+  const { AgentGuard } = require("./guard");
+  const { DecisionType, GuardDecision } = require("./schemas/decisions");
+
+  const calls = [];
+
+  class Runnable {
+    constructor() {
+      this.name = "model_request";
+      this.func = async (state) => {
+        calls.push(state);
+        return { messages: [{ role: "assistant", content: "done" }] };
+      };
+    }
+  }
+
+  class Agent {
+    constructor() {
+      this.builder = {
+        nodes: {
+          model_request: {
+            runnable: new Runnable(),
+          },
+        },
+      };
+    }
+  }
+
+  const guard = new AgentGuard("js-langchain-loopback-model-request", { sandbox: "noop" });
+  const agent = new Agent();
+  let inputCount = 0;
+
+  guard.runtime.guard = async (event) => {
+    if (event && event.event_type === "llm_input") {
+      inputCount += 1;
+      if (inputCount === 1) {
+        return {
+          decision: new GuardDecision({
+            decision_type: DecisionType.LOOP_BACK_TO_LLM,
+            reason: "rewrite messages",
+            processed_content: JSON.stringify([
+              { role: "user", content: "rewritten hello" },
+            ]),
+          }),
+        };
+      }
+    }
+    return { decision: GuardDecision.allow("ok") };
+  };
+
+  const patched = guard.attach_langchain(agent, { wrap_tools: false });
+  const result = await agent.builder.nodes.model_request.runnable.func({
+    messages: [{ role: "user", content: "hello" }],
+    marker: "keep",
+  });
+
+  assert.equal(patched.tools, 0);
+  assert.equal(patched.llm, 1);
+  assert.deepEqual(calls, [{
+    messages: [{ role: "user", content: "rewritten hello" }],
+    marker: "keep",
+  }]);
+  assert.deepEqual(result, { messages: [{ role: "assistant", content: "done" }] });
   await guard.close();
 });
 

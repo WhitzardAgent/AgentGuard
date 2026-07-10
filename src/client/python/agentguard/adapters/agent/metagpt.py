@@ -11,6 +11,7 @@ from typing import Any
 
 from agentguard.adapters.agent.base import BaseAgentAdapter, LLMBinding, ToolBinding
 from agentguard.adapters.agent.normalization import (
+    LLMInputDenormalization,
     LLMInputNormalization,
     LLMOutputNormalization,
     ToolInvokeNormalization,
@@ -114,6 +115,32 @@ class MetaGPTAgentAdapter(BaseAgentAdapter):
             metadata=metadata,
         )
 
+    def denormalize_llm_input(
+        self,
+        *,
+        label: str,
+        payload: Any,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        fn: Any = None,
+        owner: Any = None,
+    ) -> LLMInputDenormalization:
+        denormalized = _denormalize_metagpt_request(
+            payload=payload,
+            args=args,
+            kwargs=kwargs,
+            fn=fn,
+        )
+        return LLMInputDenormalization(
+            args=denormalized.args,
+            kwargs=denormalized.kwargs,
+            metadata=self._metadata(
+                label=label,
+                owner=owner,
+                extra=_metagpt_llm_extra(owner),
+            ),
+        )
+
     def normalize_llm_output(
         self,
         *,
@@ -168,6 +195,109 @@ class MetaGPTAgentAdapter(BaseAgentAdapter):
                 extra=_metagpt_tool_extra(tool_name, owner=owner),
             ),
         )
+
+
+def _denormalize_metagpt_request(
+    *,
+    payload: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    fn: Any = None,
+) -> LLMInputDenormalization:
+    current_args = list(args)
+    current_kwargs = dict(kwargs)
+    data = payload if isinstance(payload, dict) else {"messages": payload}
+
+    primary_value = _METAGPT_MISSING
+    if isinstance(data, dict):
+        if "msg" in data:
+            primary_value = data["msg"]
+        elif "messages" in data:
+            primary_value = data["messages"]
+
+    if primary_value is not _METAGPT_MISSING:
+        current_args, current_kwargs = _set_metagpt_primary_input(
+            primary_value,
+            args=current_args,
+            kwargs=current_kwargs,
+            fn=fn,
+        )
+
+    for key in ("system_msgs", "format_msgs", "images"):
+        if key in data:
+            current_kwargs[key] = data[key]
+
+    extra_kwargs = data.get("kwargs")
+    if isinstance(extra_kwargs, dict):
+        current_kwargs.update(extra_kwargs)
+
+    for key, value in data.items():
+        if key in {"label", "msg", "messages", "system_msgs", "format_msgs", "images", "kwargs"}:
+            continue
+        current_kwargs[key] = value
+
+    return LLMInputDenormalization(args=tuple(current_args), kwargs=current_kwargs)
+
+
+def _set_metagpt_primary_input(
+    value: Any,
+    *,
+    args: list[Any],
+    kwargs: dict[str, Any],
+    fn: Any = None,
+) -> tuple[list[Any], dict[str, Any]]:
+    primary_param = _metagpt_primary_parameter(fn)
+
+    if args:
+        args[0] = value
+        for name in _metagpt_primary_names(primary_param):
+            kwargs.pop(name, None)
+        return args, kwargs
+
+    for candidate in ("msg", "messages"):
+        if candidate in kwargs:
+            kwargs[candidate] = value
+            return args, kwargs
+
+    if primary_param is not None:
+        if primary_param.kind == inspect.Parameter.POSITIONAL_ONLY:
+            return [value], kwargs
+        kwargs[primary_param.name] = value
+        return args, kwargs
+
+    kwargs["msg"] = value
+    return args, kwargs
+
+
+def _metagpt_primary_parameter(fn: Any) -> inspect.Parameter | None:
+    if not callable(fn):
+        return None
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return None
+    for preferred in ("msg", "messages"):
+        param = sig.parameters.get(preferred)
+        if param is not None:
+            return param
+    for param in sig.parameters.values():
+        if param.kind in {
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        }:
+            return param
+    return None
+
+
+def _metagpt_primary_names(primary_param: inspect.Parameter | None) -> tuple[str, ...]:
+    names = ["msg", "messages"]
+    if primary_param is not None and primary_param.name not in names:
+        names.append(primary_param.name)
+    return tuple(names)
+
+
+_METAGPT_MISSING = object()
 
 
 def _module_name(obj: Any) -> str:

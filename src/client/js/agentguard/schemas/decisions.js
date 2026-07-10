@@ -31,6 +31,7 @@ class GuardDecision {
     const incomingDecisionType = data.decision_type || data.decisionType || DecisionType.ALLOW;
     this.decision_type = incomingDecisionType === "ask_user" ? DecisionType.HUMAN_CHECK : incomingDecisionType;
     this.reason = data.reason || "";
+    this.processed_content = data.processed_content ?? data.processedContent ?? "";
     this.policy_id = data.policy_id ?? data.policyId ?? null;
     this.confidence = data.confidence ?? null;
     this.risk_signals = [...(data.risk_signals || data.riskSignals || [])];
@@ -57,6 +58,7 @@ class GuardDecision {
     return {
       decision_type: this.decision_type,
       reason: this.reason,
+      processed_content: this.processed_content,
       policy_id: this.policy_id,
       confidence: this.confidence,
       risk_signals: [...this.risk_signals],
