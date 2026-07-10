@@ -1081,12 +1081,14 @@ class ConsoleState:
         plugin_result = _safe_dict(plugin_result)
         return {
             "action": _DECISION_TO_ACTION.get(decision.decision_type, "allow"),
+            "decision_type": decision.decision_type.value,
             "risk_score": risk,
             "matched_rules": list(matched),
             "obligations": [],
             "rule_version": decision.metadata.get("policy_version", "unknown"),
             "ttl_ms": 0,
             "reason": decision.reason,
+            "processed_content": decision.processed_content,
             "policy_id": decision.policy_id,
             "plugin_result": plugin_result,
             "plugin_summary": _plugin_summary(plugin_result),
@@ -1152,12 +1154,15 @@ class ConsoleState:
         action = _DECISION_TO_ACTION.get(action_key, "human_check")
         return {
             "action": action,
+            "decision_type": action_key.value,
             "risk_score": 0.0,
             "matched_rules": [str(item) for item in matched if str(item).strip()],
             "obligations": [],
             "rule_version": metadata.get("policy_version", "unknown"),
             "ttl_ms": 0,
             "reason": str(decision.get("reason") or ""),
+            "processed_content": str(decision.get("processed_content") or ""),
+            "policy_id": decision.get("policy_id"),
         }
 
 

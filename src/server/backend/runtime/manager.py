@@ -513,16 +513,24 @@ class RuntimeManager:
             check=check,
         )
         if review_tickets:
-            if not (decision.requires_user or decision.requires_remote):
+            if (
+                not decision.requires_user
+                and not decision.requires_remote
+                and not decision.is_blocking
+            ):
                 final_ticket = review_tickets[-1]
                 final_reason = str(final_ticket.get("reason") or "Review required by server plugin.")
                 final_policy_id = (
                     str(final_ticket.get("policy_id") or "").strip() or decision.policy_id
                 )
+                final_processed_content = str(
+                    final_ticket.get("processed_content") or decision.processed_content or ""
+                )
                 final_signals = list(dict.fromkeys(check.risk_signals or decision.risk_signals))
                 if str(final_ticket.get("decision_type") or "") == DecisionType.REQUIRE_REMOTE_REVIEW.value:
                     decision = GuardDecision.require_remote_review(
                         final_reason,
+                        processed_content=final_processed_content,
                         policy_id=final_policy_id,
                         risk_signals=final_signals,
                         metadata=dict(decision.metadata),
@@ -530,6 +538,7 @@ class RuntimeManager:
                 else:
                     decision = GuardDecision.human_check(
                         final_reason,
+                        processed_content=final_processed_content,
                         policy_id=final_policy_id,
                         risk_signals=final_signals,
                         metadata=dict(decision.metadata),
@@ -834,6 +843,7 @@ class RuntimeManager:
                     "plugin": plugin_name,
                     "decision_type": plugin_decision.decision_type.value,
                     "reason": plugin_decision.reason,
+                    "processed_content": plugin_decision.processed_content,
                     "policy_id": plugin_decision.policy_id,
                 }
             )

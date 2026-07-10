@@ -269,6 +269,61 @@ def test_langchain_output_splits_think_tags_when_reasoning_content_missing():
     assert event.payload.final_output == "visible answer"
 
 
+def test_langchain_denormalize_llm_input_rebuilds_invoke_arguments():
+    class Model:
+        def invoke(self, input, config=None, *, stop=None, **kwargs):
+            return input, config, stop, kwargs
+
+    adapter = langchain_adapter.LangChainAgentAdapter()
+    model = Model()
+    denormalized = adapter.denormalize_llm_input(
+        label="invoke",
+        payload={
+            "input": "rewritten prompt",
+            "config": {"tags": ["guard"]},
+            "stop": ["!"],
+            "kwargs": {"temperature": 0.3, "metadata": {"source": "guard"}},
+        },
+        args=("original prompt", {"tags": ["orig"]}),
+        kwargs={"stop": ["."], "temperature": 0.1},
+        fn=model.invoke,
+        owner=model,
+    )
+
+    assert denormalized.args == ("rewritten prompt", {"tags": ["guard"]})
+    assert denormalized.kwargs == {
+        "stop": ["!"],
+        "temperature": 0.3,
+        "metadata": {"source": "guard"},
+    }
+    assert denormalized.metadata["adapter"] == "langchain"
+    assert model.invoke(*denormalized.args, **denormalized.kwargs) == (
+        "rewritten prompt",
+        {"tags": ["guard"]},
+        ["!"],
+        {"temperature": 0.3, "metadata": {"source": "guard"}},
+    )
+
+
+def test_langchain_normalize_llm_input_preserves_positional_config():
+    class Model:
+        def invoke(self, input, config=None, *, stop=None, **kwargs):
+            return input, config, stop, kwargs
+
+    adapter = langchain_adapter.LangChainAgentAdapter()
+    normalized = adapter.normalize_llm_input(
+        label="invoke",
+        args=("prompt", {"tags": ["orig"]}),
+        kwargs={},
+        fn=Model().invoke,
+    )
+
+    assert normalized.payload == {
+        "input": "prompt",
+        "config": {"tags": ["orig"]},
+    }
+
+
 def test_attach_langchain_patches_agent_executor_llm_chain_model():
     class Tool:
         name = "lookup"
@@ -1102,6 +1157,40 @@ def test_llamaindex_chat_response_sets_plain_content_as_final_output():
     assert event.payload.output == "visible answer"
     assert event.payload.thought is None
     assert event.payload.final_output == "visible answer"
+
+
+def test_llamaindex_denormalize_llm_input_rebuilds_positional_prompt():
+    from agentguard.adapters.agent import llamaindex as llamaindex_adapter
+
+    class LLM:
+        def complete(self, prompt, formatted=False, **kwargs):
+            return prompt, formatted, kwargs
+
+    adapter = llamaindex_adapter.LlamaIndexAgentAdapter()
+    llm = LLM()
+    denormalized = adapter.denormalize_llm_input(
+        label="complete",
+        payload={
+            "input": "rewritten prompt",
+            "args": [True],
+            "kwargs": {"metadata": {"source": "guard"}},
+        },
+        args=(),
+        kwargs={"prompt": "old prompt", "formatted": False},
+        fn=llm.complete,
+        owner=llm,
+    )
+
+    assert denormalized.args == ("rewritten prompt", True)
+    assert denormalized.kwargs == {
+        "metadata": {"source": "guard"},
+    }
+    assert denormalized.metadata["adapter"] == "llamaindex"
+    assert llm.complete(*denormalized.args, **denormalized.kwargs) == (
+        "rewritten prompt",
+        True,
+        {"metadata": {"source": "guard"}},
+    )
 
 
 def test_agentguard_exposes_attach_llamaindex():

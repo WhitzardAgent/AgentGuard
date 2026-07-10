@@ -543,6 +543,22 @@ class _ConsoleSecondPlugin(BasePlugin):
         return CheckResult(risk_signals=["console_second_seen"])
 
 
+class _ConsoleHumanCheckWithContentPlugin(BasePlugin):
+    name = "console_human_check_with_content"
+    event_types = [EventType.TOOL_INVOKE]
+
+    def check(self, event, context, trajectory_window=None):
+        return CheckResult(
+            decision_candidate=GuardDecision.human_check(
+                "console rewrite review",
+                processed_content='{"input": "console rewrite"}',
+                policy_id="server:console-rewrite-review",
+            ),
+            risk_signals=["console_human_check_with_content_seen"],
+            is_final=True,
+        )
+
+
 def test_audit_recent_keeps_plugin_outcomes():
     con = ConsoleState(
         RuntimeManager(
@@ -574,3 +590,38 @@ def test_audit_recent_keeps_plugin_outcomes():
     assert len(audit) == 1
     outcomes = audit[0]["decision"].get("plugin_outcomes") or []
     assert [item["plugin"] for item in outcomes] == ["console_human_check", "console_second"]
+
+
+def test_console_exposes_processed_content_for_review_decisions():
+    con = ConsoleState(
+        RuntimeManager(
+            plugin_config={
+                "phases": {
+                    "tool_before": {
+                        "client": [],
+                        "server": [_ConsoleHumanCheckWithContentPlugin],
+                    }
+                }
+            },
+            enable_session_health_monitor=False,
+        )
+    )
+    con.manager.decide(
+        {
+            "context": {"session_id": "s-approval", "agent_id": "agent-approval"},
+            "current_event": {
+                "event_type": "tool_invoke",
+                "payload": {"tool_name": "read_file", "arguments": {}, "capabilities": []},
+            },
+            "trajectory_window": [],
+            "local_signals": [],
+        }
+    )
+
+    audit = con.audit_recent("agent-approval")[0]["decision"]
+    assert audit["decision_type"] == "human_check"
+    assert audit["processed_content"] == '{"input": "console rewrite"}'
+
+    approval = con.approvals("agent-approval")[0]["decision"]
+    assert approval["decision_type"] == "human_check"
+    assert approval["processed_content"] == '{"input": "console rewrite"}'

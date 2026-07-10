@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import functools
 import inspect
+import json
 from typing import Any, Callable
 
 from agentguard.adapters.agent.normalization import (
@@ -15,6 +16,7 @@ from agentguard.tools.metadata import ToolMetadata
 
 _PATCHED_ATTR = "__agentguard_patched__"
 _WRAPPED_ATTR = "__agentguard_wrapped__"
+_MAX_LLM_LOOPBACK_ATTEMPTS = 3
 
 
 def is_guarded(obj: Any) -> bool:
@@ -288,29 +290,15 @@ def make_guarded_llm_callable(
         @functools.wraps(fn)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
             try:
-                before_decision = guard_llm_before(
+                return await _run_guarded_llm_async(
                     guard,
+                    fn,
                     label=label,
                     args=args,
                     kwargs=kwargs,
                     normalizer=normalizer,
-                    fn=fn,
                     owner=owner,
                 )
-                before_blocked = _blocked_llm_value(before_decision)
-                if before_blocked is not None:
-                    return before_blocked
-                raw = await fn(*args, **kwargs)
-                decision = guard_llm_after(
-                    guard,
-                    raw,
-                    label=label,
-                    normalizer=normalizer,
-                    fn=fn,
-                    owner=owner,
-                )
-                blocked = _blocked_llm_value(decision)
-                return blocked if blocked is not None else raw
             except Exception:
                 _sync_local_cache_now(guard, reason="client_error")
                 raise
@@ -322,29 +310,15 @@ def make_guarded_llm_callable(
     @functools.wraps(fn)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         try:
-            before_decision = guard_llm_before(
+            return _run_guarded_llm_sync(
                 guard,
+                fn,
                 label=label,
                 args=args,
                 kwargs=kwargs,
                 normalizer=normalizer,
-                fn=fn,
                 owner=owner,
             )
-            before_blocked = _blocked_llm_value(before_decision)
-            if before_blocked is not None:
-                return before_blocked
-            raw = fn(*args, **kwargs)
-            decision = guard_llm_after(
-                guard,
-                raw,
-                label=label,
-                normalizer=normalizer,
-                fn=fn,
-                owner=owner,
-            )
-            blocked = _blocked_llm_value(decision)
-            return blocked if blocked is not None else raw
         except Exception:
             _sync_local_cache_now(guard, reason="client_error")
             raise
@@ -352,6 +326,189 @@ def make_guarded_llm_callable(
             _sync_local_cache_async(guard, reason="round_complete")
 
     return mark_guarded(wrapper)
+
+
+async def _run_guarded_llm_async(
+    guard: Any,
+    fn: Callable[..., Any],
+    *,
+    label: str,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    normalizer: AgentEventNormalizer | None = None,
+    owner: Any = None,
+) -> Any:
+    resolved = _resolve_normalizer(normalizer)
+    current_args = tuple(args)
+    current_kwargs = dict(kwargs)
+    attempts = 0
+
+    while True:
+        before_decision = guard_llm_before(
+            guard,
+            label=label,
+            args=current_args,
+            kwargs=current_kwargs,
+            normalizer=resolved,
+            fn=fn,
+            owner=owner,
+        )
+        if before_decision.decision_type == DecisionType.LOOP_BACK_TO_LLM:
+            if attempts >= _MAX_LLM_LOOPBACK_ATTEMPTS:
+                return _blocked_llm_value(before_decision)
+            current_args, current_kwargs = _loopback_llm_args_kwargs(
+                decision=before_decision,
+                label=label,
+                args=current_args,
+                kwargs=current_kwargs,
+                normalizer=resolved,
+                fn=fn,
+                owner=owner,
+            )
+            attempts += 1
+            continue
+
+        before_blocked = _blocked_llm_value(before_decision)
+        if before_blocked is not None:
+            return before_blocked
+
+        raw = await fn(*current_args, **current_kwargs)
+        decision = guard_llm_after(
+            guard,
+            raw,
+            label=label,
+            normalizer=resolved,
+            fn=fn,
+            owner=owner,
+        )
+        if decision.decision_type == DecisionType.LOOP_BACK_TO_LLM:
+            if attempts >= _MAX_LLM_LOOPBACK_ATTEMPTS:
+                return _blocked_llm_value(decision)
+            current_args, current_kwargs = _loopback_llm_args_kwargs(
+                decision=decision,
+                label=label,
+                args=current_args,
+                kwargs=current_kwargs,
+                normalizer=resolved,
+                fn=fn,
+                owner=owner,
+            )
+            attempts += 1
+            continue
+
+        blocked = _blocked_llm_value(decision)
+        return blocked if blocked is not None else raw
+
+
+def _run_guarded_llm_sync(
+    guard: Any,
+    fn: Callable[..., Any],
+    *,
+    label: str,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    normalizer: AgentEventNormalizer | None = None,
+    owner: Any = None,
+) -> Any:
+    resolved = _resolve_normalizer(normalizer)
+    current_args = tuple(args)
+    current_kwargs = dict(kwargs)
+    attempts = 0
+
+    while True:
+        before_decision = guard_llm_before(
+            guard,
+            label=label,
+            args=current_args,
+            kwargs=current_kwargs,
+            normalizer=resolved,
+            fn=fn,
+            owner=owner,
+        )
+        if before_decision.decision_type == DecisionType.LOOP_BACK_TO_LLM:
+            if attempts >= _MAX_LLM_LOOPBACK_ATTEMPTS:
+                return _blocked_llm_value(before_decision)
+            current_args, current_kwargs = _loopback_llm_args_kwargs(
+                decision=before_decision,
+                label=label,
+                args=current_args,
+                kwargs=current_kwargs,
+                normalizer=resolved,
+                fn=fn,
+                owner=owner,
+            )
+            attempts += 1
+            continue
+
+        before_blocked = _blocked_llm_value(before_decision)
+        if before_blocked is not None:
+            return before_blocked
+
+        raw = fn(*current_args, **current_kwargs)
+        decision = guard_llm_after(
+            guard,
+            raw,
+            label=label,
+            normalizer=resolved,
+            fn=fn,
+            owner=owner,
+        )
+        if decision.decision_type == DecisionType.LOOP_BACK_TO_LLM:
+            if attempts >= _MAX_LLM_LOOPBACK_ATTEMPTS:
+                return _blocked_llm_value(decision)
+            current_args, current_kwargs = _loopback_llm_args_kwargs(
+                decision=decision,
+                label=label,
+                args=current_args,
+                kwargs=current_kwargs,
+                normalizer=resolved,
+                fn=fn,
+                owner=owner,
+            )
+            attempts += 1
+            continue
+
+        blocked = _blocked_llm_value(decision)
+        return blocked if blocked is not None else raw
+
+
+def _loopback_llm_args_kwargs(
+    *,
+    decision: GuardDecision,
+    label: str,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    normalizer: AgentEventNormalizer,
+    fn: Callable[..., Any] | None = None,
+    owner: Any = None,
+) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    payload = _coerce_loopback_payload(decision.processed_content)
+    denormalized = normalizer.denormalize_llm_input(
+        label=label,
+        payload=payload,
+        args=args,
+        kwargs=kwargs,
+        fn=fn,
+        owner=owner,
+    )
+    return tuple(denormalized.args), dict(denormalized.kwargs)
+
+
+def _coerce_loopback_payload(payload: Any) -> Any:
+    if not isinstance(payload, str):
+        return payload
+
+    text = payload.strip()
+    if not text:
+        return payload
+
+    if text[0] not in {"{", "["}:
+        return payload
+
+    try:
+        return json.loads(text)
+    except Exception:
+        return payload
 
 
 def patch_llm_methods(
@@ -438,8 +595,18 @@ def _blocked_result_value(decision: GuardDecision, tool: str) -> Any | None:
 def _blocked_llm_value(decision: GuardDecision) -> Any | None:
     if decision.decision_type == DecisionType.DENY:
         return {"agentguard": "blocked", "reason": decision.reason}
+    if decision.decision_type == DecisionType.LOOP_BACK_TO_LLM:
+        return {
+            "agentguard": "loop_back_to_llm",
+            "reason": decision.reason,
+            "decision": decision.processed_content,
+        }
     if decision.decision_type == DecisionType.SANITIZE:
-        return {"agentguard": "sanitized", "reason": decision.reason}
+        return {
+            "agentguard": "sanitized",
+            "reason": decision.reason,
+            "decision": decision.processed_content,
+        }
     if decision.requires_user or decision.requires_remote:
         return {
             "agentguard": "pending",

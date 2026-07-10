@@ -11,6 +11,7 @@ from typing import Any
 
 from agentguard.adapters.agent.base import BaseAgentAdapter, ToolBinding
 from agentguard.adapters.agent.normalization import (
+    LLMInputDenormalization,
     LLMInputNormalization,
     LLMOutputNormalization,
     ToolInvokeNormalization,
@@ -102,6 +103,28 @@ class LangChainAgentAdapter(BaseAgentAdapter):
         _ = fn
         return LLMInputNormalization(
             payload=_normalize_langchain_request(args, kwargs),
+            metadata=self._langchain_meta(label=label, owner=owner),
+        )
+
+    def denormalize_llm_input(
+        self,
+        *,
+        label: str,
+        payload: Any,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        fn: Any = None,
+        owner: Any = None,
+    ) -> LLMInputDenormalization:
+        denormalized = _denormalize_langchain_request(
+            payload=payload,
+            args=args,
+            kwargs=kwargs,
+            fn=fn,
+        )
+        return LLMInputDenormalization(
+            args=denormalized.args,
+            kwargs=denormalized.kwargs,
             metadata=self._langchain_meta(label=label, owner=owner),
         )
 
@@ -354,11 +377,15 @@ def _normalize_langchain_request(
     if model_input is None and args:
         model_input = args[0]
 
+    config = kwargs.get("config")
+    if config is None and len(args) > 1:
+        config = args[1]
+
     payload: dict[str, Any] = {
         "input": _normalize_langchain_value(model_input),
     }
-    if "config" in kwargs:
-        payload["config"] = _normalize_langchain_value(kwargs["config"])
+    if config is not None:
+        payload["config"] = _normalize_langchain_value(config)
     if "stop" in kwargs:
         payload["stop"] = _normalize_langchain_value(kwargs["stop"])
 
@@ -370,6 +397,92 @@ def _normalize_langchain_request(
     if extra_kwargs:
         payload["kwargs"] = _normalize_langchain_value(extra_kwargs)
     return payload
+
+
+def _denormalize_langchain_request(
+    *,
+    payload: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    fn: Any = None,
+) -> LLMInputDenormalization:
+    current_args = list(args)
+    current_kwargs = dict(kwargs)
+    data = payload if isinstance(payload, dict) else {"input": payload}
+
+    if "input" in data:
+        current_args, current_kwargs = _set_langchain_argument(
+            "input",
+            data["input"],
+            position=0,
+            args=current_args,
+            kwargs=current_kwargs,
+            fn=fn,
+        )
+    if "config" in data:
+        current_args, current_kwargs = _set_langchain_argument(
+            "config",
+            data["config"],
+            position=1,
+            args=current_args,
+            kwargs=current_kwargs,
+            fn=fn,
+        )
+    if "stop" in data:
+        current_kwargs["stop"] = data["stop"]
+
+    extra_kwargs = data.get("kwargs")
+    if isinstance(extra_kwargs, dict):
+        current_kwargs.update(extra_kwargs)
+
+    return LLMInputDenormalization(args=tuple(current_args), kwargs=current_kwargs)
+
+
+def _set_langchain_argument(
+    name: str,
+    value: Any,
+    *,
+    position: int,
+    args: list[Any],
+    kwargs: dict[str, Any],
+    fn: Any = None,
+) -> tuple[list[Any], dict[str, Any]]:
+    if len(args) > position:
+        args[position] = value
+        kwargs.pop(name, None)
+        return args, kwargs
+
+    if name in kwargs:
+        kwargs[name] = value
+        return args, kwargs
+
+    if _langchain_accepts_keyword(fn, name):
+        kwargs[name] = value
+        return args, kwargs
+
+    if len(args) == position:
+        args.append(value)
+        kwargs.pop(name, None)
+        return args, kwargs
+
+    kwargs[name] = value
+    return args, kwargs
+
+
+def _langchain_accepts_keyword(fn: Any, name: str) -> bool:
+    if not callable(fn):
+        return False
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return False
+    param = sig.parameters.get(name)
+    if param is None:
+        return False
+    return param.kind in {
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        inspect.Parameter.KEYWORD_ONLY,
+    }
 
 
 def _normalize_langchain_llm_output(value: Any) -> Any:

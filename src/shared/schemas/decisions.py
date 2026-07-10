@@ -47,7 +47,8 @@ _REQUIRES_REMOTE = {DecisionType.REQUIRE_REMOTE_REVIEW}
 @dataclass
 class GuardDecision:
     decision_type: DecisionType
-    reason: str
+    reason: str = ""
+    processed_content: str = ""
     policy_id: str | None = None
     confidence: float | None = None
     risk_signals: list[str] = field(default_factory=list)
@@ -75,6 +76,7 @@ class GuardDecision:
         return {
             "decision_type": self.decision_type.value,
             "reason": self.reason,
+            "processed_content": self.processed_content,
             "policy_id": self.policy_id,
             "confidence": self.confidence,
             "risk_signals": list(self.risk_signals),
@@ -86,6 +88,7 @@ class GuardDecision:
         return cls(
             decision_type=DecisionType(data["decision_type"]),
             reason=data.get("reason", ""),
+            processed_content=data.get("processed_content", ""),
             policy_id=data.get("policy_id"),
             confidence=data.get("confidence"),
             risk_signals=list(data.get("risk_signals") or []),

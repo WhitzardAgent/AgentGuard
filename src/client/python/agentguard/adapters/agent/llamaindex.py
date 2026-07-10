@@ -10,6 +10,7 @@ from typing import Any, Callable
 
 from agentguard.adapters.agent.base import BaseAgentAdapter, LLMBinding
 from agentguard.adapters.agent.normalization import (
+    LLMInputDenormalization,
     LLMInputNormalization,
     LLMOutputNormalization,
     ToolInvokeNormalization,
@@ -132,6 +133,28 @@ class LlamaIndexAgentAdapter(BaseAgentAdapter):
             payload["kwargs"] = _normalize_llamaindex_value(dict(kwargs))
         return LLMInputNormalization(
             payload=payload,
+            metadata=_llamaindex_meta(label=label, owner=owner),
+        )
+
+    def denormalize_llm_input(
+        self,
+        *,
+        label: str,
+        payload: Any,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        fn: Callable[..., Any] | None = None,
+        owner: Any = None,
+    ) -> LLMInputDenormalization:
+        denormalized = _denormalize_llamaindex_request(
+            payload=payload,
+            args=args,
+            kwargs=kwargs,
+            fn=fn,
+        )
+        return LLMInputDenormalization(
+            args=denormalized.args,
+            kwargs=denormalized.kwargs,
             metadata=_llamaindex_meta(label=label, owner=owner),
         )
 
@@ -691,6 +714,109 @@ def _normalize_llamaindex_value(value: Any) -> Any:
             except Exception:
                 continue
     return str(value)
+
+
+def _denormalize_llamaindex_request(
+    *,
+    payload: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    fn: Callable[..., Any] | None = None,
+) -> LLMInputDenormalization:
+    current_args = list(args)
+    current_kwargs = dict(kwargs)
+    data = payload if isinstance(payload, dict) else {"input": payload}
+    primary_param = _llamaindex_primary_parameter(fn)
+
+    if "input" in data:
+        if (
+            primary_param is not None
+            and primary_param.kind == inspect.Parameter.KEYWORD_ONLY
+            and not current_args
+        ):
+            current_kwargs[primary_param.name] = data["input"]
+        else:
+            if current_args:
+                current_args[0] = data["input"]
+            else:
+                current_args = [data["input"]]
+            if primary_param is not None:
+                current_kwargs.pop(primary_param.name, None)
+
+    if "args" in data:
+        raw_args = data["args"]
+        if isinstance(raw_args, (list, tuple)):
+            extra_args = list(raw_args)
+        else:
+            extra_args = [raw_args]
+        if current_args:
+            current_args = current_args[:1] + extra_args
+        else:
+            current_args = extra_args
+
+    _drop_llamaindex_positional_kwargs(
+        kwargs=current_kwargs,
+        fn=fn,
+        positional_count=len(current_args),
+    )
+
+    extra_kwargs = data.get("kwargs")
+    if isinstance(extra_kwargs, dict):
+        current_kwargs.update(extra_kwargs)
+
+    return LLMInputDenormalization(args=tuple(current_args), kwargs=current_kwargs)
+
+
+def _drop_llamaindex_positional_kwargs(
+    *,
+    kwargs: dict[str, Any],
+    fn: Callable[..., Any] | None,
+    positional_count: int,
+) -> None:
+    if positional_count <= 0:
+        return
+
+    for param in _llamaindex_positional_parameters(fn)[:positional_count]:
+        if param.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD:
+            kwargs.pop(param.name, None)
+
+
+def _llamaindex_positional_parameters(
+    fn: Callable[..., Any] | None,
+) -> list[inspect.Parameter]:
+    if not callable(fn):
+        return []
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return []
+    return [
+        param
+        for param in sig.parameters.values()
+        if param.kind in {
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        }
+    ]
+
+
+def _llamaindex_primary_parameter(
+    fn: Callable[..., Any] | None,
+) -> inspect.Parameter | None:
+    if not callable(fn):
+        return None
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return None
+    for param in sig.parameters.values():
+        if param.kind in {
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        }:
+            return param
+    return None
 
 
 def _normalize_llamaindex_llm_output(value: Any) -> Any:

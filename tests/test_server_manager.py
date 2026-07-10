@@ -845,6 +845,22 @@ class AllowPlugin(BasePlugin):
         )
 
 
+class HumanCheckWithContentPlugin(BasePlugin):
+    name = "human_check_with_content"
+    event_types = [EventType.TOOL_INVOKE]
+
+    def check(self, event, context, trajectory_window=None):
+        return CheckResult(
+            decision_candidate=GuardDecision.human_check(
+                "rewrite needs review",
+                processed_content='{"input": "rewritten by server plugin"}',
+                policy_id="server:human-check-with-content",
+            ),
+            risk_signals=["human_check_with_content_seen"],
+            is_final=True,
+        )
+
+
 def test_manager_uses_session_scoped_client_plugin_config():
     m = RuntimeManager(
         plugin_config={
@@ -1097,6 +1113,51 @@ def test_manager_keeps_review_decision_when_review_tickets_exist():
     assert res["decision"]["decision_type"] == "human_check"
     assert res["decision"]["metadata"]["review_status"] == "pending"
     assert len(res["decision"]["metadata"]["review_tickets"]) == 1
+
+
+def test_manager_preserves_processed_content_for_server_review_decisions():
+    m = RuntimeManager(
+        plugin_config={
+            "phases": {
+                "tool_before": {
+                    "client": [],
+                    "server": [HumanCheckWithContentPlugin, AllowPlugin],
+                }
+            }
+        },
+        enable_session_health_monitor=False,
+    )
+    req = {
+        "request_id": "review-content",
+        "context": {"session_id": "review-content"},
+        "current_event": {
+            "event_type": "tool_invoke",
+            "payload": {"tool_name": "read_file", "arguments": {}, "capabilities": []},
+            "risk_signals": [],
+        },
+        "trajectory_window": [],
+        "local_signals": [],
+    }
+
+    res = m.decide(req)
+
+    assert res["decision"]["decision_type"] == "human_check"
+    assert res["decision"]["processed_content"] == '{"input": "rewritten by server plugin"}'
+    assert res["decision"]["metadata"]["review_tickets"][0]["processed_content"] == (
+        '{"input": "rewritten by server plugin"}'
+    )
+
+    ticket_id = res["decision"]["metadata"]["review_ticket_id"]
+    ticket = m.review_queue.get(ticket_id)
+    assert ticket is not None
+    assert ticket["guard_decision"]["processed_content"] == '{"input": "rewritten by server plugin"}'
+
+    resolved = m.review_queue.resolve(ticket_id, approved=True, note="approved with rewrite")
+    assert resolved is not None
+    assert resolved["resolved_decision"]["processed_content"] == '{"input": "rewritten by server plugin"}'
+
+    audit_records = m.audit.records()
+    assert audit_records[-1]["processed_content"] == '{"input": "rewritten by server plugin"}'
 
 
 class TraceAwarePlugin(BasePlugin):

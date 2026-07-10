@@ -31,6 +31,7 @@ class AuditLogger:
                 "event_type": event.get("event_type"),
                 "decision_type": decision.get("decision_type"),
                 "reason": decision.get("reason"),
+                "processed_content": decision.get("processed_content"),
                 "risk_signals": event.get("risk_signals") or [],
                 "policy_id": decision.get("policy_id"),
                 "metadata": decision.get("metadata") or {},

@@ -35,12 +35,13 @@ def test_event_stable_hash_ignores_volatile_fields():
 
 
 def test_decision_roundtrip_and_properties():
-    d = GuardDecision.require_approval("needs human")
+    d = GuardDecision.require_approval("needs human", processed_content='{"input": "rewritten"}')
     assert d.requires_user is True
     assert d.is_blocking is True
     restored = GuardDecision.from_dict(d.to_dict())
     assert restored.decision_type == DecisionType.REQUIRE_APPROVAL
     assert restored.reason == "needs human"
+    assert restored.processed_content == '{"input": "rewritten"}'
 
 
 def test_human_check_roundtrip_and_legacy_compatibility():
