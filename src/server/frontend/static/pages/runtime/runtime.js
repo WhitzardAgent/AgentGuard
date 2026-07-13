@@ -117,6 +117,28 @@
     return value ? value.toUpperCase() : "Unknown";
   }
 
+  function auditTypeDisplay(item) {
+    const eventType = String(item?.eventType || item?.runtimeState?.event_type || "").trim().toLowerCase();
+    if (eventType === "llm_input") {
+      return { label: "LLM_Input", pill: "LLM", meta: "" };
+    }
+    if (eventType === "llm_output") {
+      return { label: "LLM_Output", pill: "LLM", meta: "" };
+    }
+    if (eventType === "tool_invoke" || eventType === "tool_result") {
+      return {
+        label: String(item?.tool || "-").trim() || "-",
+        pill: "Tool",
+        meta: String(item?.toolLabel || "").trim(),
+      };
+    }
+    return {
+      label: formatEventType(eventType).replace(/\s+/g, "_"),
+      pill: formatRuntimeSource(item?.sourceLabel),
+      meta: String(item?.toolLabel || "").trim(),
+    };
+  }
+
   function formatNumber(value) {
     if (typeof value !== "number" || Number.isNaN(value)) {
       return "--";
@@ -544,6 +566,7 @@
 
     state.auditRows.forEach((item, index) => {
       const row = document.createElement("tr");
+      const typeDisplay = auditTypeDisplay(item);
       row.className = "runtime-audit-row";
       if (index === state.selectedAuditIndex) {
         row.classList.add("selected");
@@ -554,10 +577,10 @@
         <td>${escapeHtml(item.agent)}</td>
         <td>
           <div class="runtime-tool-cell">
-            <strong>${escapeHtml(item.tool)}</strong>
+            <strong>${escapeHtml(typeDisplay.label)}</strong>
             <div class="runtime-tool-meta">
-              ${item.sourceLabel === "mcp" ? '<span class="pill runtime-source-pill">MCP</span>' : '<span class="pill runtime-source-pill">Tool</span>'}
-              ${item.toolLabel ? `<span class="subtle">${escapeHtml(item.toolLabel)}</span>` : ""}
+              <span class="pill runtime-source-pill">${escapeHtml(typeDisplay.pill)}</span>
+              ${typeDisplay.meta ? `<span class="subtle">${escapeHtml(typeDisplay.meta)}</span>` : ""}
             </div>
           </div>
         </td>

@@ -26,7 +26,7 @@ from backend.runtime.plugins.tool_before.rule_based_plugin.matcher import (
 
 @register(
     name="rule_based_plugin",
-    description="Evaluate server policy rules against the current event and trajectory window.",
+    description="Evaluate policy rules for runtime events.",
 )
 class RuleBasedPlugin(BasePlugin):
     """Evaluate PolicyRule objects and return the winning rule decision."""
