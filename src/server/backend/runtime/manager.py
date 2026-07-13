@@ -14,6 +14,7 @@ from shared.schemas.decisions import DecisionType, GuardDecision
 from shared.schemas.events import RuntimeEvent
 from backend.audit.audit_logger import AuditLogger
 from backend.audit import AuditTraceEntry
+from backend.database import DatabaseUnavailable, get_mysql_config
 from backend.runtime.plugins.base import CheckResult
 from backend.runtime.plugins import server_plugin_manager
 from backend.runtime.plugins.config_utils import merge_plugin_configs, normalize_plugin_config
@@ -21,6 +22,7 @@ from backend.runtime.degrade.planner import DegradePlanner
 from backend.runtime.policy.engine import PolicyEngine
 from backend.runtime.review import ReviewQueue
 from backend.runtime.storage import SessionPool, TraceStore, trace_entry_event_dict
+from backend.runtime.trace_store import TraceEventStore
 from backend.user.store import resolve_user_ticket
 from shared.utils.json import safe_dumps, safe_loads
 from shared.utils.time import now_ts
@@ -48,6 +50,7 @@ class RuntimeManager:
         self.degrade = DegradePlanner()
         self.audit = audit or AuditLogger()
         self.trace_store = TraceStore()
+        self._trace_event_store: TraceEventStore | None = None
         self.session_pool = SessionPool()
         self.review_queue = ReviewQueue()
         self._session_health_interval_s = session_health_interval_s
@@ -464,7 +467,7 @@ class RuntimeManager:
         self._remember_trace_window(request_trace_window, context)
         trace_window = _merge_event_window(
             _events_from_trace_records(
-                self.trace_store.get(
+                self.get_trace_records(
                     context.session_id or "unknown",
                     agent_id=context.agent_id,
                     user_id=context.user_id,
@@ -603,7 +606,17 @@ class RuntimeManager:
         *,
         agent_id: str | None = None,
         user_id: str | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[AuditTraceEntry]:
+        trace_db = self._persistent_trace_store()
+        if trace_db is not None:
+            try:
+                return trace_db.list_trace_entries(
+                    session_id,
+                    agent_id=agent_id,
+                    user_id=user_id,
+                )
+            except Exception:
+                pass
         return self.trace_store.get(session_id, agent_id=agent_id, user_id=user_id)
 
     def record_uploaded_trace(self, trace: dict[str, Any]) -> int:
@@ -703,7 +716,37 @@ class RuntimeManager:
             agent_id=str(agent_id) if agent_id is not None else None,
             user_id=str(user_id) if user_id is not None else None,
         )
-        return status != "unchanged"
+        db_status = "unchanged"
+        trace_db = self._persistent_trace_store()
+        if trace_db is not None:
+            try:
+                db_status = trace_db.upsert_trace_entry(
+                    session_id,
+                    record,
+                    agent_id=str(agent_id) if agent_id is not None else None,
+                    user_id=str(user_id) if user_id is not None else None,
+                )
+            except Exception:
+                db_status = "unchanged"
+        return status != "unchanged" or db_status != "unchanged"
+
+    def _persistent_trace_store(self) -> TraceEventStore | None:
+        try:
+            mysql_configured = get_mysql_config() is not None
+        except Exception:
+            return None
+        if not mysql_configured:
+            return None
+        if self._trace_event_store is not None:
+            return self._trace_event_store
+        try:
+            self._trace_event_store = TraceEventStore()
+        except DatabaseUnavailable:
+            return None
+        return self._trace_event_store
+
+    def persistent_trace_store(self) -> TraceEventStore | None:
+        return self._persistent_trace_store()
 
     def _identity_metadata_from_ticket(self, user_ticket: str | None) -> dict[str, Any]:
         if not user_ticket:

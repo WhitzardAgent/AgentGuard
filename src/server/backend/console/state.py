@@ -901,6 +901,18 @@ class ConsoleState:
         }
 
     def stats(self, agent_id: str | None = None) -> dict[str, Any]:
+        trace_db = self.manager.persistent_trace_store()
+        if trace_db is not None:
+            try:
+                persisted = trace_db.stats(agent_id)
+                return {
+                    "total_requests": persisted["total_requests"],
+                    "uptime_s": round(time.time() - self._start, 2),
+                    "deny_count": persisted["deny_count"],
+                    "deny_rate": persisted["deny_rate"],
+                }
+            except Exception:
+                pass
         entries = self._traffic_entries(agent_id)
         total = len(entries)
         deny = sum(1 for e in entries if e["action"] == "deny")
@@ -918,6 +930,12 @@ class ConsoleState:
         action: str | None = None,
         tool: str | None = None,
     ) -> list[dict[str, Any]]:
+        trace_db = self.manager.persistent_trace_store()
+        if trace_db is not None:
+            try:
+                return trace_db.recent_traffic(agent_id, n=n, action=action, tool=tool)
+            except Exception:
+                pass
         entries = self._traffic_entries(agent_id)
         if action:
             entries = [e for e in entries if e["action"] == action]
@@ -926,6 +944,12 @@ class ConsoleState:
         return entries[-max(1, min(n, 1000)):][::-1]
 
     def audit_recent(self, agent_id: str | None = None, n: int = 20) -> list[dict[str, Any]]:
+        trace_db = self.manager.persistent_trace_store()
+        if trace_db is not None:
+            try:
+                return trace_db.recent_audit(agent_id, n=n)
+            except Exception:
+                pass
         with self._lock:
             entries = list(self._audit)
         if agent_id:
