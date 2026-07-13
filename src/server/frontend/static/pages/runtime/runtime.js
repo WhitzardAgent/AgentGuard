@@ -243,6 +243,17 @@
         .join("\n");
     }
     if (typeof value === "object") {
+      const role = String(value.role || value.type || "").trim().toLowerCase();
+      const toolCalls = Array.isArray(value.tool_calls) ? value.tool_calls : (
+        Array.isArray(value.toolCalls) ? value.toolCalls : []
+      );
+      if ((role === "ai" || role === "assistant") && toolCalls.length) {
+        return toolCalls.map(formatToolCallSummary).filter(Boolean).join("\n");
+      }
+      if ((role === "tool" || role === "toolresult" || role === "tool_result") && value.name) {
+        const result = extractMessageContent(value.content || value.result || value.output);
+        return result ? `[toolResult ${value.name}] ${result}` : `[toolResult ${value.name}]`;
+      }
       const content = extractMessageContent(value.content);
       if (content) {
         return content;
@@ -266,15 +277,36 @@
     return String(value).trim();
   }
 
-  function formatLlmInputMessages(messages) {
+  function formatToolCallSummary(toolCall) {
+    if (!toolCall || typeof toolCall !== "object") {
+      return "";
+    }
+    const name = String(toolCall.name || toolCall.tool_name || toolCall.function?.name || "tool").trim();
+    const args = toolCall.args ?? toolCall.arguments ?? toolCall.function?.arguments ?? {};
+    return `[toolCall ${name || "tool"}] ${stringifyDetailValue(args, "{}")}`;
+  }
+
+  function latestLlmInputMessage(messages) {
     if (!Array.isArray(messages) || !messages.length) {
+      return null;
+    }
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (extractMessageContent(message) || stringifyDetailValue(message, "")) {
+        return message;
+      }
+    }
+    return messages[messages.length - 1];
+  }
+
+  function formatLlmInputMessages(messages) {
+    const message = latestLlmInputMessage(messages);
+    if (!message) {
       return "No LLM input content captured.";
     }
-    return messages.map((message, index) => {
-      const role = String(message?.role || message?.type || `message ${index + 1}`).trim();
-      const content = extractMessageContent(message);
-      return `${role}: ${content || stringifyDetailValue(message, "-")}`;
-    }).join("\n\n");
+    const role = String(message?.role || message?.type || "message").trim();
+    const content = extractMessageContent(message);
+    return `${role}: ${content || stringifyDetailValue(message, "-")}`;
   }
 
   function extractToolCalls(value) {

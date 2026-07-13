@@ -98,6 +98,41 @@ test("runtime audit expansion formats each event type", () => {
   assert.deepEqual(
     auditExpansionContent({
       runtimeState: {
+        event_type: "llm_input",
+        payload: {
+          messages: [
+            { role: "system", content: "You are helpful." },
+            { role: "human", content: "Please retrieve document id=0." },
+            {
+              type: "ai",
+              content: "",
+              tool_calls: [{ name: "retrieve_doc", args: { id: 0 }, type: "tool_call" }],
+            },
+          ],
+        },
+      },
+    }),
+    { label: "LLM Input", body: 'ai: [toolCall retrieve_doc] {\n  "id": 0\n}' },
+  );
+
+  assert.deepEqual(
+    auditExpansionContent({
+      runtimeState: {
+        event_type: "llm_input",
+        payload: {
+          messages: [
+            { role: "human", content: "Please retrieve document id=0." },
+            { role: "tool", name: "retrieve_doc", content: "DOC#0: This is a document." },
+          ],
+        },
+      },
+    }),
+    { label: "LLM Input", body: "tool: [toolResult retrieve_doc] DOC#0: This is a document." },
+  );
+
+  assert.deepEqual(
+    auditExpansionContent({
+      runtimeState: {
         event_type: "llm_output",
         payload: { output: JSON.stringify({ data: { tool_calls: [{ name: "search" }] } }) },
       },

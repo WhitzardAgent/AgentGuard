@@ -113,7 +113,7 @@
           <div class="plugin-toggle-copy">
             <div class="agent-list-top">
               <strong>${plugin.name}</strong>
-              <span class="pill">${pillText}</span>
+              <span class="pill plugin-phase-pill">${pillText}</span>
             </div>
             <p class="subtle">${helperText}</p>
           </div>

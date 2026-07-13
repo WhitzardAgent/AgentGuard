@@ -615,6 +615,9 @@ button.sidebar-nav-item {
 
 .plugin-toggle-card {
   cursor: default;
+  position: relative;
+  min-height: 150px;
+  padding: 28px 28px 82px;
 }
 
 .plugin-scope-grid {
@@ -636,16 +639,37 @@ button.sidebar-nav-item {
 }
 
 .plugin-toggle-top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 18px;
-  flex-wrap: wrap;
+  display: block;
+  min-height: 100%;
 }
 
 .plugin-toggle-copy {
   min-width: 0;
-  flex: 1 1 auto;
+}
+
+.plugin-toggle-card .agent-list-top {
+  display: block;
+  min-height: 40px;
+  padding-right: 178px;
+}
+
+.plugin-toggle-card .agent-list-top strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.plugin-phase-pill {
+  position: absolute;
+  top: 22px;
+  right: 28px;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-toggle-card p {
+  max-width: calc(100% - 12px);
 }
 
 .plugin-switch {
@@ -655,6 +679,12 @@ button.sidebar-nav-item {
   flex: 0 0 auto;
   cursor: pointer;
   user-select: none;
+}
+
+.plugin-toggle-card .plugin-switch {
+  position: absolute;
+  left: 28px;
+  bottom: 24px;
 }
 
 .plugin-switch input {
