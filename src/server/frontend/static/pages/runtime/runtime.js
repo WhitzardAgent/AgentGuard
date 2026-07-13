@@ -63,7 +63,7 @@
 
   shell?.setPageContext({
     title: "Runtime Overview",
-    description: "Inspect agent-scoped runtime metrics, traffic, approvals, and audit activity for the selected agent.",
+    description: "Inspect agent-scoped runtime metrics, approvals, and audit activity for the selected agent.",
   });
 
   function getSelectedAgentId() {
@@ -397,6 +397,9 @@
   }
 
   function renderTimeline() {
+    if (!elements.timeline) {
+      return;
+    }
     elements.timeline.innerHTML = "";
     if (state.errors.traffic) {
       const error = document.createElement("div");
@@ -620,7 +623,6 @@
   function renderAll() {
     renderOverview();
     renderSessions();
-    renderTimeline();
     renderApprovals();
     renderAuditTable();
     setStatusMessage();
@@ -723,14 +725,6 @@
       runSectionLoad("stats", fetchAgentStats, null, (payload) => {
         state.agentStats = payload;
       }),
-      runSectionLoad("traffic", () => fetchTraffic({ n: 30 }), (items) => {
-        if (!Array.isArray(items)) {
-          throw new Error("Traffic payload has an unexpected format.");
-        }
-        return items.map(normalizeTrafficItem);
-      }, (items) => {
-        state.traffic = items;
-      }),
       runSectionLoad("sessions", () => fetchSessions({ n: 50, status: "all" }), (items) => {
         if (!Array.isArray(items)) {
           throw new Error("Sessions payload has an unexpected format.");
@@ -811,7 +805,6 @@
     }, REFRESH_INTERVALS.slow));
 
     pollers.push(window.setInterval(() => {
-      refreshTraffic().catch(() => {});
       refreshApprovals().catch(() => {});
     }, REFRESH_INTERVALS.fast));
   }
@@ -820,7 +813,7 @@
     state.selectedAuditIndex = 0;
     shell?.setPageContext({
       title: "Runtime Overview",
-      description: `Inspect agent-scoped runtime metrics, traffic, approvals, and audit activity for ${String(event?.detail?.agentLabel || getSelectedAgentLabel() || "the selected agent")}.`,
+      description: `Inspect agent-scoped runtime metrics, approvals, and audit activity for ${String(event?.detail?.agentLabel || getSelectedAgentLabel() || "the selected agent")}.`,
     });
     refreshAll().catch(() => {
       renderAll();
