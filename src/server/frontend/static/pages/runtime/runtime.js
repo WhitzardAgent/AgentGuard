@@ -24,7 +24,7 @@
     sessions: [],
     approvals: [],
     auditRows: [],
-    selectedAuditIndex: 0,
+    selectedAuditIndex: -1,
     lastUpdatedAt: null,
     errors: {
       health: "",
@@ -53,9 +53,6 @@
     timeline: document.getElementById("runtime-timeline"),
     approvalList: document.getElementById("runtime-approval-list"),
     auditBody: document.getElementById("runtime-audit-body"),
-    auditSummary: document.getElementById("runtime-audit-summary"),
-    auditArguments: document.getElementById("runtime-audit-arguments"),
-    auditResult: document.getElementById("runtime-audit-result"),
     auditDetail: document.getElementById("runtime-audit-detail"),
   };
 
@@ -204,6 +201,169 @@
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#39;");
+  }
+
+  function stringifyDetailValue(value, fallback = "-") {
+    if (value === undefined || value === null) {
+      return fallback;
+    }
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      return trimmed || fallback;
+    }
+    return JSON.stringify(value, null, 2);
+  }
+
+  function parseJsonString(value) {
+    if (typeof value !== "string") {
+      return null;
+    }
+    const trimmed = value.trim();
+    if (!trimmed || !/^[{\[]/.test(trimmed)) {
+      return null;
+    }
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return null;
+    }
+  }
+
+  function extractMessageContent(value) {
+    if (value === undefined || value === null) {
+      return "";
+    }
+    if (typeof value === "string") {
+      return value.trim();
+    }
+    if (Array.isArray(value)) {
+      return value
+        .map(extractMessageContent)
+        .filter(Boolean)
+        .join("\n");
+    }
+    if (typeof value === "object") {
+      const content = extractMessageContent(value.content);
+      if (content) {
+        return content;
+      }
+      const text = extractMessageContent(value.text);
+      if (text) {
+        return text;
+      }
+      const input = extractMessageContent(value.input);
+      if (input) {
+        return input;
+      }
+      if (value.data && typeof value.data === "object") {
+        const dataContent = extractMessageContent(value.data.content);
+        if (dataContent) {
+          return dataContent;
+        }
+      }
+      return JSON.stringify(value, null, 2);
+    }
+    return String(value).trim();
+  }
+
+  function formatLlmInputMessages(messages) {
+    if (!Array.isArray(messages) || !messages.length) {
+      return "No LLM input content captured.";
+    }
+    return messages.map((message, index) => {
+      const role = String(message?.role || message?.type || `message ${index + 1}`).trim();
+      const content = extractMessageContent(message);
+      return `${role}: ${content || stringifyDetailValue(message, "-")}`;
+    }).join("\n\n");
+  }
+
+  function extractToolCalls(value) {
+    const source = parseJsonString(value) || value;
+    if (!source || typeof source !== "object") {
+      return [];
+    }
+    const data = source.data && typeof source.data === "object" ? source.data : source;
+    if (Array.isArray(data.tool_calls)) {
+      return data.tool_calls;
+    }
+    if (Array.isArray(data.toolCalls)) {
+      return data.toolCalls;
+    }
+    return [];
+  }
+
+  function extractLlmOutputText(payload) {
+    const candidates = [
+      payload?.final_output,
+      payload?.output,
+      payload?.content,
+      payload?.message,
+      payload?.text,
+      payload?.thought,
+    ];
+    for (const candidate of candidates) {
+      const parsed = parseJsonString(candidate);
+      const structured = parsed && typeof parsed === "object"
+        ? (parsed.data && typeof parsed.data === "object" ? parsed.data : parsed)
+        : (candidate && typeof candidate === "object"
+          ? (candidate.data && typeof candidate.data === "object" ? candidate.data : candidate)
+          : null);
+      const structuredContent = structured
+        ? extractMessageContent(structured.content || structured.final_output || structured.output || structured.message || structured.text)
+        : "";
+      const text = structured ? structuredContent : extractMessageContent(candidate);
+      if (text) {
+        return text;
+      }
+    }
+    return "";
+  }
+
+  function auditExpansionContent(item) {
+    const runtimeState = item?.runtimeState || {};
+    const payload = runtimeState.payload && typeof runtimeState.payload === "object" ? runtimeState.payload : {};
+    const eventType = String(runtimeState.event_type || item?.eventType || "").trim().toLowerCase();
+
+    if (eventType === "llm_input") {
+      return {
+        label: "LLM Input",
+        body: formatLlmInputMessages(payload.messages || item?.raw?.event?.payload?.messages || []),
+      };
+    }
+
+    if (eventType === "llm_output") {
+      const outputText = extractLlmOutputText(payload);
+      const toolCalls = [
+        ...extractToolCalls(payload.output),
+        ...extractToolCalls(payload.final_output),
+        ...extractToolCalls(payload),
+      ];
+      return {
+        label: "LLM Output",
+        body: outputText || (toolCalls.length ? "[Construct A Tool Invoke]" : "No LLM output content captured."),
+      };
+    }
+
+    if (eventType === "tool_invoke") {
+      const argsValue = runtimeState.arguments ?? item?.raw?.event?.tool_call?.args ?? item?.raw?.event?.payload?.arguments ?? {};
+      return {
+        label: "Tool Arguments",
+        body: stringifyDetailValue(argsValue, "{}"),
+      };
+    }
+
+    if (eventType === "tool_result") {
+      const resultValue = runtimeState.result ?? item?.raw?.event?.tool_call?.result ?? item?.raw?.event?.payload?.result ?? null;
+      return {
+        label: "Tool Result",
+        body: stringifyDetailValue(resultValue, "null"),
+      };
+    }
+
+    return {
+      label: "Event Payload",
+      body: stringifyDetailValue(payload, "{}"),
+    };
   }
 
   function fetchHealth() {
@@ -561,7 +721,7 @@
     }
 
     if (state.selectedAuditIndex >= state.auditRows.length) {
-      state.selectedAuditIndex = 0;
+      state.selectedAuditIndex = -1;
     }
 
     state.auditRows.forEach((item, index) => {
@@ -589,6 +749,20 @@
         <td>${escapeHtml(item.matchedRules.join(", ") || "-")}</td>
       `;
       elements.auditBody.appendChild(row);
+      if (index === state.selectedAuditIndex) {
+        const expansion = auditExpansionContent(item);
+        const detailRow = document.createElement("tr");
+        detailRow.className = "runtime-audit-expanded-row";
+        detailRow.innerHTML = `
+          <td colspan="6">
+            <div class="runtime-audit-expanded">
+              <div class="runtime-detail-label">${escapeHtml(expansion.label)}</div>
+              <div class="runtime-audit-expanded-body">${escapeHtml(expansion.body)}</div>
+            </div>
+          </td>
+        `;
+        elements.auditBody.appendChild(detailRow);
+      }
     });
 
     renderAuditDetail();
@@ -597,41 +771,10 @@
   function renderAuditDetail() {
     const selected = state.auditRows[state.selectedAuditIndex];
     if (!selected) {
-      if (elements.auditSummary) {
-        elements.auditSummary.innerHTML = '<div class="empty-state runtime-detail-empty">Select an audit row to inspect event and decision JSON.</div>';
-      }
-      if (elements.auditArguments) {
-        elements.auditArguments.textContent = "Select an audit row to inspect tool arguments.";
-      }
-      if (elements.auditResult) {
-        elements.auditResult.textContent = "Select an audit row to inspect the tool result.";
-      }
       elements.auditDetail.textContent = "Select an audit row to inspect event and decision JSON.";
       return;
     }
     const runtimeState = selected.runtimeState || {};
-    const summaryPills = [
-      { label: formatEventType(runtimeState.event_type || selected.eventType) },
-      { label: formatRuntimeSource(runtimeState.source || selected.sourceLabel) },
-      { label: selected.tool || "-" },
-    ];
-    if (runtimeState?.mcp?.mcp_name) {
-      summaryPills.push({ label: runtimeState.mcp.mcp_name });
-    }
-    if (runtimeState?.mcp?.mcp_tool_name) {
-      summaryPills.push({ label: runtimeState.mcp.mcp_tool_name });
-    }
-    if (elements.auditSummary) {
-      elements.auditSummary.innerHTML = summaryPills.map((item) => `<span class="pill runtime-detail-pill">${escapeHtml(item.label)}</span>`).join("");
-    }
-    if (elements.auditArguments) {
-      const argsValue = runtimeState.arguments ?? selected.raw?.event?.tool_call?.args ?? selected.raw?.event?.payload?.arguments ?? {};
-      elements.auditArguments.textContent = JSON.stringify(argsValue ?? {}, null, 2);
-    }
-    if (elements.auditResult) {
-      const resultValue = runtimeState.result ?? selected.raw?.event?.tool_call?.result ?? selected.raw?.event?.payload?.result ?? null;
-      elements.auditResult.textContent = JSON.stringify(resultValue ?? null, null, 2);
-    }
     const payload = {
       runtime_state: runtimeState,
       event: selected.raw?.event || {},
@@ -833,7 +976,7 @@
   }
 
   function handleSelectedAgentChange(event) {
-    state.selectedAuditIndex = 0;
+    state.selectedAuditIndex = -1;
     shell?.setPageContext({
       title: "Runtime Overview",
       description: `Inspect agent-scoped runtime metrics, approvals, and audit activity for ${String(event?.detail?.agentLabel || getSelectedAgentLabel() || "the selected agent")}.`,
@@ -894,7 +1037,7 @@
       if (Number.isNaN(index)) {
         return;
       }
-      state.selectedAuditIndex = index;
+      state.selectedAuditIndex = state.selectedAuditIndex === index ? -1 : index;
       renderAuditTable();
     });
 
@@ -920,5 +1063,6 @@
     denyTicket,
     fetchAuditRecent,
     refreshAll,
+    auditExpansionContent,
   };
 })();

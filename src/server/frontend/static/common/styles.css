@@ -1200,6 +1200,32 @@ textarea {
   background: #f2f8ee;
 }
 
+.runtime-audit-expanded-row td {
+  padding-top: 0;
+  background: #f8fbf5;
+}
+
+.runtime-audit-expanded {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.runtime-audit-expanded-body {
+  max-height: 260px;
+  overflow: auto;
+  color: var(--text);
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .runtime-tool-cell {
   display: grid;
   gap: 6px;

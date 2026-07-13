@@ -1018,9 +1018,9 @@ def test_runtime_page_renders_shared_sidebar_and_active_nav():
     assert "active" in body
     assert 'href="/labels.html"' in body
     assert 'data-agent-required="true"' in body
-    assert 'id="runtime-audit-summary"' in body
-    assert 'id="runtime-audit-arguments"' in body
-    assert 'id="runtime-audit-result"' in body
+    assert 'id="runtime-audit-detail"' in body
+    assert 'id="runtime-audit-arguments"' not in body
+    assert 'id="runtime-audit-result"' not in body
     assert "Runtime Sessions" in body
     assert 'id="runtime-session-body"' in body
 
