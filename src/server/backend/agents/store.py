@@ -274,6 +274,28 @@ class AgentStore:
         )
         return {str(row["agent_id"]) for row in rows}
 
+    def bind_agent_to_user(
+        self,
+        *,
+        user_id: int,
+        agent_id: str,
+        provider: str,
+        account_email: str | None = None,
+        source: str = "adapter_scan",
+        metadata: dict[str, Any] | None = None,
+    ) -> tuple[bool, bool]:
+        agent = self.get_agent(agent_id)
+        if agent is None or agent.status != "active":
+            raise ValueError("agent is not registered or active")
+        return self._upsert_user_agent(
+            user_id=int(user_id),
+            agent_id=agent_id,
+            provider=_normalize_provider(provider),
+            account_email=_normalize_email_or_none(account_email),
+            source=_normalize_source(source),
+            metadata=metadata,
+        )
+
     def get_active_credential(
         self,
         *,
@@ -518,6 +540,7 @@ class AgentStore:
         provider: str,
         account_email: str | None,
         metadata: dict[str, Any] | None,
+        source: str = "adapter_scan",
     ) -> tuple[bool, bool]:
         existing = self.db.fetchone(
             """
@@ -535,9 +558,9 @@ class AgentStore:
                   user_id, agent_id, provider, account_email, source,
                   metadata_json, last_seen_at
                 )
-                VALUES (%s, %s, %s, %s, 'adapter_scan', %s, UTC_TIMESTAMP())
+                VALUES (%s, %s, %s, %s, %s, %s, UTC_TIMESTAMP())
                 """,
-                (int(user_id), agent_id, provider, account_email, metadata_json),
+                (int(user_id), agent_id, provider, account_email, source, metadata_json),
             )
             return True, False
         self.db.execute(
@@ -545,12 +568,13 @@ class AgentStore:
             UPDATE user_agents
             SET provider = %s,
                 account_email = COALESCE(%s, account_email),
+                source = %s,
                 metadata_json = COALESCE(%s, metadata_json),
                 last_seen_at = UTC_TIMESTAMP(),
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = %s
             """,
-            (provider, account_email, metadata_json, int(existing["id"])),
+            (provider, account_email, source, metadata_json, int(existing["id"])),
         )
         return False, True
 
@@ -1016,6 +1040,13 @@ def _normalize_email_or_none(value: Any) -> str | None:
         raise ValueError("account_email must be an email address")
     if len(text) > 255:
         raise ValueError("account_email must be at most 255 characters")
+    return text
+
+
+def _normalize_source(value: Any) -> str:
+    text = _optional_text(value) or "adapter_scan"
+    if len(text) > 64:
+        raise ValueError("source must be at most 64 characters")
     return text
 
 

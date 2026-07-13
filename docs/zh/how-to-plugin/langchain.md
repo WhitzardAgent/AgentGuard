@@ -8,10 +8,15 @@
 ```python
 agent = create_agent(...)
 
-guard = Guard(...)
+guard = Guard(
+    remote_url="http://<Control Server IP>:38080",
+    ticket="<AgentGuard User Ticket>",
+)
 guard.start(...)
 guard.attach_langchain(agent)   # Attach the guard to the LangChain agent
 ```
+
+远程接入 LangChain 时，`ticket` 是必填项。用户需要先登录 AgentGuard 前端，在 User Centre 的 Current User 区域点击 `Generate Ticket`，复制弹窗中的一次性 ticket，然后传给 LangChain 程序。ticket 是短时有效且一次性消费的，不建议写入环境变量或配置文件。
 
 ## 完整代码示例
 下面代码展示了一个导入 AgentGuard 访问控制客户端后的完整代码示例，标 🚩 符号的地方是客户端的插入位置：
@@ -76,6 +81,7 @@ if __name__ == "__main__":
     # 🚩 Load the guard client
     guard = Guard(
         remote_url="http://<Control Server IP>:38080",         # Replace with your control server IP and port
+        ticket="<AgentGuard User Ticket>",                     # Generate this in User Centre before each run
         mode="enforce",
         fail_open=False,
     )
@@ -107,4 +113,10 @@ if __name__ == "__main__":
 ```bash
 pip install langchain==1.2.18
 pip install langchain-openai==1.2.1
+```
+
+如果运行仓库里的示例脚本，需要把前端生成的 ticket 作为命令行参数传入：
+
+```bash
+python examples/test_langchain_emailcase.py --ticket agt_xxx
 ```

@@ -25,6 +25,7 @@ class DPoPVerification:
     jti: str
     iat: int
     claims: dict[str, Any]
+    public_jwk: dict[str, Any]
 
 
 def verify_dpop_proof(
@@ -73,7 +74,7 @@ def verify_dpop_proof(
         expected_ath = access_token_hash(access_token)
         if payload.get("ath") != expected_ath:
             raise DPoPError("DPoP access-token hash mismatch")
-    return DPoPVerification(jkt=jkt, jti=jti, iat=iat, claims=payload)
+    return DPoPVerification(jkt=jkt, jti=jti, iat=iat, claims=payload, public_jwk=dict(jwk))
 
 
 def jwk_thumbprint(jwk: dict[str, Any]) -> str:
@@ -122,4 +123,3 @@ def _b64url(value: bytes) -> str:
 def _b64url_decode(value: str) -> bytes:
     padding = "=" * (-len(value) % 4)
     return base64.urlsafe_b64decode((value + padding).encode("ascii"))
-

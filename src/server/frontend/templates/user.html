@@ -26,7 +26,10 @@
         <div class="card" id="profile-card">
           <div class="heading-row">
             <h3>Current User</h3>
-            <button class="btn" id="logout-button" type="button" hidden>Logout</button>
+            <div class="profile-actions">
+              <button class="btn primary" id="generate-ticket-button" type="button" hidden>Generate Ticket</button>
+              <button class="btn" id="logout-button" type="button" hidden>Logout</button>
+            </div>
           </div>
           <p class="subtle" id="user-status">Checking sign-in status...</p>
         </div>
@@ -89,6 +92,22 @@
     </main>
 
     <div class="toast" id="toast"></div>
+    <div class="ticket-modal-backdrop" id="ticket-modal-backdrop" hidden>
+      <section class="ticket-modal" role="dialog" aria-modal="true" aria-labelledby="ticket-modal-title">
+        <div class="heading-row">
+          <h3 id="ticket-modal-title">LangChain Ticket</h3>
+          <button class="btn" id="close-ticket-modal-button" type="button">Close</button>
+        </div>
+        <label class="ticket-field">
+          <span>Ticket</span>
+          <input id="ticket-value" readonly spellcheck="false">
+        </label>
+        <p class="subtle" id="ticket-expiry"></p>
+        <div class="form-grid-actions">
+          <button class="btn primary" id="copy-ticket-button" type="button">Copy Ticket</button>
+        </div>
+      </section>
+    </div>
   </div>
 
   <script src="/static/common/messages.js"></script>
@@ -102,6 +121,7 @@
   <script>
     (function () {
       const logoutButton = document.getElementById("logout-button");
+      const generateTicketButton = document.getElementById("generate-ticket-button");
       const statusNode = document.getElementById("user-status");
       const passwordCard = document.getElementById("password-card");
       const passwordChangeForm = document.getElementById("password-change-form");
@@ -109,6 +129,12 @@
       const difyBindForm = document.getElementById("dify-bind-form");
       const externalAccountListCard = document.getElementById("external-account-list-card");
       const externalAccountList = document.getElementById("external-account-list");
+      const ticketModalBackdrop = document.getElementById("ticket-modal-backdrop");
+      const ticketValue = document.getElementById("ticket-value");
+      const ticketExpiry = document.getElementById("ticket-expiry");
+      const copyTicketButton = document.getElementById("copy-ticket-button");
+      const closeTicketModalButton = document.getElementById("close-ticket-modal-button");
+      let activeTicket = "";
 
       function showToast(message, tone) {
         const toast = document.getElementById("toast");
@@ -163,12 +189,14 @@
           ? `Signed in as ${user.username} (user #${user.id}).`
           : "Not signed in.";
         logoutButton.hidden = !signedIn;
+        generateTicketButton.hidden = !signedIn;
         passwordCard.hidden = !signedIn;
         difyCard.hidden = !signedIn;
         if (!signedIn) {
           passwordChangeForm.reset();
           externalAccountListCard.hidden = true;
           externalAccountList.innerHTML = "";
+          closeTicketModal();
           clearCatalogCaches();
         }
         updateShellUser(user);
@@ -216,6 +244,77 @@
           window.location.replace(`/login.html?next=${next}`);
         }
       }
+
+      function openTicketModal(payload) {
+        activeTicket = String(payload.ticket || "");
+        ticketValue.value = activeTicket;
+        ticketExpiry.textContent = payload.ttl_seconds
+          ? `Expires in ${payload.ttl_seconds} seconds.`
+          : "This ticket is short-lived.";
+        ticketModalBackdrop.hidden = false;
+        ticketValue.focus();
+        ticketValue.select();
+      }
+
+      function closeTicketModal() {
+        activeTicket = "";
+        ticketValue.value = "";
+        ticketExpiry.textContent = "";
+        ticketModalBackdrop.hidden = true;
+      }
+
+      async function copyText(value) {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(value);
+          return;
+        }
+        ticketValue.focus();
+        ticketValue.select();
+        document.execCommand("copy");
+      }
+
+      generateTicketButton.addEventListener("click", async () => {
+        generateTicketButton.disabled = true;
+        try {
+          const payload = await api("/api/user/tickets", {
+            method: "POST",
+            body: "{}",
+          });
+          openTicketModal(payload);
+        } catch (error) {
+          showToast(error.message || "Failed to generate ticket.", "warning");
+        } finally {
+          generateTicketButton.disabled = false;
+        }
+      });
+
+      copyTicketButton.addEventListener("click", async () => {
+        if (!activeTicket) {
+          closeTicketModal();
+          return;
+        }
+        try {
+          await copyText(activeTicket);
+          closeTicketModal();
+          showToast("Ticket copied.", "success");
+        } catch (error) {
+          showToast(error.message || "Failed to copy ticket.", "warning");
+        }
+      });
+
+      closeTicketModalButton.addEventListener("click", closeTicketModal);
+
+      ticketModalBackdrop.addEventListener("click", (event) => {
+        if (event.target === ticketModalBackdrop) {
+          closeTicketModal();
+        }
+      });
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !ticketModalBackdrop.hidden) {
+          closeTicketModal();
+        }
+      });
 
       logoutButton.addEventListener("click", async () => {
         try {
@@ -293,5 +392,47 @@
       refresh();
     })();
   </script>
+  <style>
+    .profile-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+
+    .ticket-modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 80;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: rgb(15 23 42 / 45%);
+    }
+
+    .ticket-modal-backdrop[hidden] {
+      display: none;
+    }
+
+    .ticket-modal {
+      width: min(560px, 100%);
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .ticket-field {
+      display: grid;
+      gap: 8px;
+      margin-top: 18px;
+    }
+
+    .ticket-field input {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+  </style>
 </body>
 </html>

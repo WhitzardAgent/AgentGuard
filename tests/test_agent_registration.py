@@ -99,7 +99,8 @@ class FakeDB:
                 if row["id"] == binding_id:
                     row["provider"] = params[0]
                     row["account_email"] = params[1] or row.get("account_email")
-                    row["metadata_json"] = params[2] or row.get("metadata_json")
+                    row["source"] = params[2]
+                    row["metadata_json"] = params[3] or row.get("metadata_json")
                     return 1
         return 0
 
@@ -142,7 +143,8 @@ class FakeDB:
                 "agent_id": params[1],
                 "provider": params[2],
                 "account_email": params[3],
-                "metadata_json": params[4],
+                "source": params[4],
+                "metadata_json": params[5],
             }
             self.next_id += 1
             self.user_agents.append(row)

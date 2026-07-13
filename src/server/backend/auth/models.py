@@ -13,7 +13,7 @@ class RuntimeSession:
     user_id: int
     provider: str
     external_session_id: str | None
-    external_account_email: str
+    external_account_email: str | None
     dpop_jkt: str
     status: str
     metadata_json: str | None = None

@@ -28,6 +28,26 @@ class FakeBroker:
             expires_at=1000,
         )
 
+
+class FakeLangChainBroker(FakeBroker):
+    def create_langchain_ticket_session(self, **kwargs):
+        return SimpleNamespace(
+            session=RuntimeSession(
+                session_id="ags_langchain_created",
+                agent_id="ag_langchain_created",
+                user_id=8,
+                provider="langchain",
+                external_session_id=None,
+                external_account_email=None,
+                dpop_jkt="jkt-langchain",
+                status="active",
+            ),
+            session_token="runtime-token-langchain",
+            token_jti="rtok-langchain",
+            issued_at=101,
+            expires_at=1001,
+        )
+
     def authenticate_runtime_request(self, **kwargs):
         return AuthContext(
             session_id="ags_dify_auth",
@@ -85,6 +105,46 @@ def test_session_create_route_allows_missing_external_session_id(monkeypatch):
     payload = response.json()
     assert payload["session_id"] == "ags_dify_created"
     assert payload["external_session_id"] is None
+
+
+def test_session_create_route_dispatches_langchain_ticket_provider(monkeypatch):
+    monkeypatch.setattr("backend.api.client_router.get_dify_auth_broker", lambda: FakeLangChainBroker())
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/v1/server/session/create",
+        headers={"DPoP": "proof"},
+        json={
+            "provider": "langchain",
+            "user_ticket": "agt-ticket",
+            "metadata": {"name": "LangChain demo"},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["session_id"] == "ags_langchain_created"
+    assert payload["agent_id"] == "ag_langchain_created"
+    assert payload["user_id"] == "8"
+    assert payload["session_token"] == "runtime-token-langchain"
+    assert payload["auth_method"] == "langchain_dpop"
+
+
+def test_session_create_route_keeps_dify_required_fields(monkeypatch):
+    monkeypatch.setattr("backend.api.client_router.get_dify_auth_broker", lambda: FakeBroker())
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/v1/server/session/create",
+        headers={"Authorization": "Bearer test-key", "DPoP": "proof"},
+        json={
+            "provider": "dify",
+            "account_email": "alice@example.com",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "agent_id is required"
 
 
 def test_dpop_runtime_route_overrides_self_reported_context(monkeypatch):

@@ -86,8 +86,9 @@ class SessionRegisterRequest(_ApiModel):
 class RuntimeSessionCreateRequest(_ApiModel):
     provider: str
     external_session_id: str | None = None
-    agent_id: str
-    account_email: str
+    agent_id: str | None = None
+    account_email: str | None = None
+    user_ticket: str | None = None
     external_user_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 

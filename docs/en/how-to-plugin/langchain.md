@@ -9,10 +9,15 @@ The LangChain adapter targets the return value of `langchain.agents.create_agent
 ```python
 agent = create_agent(...)
 
-guard = Guard(...)
+guard = Guard(
+    remote_url="http://<Control Server IP>:38080",
+    ticket="<AgentGuard User Ticket>",
+)
 guard.start(...)
 guard.attach_langchain(agent)   # Attach the guard to the LangChain agent
 ```
+
+For remote LangChain integration, `ticket` is required. Sign in to the AgentGuard frontend, open User Centre, click `Generate Ticket` in the Current User section, copy the one-time ticket from the popup, and pass it to the LangChain program. Tickets are short-lived and consumed once, so avoid storing them in environment variables or config files.
 
 ## Full example
 
@@ -79,6 +84,7 @@ if __name__ == "__main__":
     # 🚩 Load the guard client
     guard = Guard(
         remote_url="http://<Control Server IP>:38080",      # Replace with your control server IP and port
+        ticket="<AgentGuard User Ticket>",                  # Generate this in User Centre before each run
         mode="enforce",
         fail_open=False,
     )
@@ -110,4 +116,10 @@ if __name__ == "__main__":
 ```bash
 pip install langchain==1.2.18
 pip install langchain-openai==1.2.1
+```
+
+To run the repository example, pass the frontend-generated ticket as a command-line argument:
+
+```bash
+python examples/test_langchain_emailcase.py --ticket agt_xxx
 ```

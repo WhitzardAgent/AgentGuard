@@ -50,7 +50,7 @@ class RuntimeSessionStore:
         user_id: int,
         provider: str,
         external_session_id: str | None,
-        external_account_email: str,
+        external_account_email: str | None,
         dpop_jkt: str,
         metadata: dict[str, Any] | None = None,
     ) -> RuntimeSession:
@@ -69,7 +69,7 @@ class RuntimeSessionStore:
                 int(user_id),
                 _normalize_provider(provider),
                 _optional_text(external_session_id),
-                _normalize_email(external_account_email),
+                _normalize_email_or_none(external_account_email),
                 dpop_jkt,
                 _metadata_json(metadata),
             ),
@@ -206,6 +206,9 @@ class RuntimeSessionStore:
         column = self.db.fetchone("SHOW COLUMNS FROM runtime_sessions LIKE 'external_session_id'")
         if column and str(column.get("Null") or "").upper() == "NO":
             self.db.execute("ALTER TABLE runtime_sessions MODIFY external_session_id VARCHAR(255) NULL")
+        column = self.db.fetchone("SHOW COLUMNS FROM runtime_sessions LIKE 'external_account_email'")
+        if column and str(column.get("Null") or "").upper() == "NO":
+            self.db.execute("ALTER TABLE runtime_sessions MODIFY external_account_email VARCHAR(255) NULL")
 
 
 def ensure_runtime_session_schema() -> None:
@@ -224,7 +227,7 @@ _SCHEMA = [
       user_id INT NOT NULL,
       provider VARCHAR(64) NOT NULL,
       external_session_id VARCHAR(255) NULL,
-      external_account_email VARCHAR(255) NOT NULL,
+      external_account_email VARCHAR(255) NULL,
       dpop_jkt VARCHAR(255) NOT NULL,
       status VARCHAR(32) NOT NULL DEFAULT 'active',
       metadata_json JSON NULL,
@@ -265,7 +268,7 @@ def _session_from_row(row: dict[str, Any]) -> RuntimeSession:
         user_id=int(row["user_id"]),
         provider=str(row["provider"]),
         external_session_id=_optional_text(row.get("external_session_id")),
-        external_account_email=str(row["external_account_email"]),
+        external_account_email=_optional_text(row.get("external_account_email")),
         dpop_jkt=str(row["dpop_jkt"]),
         status=str(row["status"]),
         metadata_json=_optional_text(row.get("metadata_json")),
@@ -316,6 +319,11 @@ def _normalize_provider(value: str) -> str:
 
 def _normalize_email(value: str) -> str:
     return str(value or "").strip().lower()
+
+
+def _normalize_email_or_none(value: Any) -> str | None:
+    text = _optional_text(value)
+    return text.lower() if text else None
 
 
 def _optional_text(value: Any) -> str | None:

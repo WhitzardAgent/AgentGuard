@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import argparse
 from typing import Any
 
 from langchain.agents import create_agent
@@ -57,6 +58,18 @@ def get_control_server_url() -> str:
             "with a real URL, for example http://127.0.0.1:38080."
         )
     return url
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run the LangChain AgentGuard remote demo with a user ticket."
+    )
+    parser.add_argument(
+        "--ticket",
+        required=True,
+        help="One-time AgentGuard user ticket generated from the User Centre.",
+    )
+    return parser.parse_args()
 
 @tool
 def retrieve_doc(id: int) -> str:
@@ -145,11 +158,13 @@ def run(agent, prompt):
     print("===================================\n")
 
 if __name__ == "__main__":
+    args = parse_args()
     agent = build_agent()
 
     # 🚩 Load the guard client
     guard = Guard(
         remote_url=get_control_server_url(),
+        ticket=args.ticket,
         mode="enforce",
         fail_open=False,
     )

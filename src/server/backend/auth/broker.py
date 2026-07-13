@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import json
+import secrets
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -14,7 +15,7 @@ from backend.auth.models import AuthContext, RuntimeSession
 from backend.auth.replay_store import DPoPReplayError, DPoPReplayStore, get_replay_store
 from backend.auth.session_store import RuntimeSessionStore, get_runtime_session_store
 from backend.auth.token_service import RuntimeTokenService, TokenError
-from backend.user.store import UserStore
+from backend.user.store import InvalidUserTicket, UserStore
 
 
 class AuthBrokerError(PermissionError):
@@ -130,6 +131,80 @@ class DifyAuthBroker:
                 **(metadata or {}),
                 "external_user_id": external_user_id,
             },
+        )
+        return self._issue_token(session)
+
+    def create_langchain_ticket_session(
+        self,
+        *,
+        user_ticket: str | None,
+        metadata: dict[str, Any] | None,
+        dpop_proof: str | None,
+        request_body: dict[str, Any],
+        method: str,
+        url: str,
+    ) -> RuntimeSessionIssue:
+        identity = self._resolve_user_ticket(user_ticket)
+        verification = self._verify_proof(
+            dpop_proof,
+            method=method,
+            url=url,
+            access_token=None,
+            expected_jkt=None,
+        )
+        clean_metadata = dict(metadata or {})
+        clean_metadata.update(
+            {
+                "ticket_id": identity.ticket_id,
+                "ticket_prefix": identity.ticket_prefix,
+                "runtime_auth_provider": "langchain",
+                "request_body_provider": request_body.get("provider"),
+            }
+        )
+        external_agent_id = f"ticket-{identity.ticket_id}-{secrets.token_urlsafe(12)}"
+        registration = self.agent_store.register_agent(
+            provider="langchain",
+            provider_instance_id=None,
+            tenant_id=None,
+            external_agent_id=external_agent_id,
+            agent_type="runtime",
+            name=_optional_text(clean_metadata.get("name")) or "LangChain runtime agent",
+            description=_optional_text(clean_metadata.get("description")),
+            public_key_jwk=verification.public_jwk,
+            metadata={
+                **clean_metadata,
+                "external_agent_id": external_agent_id,
+                "ticket_prefix": identity.ticket_prefix,
+            },
+        )
+        self.agent_store.bind_agent_to_user(
+            user_id=identity.user_id,
+            agent_id=registration.agent.agent_id,
+            provider="langchain",
+            account_email=None,
+            source="user_ticket",
+            metadata={
+                **clean_metadata,
+                "ticket_prefix": identity.ticket_prefix,
+            },
+        )
+        session = self.session_store.create_session(
+            agent_id=registration.agent.agent_id,
+            user_id=identity.user_id,
+            provider="langchain",
+            external_session_id=None,
+            external_account_email=None,
+            dpop_jkt=verification.jkt,
+            metadata={
+                **clean_metadata,
+                "ticket_id": identity.ticket_id,
+                "ticket_prefix": identity.ticket_prefix,
+            },
+        )
+        self._consume_user_ticket(
+            user_ticket,
+            agent_id=registration.agent.agent_id,
+            session_id=session.session_id,
         )
         return self._issue_token(session)
 
@@ -283,6 +358,31 @@ class DifyAuthBroker:
         except DPoPReplayError as exc:
             raise RuntimeAuthUnauthorized(str(exc)) from exc
         except AgentIdentityProofError as exc:
+            raise RuntimeAuthUnauthorized(str(exc)) from exc
+
+    def _resolve_user_ticket(self, ticket: str | None):
+        try:
+            identity = self.user_store.resolve_ticket(ticket)
+        except InvalidUserTicket as exc:
+            raise RuntimeAuthUnauthorized(str(exc)) from exc
+        if identity is None:
+            raise RuntimeAuthUnauthorized("missing user ticket")
+        return identity
+
+    def _consume_user_ticket(
+        self,
+        ticket: str | None,
+        *,
+        agent_id: str,
+        session_id: str,
+    ) -> None:
+        try:
+            self.user_store.consume_ticket(
+                ticket,
+                agent_id=agent_id,
+                session_id=session_id,
+            )
+        except InvalidUserTicket as exc:
             raise RuntimeAuthUnauthorized(str(exc)) from exc
 
     def _active_session(self, session_id: str) -> RuntimeSession:

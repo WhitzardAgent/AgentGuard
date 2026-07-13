@@ -230,21 +230,37 @@ def register_session(req: SessionRegisterRequest, request: Request) -> dict[str,
 
 @router.post("/v1/server/session/create")
 def create_runtime_session(req: RuntimeSessionCreateRequest, request: Request) -> dict[str, Any]:
-    _validate_adapter_api_key(request)
     try:
-        issue = get_dify_auth_broker().create_session(
-            provider=req.provider,
-            external_session_id=req.external_session_id,
-            agent_id=req.agent_id,
-            account_email=req.account_email,
-            external_user_id=req.external_user_id,
-            metadata=req.metadata,
-            dpop_proof=request.headers.get("dpop"),
-            agent_proof=request.headers.get("x-agentguard-agent-proof"),
-            request_body=req.model_dump(exclude_none=True),
-            method=request.method,
-            url=str(request.url),
-        )
+        provider = str(req.provider or "").strip().lower()
+        broker = get_dify_auth_broker()
+        if provider == "langchain":
+            issue = broker.create_langchain_ticket_session(
+                user_ticket=req.user_ticket or request.headers.get("x-agentguard-user-ticket"),
+                metadata=req.metadata,
+                dpop_proof=request.headers.get("dpop"),
+                request_body=req.model_dump(exclude_none=True),
+                method=request.method,
+                url=str(request.url),
+            )
+        else:
+            _validate_adapter_api_key(request)
+            if not req.agent_id:
+                raise HTTPException(status_code=400, detail="agent_id is required")
+            if not req.account_email:
+                raise HTTPException(status_code=400, detail="account_email is required")
+            issue = broker.create_session(
+                provider=req.provider,
+                external_session_id=req.external_session_id,
+                agent_id=req.agent_id,
+                account_email=req.account_email,
+                external_user_id=req.external_user_id,
+                metadata=req.metadata,
+                dpop_proof=request.headers.get("dpop"),
+                agent_proof=request.headers.get("x-agentguard-agent-proof"),
+                request_body=req.model_dump(exclude_none=True),
+                method=request.method,
+                url=str(request.url),
+            )
     except DatabaseUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except AuthBrokerError as exc:
@@ -425,7 +441,9 @@ def _runtime_session_issue_payload(issue: Any) -> dict[str, Any]:
         "session_token": issue.session_token,
         "issued_at": issue.issued_at,
         "expires_at": issue.expires_at,
-        "auth_method": "dify_api_key_dpop",
+        "auth_method": (
+            "dify_api_key_dpop" if session.provider == "dify" else f"{session.provider}_dpop"
+        ),
         "external_session_id": session.external_session_id,
     }
 

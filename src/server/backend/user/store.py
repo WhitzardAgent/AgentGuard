@@ -82,6 +82,7 @@ class UserStore:
     def ensure_schema(self) -> None:
         for statement in _SCHEMA:
             self.db.execute(statement)
+        _ensure_user_ticket_columns(self.db)
 
     def create_user(self, username: str, password: str) -> User:
         normalized = _normalize_username(username)
@@ -231,6 +232,7 @@ class UserStore:
             JOIN users u ON u.id = t.user_id
             WHERE t.ticket_hash = %s
               AND t.expires_at > UTC_TIMESTAMP()
+              AND t.consumed_at IS NULL
             """,
             (_hash_token(ticket),),
         )
@@ -247,6 +249,33 @@ class UserStore:
             ticket_prefix=str(row["ticket_prefix"]),
             expires_at=_coerce_datetime(row["expires_at"]),
         )
+
+    def consume_ticket(
+        self,
+        ticket: str | None,
+        *,
+        agent_id: str,
+        session_id: str,
+    ) -> UserTicketIdentity:
+        identity = self.resolve_ticket(ticket)
+        if identity is None:
+            raise InvalidUserTicket("invalid or expired user ticket")
+        changed = self.db.execute(
+            """
+            UPDATE user_tickets
+            SET consumed_at = UTC_TIMESTAMP(),
+                consumed_agent_id = %s,
+                consumed_session_id = %s,
+                last_used_at = UTC_TIMESTAMP()
+            WHERE id = %s
+              AND consumed_at IS NULL
+              AND expires_at > UTC_TIMESTAMP()
+            """,
+            (agent_id, session_id, identity.ticket_id),
+        )
+        if changed <= 0:
+            raise InvalidUserTicket("user ticket has already been consumed")
+        return identity
 
     def bind_external_account(
         self,
@@ -386,6 +415,27 @@ def resolve_user_ticket(ticket: str | None) -> UserTicketIdentity | None:
         raise InvalidUserTicket("user ticket validation is unavailable") from exc
 
 
+def _ensure_user_ticket_columns(db: MySQLDatabase) -> None:
+    columns = {
+        "consumed_at": "ALTER TABLE user_tickets ADD COLUMN consumed_at TIMESTAMP NULL AFTER last_used_at",
+        "consumed_agent_id": "ALTER TABLE user_tickets ADD COLUMN consumed_agent_id VARCHAR(255) NULL AFTER consumed_at",
+        "consumed_session_id": "ALTER TABLE user_tickets ADD COLUMN consumed_session_id VARCHAR(255) NULL AFTER consumed_agent_id",
+    }
+    for column, statement in columns.items():
+        try:
+            row = db.fetchone("SHOW COLUMNS FROM user_tickets LIKE %s", (column,))
+        except Exception:
+            return
+        if row is None:
+            db.execute(statement)
+    try:
+        row = db.fetchone("SHOW INDEX FROM user_tickets WHERE Key_name = %s", ("idx_user_tickets_consumed_at",))
+        if row is None:
+            db.execute("ALTER TABLE user_tickets ADD INDEX idx_user_tickets_consumed_at (consumed_at)")
+    except Exception:
+        return
+
+
 _SCHEMA = [
     """
     CREATE TABLE IF NOT EXISTS users (
@@ -438,8 +488,12 @@ _SCHEMA = [
       expires_at TIMESTAMP NOT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       last_used_at TIMESTAMP NULL,
+      consumed_at TIMESTAMP NULL,
+      consumed_agent_id VARCHAR(255) NULL,
+      consumed_session_id VARCHAR(255) NULL,
       INDEX idx_user_tickets_user_id (user_id),
       INDEX idx_user_tickets_expires_at (expires_at),
+      INDEX idx_user_tickets_consumed_at (consumed_at),
       CONSTRAINT fk_user_tickets_user
         FOREIGN KEY (user_id) REFERENCES users(id)
         ON DELETE CASCADE

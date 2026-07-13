@@ -14,7 +14,7 @@ from backend.auth.broker import DifyAuthBroker, RuntimeAuthForbidden, RuntimeAut
 from backend.auth.models import RuntimeSession, RuntimeToken
 from backend.auth.replay_store import DPoPReplayError
 from backend.auth.token_service import RuntimeTokenService
-from backend.user.store import ExternalAccountMapping
+from backend.user.store import ExternalAccountMapping, InvalidUserTicket, UserTicketIdentity
 
 
 CREATE_URL = "http://agentguard.test/v1/server/session/create"
@@ -35,8 +35,12 @@ class FakeAgentStore:
         self.active = active
         self.bound = bound
         self.credential_active = credential_active
+        self.registered: dict[str, Any] = {}
+        self.bindings: list[dict[str, Any]] = []
 
     def get_agent(self, agent_id: str):
+        if agent_id in self.registered:
+            return self.registered[agent_id]
         if agent_id != AGENT_ID and agent_id != "ag_workflow":
             return None
         return dataclass_record(
@@ -65,6 +69,39 @@ class FakeAgentStore:
             status="active",
         )
 
+    def register_agent(self, **kwargs):
+        agent_id = f"ag_langchain_{len(self.registered) + 1}"
+        agent = dataclass_record(
+            agent_id=agent_id,
+            agent_identity_code=f"agic_{agent_id}",
+            provider=kwargs.get("provider"),
+            external_agent_id=kwargs.get("external_agent_id"),
+            agent_type=kwargs.get("agent_type"),
+            status="active",
+            public_key_jwk=json.dumps(kwargs.get("public_key_jwk"), sort_keys=True, separators=(",", ":")),
+            public_key_thumbprint="langchain-thumbprint",
+        )
+        credential = dataclass_record(
+            credential_id=f"agcred_{agent_id}",
+            agent_id=agent_id,
+            public_key_jwk=agent.public_key_jwk,
+            public_key_thumbprint=agent.public_key_thumbprint,
+            status="active",
+        )
+        self.registered[agent_id] = agent
+        return dataclass_record(
+            agent=agent,
+            credential=credential,
+            user_id=None,
+            account_email=None,
+            user_binding_created=False,
+            user_binding_updated=False,
+        )
+
+    def bind_agent_to_user(self, **kwargs):
+        self.bindings.append(dict(kwargs))
+        return True, False
+
 
 def dataclass_record(**kwargs):
     return type("Record", (), kwargs)()
@@ -73,6 +110,14 @@ def dataclass_record(**kwargs):
 class FakeUserStore:
     def __init__(self, *, bound: bool = True) -> None:
         self.bound = bound
+        self.ticket = UserTicketIdentity(
+            user_id=7,
+            username="alice",
+            ticket_id=99,
+            ticket_prefix="agt_fake_ticket",
+            expires_at=datetime.now(timezone.utc),
+        )
+        self.consumed: list[dict[str, str]] = []
 
     def external_account_by_provider_email(self, *, provider: str, account_email: str):
         if not self.bound:
@@ -83,6 +128,17 @@ class FakeUserStore:
             provider=provider,
             account_email=account_email,
         )
+
+    def resolve_ticket(self, ticket: str | None):
+        if ticket != "agt_valid_ticket" or self.consumed:
+            raise InvalidUserTicket("invalid or expired user ticket")
+        return self.ticket
+
+    def consume_ticket(self, ticket: str | None, *, agent_id: str, session_id: str):
+        if ticket != "agt_valid_ticket" or self.consumed:
+            raise InvalidUserTicket("user ticket has already been consumed")
+        self.consumed.append({"agent_id": agent_id, "session_id": session_id})
+        return self.ticket
 
 
 class FakeReplayStore:
@@ -124,8 +180,9 @@ class FakeRuntimeSessionStore:
         dpop_jkt: str,
         metadata: dict[str, Any] | None = None,
     ):
+        provider_prefix = str(provider or "dify")
         session = RuntimeSession(
-            session_id=f"ags_dify_test_{self.next_id}",
+            session_id=f"ags_{provider_prefix}_test_{self.next_id}",
             agent_id=agent_id,
             user_id=user_id,
             provider=provider,
@@ -246,6 +303,88 @@ def test_dify_session_create_issues_runtime_token_for_bound_email():
     assert issue.session.session_id.startswith("ags_dify_test_")
     assert issue.session.user_id == 7
     assert issue.session_token
+
+
+def test_langchain_ticket_session_create_issues_dpop_runtime_session():
+    session_store = FakeRuntimeSessionStore()
+    replay = FakeReplayStore()
+    user_store = FakeUserStore()
+    agent_store = FakeAgentStore()
+    broker = DifyAuthBroker(
+        session_store=session_store,
+        replay_store=replay,
+        user_store=user_store,
+        agent_store=agent_store,
+        token_service=RuntimeTokenService(secret="test-secret", ttl_seconds=900),
+    )
+    key = DPoPKey()
+    body = {
+        "provider": "langchain",
+        "user_ticket": "agt_valid_ticket",
+        "metadata": {"name": "Ticket demo"},
+    }
+
+    issue = broker.create_langchain_ticket_session(
+        user_ticket="agt_valid_ticket",
+        metadata=body["metadata"],
+        dpop_proof=key.proof("POST", CREATE_URL),
+        request_body=body,
+        method="POST",
+        url=CREATE_URL,
+    )
+
+    assert issue.session.provider == "langchain"
+    assert issue.session.session_id.startswith("ags_langchain_test_")
+    assert issue.session.user_id == 7
+    assert issue.session.external_account_email is None
+    assert issue.session.agent_id in agent_store.registered
+    assert agent_store.bindings == [
+        {
+            "user_id": 7,
+            "agent_id": issue.session.agent_id,
+            "provider": "langchain",
+            "account_email": None,
+            "source": "user_ticket",
+            "metadata": {
+                "name": "Ticket demo",
+                "ticket_id": 99,
+                "ticket_prefix": "agt_fake_ticket",
+                "runtime_auth_provider": "langchain",
+                "request_body_provider": "langchain",
+            },
+        }
+    ]
+    assert user_store.consumed == [
+        {"agent_id": issue.session.agent_id, "session_id": issue.session.session_id}
+    ]
+    claims = broker.token_service.verify(issue.session_token)
+    assert claims["sid"] == issue.session.session_id
+    assert claims["sub"] == issue.session.agent_id
+    assert claims["uid"] == "7"
+
+
+def test_langchain_ticket_session_rejects_reused_ticket():
+    broker, _ = _broker()
+    key = DPoPKey()
+    body = {"provider": "langchain", "user_ticket": "agt_valid_ticket", "metadata": {}}
+
+    broker.create_langchain_ticket_session(
+        user_ticket="agt_valid_ticket",
+        metadata={},
+        dpop_proof=key.proof("POST", CREATE_URL),
+        request_body=body,
+        method="POST",
+        url=CREATE_URL,
+    )
+    with pytest.raises(RuntimeAuthUnauthorized):
+        broker.create_langchain_ticket_session(
+            user_ticket="agt_valid_ticket",
+            metadata={},
+            dpop_proof=key.proof("POST", CREATE_URL),
+            request_body=body,
+            method="POST",
+            url=CREATE_URL,
+        )
 
 
 def test_dify_session_create_allows_missing_external_session_id():

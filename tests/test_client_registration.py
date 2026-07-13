@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from agentguard.config_api import ClientConfigAPIServer
 from agentguard.guard import AgentGuard
+from agentguard.compat import Guard, Principal
 from agentguard.u_guard.remote_client import RemoteGuardClient
+import pytest
 
 
 def test_python_client_closes_dpop_runtime_session_by_default(monkeypatch):
@@ -200,5 +202,103 @@ def test_python_client_replays_registered_tools_after_remote_resync(monkeypatch)
         assert tool["name"] == "lookup"
         assert tool["input_params"] == ["query"]
         assert tool["capabilities"] == ["read_file"]
+    finally:
+        guard.close()
+
+
+def test_compat_guard_ticket_creates_langchain_dpop_runtime_session(monkeypatch):
+    create_calls: list[dict] = []
+    register_calls: list[dict] = []
+
+    def fake_create_runtime_session(self: RemoteGuardClient, body, *, extra_headers_factory=None):
+        create_calls.append(
+            {
+                "body": dict(body),
+                "use_dpop_auth": self.use_dpop_auth,
+                "legacy_identity_headers": self.legacy_identity_headers,
+                "has_dpop_factory": callable(self.dpop_proof_factory),
+            }
+        )
+        return {
+            "session_id": "ags_langchain_created",
+            "agent_id": "ag_langchain_created",
+            "user_id": "7",
+            "session_token": "runtime-token",
+            "expires_at": 1000,
+        }
+
+    def fake_register_session(self: RemoteGuardClient, context):
+        register_calls.append(context.to_dict())
+        return {"status": "ok"}
+
+    monkeypatch.setattr(RemoteGuardClient, "create_runtime_session", fake_create_runtime_session)
+    monkeypatch.setattr(RemoteGuardClient, "register_session", fake_register_session)
+    monkeypatch.setattr(RemoteGuardClient, "close_runtime_session", lambda self: {"status": "ok"})
+
+    guard = Guard(
+        remote_url="http://server.test",
+        ticket="agt-ticket",
+        mode="enforce",
+    )
+    guard.start(
+        principal=Principal(
+            session_id="client-bootstrap-session",
+            agent_id="client-self-agent",
+            user_id="client-self-user",
+        ),
+        goal="langchain ticket demo",
+    )
+    try:
+        assert create_calls == [
+            {
+                "body": {
+                    "provider": "langchain",
+                    "user_ticket": "agt-ticket",
+                    "metadata": {
+                        "principal": {
+                            "session_id": "client-bootstrap-session",
+                            "agent_id": "client-self-agent",
+                            "user_id": "client-self-user",
+                        },
+                        "goal": "langchain ticket demo",
+                    },
+                },
+                "use_dpop_auth": True,
+                "legacy_identity_headers": False,
+                "has_dpop_factory": True,
+            }
+        ]
+        assert register_calls == []
+        remote = guard._require_guard()._remote
+        assert remote.session_id == "ags_langchain_created"
+        assert remote.agent_id == "ag_langchain_created"
+        assert remote.user_id == "7"
+        assert remote.session_token == "runtime-token"
+        assert remote.use_dpop_auth is True
+        assert remote.legacy_identity_headers is False
+        headers = remote._headers(method="POST", url="http://server.test/v1/server/guard/decide")
+        assert headers["Authorization"] == "DPoP runtime-token"
+        assert "DPoP" in headers
+        assert "X-AgentGuard-Session-Id" not in headers
+        assert "X-AgentGuard-Agent-Id" not in headers
+        assert "X-AgentGuard-User-Id" not in headers
+    finally:
+        guard.close()
+
+
+def test_compat_guard_remote_langchain_requires_ticket(monkeypatch):
+    monkeypatch.setattr(RemoteGuardClient, "register_session", lambda self, context: {"status": "ok"})
+    monkeypatch.setattr(RemoteGuardClient, "unregister_session", lambda self: {"status": "ok"})
+
+    guard = Guard(remote_url="http://server.test")
+    guard.start(
+        principal=Principal(
+            session_id="legacy-langchain-session",
+            agent_id="legacy-langchain-agent",
+        )
+    )
+    try:
+        with pytest.raises(ValueError, match="ticket or user_ticket is required"):
+            guard.attach_langchain(object())
     finally:
         guard.close()

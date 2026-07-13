@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agentguard.guard import AgentGuard
+from agentguard.u_guard.dpop import DPoPKey
+from agentguard.u_guard.remote_client import RemoteGuardClient
 
 
 @dataclass(slots=True)
@@ -65,6 +67,7 @@ class Guard:
         remote_retries: int = 2,
         plugin_config: str | dict[str, Any] | None = None,
         session_key: str | None = None,
+        ticket: str | None = None,
         user_ticket: str | None = None,
         agent_id: str | None = None,
         user_id: str | None = None,
@@ -87,29 +90,57 @@ class Guard:
             "remote_retries": remote_retries,
             "plugin_config": plugin_config,
             "session_key": session_key,
-            "user_ticket": user_ticket,
+            "user_ticket": user_ticket or ticket,
             "agent_id": agent_id,
             "user_id": user_id,
         }
         self.mode = mode
         self.fail_open = fail_open
         self._guard: AgentGuard | None = None
+        self._ticket_dpop_key: DPoPKey | None = None
 
-    def start(self, *, principal: Principal, goal: str | None = None) -> "Guard":
-        self._guard = self._build_guard(**principal.to_context_kwargs())
+    def start(self, *, principal: Principal | None = None, goal: str | None = None) -> "Guard":
+        if principal is None:
+            if not self._config["user_ticket"]:
+                raise TypeError("principal is required unless ticket/user_ticket is configured")
+            principal = Principal(session_id="agentguard-ticket-bootstrap")
+        runtime_issue = self._create_ticket_runtime_session(principal=principal, goal=goal)
+        self._guard = self._build_guard(
+            **principal.to_context_kwargs(),
+            runtime_issue=runtime_issue,
+        )
         self._guard.context.metadata["guard_mode"] = self.mode
         if self.fail_open is not None:
             self._guard.context.metadata["guard_fail_open"] = self.fail_open
         if goal:
             self._guard.context.metadata["goal"] = goal
         self._guard.context.task_id = self._guard.context.task_id or principal.task_id
-        if getattr(self._guard._remote, "enabled", False):
+        if getattr(self._guard._remote, "enabled", False) and runtime_issue is None:
             self._guard._sync_remote_session()
         return self
 
     def close(self) -> None:
         if self._guard is not None:
             self._guard.close()
+
+    def attach_langchain(
+        self,
+        agent: Any,
+        *,
+        wrap_tools: bool = True,
+        wrap_llm: bool = True,
+    ) -> dict[str, Any]:
+        guard = self._require_guard()
+        if getattr(guard._remote, "enabled", False) and not getattr(
+            guard._remote,
+            "use_dpop_auth",
+            False,
+        ):
+            raise ValueError(
+                "ticket or user_ticket is required for remote LangChain integration. "
+                "Generate a ticket in AgentGuard User Centre and pass it to Guard(ticket=...)."
+            )
+        return guard.attach_langchain(agent, wrap_tools=wrap_tools, wrap_llm=wrap_llm)
 
     def _build_guard(
         self,
@@ -119,11 +150,22 @@ class Guard:
         user_id: str | None = None,
         environment: str | None = None,
         metadata: dict[str, Any] | None = None,
+        runtime_issue: dict[str, Any] | None = None,
     ) -> AgentGuard:
+        runtime_issue = dict(runtime_issue or {})
+        dpop_key = self._ticket_dpop_key
         guard = AgentGuard(
-            session_id=session_id,
-            user_id=user_id if user_id is not None else self._config["user_id"],
-            agent_id=agent_id if agent_id is not None else self._config["agent_id"],
+            session_id=str(runtime_issue.get("session_id") or session_id),
+            user_id=(
+                str(runtime_issue.get("user_id"))
+                if runtime_issue.get("user_id") is not None
+                else user_id if user_id is not None else self._config["user_id"]
+            ),
+            agent_id=(
+                str(runtime_issue.get("agent_id"))
+                if runtime_issue.get("agent_id") is not None
+                else agent_id if agent_id is not None else self._config["agent_id"]
+            ),
             policy=self._config["policy"],
             server_url=self._config["server_url"],
             api_key=self._config["api_key"],
@@ -138,11 +180,53 @@ class Guard:
             remote_retries=self._config["remote_retries"],
             plugin_config=self._config["plugin_config"],
             session_key=self._config["session_key"],
-            user_ticket=self._config["user_ticket"],
+            user_ticket=None if runtime_issue else self._config["user_ticket"],
+            session_token=runtime_issue.get("session_token"),
+            dpop_proof_factory=dpop_key.proof if dpop_key is not None and runtime_issue else None,
+            use_dpop_auth=bool(runtime_issue),
+            legacy_identity_headers=not bool(runtime_issue),
+            auto_register_session=not bool(runtime_issue),
         )
         if metadata:
             guard.context.metadata.update(metadata)
         return guard
+
+    def _create_ticket_runtime_session(
+        self,
+        *,
+        principal: Principal,
+        goal: str | None,
+    ) -> dict[str, Any] | None:
+        ticket = self._config["user_ticket"]
+        server_url = self._config["server_url"]
+        if not ticket:
+            return None
+        if not server_url:
+            raise ValueError("server_url or remote_url is required when ticket is configured")
+        dpop_key = DPoPKey()
+        self._ticket_dpop_key = dpop_key
+        metadata = dict(principal.metadata or {})
+        principal_payload = principal.to_context_kwargs().get("metadata", {}).get("principal")
+        if isinstance(principal_payload, dict):
+            metadata.setdefault("principal", principal_payload)
+        if goal:
+            metadata["goal"] = goal
+        client = RemoteGuardClient(
+            server_url,
+            api_key=self._config["api_key"],
+            dpop_proof_factory=dpop_key.proof,
+            use_dpop_auth=True,
+            legacy_identity_headers=False,
+            timeout_s=self._config["remote_timeout_s"],
+            retries=self._config["remote_retries"],
+        )
+        return client.create_runtime_session(
+            {
+                "provider": "langchain",
+                "user_ticket": ticket,
+                "metadata": metadata,
+            }
+        )
 
     def _require_guard(self) -> AgentGuard:
         if self._guard is None:
