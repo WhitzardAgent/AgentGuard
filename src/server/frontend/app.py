@@ -287,6 +287,11 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
             self._proxy(upstream_path, method="DELETE", query=query)
             return
 
+        if path.startswith("/api/agents/") and path.count("/") == 3:
+            upstream_path = path.removeprefix("/api/")
+            self._proxy(upstream_path, method="DELETE", query=query)
+            return
+
         if path.startswith("/api/user/external-accounts/"):
             mapping_id = path.rsplit("/", 1)[-1]
             self._proxy(

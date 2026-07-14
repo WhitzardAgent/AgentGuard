@@ -16,9 +16,11 @@ def ensure_schema() -> None:
     from backend.agents.store import ensure_agent_schema  # noqa: PLC0415
     from backend.auth.session_store import ensure_runtime_session_schema  # noqa: PLC0415
     from backend.runtime.trace_store import ensure_trace_schema  # noqa: PLC0415
+    from backend.session_mapping.store import ensure_session_mapping_schema  # noqa: PLC0415
     from backend.user.store import ensure_user_schema  # noqa: PLC0415
 
     ensure_user_schema()
     ensure_agent_schema()
     ensure_runtime_session_schema()
+    ensure_session_mapping_schema()
     ensure_trace_schema()

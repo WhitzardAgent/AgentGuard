@@ -92,6 +92,36 @@ class AgentToolRecord:
         return payload
 
 
+@dataclass(frozen=True)
+class AgentDeletionResult:
+    agent_id: str
+    deleted: bool
+    trace_event_count: int = 0
+    runtime_token_count: int = 0
+    runtime_session_count: int = 0
+    external_session_mapping_count: int = 0
+    user_agent_binding_count: int = 0
+    credential_count: int = 0
+    external_identity_count: int = 0
+    tool_count: int = 0
+    agent_count: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "agent_id": self.agent_id,
+            "deleted": self.deleted,
+            "trace_event_count": self.trace_event_count,
+            "runtime_token_count": self.runtime_token_count,
+            "runtime_session_count": self.runtime_session_count,
+            "external_session_mapping_count": self.external_session_mapping_count,
+            "user_agent_binding_count": self.user_agent_binding_count,
+            "credential_count": self.credential_count,
+            "external_identity_count": self.external_identity_count,
+            "tool_count": self.tool_count,
+            "agent_count": self.agent_count,
+        }
+
+
 class AgentStore:
     def __init__(self, db: MySQLDatabase | None = None) -> None:
         self.db = db or get_database()
@@ -338,6 +368,14 @@ class AgentStore:
             """,
         )
         return [_agent_from_row(row) for row in rows]
+
+    def delete_agent(self, agent_id: str) -> AgentDeletionResult:
+        clean_agent_id = _normalize_required(agent_id, "agent_id")
+        if self.get_agent(clean_agent_id) is None:
+            return AgentDeletionResult(agent_id=clean_agent_id, deleted=False)
+        if hasattr(self.db, "connect"):
+            return self._delete_agent_transactional(clean_agent_id)
+        return _delete_agent_with_execute(self.db.execute, clean_agent_id)
 
     def sync_provider_agents(
         self,
@@ -653,9 +691,94 @@ class AgentStore:
             raise RuntimeError("failed to register agent credential")
         return credential
 
+    def _delete_agent_transactional(self, agent_id: str) -> AgentDeletionResult:
+        conn = self.db.connect()
+        try:
+            conn.begin()
+            with conn.cursor() as cursor:
+                result = _delete_agent_with_execute(cursor.execute, agent_id)
+            conn.commit()
+            return result
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
 
 def ensure_agent_schema() -> None:
     AgentStore().ensure_schema()
+
+
+def agent_delete_allowed_from_console(record: AgentRecord) -> bool:
+    metadata = _json_dict(record.metadata_json)
+    provider = str(
+        record.provider
+        or metadata.get("external_provider")
+        or metadata.get("provider")
+        or ""
+    ).strip().lower()
+    return provider == "langchain"
+
+
+def _delete_agent_with_execute(execute: Any, agent_id: str) -> AgentDeletionResult:
+    trace_event_count = int(
+        execute(
+            """
+            DELETE FROM runtime_trace_events
+            WHERE agent_id = %s
+               OR raw_agent_id = %s
+               OR runtime_session_id IN (
+                    SELECT session_id FROM runtime_sessions WHERE agent_id = %s
+               )
+               OR session_id IN (
+                    SELECT session_id FROM runtime_sessions WHERE agent_id = %s
+               )
+            """,
+            (agent_id, agent_id, agent_id, agent_id),
+        )
+    )
+    runtime_token_count = int(
+        execute(
+            """
+            DELETE FROM runtime_tokens
+            WHERE session_id IN (
+                SELECT session_id FROM runtime_sessions WHERE agent_id = %s
+            )
+            """,
+            (agent_id,),
+        )
+    )
+    runtime_session_count = int(
+        execute("DELETE FROM runtime_sessions WHERE agent_id = %s", (agent_id,))
+    )
+    external_session_mapping_count = int(
+        execute("DELETE FROM external_runtime_sessions WHERE agent_id = %s", (agent_id,))
+    )
+    tool_count = int(execute("DELETE FROM agent_tools WHERE agent_id = %s", (agent_id,)))
+    user_agent_binding_count = int(
+        execute("DELETE FROM user_agents WHERE agent_id = %s", (agent_id,))
+    )
+    credential_count = int(
+        execute("DELETE FROM agent_credentials WHERE agent_id = %s", (agent_id,))
+    )
+    external_identity_count = int(
+        execute("DELETE FROM agent_external_identities WHERE agent_id = %s", (agent_id,))
+    )
+    agent_count = int(execute("DELETE FROM agents WHERE agent_id = %s", (agent_id,)))
+    return AgentDeletionResult(
+        agent_id=agent_id,
+        deleted=agent_count > 0,
+        trace_event_count=trace_event_count,
+        runtime_token_count=runtime_token_count,
+        runtime_session_count=runtime_session_count,
+        external_session_mapping_count=external_session_mapping_count,
+        user_agent_binding_count=user_agent_binding_count,
+        credential_count=credential_count,
+        external_identity_count=external_identity_count,
+        tool_count=tool_count,
+        agent_count=agent_count,
+    )
 
 
 _SCHEMA = [

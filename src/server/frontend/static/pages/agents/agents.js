@@ -9,6 +9,7 @@
 
   let agentCatalog = [];
   let selectedAgentId = shell?.getState?.().selectedAgentId || "";
+  const deletingAgentIds = new Set();
 
   shell?.setPageContext({
     title: "Agent Selection",
@@ -52,6 +53,10 @@
     return parts.join(" | ");
   }
 
+  function canDeleteAgent(agent) {
+    return String(agent?.external_provider || "").trim().toLowerCase() === "langchain";
+  }
+
   function renderAgentList() {
     agentList.innerHTML = "";
     const items = Array.isArray(agentCatalog) ? agentCatalog.slice() : [];
@@ -77,27 +82,39 @@
       const mcpPreviewText = Array.isArray(agent?.mcp_names)
         ? agent.mcp_names.join(", ")
         : "";
-      const card = document.createElement("button");
-      card.type = "button";
+      const showDelete = canDeleteAgent(agent);
+      const card = document.createElement("div");
       card.className = "agent-list-card";
       if (agentId === selectedAgentId) {
         card.classList.add("selected");
       }
+      if (deletingAgentIds.has(agentId)) {
+        card.classList.add("pending-delete");
+      }
 
       card.innerHTML = `
-        <div class="agent-list-top">
-          <strong>${escapeHtml(displayName)}</strong>
-          <span class="pill">${toolCount} tool${toolCount === 1 ? "" : "s"}</span>
-          <span class="pill">${skillCount} skill${skillCount === 1 ? "" : "s"}</span>
-          <span class="pill">${mcpCount} MCP${mcpCount === 1 ? "" : "s"}</span>
-        </div>
-        ${subtitle ? `<p class="subtle">${escapeHtml(subtitle)}</p>` : ""}
-        <p class="subtle">${escapeHtml(toolPreviewText || "No tools registered.")}</p>
-        <p class="subtle">${escapeHtml(skillPreviewText ? `Skills: ${skillPreviewText}` : "No skills registered.")}</p>
-        <p class="subtle">${escapeHtml(mcpPreviewText ? `MCP: ${mcpPreviewText}` : "No MCP services registered.")}</p>
+        <button class="agent-card-select" type="button" data-agent-action="select">
+          <div class="agent-list-top">
+            <strong>${escapeHtml(displayName)}</strong>
+            <span class="pill">${toolCount} tool${toolCount === 1 ? "" : "s"}</span>
+            <span class="pill">${skillCount} skill${skillCount === 1 ? "" : "s"}</span>
+            <span class="pill">${mcpCount} MCP${mcpCount === 1 ? "" : "s"}</span>
+          </div>
+          ${subtitle ? `<p class="subtle">${escapeHtml(subtitle)}</p>` : ""}
+          <p class="subtle">${escapeHtml(toolPreviewText || "No tools registered.")}</p>
+          <p class="subtle">${escapeHtml(skillPreviewText ? `Skills: ${skillPreviewText}` : "No skills registered.")}</p>
+          <p class="subtle">${escapeHtml(mcpPreviewText ? `MCP: ${mcpPreviewText}` : "No MCP services registered.")}</p>
+        </button>
+        ${showDelete ? `
+          <div class="agent-card-actions">
+            <button class="link-button danger agent-delete-button" type="button" data-agent-action="delete" ${deletingAgentIds.has(agentId) ? "disabled" : ""}>
+              ${deletingAgentIds.has(agentId) ? "Deleting..." : "Delete"}
+            </button>
+          </div>
+        ` : ""}
       `;
 
-      card.addEventListener("click", () => {
+      card.querySelector('[data-agent-action="select"]')?.addEventListener("click", () => {
         shell?.setSelectedAgent?.(agentId);
         renderAgentList();
         showToast(`Now watching ${displayName}.`, "success");
@@ -106,8 +123,54 @@
         }
       });
 
+      card.querySelector('[data-agent-action="delete"]')?.addEventListener("click", () => {
+        deleteAgent(agent, displayName);
+      });
+
       agentList.appendChild(card);
     });
+  }
+
+  async function deleteAgent(agent, displayName) {
+    const agentId = String(agent?.agent_id || "").trim();
+    if (!agentId || deletingAgentIds.has(agentId)) {
+      return;
+    }
+    if (!canDeleteAgent(agent)) {
+      showToast("Only LangChain agents can be deleted from this page.", "warning");
+      return;
+    }
+    const confirmed = window.confirm(
+      `Delete ${displayName || agentId}? This unregisters the agent and deletes its sessions.`,
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    deletingAgentIds.add(agentId);
+    renderAgentList();
+    updateSyncStatus(`Deleting ${displayName || agentId}...`);
+
+    try {
+      await api.fetchJson(`/api/agents/${encodeURIComponent(agentId)}`, {
+        method: "DELETE",
+      });
+      agentCatalog = agentCatalog.filter((item) => String(item?.agent_id || "").trim() !== agentId);
+      if (selectedAgentId === agentId) {
+        selectedAgentId = "";
+        shell?.setSelectedAgent?.("");
+      }
+      renderAgentList();
+      showToast(`Deleted ${displayName || agentId}.`, "success");
+      await refreshAgentCatalog();
+    } catch (error) {
+      showToast(api.formatErrorMessage(error, "Failed to delete agent."), "warning");
+      renderAgentList();
+      updateSyncStatus("Delete failed. Agent catalog was not changed.");
+    } finally {
+      deletingAgentIds.delete(agentId);
+      renderAgentList();
+    }
   }
 
   async function refreshAgentCatalog({ manual = false } = {}) {

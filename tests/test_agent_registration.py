@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from backend.agents.store import AgentStore
+from backend.agents.store import AgentRecord, AgentStore, agent_delete_allowed_from_console
 
 
 class FakeDB:
@@ -13,10 +13,80 @@ class FakeDB:
         self.user_agents: list[dict[str, Any]] = []
         self.agent_credentials: list[dict[str, Any]] = []
         self.agent_tools: list[dict[str, Any]] = []
+        self.runtime_sessions: list[dict[str, Any]] = []
+        self.runtime_tokens: list[dict[str, Any]] = []
+        self.external_runtime_sessions: list[dict[str, Any]] = []
+        self.runtime_trace_events: list[dict[str, Any]] = []
         self.next_id = 1
 
     def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> int:
         if "CREATE TABLE" in sql:
+            return 0
+        if "DELETE FROM runtime_trace_events" in sql:
+            agent_id = str(params[0])
+            session_ids = {
+                str(row["session_id"])
+                for row in self.runtime_sessions
+                if str(row.get("agent_id") or "") == agent_id
+            }
+            before = len(self.runtime_trace_events)
+            self.runtime_trace_events = [
+                row
+                for row in self.runtime_trace_events
+                if str(row.get("agent_id") or "") != agent_id
+                and str(row.get("raw_agent_id") or "") != agent_id
+                and str(row.get("runtime_session_id") or "") not in session_ids
+                and str(row.get("session_id") or "") not in session_ids
+            ]
+            return before - len(self.runtime_trace_events)
+        if "DELETE FROM runtime_tokens" in sql:
+            agent_id = str(params[0])
+            session_ids = {
+                str(row["session_id"])
+                for row in self.runtime_sessions
+                if str(row.get("agent_id") or "") == agent_id
+            }
+            before = len(self.runtime_tokens)
+            self.runtime_tokens = [
+                row for row in self.runtime_tokens if str(row.get("session_id") or "") not in session_ids
+            ]
+            return before - len(self.runtime_tokens)
+        if "DELETE FROM runtime_sessions" in sql:
+            agent_id = str(params[0])
+            before = len(self.runtime_sessions)
+            self.runtime_sessions = [
+                row for row in self.runtime_sessions if str(row.get("agent_id") or "") != agent_id
+            ]
+            return before - len(self.runtime_sessions)
+        if "DELETE FROM external_runtime_sessions" in sql:
+            agent_id = str(params[0])
+            before = len(self.external_runtime_sessions)
+            self.external_runtime_sessions = [
+                row for row in self.external_runtime_sessions if str(row.get("agent_id") or "") != agent_id
+            ]
+            return before - len(self.external_runtime_sessions)
+        if "DELETE FROM user_agents" in sql:
+            agent_id = str(params[0])
+            before = len(self.user_agents)
+            self.user_agents = [row for row in self.user_agents if row["agent_id"] != agent_id]
+            return before - len(self.user_agents)
+        if "DELETE FROM agent_credentials" in sql:
+            agent_id = str(params[0])
+            before = len(self.agent_credentials)
+            self.agent_credentials = [row for row in self.agent_credentials if row["agent_id"] != agent_id]
+            return before - len(self.agent_credentials)
+        if "DELETE FROM agent_external_identities" in sql:
+            agent_id = str(params[0])
+            before = len(self.agent_external_identities)
+            self.agent_external_identities = [
+                row for row in self.agent_external_identities if row["agent_id"] != agent_id
+            ]
+            return before - len(self.agent_external_identities)
+        if "DELETE FROM agents" in sql:
+            agent_id = str(params[0])
+            if agent_id in self.agents:
+                del self.agents[agent_id]
+                return 1
             return 0
         if "SET status = 'deleted'" in sql:
             for agent_id in params[1:]:
@@ -392,3 +462,93 @@ def test_provider_agent_sync_deactivates_missing_dify_agents():
     assert db.agents[stale.agent_id]["status"] == "deleted"
     assert store.agent_ids_for_user(7) == {first.agent_id}
     assert store.list_agents({first.agent_id, stale.agent_id}) == [first]
+
+
+def test_delete_agent_removes_registry_runtime_sessions_and_traces():
+    db = FakeDB()
+    db.user_external_accounts.append(
+        {"user_id": 7, "provider": "dify", "account_email": "alice@example.com"}
+    )
+    store = AgentStore(db)
+    agent = store.register_agent(
+        provider="dify",
+        external_agent_id="app-1",
+        agent_type="workflow",
+        account_email="alice@example.com",
+        public_key_jwk=PUBLIC_JWK,
+    ).agent
+    other = store.register_agent(
+        provider="dify",
+        external_agent_id="app-2",
+        agent_type="workflow",
+        public_key_jwk=PUBLIC_JWK,
+    ).agent
+    store.sync_agent_tools(agent.agent_id, [{"name": "weekday"}])
+    db.runtime_sessions.extend(
+        [
+            {"session_id": "session-1", "agent_id": agent.agent_id},
+            {"session_id": "session-2", "agent_id": other.agent_id},
+        ]
+    )
+    db.runtime_tokens.extend(
+        [
+            {"token_jti": "token-1", "session_id": "session-1"},
+            {"token_jti": "token-2", "session_id": "session-2"},
+        ]
+    )
+    db.external_runtime_sessions.extend(
+        [
+            {"id": 1, "agent_id": agent.agent_id},
+            {"id": 2, "agent_id": other.agent_id},
+        ]
+    )
+    db.runtime_trace_events.extend(
+        [
+            {"id": 1, "agent_id": agent.agent_id, "session_id": "unlinked"},
+            {"id": 2, "raw_agent_id": agent.agent_id, "session_id": "legacy"},
+            {"id": 3, "runtime_session_id": "session-1", "session_id": "session-1"},
+            {"id": 4, "agent_id": other.agent_id, "session_id": "session-2"},
+        ]
+    )
+
+    result = store.delete_agent(agent.agent_id)
+
+    assert result.deleted is True
+    assert result.trace_event_count == 3
+    assert result.runtime_token_count == 1
+    assert result.runtime_session_count == 1
+    assert result.external_session_mapping_count == 1
+    assert result.user_agent_binding_count == 1
+    assert result.credential_count == 1
+    assert result.external_identity_count == 1
+    assert result.tool_count == 1
+    assert result.agent_count == 1
+    assert agent.agent_id not in db.agents
+    assert db.runtime_sessions == [{"session_id": "session-2", "agent_id": other.agent_id}]
+    assert db.runtime_tokens == [{"token_jti": "token-2", "session_id": "session-2"}]
+    assert db.external_runtime_sessions == [{"id": 2, "agent_id": other.agent_id}]
+    assert db.runtime_trace_events == [{"id": 4, "agent_id": other.agent_id, "session_id": "session-2"}]
+
+
+def test_console_agent_delete_policy_only_allows_langchain_agents():
+    assert agent_delete_allowed_from_console(
+        AgentRecord(
+            agent_id="ag-langchain",
+            agent_identity_code="agic-langchain",
+            provider="langchain",
+        )
+    )
+    assert not agent_delete_allowed_from_console(
+        AgentRecord(
+            agent_id="ag-dify",
+            agent_identity_code="agic-dify",
+            provider="dify",
+        )
+    )
+    assert agent_delete_allowed_from_console(
+        AgentRecord(
+            agent_id="ag-metadata",
+            agent_identity_code="agic-metadata",
+            metadata_json='{"external_provider": "langchain"}',
+        )
+    )

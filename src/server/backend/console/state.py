@@ -174,6 +174,36 @@ class ConsoleState:
         with self._lock:
             return self._mcps.get((normalized_agent_id, normalized_mcp_id))
 
+    def unregister_agent(self, agent_id: str) -> None:
+        normalized_agent_id = str(agent_id or "").strip()
+        if not normalized_agent_id:
+            return
+        with self._lock:
+            for key in [key for key in self._tools if key[0] == normalized_agent_id]:
+                self._tools.pop(key, None)
+            for key in [key for key in self._skills if key[0] == normalized_agent_id]:
+                self._skills.pop(key, None)
+            for key in [key for key in self._mcps if key[0] == normalized_agent_id]:
+                self._mcps.pop(key, None)
+            for rule_id, entry in list(self._console_rules.items()):
+                if entry.get("agent_id") == normalized_agent_id:
+                    self._console_rules.pop(rule_id, None)
+            self._agent_external_accounts.pop(normalized_agent_id, None)
+            self._agent_display_metadata.pop(normalized_agent_id, None)
+            self._traffic = deque(
+                (item for item in self._traffic if item.get("agent") != normalized_agent_id),
+                maxlen=self._traffic.maxlen,
+            )
+            self._audit = deque(
+                (
+                    item
+                    for item in self._audit
+                    if (item.get("event") or {}).get("principal", {}).get("agent_id")
+                    != normalized_agent_id
+                ),
+                maxlen=self._audit.maxlen,
+            )
+
     def register_tool(
         self,
         context: dict[str, Any] | Any,

@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from backend.api.schemas import McpDetectRequest
-from backend.agents.store import AgentRecord, AgentStore
+from backend.agents.store import AgentRecord, AgentStore, agent_delete_allowed_from_console
 from backend.app_state import get_console
 from backend.auth.models import RuntimeSessionSummary
 from backend.auth.session_store import get_runtime_session_store
@@ -74,6 +74,32 @@ def list_agents(
     except DatabaseUnavailable:
         return []
     return [_agent_record_to_console_item(record) for record in records]
+
+
+@router.delete("/v1/backend/agents/{agent_id}")
+def delete_agent(
+    agent_id: str,
+    agentguard_user_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+) -> Any:
+    visible = _visible_scope(agentguard_user_session)
+    if visible.get("user_id") is None:
+        return _err("login required", 401)
+    if not _agent_visible(visible, agent_id):
+        return _err("agent not visible", 403)
+    try:
+        store = AgentStore()
+        agent = store.get_agent(agent_id)
+        if agent is None:
+            return _err(f"agent '{agent_id}' not found", 404)
+        if not agent_delete_allowed_from_console(agent):
+            return _err("only LangChain agents can be deleted from the console", 409)
+        result = store.delete_agent(agent.agent_id)
+    except DatabaseUnavailable:
+        return _err("database unavailable", 503)
+    if not result.deleted:
+        return _err(f"agent '{agent_id}' not found", 404)
+    get_console().unregister_agent(result.agent_id)
+    return {"ok": True, "agent_id": result.agent_id, "deleted": result.to_dict()}
 
 
 # ---- tools -------------------------------------------------------------
