@@ -189,6 +189,7 @@ if __name__ == "__main__":
 
     try:
         run(agent, "Please retrieve document id=0 and send it to admin@example.com.")
+        import time; time.sleep(80)  # Wait for the guard to flush events
         run(agent, "Please retrieve document id=0 and send it to alice@example.com.")
     finally:
         # 🚩 Close the guard

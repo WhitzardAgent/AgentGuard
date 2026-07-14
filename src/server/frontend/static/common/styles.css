@@ -1247,6 +1247,20 @@ textarea {
   overflow-x: auto;
 }
 
+.runtime-audit-table-wrap {
+  max-height: min(56vh, 640px);
+  overflow: auto;
+  position: relative;
+}
+
+.runtime-audit-table-wrap .table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #ffffff;
+  box-shadow: 0 1px 0 #e5ebdf;
+}
+
 .runtime-approval-actions {
   margin-top: 10px;
   margin-bottom: 0;

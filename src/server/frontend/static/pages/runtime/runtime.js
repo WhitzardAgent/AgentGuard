@@ -737,7 +737,7 @@
     elements.auditBody.innerHTML = "";
     if (state.errors.audit) {
       const row = document.createElement("tr");
-      row.innerHTML = `<td colspan="6"><div class="empty-state">${escapeHtml(state.errors.audit)}</div></td>`;
+      row.innerHTML = `<td colspan="5"><div class="empty-state">${escapeHtml(state.errors.audit)}</div></td>`;
       elements.auditBody.appendChild(row);
       renderAuditDetail();
       elements.auditDetail.textContent = "Audit data is unavailable.";
@@ -745,7 +745,7 @@
     }
     if (!state.auditRows.length) {
       const row = document.createElement("tr");
-      row.innerHTML = `<td colspan="6"><div class="empty-state">No audit records have been captured yet.</div></td>`;
+      row.innerHTML = `<td colspan="5"><div class="empty-state">No audit records have been captured yet.</div></td>`;
       elements.auditBody.appendChild(row);
       renderAuditDetail();
       elements.auditDetail.textContent = "No audit detail available.";
@@ -777,7 +777,6 @@
           </div>
         </td>
         <td><span class="pill ${actionTone(item.action)}">${escapeHtml(formatAction(item.action))}</span></td>
-        <td>${escapeHtml(formatRisk(item.risk))}</td>
         <td>${escapeHtml(item.matchedRules.join(", ") || "-")}</td>
       `;
       elements.auditBody.appendChild(row);
@@ -786,7 +785,7 @@
         const detailRow = document.createElement("tr");
         detailRow.className = "runtime-audit-expanded-row";
         detailRow.innerHTML = `
-          <td colspan="6">
+          <td colspan="5">
             <div class="runtime-audit-expanded">
               <div class="runtime-detail-label">${escapeHtml(expansion.label)}</div>
               <div class="runtime-audit-expanded-body">${escapeHtml(expansion.body)}</div>
