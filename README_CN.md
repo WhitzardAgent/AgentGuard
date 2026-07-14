@@ -349,7 +349,7 @@ UI 界面还支持策略可视化配置和动态热更新。
 
 ## 🎬 演示视频
 
-[Demo.mp4](./docs/videos/Demo.mp4)
+https://ik.imagekit.io/4vsnlaxpc/6dd7e279a6b8d9be652002280d026a46_raw.mp4
 
 ## 🏆 相比于现有框架的能力优势
 
