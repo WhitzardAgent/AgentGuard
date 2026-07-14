@@ -1015,31 +1015,18 @@
   }
 
   async function refreshAgentCatalog() {
-    let registeredPayload = [];
-    try {
-      const maybeAgents = await fetchJson("/api/agents");
-      registeredPayload = Array.isArray(maybeAgents) ? maybeAgents : [];
-    } catch {
-      registeredPayload = [];
-    }
-    const toolPayload = await fetchJson("/api/tools");
+    const [maybeAgents, toolPayload, maybeSkills, maybeMcps] = await Promise.all([
+      fetchJson("/api/agents").catch(() => []),
+      fetchJson("/api/tools"),
+      fetchJson("/api/skills").catch(() => []),
+      fetchJson("/api/mcps").catch(() => []),
+    ]);
     if (!Array.isArray(toolPayload)) {
       throw new Error("Agent catalog payload has an unexpected format.");
     }
-    let skillPayload = [];
-    try {
-      const maybeSkills = await fetchJson("/api/skills");
-      skillPayload = Array.isArray(maybeSkills) ? maybeSkills : [];
-    } catch {
-      skillPayload = [];
-    }
-    let mcpPayload = [];
-    try {
-      const maybeMcps = await fetchJson("/api/mcps");
-      mcpPayload = Array.isArray(maybeMcps) ? maybeMcps : [];
-    } catch {
-      mcpPayload = [];
-    }
+    const registeredPayload = Array.isArray(maybeAgents) ? maybeAgents : [];
+    const skillPayload = Array.isArray(maybeSkills) ? maybeSkills : [];
+    const mcpPayload = Array.isArray(maybeMcps) ? maybeMcps : [];
     const tools = toolPayload.map(normalizeTool);
     const skills = skillPayload.map(normalizeSkill);
     const mcps = mcpPayload.map(normalizeMcp);

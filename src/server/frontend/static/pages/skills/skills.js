@@ -1,4 +1,5 @@
 (function () {
+  const DETECT_TIMER_INTERVAL_MS = 5000;
   const data = window.AgentGuardData;
   const shell = window.AgentGuardShell;
   const api = window.AgentGuardApi;
@@ -52,6 +53,10 @@
 
   function showToast(message, tone) {
     window.AgentGuardUI?.showToast?.(message, tone);
+  }
+
+  function isPageVisible() {
+    return typeof document === "undefined" || document.visibilityState !== "hidden";
   }
 
   function selectedAgentDisplayName() {
@@ -1274,9 +1279,15 @@
     state.detectStartedAt = Date.now();
     state.detectElapsedS = 0;
     state.detectTimer = window.setInterval(() => {
+      if (!state.detecting) {
+        return;
+      }
       state.detectElapsedS = Math.floor((Date.now() - state.detectStartedAt) / 1000);
+      if (!isPageVisible()) {
+        return;
+      }
       renderSkillList();
-    }, 1000);
+    }, DETECT_TIMER_INTERVAL_MS);
   }
 
   function stopDetectTimer() {
@@ -1374,6 +1385,16 @@
     state.detectionError = "";
     loadSkills();
   });
+
+  if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+    document.addEventListener("visibilitychange", () => {
+      if (!state.detecting || !isPageVisible()) {
+        return;
+      }
+      state.detectElapsedS = Math.floor((Date.now() - state.detectStartedAt) / 1000);
+      renderSkillList();
+    });
+  }
 
   state.skills = withoutDetectionResults(data.loadSkillList(state.selectedAgentId));
   renderSkillList();

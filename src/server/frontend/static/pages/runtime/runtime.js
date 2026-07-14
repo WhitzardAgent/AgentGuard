@@ -1,7 +1,7 @@
 (function () {
   const REFRESH_INTERVALS = {
-    fast: 2000,
-    slow: 5000,
+    fast: 5000,
+    slow: 15000,
   };
   const api = window.AgentGuardApi;
   const shell = window.AgentGuardShell;
@@ -57,6 +57,7 @@
   };
 
   const pollers = [];
+  const pendingLoads = new Map();
 
   shell?.setPageContext({
     title: "Runtime Overview",
@@ -73,6 +74,10 @@
 
   function showToast(message, tone) {
     window.AgentGuardUI.showToast(message, tone);
+  }
+
+  function isPageVisible() {
+    return typeof document === "undefined" || document.visibilityState !== "hidden";
   }
 
   function currentLocaleTag() {
@@ -849,12 +854,27 @@
     }
   }
 
+  async function runSectionLoadOnce(sectionName, loader, transform, assign) {
+    if (pendingLoads.has(sectionName)) {
+      return pendingLoads.get(sectionName);
+    }
+    const request = (async () => {
+      try {
+        await runSectionLoad(sectionName, loader, transform, assign);
+      } finally {
+        pendingLoads.delete(sectionName);
+      }
+    })();
+    pendingLoads.set(sectionName, request);
+    return request;
+  }
+
   async function refreshOverview() {
     await Promise.all([
-      runSectionLoad("health", fetchHealth, null, (payload) => {
+      runSectionLoadOnce("health", fetchHealth, null, (payload) => {
         state.health = payload;
       }),
-      runSectionLoad("stats", fetchAgentStats, null, (payload) => {
+      runSectionLoadOnce("stats", fetchAgentStats, null, (payload) => {
         state.agentStats = payload;
       }),
     ]);
@@ -863,7 +883,7 @@
   }
 
   async function refreshTraffic() {
-    await runSectionLoad("traffic", () => fetchTraffic({ n: 30 }), (items) => {
+    await runSectionLoadOnce("traffic", () => fetchTraffic({ n: 30 }), (items) => {
       if (!Array.isArray(items)) {
         throw new Error("Traffic payload has an unexpected format.");
       }
@@ -876,7 +896,7 @@
   }
 
   async function refreshSessions() {
-    await runSectionLoad("sessions", () => fetchSessions({ n: 50, status: "all" }), (items) => {
+    await runSectionLoadOnce("sessions", () => fetchSessions({ n: 50, status: "all" }), (items) => {
       if (!Array.isArray(items)) {
         throw new Error("Sessions payload has an unexpected format.");
       }
@@ -889,7 +909,7 @@
   }
 
   async function refreshApprovals() {
-    await runSectionLoad("approvals", fetchApprovals, (items) => {
+    await runSectionLoadOnce("approvals", fetchApprovals, (items) => {
       if (!Array.isArray(items)) {
         throw new Error("Approvals payload has an unexpected format.");
       }
@@ -902,7 +922,7 @@
   }
 
   async function refreshAudit() {
-    await runSectionLoad("audit", () => fetchAuditRecent({ n: 20 }), (items) => {
+    await runSectionLoadOnce("audit", () => fetchAuditRecent({ n: 20 }), (items) => {
       if (!Array.isArray(items)) {
         throw new Error("Audit payload has an unexpected format.");
       }
@@ -916,13 +936,13 @@
 
   async function refreshAll() {
     await Promise.all([
-      runSectionLoad("health", fetchHealth, null, (payload) => {
+      runSectionLoadOnce("health", fetchHealth, null, (payload) => {
         state.health = payload;
       }),
-      runSectionLoad("stats", fetchAgentStats, null, (payload) => {
+      runSectionLoadOnce("stats", fetchAgentStats, null, (payload) => {
         state.agentStats = payload;
       }),
-      runSectionLoad("sessions", () => fetchSessions({ n: 50, status: "all" }), (items) => {
+      runSectionLoadOnce("sessions", () => fetchSessions({ n: 50, status: "all" }), (items) => {
         if (!Array.isArray(items)) {
           throw new Error("Sessions payload has an unexpected format.");
         }
@@ -930,7 +950,7 @@
       }, (items) => {
         state.sessions = items;
       }),
-      runSectionLoad("approvals", fetchApprovals, (items) => {
+      runSectionLoadOnce("approvals", fetchApprovals, (items) => {
         if (!Array.isArray(items)) {
           throw new Error("Approvals payload has an unexpected format.");
         }
@@ -938,7 +958,7 @@
       }, (items) => {
         state.approvals = items;
       }),
-      runSectionLoad("audit", () => fetchAuditRecent({ n: 20 }), (items) => {
+      runSectionLoadOnce("audit", () => fetchAuditRecent({ n: 20 }), (items) => {
         if (!Array.isArray(items)) {
           throw new Error("Audit payload has an unexpected format.");
         }
@@ -996,12 +1016,18 @@
 
   function startPolling() {
     pollers.push(window.setInterval(() => {
+      if (!isPageVisible()) {
+        return;
+      }
       refreshOverview().catch(() => {});
       refreshSessions().catch(() => {});
       refreshAudit().catch(() => {});
     }, REFRESH_INTERVALS.slow));
 
     pollers.push(window.setInterval(() => {
+      if (!isPageVisible()) {
+        return;
+      }
       refreshApprovals().catch(() => {});
     }, REFRESH_INTERVALS.fast));
   }
@@ -1073,6 +1099,15 @@
     });
 
     window.addEventListener("agentguard:selected-agent-change", handleSelectedAgentChange);
+    if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+      document.addEventListener("visibilitychange", () => {
+        if (isPageVisible()) {
+          refreshAll().catch(() => {
+            renderAll();
+          });
+        }
+      });
+    }
   }
 
   bindEvents();

@@ -104,6 +104,64 @@ def _text_request(method: str, base_url: str, path: str) -> tuple[int, str]:
     return response.status, raw.decode("utf-8")
 
 
+def test_preview_server_uses_http_11_for_page_responses():
+    with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+        conn = http.client.HTTPConnection("127.0.0.1", int(preview.url.rsplit(":", 1)[1]), timeout=5)
+        conn.request("GET", "/login")
+        response = conn.getresponse()
+        body = response.read()
+        version = response.version
+        conn.close()
+
+    assert response.status == 200
+    assert version == 11
+    assert body
+
+
+def test_static_assets_include_cache_headers():
+    with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+        status, headers, body = _raw_request("GET", preview.url, "/static/common/styles.css")
+
+    assert status == 200
+    assert body
+    assert headers.get("cache-control") == ["public, max-age=300"]
+    assert "last-modified" in headers
+
+
+def test_html_pages_disable_stale_caching():
+    with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+        status, headers, body = _raw_request("GET", preview.url, "/runtime")
+
+    assert status == 200
+    assert body
+    assert headers.get("cache-control") == ["no-cache"]
+    assert "last-modified" in headers
+
+
+def test_rules_page_uses_single_bundle_script():
+    with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+        status, body = _text_request("GET", preview.url, "/rules")
+
+    assert status == 200
+    assert '/static/bundles/rules-page.js' in body
+    assert '/static/pages/rules/rules.js' not in body
+    assert '/static/common/app.js' not in body
+
+
+def test_rules_bundle_includes_configured_app_prefix_and_module_sources():
+    with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+        status, headers, raw = _raw_request("GET", preview.url, "/static/bundles/rules-page.js")
+
+    bundle = raw.decode("utf-8")
+    assert status == 200
+    assert headers.get("cache-control") == ["public, max-age=60, must-revalidate"]
+    assert "last-modified" in headers
+    assert 'window.AgentGuardConfig = {"apiBase": "http://127.0.0.1:38080"};' in bundle
+    assert '/* common/app.js */' in bundle
+    assert '/* pages/rules/rules.js */' in bundle
+    assert 'function resolveRuleModule(globalName, requirePath)' in bundle
+
+
 def test_rules_proxy_forwards_api_key_and_payload():
     observed: dict[str, object] = {}
 

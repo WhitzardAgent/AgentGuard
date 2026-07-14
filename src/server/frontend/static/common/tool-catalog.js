@@ -3,13 +3,25 @@
     return Array.isArray(catalog) ? catalog : [];
   }
 
-  function toolDisplayName(tool, catalog = []) {
+  function buildNameCounts(catalog = []) {
+    const counts = new Map();
+    normalizeCatalog(catalog).forEach((item) => {
+      const name = String(item?.name || "").trim();
+      if (!name) {
+        return;
+      }
+      counts.set(name, (counts.get(name) || 0) + 1);
+    });
+    return counts;
+  }
+
+  function toolDisplayName(tool, catalog = [], nameCounts = null) {
     if (!tool) {
       return "";
     }
-    const normalizedCatalog = normalizeCatalog(catalog);
-    const duplicates = normalizedCatalog.filter((item) => item?.name === tool.name);
-    return duplicates.length > 1
+    const counts = nameCounts instanceof Map ? nameCounts : buildNameCounts(catalog);
+    const duplicateCount = counts.get(String(tool.name || "").trim()) || 0;
+    return duplicateCount > 1
       ? `${tool.owner_agent_id} / ${tool.name}`
       : String(tool.name || "").trim();
   }
@@ -38,17 +50,19 @@
 
   function sortCatalogByDisplayName(catalog) {
     const normalizedCatalog = normalizeCatalog(catalog).slice();
-    normalizedCatalog.sort((a, b) => toolDisplayName(a, normalizedCatalog).localeCompare(toolDisplayName(b, normalizedCatalog)));
+    const nameCounts = buildNameCounts(normalizedCatalog);
+    normalizedCatalog.sort((a, b) => toolDisplayName(a, normalizedCatalog, nameCounts).localeCompare(toolDisplayName(b, normalizedCatalog, nameCounts)));
     return normalizedCatalog;
   }
 
   function toToolOptions(catalog) {
     const normalizedCatalog = sortCatalogByDisplayName(catalog);
+    const nameCounts = buildNameCounts(normalizedCatalog);
     return normalizedCatalog
       .filter((tool) => String(tool?.tool_key || "").trim())
       .map((tool) => ({
         value: tool.tool_key,
-        label: toolDisplayName(tool, normalizedCatalog),
+        label: toolDisplayName(tool, normalizedCatalog, nameCounts),
         name: String(tool.name || "").trim(),
       }));
   }

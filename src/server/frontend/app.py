@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from email.utils import formatdate
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -48,6 +49,36 @@ def _proxy_timeout_seconds() -> float:
 
 
 PROXY_TIMEOUT_SECONDS = _proxy_timeout_seconds()
+STATIC_CACHE_SECONDS = 300
+DYNAMIC_CACHE_SECONDS = 60
+RULES_PAGE_BUNDLE_PATH = "bundles/rules-page.js"
+RULES_PAGE_BUNDLE_FILES = (
+    "common/messages.js",
+    "common/page-shell.js",
+    "common/app.js",
+    "common/tool-catalog.js",
+    "common/ui-helpers.js",
+    "pages/rules/rule-storage.js",
+    "pages/rules/rule-dsl.js",
+    "pages/rules/rule-parser.js",
+    "pages/rules/rule-utils.js",
+    "pages/rules/rule-on-clause.js",
+    "pages/rules/path-builder.js",
+    "pages/rules/condition-builder.js",
+    "pages/rules/rule-model.js",
+    "pages/rules/rule-validation.js",
+    "pages/rules/rule-preview.js",
+    "pages/rules/rule-service.js",
+    "pages/rules/rule-store.js",
+    "pages/rules/rule-form-controller.js",
+    "pages/rules/rule-list-controller.js",
+    "pages/rules/rules.js",
+)
+STATIC_BUNDLES = {
+    RULES_PAGE_BUNDLE_PATH: RULES_PAGE_BUNDLE_FILES,
+}
+BUNDLE_SEPARATOR = b"\n;\n"
+BUNDLE_CACHE: dict[str, tuple[tuple[object, ...], bytes, float]] = {}
 
 PAGE_ROUTES = {
     "/": "login.html",
@@ -91,6 +122,8 @@ SIDEBAR_TABS = ("home", "agents", "plugins", "skills", "mcps", "user", "labels",
 
 
 class FrontendPreviewHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
@@ -328,6 +361,11 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
 
     def _serve_static(self, request_path: str) -> None:
         relative_path = request_path.removeprefix("/static/")
+
+        if relative_path in STATIC_BUNDLES:
+            self._serve_bundle(relative_path)
+            return
+
         file_path = (STATIC_DIR / relative_path).resolve()
 
         if not self._is_safe_path(file_path, STATIC_DIR):
@@ -339,20 +377,74 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
             return
 
         if relative_path == "common/app.js":
-            prefix = (
-                f"window.AgentGuardConfig = "
-                f"{json.dumps({'apiBase': API_BASE_URL}, ensure_ascii=False)};\n"
-            ).encode("utf-8")
-            body = prefix + file_path.read_bytes()
+            body = self._app_config_prefix() + file_path.read_bytes()
+            last_modified = self._http_date(file_path.stat().st_mtime)
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "application/javascript; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
+            self.send_header(
+                "Cache-Control",
+                f"public, max-age={DYNAMIC_CACHE_SECONDS}, must-revalidate",
+            )
+            self.send_header("Last-Modified", last_modified)
             self.end_headers()
             self.wfile.write(body)
             return
 
         mime_type, _ = mimetypes.guess_type(file_path.name)
         self._serve_file(file_path, mime_type or "application/octet-stream")
+
+    def _serve_bundle(self, relative_path: str) -> None:
+        sources = STATIC_BUNDLES.get(relative_path)
+        if not sources:
+            self.send_error(HTTPStatus.NOT_FOUND, "Not Found")
+            return
+
+        resolved_sources: list[tuple[str, Path]] = []
+        source_states: list[tuple[str, int]] = []
+        latest_mtime = 0.0
+        for source in sources:
+            file_path = (STATIC_DIR / source).resolve()
+            if not self._is_safe_path(file_path, STATIC_DIR):
+                self.send_error(HTTPStatus.FORBIDDEN, "Forbidden")
+                return
+            if not file_path.is_file():
+                self.send_error(HTTPStatus.NOT_FOUND, "Not Found")
+                return
+            stat = file_path.stat()
+            latest_mtime = max(latest_mtime, stat.st_mtime)
+            source_states.append((source, stat.st_mtime_ns))
+            resolved_sources.append((source, file_path))
+
+        cache_key = (API_BASE_URL, tuple(source_states))
+        cached = BUNDLE_CACHE.get(relative_path)
+        if cached and cached[0] == cache_key:
+            body = cached[1]
+            latest_mtime = cached[2]
+        else:
+            parts: list[bytes] = []
+            for source, file_path in resolved_sources:
+                parts.append(f"/* {source} */\n".encode("utf-8"))
+                if source == "common/app.js":
+                    parts.append(self._app_config_prefix())
+                parts.append(file_path.read_bytes())
+                parts.append(BUNDLE_SEPARATOR)
+            body = b"".join(parts)
+            BUNDLE_CACHE[relative_path] = (cache_key, body, latest_mtime)
+
+        try:
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/javascript; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header(
+                "Cache-Control",
+                f"public, max-age={DYNAMIC_CACHE_SECONDS}, must-revalidate",
+            )
+            self.send_header("Last-Modified", self._http_date(latest_mtime))
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+            return
 
     def _serve_asset(self, request_path: str) -> None:
         relative_path = request_path.removeprefix("/assets/")
@@ -375,10 +467,13 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
             return
 
         body = path.read_bytes()
+        last_modified = self._http_date(path.stat().st_mtime)
         try:
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", f"public, max-age={STATIC_CACHE_SECONDS}")
+            self.send_header("Last-Modified", last_modified)
             self.end_headers()
             self.wfile.write(body)
         except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
@@ -391,10 +486,13 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
             return
 
         body = self._render_template(page_name).encode("utf-8")
+        last_modified = self._http_date(path.stat().st_mtime)
         try:
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Last-Modified", last_modified)
             self.end_headers()
             self.wfile.write(body)
         except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
@@ -513,8 +611,20 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
+
+    @staticmethod
+    def _app_config_prefix() -> bytes:
+        return (
+            f"window.AgentGuardConfig = "
+            f"{json.dumps({'apiBase': API_BASE_URL}, ensure_ascii=False)};\n"
+        ).encode("utf-8")
+
+    @staticmethod
+    def _http_date(timestamp: float) -> str:
+        return formatdate(timestamp, usegmt=True)
 
     @staticmethod
     def _is_safe_path(candidate: Path, parent: Path) -> bool:
