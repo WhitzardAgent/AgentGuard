@@ -1,5 +1,15 @@
 # Quick Deployment
 
+## 🎬 Demo Video
+
+<p align="center">
+  <a href="https://ik.imagekit.io/4vsnlaxpc/6dd7e279a6b8d9be652002280d026a46_raw.mp4">
+    <img src="../figs/dashboard.png" alt="Watch the AgentGuard demo video" width="900" />
+  </a>
+</p>
+
+<p align="center">Click the preview image to watch the demo video.</p>
+
 ## Prerequisites
 * Python >= 3.11
 * pip

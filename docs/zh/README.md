@@ -1,5 +1,15 @@
 # 快速部署
 
+## 🎬 演示视频
+
+<p align="center">
+  <a href="https://ik.imagekit.io/4vsnlaxpc/6dd7e279a6b8d9be652002280d026a46_raw.mp4">
+    <img src="../figs/dashboard.png" alt="点击查看 AgentGuard 演示视频" width="900" />
+  </a>
+</p>
+
+<p align="center">点击预览图查看演示视频。</p>
+
 ## 环境准备
 * Python >= 3.11
 * pip
