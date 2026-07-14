@@ -34,6 +34,15 @@
             <input id="register-username" autocomplete="username" required minlength="3" maxlength="255">
           </label>
           <label>
+            <span>Email</span>
+            <input id="register-email" type="email" autocomplete="email" required minlength="3" maxlength="255">
+          </label>
+          <label>
+            <span>Verification Code</span>
+            <input id="register-code" inputmode="numeric" autocomplete="one-time-code" required minlength="6" maxlength="6">
+          </label>
+          <button class="btn auth-submit" id="send-register-code" type="button">Send Code</button>
+          <label>
             <span>New Password</span>
             <input id="register-password" type="password" autocomplete="new-password" required minlength="8">
           </label>
@@ -54,6 +63,7 @@
       const toggleRegister = document.getElementById("toggle-register");
       const loginSubmit = document.getElementById("login-submit");
       const registerSubmit = document.getElementById("register-submit");
+      const sendRegisterCode = document.getElementById("send-register-code");
 
       function showToast(message, tone) {
         const toast = document.getElementById("toast");
@@ -140,6 +150,31 @@
         }
       });
 
+      sendRegisterCode.addEventListener("click", async () => {
+        const email = document.getElementById("register-email").value.trim();
+        if (!email) {
+          showToast("Email is required.", "warning");
+          return;
+        }
+        setLoading(sendRegisterCode, true);
+        try {
+          const payload = await api("/api/user/register/email-code", {
+            method: "POST",
+            body: JSON.stringify({ email }),
+          });
+          showToast(
+            payload.cooldown_seconds
+              ? `Code sent. Try again in ${payload.cooldown_seconds} seconds.`
+              : "Code sent.",
+            "success",
+          );
+        } catch (error) {
+          showToast(error.message || "Failed to send code.", "warning");
+        } finally {
+          setLoading(sendRegisterCode, false);
+        }
+      });
+
       registerForm.addEventListener("submit", async (event) => {
         event.preventDefault();
         setLoading(registerSubmit, true);
@@ -148,9 +183,12 @@
             method: "POST",
             body: JSON.stringify({
               username: document.getElementById("register-username").value.trim(),
+              email: document.getElementById("register-email").value.trim(),
               password: document.getElementById("register-password").value,
+              verification_code: document.getElementById("register-code").value.trim(),
             }),
           });
+          registerForm.reset();
           registerPanel.hidden = true;
           toggleRegister.textContent = "Create an account";
           showToast("Account created. Sign in with it.", "success");

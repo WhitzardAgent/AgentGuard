@@ -8,12 +8,16 @@ from fastapi import APIRouter, Cookie, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from backend.database import DatabaseUnavailable
+from backend.user.email import EmailDeliveryUnavailable, get_email_sender
 from backend.user.permissions import is_admin_user
 from backend.user.store import (
+    DuplicateEmail,
     DuplicateExternalAccount,
     DuplicateUsername,
+    EmailVerificationRateLimited,
     ExternalAccountMapping,
     InvalidCredentials,
+    InvalidEmailVerification,
     User,
     UserStore,
 )
@@ -26,6 +30,15 @@ SESSION_COOKIE = "agentguard_user_session"
 class Credentials(BaseModel):
     username: str = Field(min_length=3, max_length=255)
     password: str = Field(min_length=8)
+
+
+class RegisterRequest(Credentials):
+    email: str = Field(min_length=3, max_length=255)
+    verification_code: str = Field(min_length=6, max_length=6)
+
+
+class EmailCodeRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=255)
 
 
 class PasswordChangeRequest(BaseModel):
@@ -44,15 +57,52 @@ def get_user_store() -> UserStore:
 
 
 @router.post("/v1/user/register")
-def register_user(req: Credentials) -> dict[str, Any]:
+def register_user(req: RegisterRequest) -> dict[str, Any]:
     store = _store_or_503()
     try:
-        user = store.create_user(req.username, req.password)
+        user = store.create_user(
+            req.username,
+            req.password,
+            email=req.email,
+            verification_code=req.verification_code,
+        )
     except DuplicateUsername as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except DuplicateEmail as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except InvalidEmailVerification as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"user": _user_payload(user)}
+
+
+@router.post("/v1/user/register/email-code")
+def send_register_email_code(req: EmailCodeRequest) -> dict[str, Any]:
+    store = _store_or_503()
+    try:
+        if store.user_for_email(req.email) is not None:
+            raise DuplicateEmail(f"email already exists: {req.email.strip().lower()}")
+        sender = get_email_sender()
+        issue = store.issue_email_verification_code(req.email)
+        sender.send_verification_code(
+            to_email=issue.email,
+            code=issue.code,
+        )
+    except DuplicateEmail as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except EmailVerificationRateLimited as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except EmailDeliveryUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "status": "ok",
+        "email": issue.email,
+        "expires_at": _iso(issue.expires_at),
+        "cooldown_seconds": issue.cooldown_seconds,
+    }
 
 
 @router.post("/v1/user/login")
@@ -204,7 +254,13 @@ def _set_session_cookie(response: Response, token: str, expires_at: datetime) ->
 
 
 def _user_payload(user: User) -> dict[str, Any]:
-    return {"id": user.id, "username": user.username, "is_admin": is_admin_user(user)}
+    return {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "email_verified": user.email_verified_at is not None,
+        "is_admin": is_admin_user(user),
+    }
 
 
 def _ticket_payload(item: dict[str, Any]) -> dict[str, Any]:

@@ -234,6 +234,40 @@ def test_user_password_proxy_forwards_cookie_and_payload():
     }
 
 
+def test_user_register_email_code_proxy_forwards_payload():
+    observed: dict[str, object] = {}
+
+    class UpstreamHandler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            observed["path"] = self.path
+            length = int(self.headers.get("Content-Length", "0"))
+            observed["body"] = self.rfile.read(length).decode("utf-8")
+            body = json.dumps({"status": "ok"}).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    with _ThreadedServer(UpstreamHandler) as upstream:
+        with patched_proxy_target(upstream.url):
+            with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+                status, payload = _json_request(
+                    "POST",
+                    preview.url,
+                    "/api/user/register/email-code",
+                    {"email": "alice@example.com"},
+                )
+
+    assert status == 200
+    assert payload == {"status": "ok"}
+    assert observed["path"] == "/v1/user/register/email-code"
+    assert json.loads(str(observed["body"])) == {"email": "alice@example.com"}
+
+
 def test_user_external_account_proxy_forwards_requests():
     observed: dict[str, object] = {}
 

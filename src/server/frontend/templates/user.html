@@ -185,8 +185,11 @@
 
       function renderUser(user) {
         const signedIn = Boolean(user);
+        const emailLabel = user?.email
+          ? ` Email: ${user.email}${user.email_verified ? "" : " (unverified)"}.`
+          : " Email: not bound.";
         statusNode.textContent = signedIn
-          ? `Signed in as ${user.username} (user #${user.id}).`
+          ? `Signed in as ${user.username} (user #${user.id}).${emailLabel}`
           : "Not signed in.";
         logoutButton.hidden = !signedIn;
         generateTicketButton.hidden = !signedIn;

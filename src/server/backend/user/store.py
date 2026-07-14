@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import os
 import secrets
 from dataclasses import dataclass
@@ -13,14 +14,23 @@ from backend.user.passwords import hash_password, verify_password
 
 SESSION_TTL_ENV = "AGENTGUARD_USER_SESSION_TTL_SECONDS"
 TICKET_TTL_ENV = "AGENTGUARD_USER_TICKET_TTL_SECONDS"
+EMAIL_CODE_TTL_ENV = "AGENTGUARD_USER_EMAIL_CODE_TTL_SECONDS"
+EMAIL_CODE_COOLDOWN_ENV = "AGENTGUARD_USER_EMAIL_CODE_COOLDOWN_SECONDS"
+EMAIL_CODE_MAX_ATTEMPTS_ENV = "AGENTGUARD_USER_EMAIL_CODE_MAX_ATTEMPTS"
 DEFAULT_SESSION_TTL_SECONDS = 86_400
 DEFAULT_TICKET_TTL_SECONDS = 300
+DEFAULT_EMAIL_CODE_TTL_SECONDS = 600
+DEFAULT_EMAIL_CODE_COOLDOWN_SECONDS = 60
+DEFAULT_EMAIL_CODE_MAX_ATTEMPTS = 5
+EMAIL_VERIFICATION_PURPOSE_REGISTER = "register"
 
 
 @dataclass(frozen=True)
 class User:
     id: int
     username: str
+    email: str | None = None
+    email_verified_at: datetime | None = None
     profile_json: str | None = None
 
 
@@ -36,6 +46,14 @@ class TicketIssue:
     ticket: str
     expires_at: datetime
     prefix: str
+
+
+@dataclass(frozen=True)
+class EmailVerificationIssue:
+    email: str
+    code: str
+    expires_at: datetime
+    cooldown_seconds: int
 
 
 @dataclass(frozen=True)
@@ -63,11 +81,23 @@ class DuplicateUsername(ValueError):
     pass
 
 
+class DuplicateEmail(ValueError):
+    pass
+
+
 class DuplicateExternalAccount(ValueError):
     pass
 
 
 class InvalidCredentials(ValueError):
+    pass
+
+
+class InvalidEmailVerification(ValueError):
+    pass
+
+
+class EmailVerificationRateLimited(ValueError):
     pass
 
 
@@ -82,34 +112,146 @@ class UserStore:
     def ensure_schema(self) -> None:
         for statement in _SCHEMA:
             self.db.execute(statement)
+        _ensure_user_columns(self.db)
         _ensure_user_ticket_columns(self.db)
 
-    def create_user(self, username: str, password: str) -> User:
+    def create_user(
+        self,
+        username: str,
+        password: str,
+        *,
+        email: str | None = None,
+        verification_code: str | None = None,
+        require_verified_email: bool = True,
+    ) -> User:
         normalized = _normalize_username(username)
         _validate_password(password)
+        clean_email = _normalize_email(email) if email is not None else None
+        verification_id: int | None = None
+        if require_verified_email:
+            if clean_email is None:
+                raise ValueError("email is required")
+            verification_id = self._valid_email_verification_id(
+                clean_email,
+                verification_code,
+                purpose=EMAIL_VERIFICATION_PURPOSE_REGISTER,
+            )
         try:
             user_id = self.db.insert(
                 """
-                INSERT INTO users (username, password_hash)
-                VALUES (%s, %s)
+                INSERT INTO users (
+                  username, email, email_verified_at, password_hash
+                )
+                VALUES (%s, %s, %s, %s)
                 """,
-                (normalized, hash_password(password)),
+                (
+                    normalized,
+                    clean_email,
+                    None,
+                    hash_password(password),
+                ),
             )
         except Exception as exc:
             if _is_duplicate_key(exc):
+                if clean_email and self.user_for_email(clean_email) is not None:
+                    raise DuplicateEmail(f"email already exists: {clean_email}") from exc
                 raise DuplicateUsername(f"username already exists: {normalized}") from exc
             raise
-        return User(id=user_id, username=normalized)
+        if clean_email is not None:
+            self.db.execute(
+                """
+                UPDATE users
+                SET email_verified_at = UTC_TIMESTAMP()
+                WHERE id = %s AND email = %s
+                """,
+                (user_id, clean_email),
+            )
+        if verification_id is not None:
+            self.db.execute(
+                """
+                UPDATE user_email_verification_codes
+                SET consumed_at = UTC_TIMESTAMP()
+                WHERE id = %s AND consumed_at IS NULL
+                """,
+                (verification_id,),
+            )
+        row = self.db.fetchone(
+            "SELECT id, username, email, email_verified_at, profile_json FROM users WHERE id = %s",
+            (user_id,),
+        )
+        return _user_from_row(row)
 
     def authenticate(self, username: str, password: str) -> User:
         normalized = _normalize_username(username)
         row = self.db.fetchone(
-            "SELECT id, username, password_hash, profile_json FROM users WHERE username = %s",
+            """
+            SELECT id, username, email, email_verified_at, password_hash, profile_json
+            FROM users
+            WHERE username = %s
+            """,
             (normalized,),
         )
         if not row or not verify_password(password, str(row.get("password_hash") or "")):
             raise InvalidCredentials("invalid username or password")
         return _user_from_row(row)
+
+    def user_for_email(self, email: str) -> User | None:
+        row = self.db.fetchone(
+            """
+            SELECT id, username, email, email_verified_at, profile_json
+            FROM users
+            WHERE email = %s
+            """,
+            (_normalize_email(email),),
+        )
+        return _user_from_row(row) if row else None
+
+    def issue_email_verification_code(
+        self,
+        email: str,
+        *,
+        purpose: str = EMAIL_VERIFICATION_PURPOSE_REGISTER,
+    ) -> EmailVerificationIssue:
+        clean_email = _normalize_email(email)
+        clean_purpose = _normalize_verification_purpose(purpose)
+        if clean_purpose == EMAIL_VERIFICATION_PURPOSE_REGISTER and self.user_for_email(clean_email):
+            raise DuplicateEmail(f"email already exists: {clean_email}")
+        cooldown = _int_env(EMAIL_CODE_COOLDOWN_ENV, DEFAULT_EMAIL_CODE_COOLDOWN_SECONDS)
+        recent = self.db.fetchone(
+            """
+            SELECT id
+            FROM user_email_verification_codes
+            WHERE email = %s
+              AND purpose = %s
+              AND consumed_at IS NULL
+              AND created_at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL %s SECOND)
+            LIMIT 1
+            """,
+            (clean_email, clean_purpose, cooldown),
+        )
+        if recent is not None:
+            raise EmailVerificationRateLimited("email verification code was sent recently")
+        ttl = _int_env(EMAIL_CODE_TTL_ENV, DEFAULT_EMAIL_CODE_TTL_SECONDS)
+        code = _new_email_code()
+        issue_id = self.db.insert(
+            """
+            INSERT INTO user_email_verification_codes (
+              email, code_hash, purpose, expires_at
+            )
+            VALUES (%s, %s, %s, DATE_ADD(UTC_TIMESTAMP(), INTERVAL %s SECOND))
+            """,
+            (clean_email, _hash_email_code(clean_email, clean_purpose, code), clean_purpose, ttl),
+        )
+        row = self.db.fetchone(
+            "SELECT expires_at FROM user_email_verification_codes WHERE id = %s",
+            (issue_id,),
+        )
+        return EmailVerificationIssue(
+            email=clean_email,
+            code=code,
+            expires_at=_datetime_from_row(row, "expires_at"),
+            cooldown_seconds=cooldown,
+        )
 
     def change_password(
         self,
@@ -164,7 +306,7 @@ class UserStore:
             return None
         row = self.db.fetchone(
             """
-            SELECT u.id, u.username, u.profile_json
+            SELECT u.id, u.username, u.email, u.email_verified_at, u.profile_json
             FROM user_sessions s
             JOIN users u ON u.id = s.user_id
             WHERE s.token_hash = %s
@@ -174,6 +316,46 @@ class UserStore:
             (_hash_token(token),),
         )
         return _user_from_row(row) if row else None
+
+    def _valid_email_verification_id(
+        self,
+        email: str,
+        code: str | None,
+        *,
+        purpose: str,
+    ) -> int:
+        clean_code = _normalize_email_code(code)
+        clean_purpose = _normalize_verification_purpose(purpose)
+        max_attempts = _int_env(EMAIL_CODE_MAX_ATTEMPTS_ENV, DEFAULT_EMAIL_CODE_MAX_ATTEMPTS)
+        row = self.db.fetchone(
+            """
+            SELECT id, code_hash
+            FROM user_email_verification_codes
+            WHERE email = %s
+              AND purpose = %s
+              AND consumed_at IS NULL
+              AND expires_at > UTC_TIMESTAMP()
+              AND attempt_count < %s
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (email, clean_purpose, max_attempts),
+        )
+        if not row:
+            raise InvalidEmailVerification("invalid or expired email verification code")
+        expected = str(row.get("code_hash") or "")
+        actual = _hash_email_code(email, clean_purpose, clean_code)
+        if not hmac.compare_digest(actual, expected):
+            self.db.execute(
+                """
+                UPDATE user_email_verification_codes
+                SET attempt_count = attempt_count + 1
+                WHERE id = %s AND consumed_at IS NULL
+                """,
+                (row["id"],),
+            )
+            raise InvalidEmailVerification("invalid or expired email verification code")
+        return int(row["id"])
 
     def revoke_session(self, token: str | None) -> None:
         if not token:
@@ -436,15 +618,53 @@ def _ensure_user_ticket_columns(db: MySQLDatabase) -> None:
         return
 
 
+def _ensure_user_columns(db: MySQLDatabase) -> None:
+    columns = {
+        "email": "ALTER TABLE users ADD COLUMN email VARCHAR(255) NULL AFTER username",
+        "email_verified_at": "ALTER TABLE users ADD COLUMN email_verified_at TIMESTAMP NULL AFTER email",
+    }
+    for column, statement in columns.items():
+        try:
+            row = db.fetchone("SHOW COLUMNS FROM users LIKE %s", (column,))
+        except Exception:
+            return
+        if row is None:
+            db.execute(statement)
+    try:
+        row = db.fetchone("SHOW INDEX FROM users WHERE Key_name = %s", ("uniq_users_email",))
+        if row is None:
+            db.execute("ALTER TABLE users ADD UNIQUE KEY uniq_users_email (email)")
+    except Exception:
+        return
+
+
 _SCHEMA = [
     """
     CREATE TABLE IF NOT EXISTS users (
       id INT AUTO_INCREMENT PRIMARY KEY,
       username VARCHAR(255) NOT NULL UNIQUE,
+      email VARCHAR(255) NULL,
+      email_verified_at TIMESTAMP NULL,
       password_hash VARCHAR(255) NOT NULL,
       profile_json JSON NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_users_email (email)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS user_email_verification_codes (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      email VARCHAR(255) NOT NULL,
+      code_hash CHAR(64) NOT NULL,
+      purpose VARCHAR(64) NOT NULL,
+      expires_at TIMESTAMP NOT NULL,
+      consumed_at TIMESTAMP NULL,
+      attempt_count INT NOT NULL DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_user_email_codes_email_purpose (email, purpose),
+      INDEX idx_user_email_codes_expires_at (expires_at),
+      INDEX idx_user_email_codes_consumed_at (consumed_at)
     )
     """,
     """
@@ -536,6 +756,22 @@ def _normalize_email(email: str) -> str:
     return normalized
 
 
+def _normalize_verification_purpose(purpose: str) -> str:
+    normalized = str(purpose or "").strip().lower()
+    if not normalized:
+        raise ValueError("verification purpose is required")
+    if len(normalized) > 64:
+        raise ValueError("verification purpose must be at most 64 characters")
+    return normalized
+
+
+def _normalize_email_code(code: str | None) -> str:
+    normalized = str(code or "").strip()
+    if len(normalized) != 6 or not normalized.isdigit():
+        raise InvalidEmailVerification("invalid or expired email verification code")
+    return normalized
+
+
 def _optional_text(value: Any) -> str | None:
     if value is None:
         return None
@@ -547,8 +783,17 @@ def _hash_token(token: str) -> str:
     return hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()
 
 
+def _hash_email_code(email: str, purpose: str, code: str) -> str:
+    payload = f"{purpose}\0{email}\0{code}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def _new_token(prefix: str) -> str:
     return f"{prefix}_{secrets.token_urlsafe(32)}"
+
+
+def _new_email_code() -> str:
+    return f"{secrets.randbelow(1_000_000):06d}"
 
 
 def _int_env(name: str, default: int) -> int:
@@ -568,6 +813,12 @@ def _user_from_row(row: dict[str, Any]) -> User:
     return User(
         id=int(row["id"]),
         username=str(row["username"]),
+        email=_optional_text(row.get("email")),
+        email_verified_at=(
+            _coerce_datetime(row["email_verified_at"])
+            if row.get("email_verified_at")
+            else None
+        ),
         profile_json=row.get("profile_json"),
     )
 
