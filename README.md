@@ -354,7 +354,7 @@ For additional deployment details, refer to the [Documentation](https://whitzard
 
 <p align="center">
   <a href="https://ik.imagekit.io/4vsnlaxpc/6dd7e279a6b8d9be652002280d026a46_raw.mp4">
-    <img src="./docs/figs/dashboard.png" alt="Watch the AgentGuard demo video" width="900" />
+    <img src="./docs/figs/begin.png" alt="Watch the AgentGuard demo video" width="900" />
   </a>
 </p>
 
