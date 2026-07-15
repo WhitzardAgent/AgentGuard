@@ -38,10 +38,6 @@
     detectionError: "",
   };
 
-  shell?.setPageContext({
-    title: "Skill Security",
-    description: "Inspect reported skills and run static detection for the selected agent.",
-  });
 
   function t(value) {
     return i18n?.t?.(value) || value;

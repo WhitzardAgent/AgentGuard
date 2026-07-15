@@ -12,16 +12,20 @@
   const selectedAgentLabel = document.getElementById("plugin-selected-agent");
 
   const PLUGIN_SCOPES = ["server", "client"];
+
+  function copy(key, fallback, variables = {}) {
+    return shell?.getPageCopy?.(key, fallback, variables) || String(fallback || "");
+  }
   const SCOPE_COPY = {
     server: {
       availableKey: "remote_plugins",
       heading: "server",
-      empty: "No server plugins are available for this agent yet.",
+      empty: copy("empty-server-plugins", "No server plugins are available for this agent yet."),
     },
     client: {
       availableKey: "local_plugins",
       heading: "client",
-      empty: "No client plugins are available for this agent yet. Start a client config API to discover client-side plugins.",
+      empty: copy("empty-client-plugins", "No client plugins are available for this agent yet. Start a client config API to discover client-side plugins."),
     },
   };
 
@@ -37,10 +41,6 @@
     loading: false,
   };
 
-  shell?.setPageContext({
-    title: "Plugin Config",
-    description: "Configure server and client plugin scopes for the selected agent.",
-  });
 
   function showToast(message, tone) {
     window.AgentGuardUI.showToast(message, tone);
@@ -76,23 +76,30 @@
     if (!container) {
       return;
     }
-    const copy = SCOPE_COPY[scope];
+    const scopeCopy = SCOPE_COPY[scope];
     const items = scopeItems(scope);
     const enabledNames = new Set(scopeSelection(scope));
     container.innerHTML = "";
 
     if (statusNode) {
       if (!state.selectedAgentId) {
-        statusNode.textContent = `Select an agent to view ${copy.heading} plugins.`;
+        statusNode.textContent = scopeCopy.heading === "server"
+          ? copy("no-agent-server-plugins", "Select an agent to view server plugins.")
+          : copy("no-agent-client-plugins", "Select an agent to view client plugins.");
       } else if (!items.length) {
-        statusNode.textContent = copy.empty;
+        statusNode.textContent = scopeCopy.empty;
       } else {
-        statusNode.textContent = `${enabledNames.size} of ${items.length} ${copy.heading} plugins enabled.`;
+        statusNode.textContent = `${enabledNames.size} of ${items.length} ${scopeCopy.heading} plugins enabled.`;
       }
     }
 
     if (!items.length) {
-      container.innerHTML = `<div class="empty-state">${copy.empty}</div>`;
+      const emptyText = !state.selectedAgentId
+        ? (scopeCopy.heading === "server"
+          ? copy("no-agent-server-plugins", "Select an agent to view server plugins.")
+          : copy("no-agent-client-plugins", "Select an agent to view client plugins."))
+        : scopeCopy.empty;
+      container.innerHTML = `<div class="empty-state">${emptyText}</div>`;
       return;
     }
 
@@ -101,9 +108,9 @@
       const isEnabled = enabledNames.has(plugin.name);
       const phaseText = plugin.phases?.length ? plugin.phases.join(", ") : "";
       const eventsText = plugin.event_types.length ? plugin.event_types.join(", ") : "";
-      const pillText = phaseText || eventsText || "Phase not declared";
-      const switchLabel = isEnabled ? "On" : "Off";
-      const helperText = plugin.description || "No plugin description provided.";
+      const pillText = phaseText || eventsText || copy("phase-not-declared", "Phase not declared");
+      const switchLabel = isEnabled ? copy("switch-on", "On") : copy("switch-off", "Off");
+      const helperText = plugin.description || copy("no-plugin-description", "No plugin description provided.");
       card.className = "agent-list-card plugin-toggle-card";
       if (isEnabled) {
         card.classList.add("selected");
@@ -137,7 +144,7 @@
   }
 
   function renderPluginLists() {
-    selectedAgentLabel.textContent = selectedAgentDisplayName() || "the selected agent";
+    selectedAgentLabel.textContent = selectedAgentDisplayName() || copy("selected-agent-fallback", "the selected agent");
     renderScopeList("server", remotePluginList, remotePluginStatus);
     renderScopeList("client", localPluginList, localPluginStatus);
   }

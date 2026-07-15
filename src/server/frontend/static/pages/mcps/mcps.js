@@ -33,10 +33,6 @@
     detectionError: "",
   };
 
-  shell?.setPageContext({
-    title: "MCP Security",
-    description: "Inspect reported MCP services and run LLM detection for the selected agent.",
-  });
 
   function t(value) {
     return i18n?.t?.(value) || value;

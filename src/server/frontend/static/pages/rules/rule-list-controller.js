@@ -14,18 +14,23 @@
     onDeleteLocalRule,
     onDisableRule,
     onSelectRule,
+    shell,
   }) {
     let currentFilter = "all";
+
+    function copy(key, fallback, variables = {}) {
+      return shell?.getPageCopy?.(key, fallback, variables) || String(fallback || "");
+    }
 
     function renderRuleListEmptyState() {
       const empty = document.createElement("div");
       empty.className = "empty-state";
       if (currentFilter === publishedStatus) {
-        empty.textContent = "There are no published runtime rules right now.";
+        empty.textContent = copy("rules-empty-published", "There are no published runtime rules right now.");
       } else if (currentFilter === unpublishedStatus) {
-        empty.textContent = "There are no unpublished local rules yet. Generate one to keep it here before publishing.";
+        empty.textContent = copy("rules-empty-unpublished", "There are no unpublished local rules yet. Generate one to keep it here before publishing.");
       } else {
-        empty.textContent = "There are no rules yet. Generate a local rule or publish one to the runtime.";
+        empty.textContent = copy("rules-empty-all", "There are no rules yet. Generate a local rule or publish one to the runtime.");
       }
       return empty;
     }
@@ -46,7 +51,7 @@
 
       const statusPill = document.createElement("span");
       statusPill.className = `pill ${status === publishedStatus ? "" : "warn"}`.trim();
-      statusPill.textContent = status === publishedStatus ? "Published" : "Unpublished";
+      statusPill.textContent = status === publishedStatus ? copy("rules-status-published", "Published") : copy("rules-status-unpublished", "Unpublished");
       meta.appendChild(statusPill);
 
       const actionPill = document.createElement("span");
@@ -76,14 +81,14 @@
       const userManaged = rule?.userManaged !== false;
 
       if (status === unpublishedStatus && userManaged) {
-        buttonGroup.appendChild(createRuleActionButton("/assets/publish.png", "Publish rule", () => {
+        buttonGroup.appendChild(createRuleActionButton("/assets/publish.png", copy("publish-rule", "Publish rule"), () => {
           onPublishRule(rule);
         }));
-        buttonGroup.appendChild(createRuleActionButton("/assets/close.png", "Delete unpublished rule", () => {
+        buttonGroup.appendChild(createRuleActionButton("/assets/close.png", copy("delete-unpublished-rule", "Delete unpublished rule"), () => {
           onDeleteLocalRule(rule);
         }));
       } else if (status === publishedStatus && userManaged) {
-        buttonGroup.appendChild(createRuleActionButton("/assets/disable.png", "Disable published rule", () => {
+        buttonGroup.appendChild(createRuleActionButton("/assets/disable.png", copy("disable-published-rule", "Disable published rule"), () => {
           onDisableRule(rule);
         }));
       }

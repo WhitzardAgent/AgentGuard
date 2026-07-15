@@ -175,10 +175,6 @@ const state = {
   llmConfig: loadStoredLlmConfig(),
 };
 
-shell?.setPageContext({
-  title: "Rule Builder",
-  description: "Build rules from structured inputs, preview DSL output, and manage unpublished and published states.",
-});
 
 function showToast(message, tone) {
   window.AgentGuardUI.showToast(message, tone);
@@ -637,6 +633,7 @@ const list = ruleListControllerModule.create({
   ruleSourceLabel,
   ruleFilterButtons: elements.ruleFilterButtons,
   ruleList: elements.ruleList,
+  shell,
   unpublishedStatus: ruleUtils.RULE_STATUS_UNPUBLISHED,
 });
 

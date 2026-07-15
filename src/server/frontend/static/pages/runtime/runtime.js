@@ -59,10 +59,6 @@
   const pollers = [];
   const pendingLoads = new Map();
 
-  shell?.setPageContext({
-    title: "Runtime Overview",
-    description: "Inspect agent-scoped runtime metrics, approvals, and audit activity for the selected agent.",
-  });
 
   function getSelectedAgentId() {
     return String(shell?.getState?.().selectedAgentId || "").trim();
@@ -82,6 +78,10 @@
 
   function currentLocaleTag() {
     return i18n?.getLocale?.() || "en-US";
+  }
+
+  function copy(key, fallback, variables = {}) {
+    return shell?.getPageCopy?.(key, fallback, variables) || String(fallback || "");
   }
 
   function formatAction(action) {
@@ -582,19 +582,19 @@
   function setStatusMessage() {
     const errors = collectErrors();
     if (errors.length === Object.keys(state.errors).length) {
-      elements.healthPill.textContent = "Unreachable";
+      elements.healthPill.textContent = copy("runtime-unreachable", "Unreachable");
       elements.healthPill.className = "pill danger";
       return;
     }
     if (errors.length) {
-      elements.healthPill.textContent = "Partial";
+      elements.healthPill.textContent = copy("runtime-partial", "Partial");
       elements.healthPill.className = "pill warn";
       return;
     }
     const updatedText = state.lastUpdatedAt
       ? new Date(state.lastUpdatedAt).toLocaleTimeString(currentLocaleTag(), { hour12: false })
       : "--";
-    elements.healthPill.textContent = state.health?.ok ? "Healthy" : "Connected";
+    elements.healthPill.textContent = state.health?.ok ? copy("runtime-healthy", "Healthy") : copy("runtime-connected", "Connected");
     elements.healthPill.className = "pill";
   }
 
@@ -628,7 +628,7 @@
     if (!state.traffic.length) {
       const empty = document.createElement("div");
       empty.className = "empty-state";
-      empty.textContent = "No recent traffic in the current runtime window.";
+      empty.textContent = copy("runtime-empty-traffic", "No recent traffic in the current runtime window.");
       elements.timeline.appendChild(empty);
       return;
     }
@@ -673,7 +673,7 @@
     }
     if (!state.sessions.length) {
       const row = document.createElement("tr");
-      row.innerHTML = '<td colspan="9"><div class="empty-state">No runtime sessions have been created for this agent yet.</div></td>';
+      row.innerHTML = `<td colspan="9"><div class="empty-state">${escapeHtml(copy("runtime-empty-sessions", "No runtime sessions have been created for this agent yet."))}</div></td>`;
       elements.sessionBody.appendChild(row);
       return;
     }
@@ -691,7 +691,7 @@
         <td>${escapeHtml(formatNumber(item.activeTokenCount))}</td>
         <td>${escapeHtml(item.latestTokenExpiresAt)}</td>
         <td>
-          ${canClose ? `<button class="btn" type="button" data-session-action="close" data-session-id="${escapeHtml(item.sessionId)}">Close</button>` : "-"}
+          ${canClose ? `<button class="btn" type="button" data-session-action="close" data-session-id="${escapeHtml(item.sessionId)}">${escapeHtml(copy("runtime-close", "Close"))}</button>` : "-"}
         </td>
       `;
       elements.sessionBody.appendChild(row);
@@ -711,7 +711,7 @@
     if (!state.approvals.length) {
       const empty = document.createElement("div");
       empty.className = "empty-state";
-      empty.textContent = "No pending human-check tickets right now.";
+      empty.textContent = copy("runtime-empty-approvals", "No pending human-check tickets right now.");
       elements.approvalList.appendChild(empty);
       return;
     }
@@ -719,15 +719,15 @@
     state.approvals.forEach((item) => {
       const row = document.createElement("div");
       row.className = "list-item";
-      const matched = item.rules[0] ? `matched=${item.rules[0]}` : item.reason || "No rule detail";
+      const matched = item.rules[0] ? `matched=${item.rules[0]}` : item.reason || copy("runtime-no-rule-detail", "No rule detail");
       row.innerHTML = `
         <strong>${escapeHtml(item.ticketId)} | ${escapeHtml(item.tool)}</strong>
         <p class="subtle">agent=${escapeHtml(item.agent)} | session=${escapeHtml(item.session)} | created=${escapeHtml(item.createdAt)}</p>
         <p class="subtle">${escapeHtml(item.targetSummary)}</p>
         <p class="subtle">${escapeHtml(matched)}</p>
         <div class="toolbar runtime-approval-actions">
-          <button class="btn primary" type="button" data-approval-action="approve" data-ticket-id="${escapeHtml(item.ticketId)}">Approve</button>
-          <button class="btn" type="button" data-approval-action="deny" data-ticket-id="${escapeHtml(item.ticketId)}">Deny</button>
+          <button class="btn primary" type="button" data-approval-action="approve" data-ticket-id="${escapeHtml(item.ticketId)}">${escapeHtml(copy("runtime-approve", "Approve"))}</button>
+          <button class="btn" type="button" data-approval-action="deny" data-ticket-id="${escapeHtml(item.ticketId)}">${escapeHtml(copy("runtime-deny", "Deny"))}</button>
         </div>
       `;
       elements.approvalList.appendChild(row);
@@ -741,15 +741,15 @@
       row.innerHTML = `<td colspan="5"><div class="empty-state">${escapeHtml(state.errors.audit)}</div></td>`;
       elements.auditBody.appendChild(row);
       renderAuditDetail();
-      elements.auditDetail.textContent = "Audit data is unavailable.";
+      elements.auditDetail.textContent = copy("runtime-audit-unavailable", "Audit data is unavailable.");
       return;
     }
     if (!state.auditRows.length) {
       const row = document.createElement("tr");
-      row.innerHTML = `<td colspan="5"><div class="empty-state">No audit records have been captured yet.</div></td>`;
+      row.innerHTML = `<td colspan="5"><div class="empty-state">${escapeHtml(copy("runtime-empty-audit", "No audit records have been captured yet."))}</div></td>`;
       elements.auditBody.appendChild(row);
       renderAuditDetail();
-      elements.auditDetail.textContent = "No audit detail available.";
+      elements.auditDetail.textContent = copy("runtime-no-audit-detail", "No audit detail available.");
       return;
     }
 
@@ -803,7 +803,7 @@
   function renderAuditDetail() {
     const selected = state.auditRows[state.selectedAuditIndex];
     if (!selected) {
-      elements.auditDetail.textContent = "Select an audit row to inspect event and decision JSON.";
+      elements.auditDetail.textContent = copy("runtime-select-audit-detail", "Select an audit row to inspect event and decision JSON.");
       return;
     }
     const runtimeState = selected.runtimeState || {};
@@ -1032,7 +1032,7 @@
     state.selectedAuditIndex = -1;
     shell?.setPageContext({
       title: "Runtime Overview",
-      description: `Inspect agent-scoped runtime metrics, approvals, and audit activity for ${String(event?.detail?.agentLabel || getSelectedAgentLabel() || "the selected agent")}.`,
+      description: `Inspect agent-scoped runtime metrics, traffic, approvals, and audit activity for ${String(event?.detail?.agentLabel || getSelectedAgentLabel() || "the selected agent")}.`,
     });
     refreshAll().catch(() => {
       renderAll();
@@ -1043,10 +1043,10 @@
     elements.refreshButton.addEventListener("click", () => {
       refreshAll()
         .then(() => {
-          showToast("Runtime data refreshed.", "success");
+          showToast(copy("runtime-refresh-success", "Runtime data refreshed."), "success");
         })
         .catch((error) => {
-          showToast(error instanceof Error ? error.message : "Failed to refresh runtime data.", "warning");
+          showToast(error instanceof Error ? error.message : copy("runtime-refresh-failed", "Failed to refresh runtime data."), "warning");
         });
     });
 

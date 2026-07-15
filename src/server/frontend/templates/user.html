@@ -22,6 +22,11 @@
         </div>
       </section>
 
+      <div id="agentguard-page-context" hidden>
+        <span id="agentguard-page-context-title">User Centre</span>
+        <span id="agentguard-page-context-description">Manage frontend user identities and related configuration.</span>
+      </div>
+
       <section class="grid two">
         <div class="card" id="profile-card">
           <div class="heading-row">
@@ -121,12 +126,6 @@
 
   <script src="/static/common/messages.js"></script>
   <script src="/static/common/page-shell.js"></script>
-  <script>
-    window.AgentGuardShell?.setPageContext({
-      title: "User",
-      description: "Manage frontend user identities and related configuration.",
-    });
-  </script>
   <script>
     (function () {
       const logoutButton = document.getElementById("logout-button");

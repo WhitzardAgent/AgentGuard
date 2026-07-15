@@ -42,6 +42,21 @@ class FakeElement extends FakeNode {
     return node;
   }
 
+  removeAttribute(name) {
+    this.attributes.delete(name);
+    if (name === "id") {
+      this.id = "";
+    }
+  }
+
+  remove() {
+    if (!this.parentElement) {
+      return;
+    }
+    this.parentElement.children = this.parentElement.children.filter((child) => child !== this);
+    this.parentElement = null;
+  }
+
   getAttribute(name) {
     return this.attributes.has(name) ? this.attributes.get(name) : null;
   }
@@ -141,30 +156,60 @@ function collectTextNodes(root) {
   return nodes;
 }
 
-function createDocument(body, title = "AgentGuard Frontend Preview") {
+function createDocument(body, title = "AgentGuard Frontend Preview", options = {}) {
   const documentElement = new FakeElement("html");
+  const head = new FakeElement("head");
   documentElement.lang = "en";
+  if (options.serverLanguage) {
+    documentElement.setAttribute("data-agentguard-server-language", options.serverLanguage);
+    documentElement.lang = options.serverLanguage === "zh" ? "zh-CN" : "en";
+  }
+  documentElement.appendChild(head);
+  documentElement.appendChild(body);
 
-  const ids = new Map();
-  const register = (node) => {
-    if (node instanceof FakeElement && node.id) {
-      ids.set(node.id, node);
+  const listeners = {};
+  const findById = (node, id) => {
+    if (!(node instanceof FakeElement)) {
+      return null;
     }
-    if (node instanceof FakeElement) {
-      node.children.forEach(register);
+    if (node.id === id) {
+      return node;
     }
+    for (const child of node.children) {
+      const found = findById(child, id);
+      if (found) {
+        return found;
+      }
+    }
+    return null;
   };
-  register(body);
+
+  let cookieValue = String(options.cookie || "");
 
   return {
     body,
+    head,
     title,
-    readyState: "complete",
+    readyState: options.readyState || "complete",
     documentElement,
-    getElementById(id) {
-      return ids.get(id) || null;
+    get cookie() {
+      return cookieValue;
     },
-    addEventListener() {},
+    set cookie(value) {
+      cookieValue = String(value || "");
+    },
+    getElementById(id) {
+      return findById(documentElement, id);
+    },
+    addEventListener(name, handler) {
+      listeners[name] = handler;
+    },
+    createElement(tagName) {
+      return new FakeElement(tagName);
+    },
+    dispatch(name) {
+      listeners[name]?.();
+    },
     createTreeWalker(root) {
       const nodes = collectTextNodes(root);
       let index = 0;
@@ -179,7 +224,7 @@ function createDocument(body, title = "AgentGuard Frontend Preview") {
   };
 }
 
-function loadI18n({ language = null, body, title, storage = null } = {}) {
+function loadI18n({ language = null, body, title, storage = null, readyState = "complete", cookie = "", serverLanguage = "" } = {}) {
   global.Node = { TEXT_NODE, ELEMENT_NODE };
   global.NodeFilter = { SHOW_TEXT: 4 };
   global.HTMLElement = FakeElement;
@@ -189,7 +234,7 @@ function loadI18n({ language = null, body, title, storage = null } = {}) {
   global.MutationObserver = undefined;
 
   global.localStorage = storage || createStorage(language ? { "agentguard.language": language } : {});
-  global.document = createDocument(body, title);
+  global.document = createDocument(body, title, { readyState, cookie, serverLanguage });
 
   let reloadCount = 0;
   global.window = {
@@ -209,6 +254,9 @@ function loadI18n({ language = null, body, title, storage = null } = {}) {
     reloadCount() {
       return reloadCount;
     },
+    dispatchDOMContentLoaded() {
+      global.document.dispatch("DOMContentLoaded");
+    },
   };
 }
 
@@ -227,6 +275,20 @@ test("i18n defaults to English and toggles to Chinese", () => {
 
   assert.equal(global.localStorage.getItem("agentguard.language"), "zh");
   assert.equal(reloadCount(), 1);
+});
+
+
+test("i18n reads the cookie language before localStorage", () => {
+  const body = new FakeElement("body");
+  const button = new FakeButtonElement("button", { id: "sidebar-language-toggle", textContent: "中文" });
+  body.appendChild(button);
+
+  const storage = createStorage({ "agentguard.language": "en" });
+  const { api } = loadI18n({ body, storage, cookie: "agentguard.language=zh" });
+
+  assert.equal(api.getLanguage(), "zh");
+  assert.equal(global.document.documentElement.lang, "zh-CN");
+  assert.equal(button.textContent, "English");
 });
 
 test("i18n applies explicit translations and translated values in Chinese mode", () => {
@@ -316,7 +378,47 @@ test("language chosen on login persists to later pages", () => {
 
   loadI18n({ body: appBody, storage: sharedStorage, title: "AgentGuard Frontend Preview" });
 
+  assert.match(global.document.cookie, /agentguard\.language=zh/);
   assert.equal(global.document.documentElement.lang, "zh-CN");
   assert.equal(global.document.title, "AgentGuard 前端预览");
   assert.equal(homeTitle.textContent, "首页");
+});
+
+
+test("i18n hides Chinese pages until DOMContentLoaded translations finish", () => {
+  const body = new FakeElement("body");
+  const button = new FakeButtonElement("button", { id: "sidebar-language-toggle", textContent: "中文" });
+  const title = new FakeElement("h1");
+  title.appendChild(new FakeTextNode("Home"));
+  body.appendChild(button);
+  body.appendChild(title);
+
+  const { dispatchDOMContentLoaded } = loadI18n({ language: "zh", body, readyState: "loading" });
+
+  assert.equal(global.document.documentElement.getAttribute("data-agentguard-i18n-pending"), "zh");
+  assert.equal(global.document.getElementById("agentguard-i18n-boot-style")?.textContent, 'html[data-agentguard-i18n-pending="zh"] body { visibility: hidden; }');
+
+  dispatchDOMContentLoaded();
+
+  assert.equal(global.document.documentElement.getAttribute("data-agentguard-i18n-pending"), null);
+  assert.equal(global.document.getElementById("agentguard-i18n-boot-style"), null);
+  assert.equal(title.textContent, "首页");
+  assert.equal(button.textContent, "English");
+});
+
+
+test("i18n skips boot hiding when the server already rendered Chinese", () => {
+  const body = new FakeElement("body");
+  const button = new FakeButtonElement("button", { id: "sidebar-language-toggle", textContent: "English" });
+  const title = new FakeElement("h1");
+  title.appendChild(new FakeTextNode("首页"));
+  body.appendChild(button);
+  body.appendChild(title);
+
+  loadI18n({ body, cookie: "agentguard.language=zh", serverLanguage: "zh", readyState: "loading", title: "AgentGuard 前端预览" });
+
+  assert.equal(global.document.documentElement.getAttribute("data-agentguard-i18n-pending"), null);
+  assert.equal(global.document.getElementById("agentguard-i18n-boot-style"), null);
+  assert.equal(title.textContent, "首页");
+  assert.equal(button.textContent, "English");
 });

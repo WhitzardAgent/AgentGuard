@@ -108,6 +108,33 @@
     element.textContent = String(value || "");
   }
 
+  function readText(id) {
+    const element = getElement(id);
+    if (!element) {
+      return "";
+    }
+    return String(element.textContent || "").trim();
+  }
+
+  function interpolateText(template, variables = {}) {
+    return String(template || "").replace(/\{(\w+)\}/g, (match, key) => {
+      if (!Object.prototype.hasOwnProperty.call(variables, key)) {
+        return match;
+      }
+      return String(variables[key] ?? "");
+    });
+  }
+
+  function getPageCopy(key, fallback = "", variables = {}) {
+    const value = readText(`agentguard-copy-${String(key || "").trim()}`) || String(fallback || "");
+    return interpolateText(value, variables);
+  }
+
+  function translateText(value) {
+    const text = String(value || "");
+    return window.AgentGuardI18n?.t?.(text) || text;
+  }
+
   function selectedAgentDisplayLabel() {
     const agentId = String(state.selectedAgentId || "").trim();
     if (!agentId) {
@@ -204,10 +231,21 @@
     bodyClassList.remove("sidebar-collapsed");
   }
 
+  function initTemplatePageContext() {
+    const title = readText("agentguard-page-context-title");
+    const description = readText("agentguard-page-context-description");
+    if (title) {
+      state.pageTitle = title;
+    }
+    if (description) {
+      state.pageDescription = description;
+    }
+  }
+
   function initSelectedAgentState() {
     state.selectedAgentId = readSelectedAgentId();
     state.selectedPluginName = readSelectedPluginName();
-    state.currentUserLabel = readCurrentUserLabel() || "Current User";
+    state.currentUserLabel = readCurrentUserLabel() || readText("sidebar-current-user") || translateText("Current User");
 
     const clearButton = getElement("sidebar-clear-agent");
     clearButton?.addEventListener("click", () => {
@@ -246,8 +284,8 @@
   }
 
   function setPageContext(nextState) {
-    state.pageTitle = String(nextState?.title || state.pageTitle || "AgentGuard");
-    state.pageDescription = String(nextState?.description || "");
+    state.pageTitle = translateText(nextState?.title || state.pageTitle || "AgentGuard");
+    state.pageDescription = translateText(nextState?.description || "");
     render();
   }
 
@@ -264,7 +302,7 @@
 
   function setCurrentUser(label) {
     const normalized = String(label || "").trim();
-    state.currentUserLabel = normalized || "Current User";
+    state.currentUserLabel = normalized || translateText("Current User");
     try {
       if (normalized) {
         window.localStorage?.setItem(CURRENT_USER_KEY, normalized);
@@ -329,6 +367,7 @@
   }
 
   applySidebarState();
+  initTemplatePageContext();
   initSelectedAgentState();
   render();
   requireAuthenticatedUser();
@@ -341,6 +380,7 @@
     setApiStatus,
     setPageContext,
     setCurrentUser,
+    getPageCopy,
     setSelectedAgent,
     setSelectedPlugin,
     setToolStatus,

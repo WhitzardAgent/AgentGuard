@@ -3,6 +3,11 @@
   const DEFAULT_LANGUAGE = "en";
   const SUPPORTED_LANGUAGES = new Set(["en", "zh"]);
   const OBSERVED_ATTRIBUTES = ["title", "placeholder", "aria-label"];
+  const SERVER_LANGUAGE_ATTRIBUTE = "data-agentguard-server-language";
+  const BOOT_PENDING_ATTRIBUTE = "data-agentguard-i18n-pending";
+  const BOOT_PENDING_DATASET_KEY = "agentguardI18nPending";
+  const BOOT_STYLE_ID = "agentguard-i18n-boot-style";
+  const BOOT_STYLE_TEXT = `html[${BOOT_PENDING_ATTRIBUTE}="zh"] body { visibility: hidden; }`;
   const EXACT_TRANSLATIONS = {
     zh: {
       "Sign In - AgentGuard": "登录 - AgentGuard",
@@ -42,7 +47,8 @@
       Plugins: "插件",
       Labels: "标签",
       Rules: "规则",
-      User: "用户",
+      "User Centre": "用户中心",
+      User: "用户中心",
       Doc: "文档",
       GitHub: "GitHub",
       DashBoard: "仪表盘",
@@ -71,6 +77,18 @@
       "Choose which registered agent you want to keep in view across the frontend.": "选择你希望在整个前端中持续关注的已注册智能体。",
       "No agents are discoverable yet. Sync the tool catalog after agents register tools.": "暂时还没有已发现的智能体。请在智能体注册后同步工具目录。",
       "No tools registered.": "尚未注册任何工具。",
+      "No skills registered.": "尚未注册任何 Skill。",
+      "No MCP services registered.": "尚未注册任何 MCP 服务。",
+      "Skills: {items}": "Skills：{items}",
+      "MCP: {items}": "MCP：{items}",
+      "Delete": "删除",
+      "Deleting...": "删除中…",
+      "Only LangChain agents can be deleted from this page.": "此页面仅支持删除 LangChain 智能体。",
+      "Delete {agent}? This unregisters the agent and deletes its sessions.": "确定删除 {agent} 吗？这会注销该智能体并删除其会话。",
+      "Deleting {agent}...": "正在删除 {agent}…",
+      "Deleted {agent}.": "已删除 {agent}。",
+      "Delete failed. Agent catalog was not changed.": "删除失败，智能体目录未发生变更。",
+      "Now watching {agent}.": "正在监控 {agent}。",
       "Refreshing agent catalog...": "正在刷新智能体目录…",
       "Syncing agent catalog...": "正在同步智能体目录…",
       "Synced just now": "刚刚已同步",
@@ -95,6 +113,10 @@
       "Configure server and client plugin scopes for the selected agent.": "为选中的智能体配置服务端与客户端插件范围。",
       "Phase not declared": "未声明阶段",
       "No plugin description provided.": "未提供插件描述。",
+      "Select an agent to view server plugins.": "请先选择一个智能体以查看服务端插件。",
+      "Select an agent to view client plugins.": "请先选择一个智能体以查看客户端插件。",
+      "On": "开启",
+      "Off": "关闭",
       "Select an agent first.": "请先选择一个智能体。",
       "Using server default plugin config": "使用服务端默认插件配置",
       "Current plugins": "当前插件",
@@ -134,6 +156,8 @@
       "Select category": "选择类别",
       "Select value": "选择值",
       "Select category first": "请先选择类别",
+      "Labels to write for {tool}:": "{tool} 待写入的标签：",
+      "Remove": "移除",
       "Choose an agent first.": "请先选择一个智能体。",
       "Tool catalog refreshed.": "工具目录已刷新。",
       "Showing the built-in empty tool catalog fallback.": "正在显示内置的空工具目录兜底数据。",
@@ -168,6 +192,8 @@
       Unreachable: "不可达",
       "No target summary available.": "没有可用的目标摘要。",
       "No recent traffic in the current runtime window.": "当前运行时窗口内暂无最近流量。",
+      "No runtime sessions have been created for this agent yet.": "该智能体尚未创建任何运行时会话。",
+      "Close": "关闭",
       "No pending human-check tickets right now.": "当前没有待处理的人审工单。",
       Approve: "批准",
       Deny: "拒绝",
@@ -643,8 +669,13 @@
   }
 
   function readStoredLanguage() {
+    const cookieLanguage = readCookieLanguage();
+    if (cookieLanguage) {
+      return cookieLanguage;
+    }
     try {
-      return normalizeLanguage(window.localStorage?.getItem(LANGUAGE_KEY));
+      const storedValue = String(window.localStorage?.getItem(LANGUAGE_KEY) || "").trim().toLowerCase();
+      return SUPPORTED_LANGUAGES.has(storedValue) ? storedValue : DEFAULT_LANGUAGE;
     } catch {
       return DEFAULT_LANGUAGE;
     }
@@ -658,12 +689,101 @@
     return currentLanguage() === "zh" ? "zh-CN" : "en-US";
   }
 
+  function readCookieLanguage() {
+    if (typeof document === "undefined") {
+      return "";
+    }
+    const rawCookie = String(document.cookie || "");
+    if (!rawCookie) {
+      return "";
+    }
+    const prefix = `${LANGUAGE_KEY}=`;
+    const entry = rawCookie.split(";").map((item) => item.trim()).find((item) => item.startsWith(prefix));
+    if (!entry) {
+      return "";
+    }
+    const rawValue = entry.slice(prefix.length).trim().toLowerCase();
+    return SUPPORTED_LANGUAGES.has(rawValue) ? rawValue : "";
+  }
+
+  function currentServerLanguage() {
+    if (typeof document === "undefined" || !document.documentElement || typeof document.documentElement.getAttribute !== "function") {
+      return "";
+    }
+    const rawValue = String(document.documentElement.getAttribute(SERVER_LANGUAGE_ATTRIBUTE) || "").trim().toLowerCase();
+    return SUPPORTED_LANGUAGES.has(rawValue) ? rawValue : "";
+  }
+
   function persistLanguage(language) {
+    const normalized = normalizeLanguage(language);
     try {
-      window.localStorage?.setItem(LANGUAGE_KEY, normalizeLanguage(language));
+      window.localStorage?.setItem(LANGUAGE_KEY, normalized);
     } catch {
       // Ignore localStorage write errors in preview mode.
     }
+    try {
+      if (typeof document !== "undefined") {
+        document.cookie = `${LANGUAGE_KEY}=${encodeURIComponent(normalized)}; Path=/; Max-Age=31536000; SameSite=Lax`;
+      }
+    } catch {
+      // Ignore cookie write errors in preview mode.
+    }
+  }
+
+  function ensureBootStyle() {
+    if (typeof document === "undefined" || !document.head || typeof document.createElement !== "function") {
+      return;
+    }
+    if (typeof document.getElementById === "function" && document.getElementById(BOOT_STYLE_ID)) {
+      return;
+    }
+    const style = document.createElement("style");
+    style.id = BOOT_STYLE_ID;
+    if (typeof style.setAttribute === "function") {
+      style.setAttribute("id", BOOT_STYLE_ID);
+    }
+    style.textContent = BOOT_STYLE_TEXT;
+    document.head.appendChild(style);
+  }
+
+  function clearBootPendingState() {
+    if (typeof document === "undefined" || !document.documentElement) {
+      return;
+    }
+    if (typeof document.documentElement.removeAttribute === "function") {
+      document.documentElement.removeAttribute(BOOT_PENDING_ATTRIBUTE);
+    }
+    if (document.documentElement.dataset) {
+      delete document.documentElement.dataset[BOOT_PENDING_DATASET_KEY];
+    }
+    const bootStyle = typeof document.getElementById === "function" ? document.getElementById(BOOT_STYLE_ID) : null;
+    if (bootStyle && typeof bootStyle.remove === "function") {
+      bootStyle.remove();
+    }
+  }
+
+  function prepareBootLanguage(language) {
+    if (typeof document === "undefined" || !document.documentElement) {
+      return;
+    }
+    const normalized = normalizeLanguage(language);
+    const serverLanguage = currentServerLanguage();
+    document.documentElement.lang = normalized === "zh" ? "zh-CN" : "en";
+    if (serverLanguage === normalized) {
+      clearBootPendingState();
+      return;
+    }
+    if (normalized !== "zh") {
+      clearBootPendingState();
+      return;
+    }
+    if (typeof document.documentElement.setAttribute === "function") {
+      document.documentElement.setAttribute(BOOT_PENDING_ATTRIBUTE, "zh");
+    }
+    if (document.documentElement.dataset) {
+      document.documentElement.dataset[BOOT_PENDING_DATASET_KEY] = "zh";
+    }
+    ensureBootStyle();
   }
 
   function normalizeWhitespace(value) {
@@ -827,16 +947,19 @@
     if (typeof document === "undefined") {
       return;
     }
+    const language = currentLanguage();
+    const serverLanguage = currentServerLanguage();
     if (document.documentElement) {
-      document.documentElement.lang = currentLanguage() === "zh" ? "zh-CN" : "en";
+      document.documentElement.lang = language === "zh" ? "zh-CN" : "en";
     }
     if (document.title) {
       document.title = translateValue(document.title);
     }
-    if (document.body) {
+    if (document.body && serverLanguage !== language) {
       applyToElement(document.body);
     }
     renderLanguageToggle();
+    clearBootPendingState();
   }
 
   function renderLanguageToggle() {
@@ -897,9 +1020,9 @@
     return normalized;
   }
 
-  if (currentLanguage() !== "zh") {
-    persistLanguage(DEFAULT_LANGUAGE);
-  }
+  const initialLanguage = currentLanguage();
+  prepareBootLanguage(initialLanguage);
+  persistLanguage(initialLanguage);
 
   window.AgentGuardI18n = {
     getLanguage: currentLanguage,

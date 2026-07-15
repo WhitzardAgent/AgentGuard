@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from email.utils import formatdate
+from html import escape as html_escape
+from html.parser import HTMLParser
 from http import HTTPStatus
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import json
@@ -11,6 +14,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import unquote, urljoin, urlparse
 from urllib.request import Request, urlopen
+import re
 
 # The mock backend is an optional offline-preview helper. Production deployments
 # proxy to a real AgentGuard server and do not require it.
@@ -119,6 +123,241 @@ PAGE_TAB_KEYS = {
 }
 
 SIDEBAR_TABS = ("home", "agents", "plugins", "skills", "mcps", "user", "labels", "rules", "runtime")
+LANGUAGE_COOKIE_NAME = "agentguard.language"
+SERVER_LANGUAGE_ATTRIBUTE = "data-agentguard-server-language"
+_SUPPORTED_TEMPLATE_LANGUAGES = {"en", "zh"}
+_TRANSLATABLE_ATTRIBUTES = {"title", "aria-label", "placeholder"}
+_EXCLUDED_TRANSLATION_TAGS = {"script", "style"}
+_EXPLICIT_ATTRIBUTE_TRANSLATIONS = {
+    "data-i18n-title": "title",
+    "data-i18n-aria-label": "aria-label",
+}
+
+
+def _normalize_template_language(language: str | None) -> str:
+    normalized = str(language or "").strip().lower()
+    return normalized if normalized in _SUPPORTED_TEMPLATE_LANGUAGES else "en"
+
+
+def _normalize_template_whitespace(value: str) -> str:
+    return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def _extract_zh_translations() -> dict[str, str]:
+    content = (STATIC_DIR / "common" / "i18n.js").read_text(encoding="utf-8")
+    start = content.find("zh: {")
+    if start < 0:
+        return {}
+    brace_start = content.find("{", start)
+    if brace_start < 0:
+        return {}
+    depth = 0
+    block_end = -1
+    for index in range(brace_start, len(content)):
+        char = content[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                block_end = index
+                break
+    if block_end < 0:
+        return {}
+    block = content[brace_start + 1:block_end]
+    pattern = re.compile(r'^(?:"((?:\\.|[^"\\])*)"|([A-Za-z_][A-Za-z0-9_]*)):\s*"((?:\\.|[^"\\])*)",?$')
+    translations: dict[str, str] = {}
+    for raw_line in block.splitlines():
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("//"):
+            continue
+        match = pattern.match(stripped)
+        if not match:
+            continue
+        quoted_key, bare_key, raw_value = match.groups()
+        key = json.loads(f'"{quoted_key}"') if quoted_key is not None else str(bare_key)
+        value = json.loads(f'"{raw_value}"')
+        translations[key] = value
+    return translations
+
+
+EXACT_ZH_TEMPLATE_TRANSLATIONS = _extract_zh_translations()
+
+
+def _translate_template_key(key: str, language: str) -> str:
+    if language != "zh":
+        return key
+    normalized = _normalize_template_whitespace(key)
+    if not normalized:
+        return key
+    return EXACT_ZH_TEMPLATE_TRANSLATIONS.get(normalized, key)
+
+
+def _translate_template_value(value: str, language: str) -> str:
+    if language != "zh":
+        return value
+    normalized = _normalize_template_whitespace(value)
+    if not normalized:
+        return value
+    translated = EXACT_ZH_TEMPLATE_TRANSLATIONS.get(normalized)
+    if not translated:
+        return value
+    leading_match = re.match(r"^\s*", value)
+    trailing_match = re.search(r"\s*$", value)
+    leading = leading_match.group(0) if leading_match else ""
+    trailing = trailing_match.group(0) if trailing_match else ""
+    return f"{leading}{translated}{trailing}"
+
+
+class _TemplateLocalizer(HTMLParser):
+    def __init__(self, language: str) -> None:
+        super().__init__(convert_charrefs=False)
+        self.language = _normalize_template_language(language)
+        self.parts: list[str] = []
+        self._excluded_stack: list[str] = []
+        self._explicit_skip_stack: list[str] = []
+
+    def render(self, content: str) -> str:
+        self.feed(content)
+        self.close()
+        return "".join(self.parts)
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        lower_tag = tag.lower()
+        if self._explicit_skip_stack:
+            self._explicit_skip_stack.append(lower_tag)
+            return
+        self.parts.append(self._format_start_tag(tag, attrs, self_closing=False))
+        explicit_mode, explicit_key = self._explicit_binding(attrs)
+        if explicit_mode and explicit_key is not None:
+            translated = _translate_template_key(explicit_key, self.language)
+            if explicit_mode == "html":
+                self.parts.append(translated)
+            else:
+                self.parts.append(html_escape(translated))
+            self._explicit_skip_stack.append(lower_tag)
+            return
+        if lower_tag in _EXCLUDED_TRANSLATION_TAGS:
+            self._excluded_stack.append(lower_tag)
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if self._explicit_skip_stack:
+            return
+        self.parts.append(self._format_start_tag(tag, attrs, self_closing=True))
+
+    def handle_endtag(self, tag: str) -> None:
+        lower_tag = tag.lower()
+        if self._explicit_skip_stack:
+            if self._explicit_skip_stack[-1] == lower_tag:
+                self._explicit_skip_stack.pop()
+                if not self._explicit_skip_stack:
+                    self.parts.append(f"</{tag}>")
+            return
+        self.parts.append(f"</{tag}>")
+        if self._excluded_stack and self._excluded_stack[-1] == lower_tag:
+            self._excluded_stack.pop()
+
+    def handle_data(self, data: str) -> None:
+        if self._excluded_stack or self._explicit_skip_stack:
+            if self._excluded_stack:
+                self.parts.append(data)
+            return
+        self.parts.append(_translate_template_value(data, self.language))
+
+    def handle_comment(self, data: str) -> None:
+        if self._explicit_skip_stack:
+            return
+        self.parts.append(f"<!--{data}-->")
+
+    def handle_decl(self, decl: str) -> None:
+        if self._explicit_skip_stack:
+            return
+        self.parts.append(f"<!{decl}>")
+
+    def handle_entityref(self, name: str) -> None:
+        if self._explicit_skip_stack:
+            return
+        self.parts.append(f"&{name};")
+
+    def handle_charref(self, name: str) -> None:
+        if self._explicit_skip_stack:
+            return
+        self.parts.append(f"&#{name};")
+
+    def handle_pi(self, data: str) -> None:
+        if self._explicit_skip_stack:
+            return
+        self.parts.append(f"<?{data}>")
+
+    def unknown_decl(self, data: str) -> None:
+        if self._explicit_skip_stack:
+            return
+        self.parts.append(f"<![{data}]>")
+
+    def _explicit_binding(self, attrs: list[tuple[str, str | None]]) -> tuple[str, str | None]:
+        if self.language != "zh" or self._excluded_stack:
+            return "", None
+        attr_map = {name: value for name, value in attrs if value is not None}
+        if attr_map.get("data-i18n-html"):
+            return "html", str(attr_map["data-i18n-html"])
+        if attr_map.get("data-i18n-value"):
+            return "text", str(attr_map["data-i18n-value"])
+        if attr_map.get("data-i18n"):
+            return "text", str(attr_map["data-i18n"])
+        return "", None
+
+    def _format_start_tag(self, tag: str, attrs: list[tuple[str, str | None]], *, self_closing: bool) -> str:
+        serialized_attrs: list[str] = []
+        excluded = bool(self._excluded_stack) or tag.lower() in _EXCLUDED_TRANSLATION_TAGS
+        attr_map = {name: value for name, value in attrs if value is not None}
+        seen_names: set[str] = set()
+        for name, value in attrs:
+            if value is None:
+                serialized_attrs.append(name)
+                seen_names.add(name)
+                continue
+            next_value = value
+            if not excluded and self.language == "zh":
+                explicit_key = None
+                for binding_name, target_name in _EXPLICIT_ATTRIBUTE_TRANSLATIONS.items():
+                    if target_name == name and attr_map.get(binding_name):
+                        explicit_key = str(attr_map[binding_name])
+                        break
+                if explicit_key is not None:
+                    next_value = _translate_template_key(explicit_key, self.language)
+                elif name in _TRANSLATABLE_ATTRIBUTES:
+                    next_value = _translate_template_value(value, self.language).strip() or value
+            serialized_attrs.append(f'{name}="{html_escape(next_value, quote=True)}"')
+            seen_names.add(name)
+        if not excluded and self.language == "zh":
+            for binding_name, target_name in _EXPLICIT_ATTRIBUTE_TRANSLATIONS.items():
+                binding_value = attr_map.get(binding_name)
+                if binding_value and target_name not in seen_names:
+                    translated = _translate_template_key(str(binding_value), self.language)
+                    serialized_attrs.append(f'{target_name}="{html_escape(translated, quote=True)}"')
+        joined_attrs = f" {' '.join(serialized_attrs)}" if serialized_attrs else ""
+        suffix = " />" if self_closing else ">"
+        return f"<{tag}{joined_attrs}{suffix}"
+
+
+def _inject_server_language(content: str, language: str) -> str:
+    normalized = _normalize_template_language(language)
+    html_lang = "zh-CN" if normalized == "zh" else "en"
+
+    def repl(match: re.Match[str]) -> str:
+        attrs = match.group(1) or ""
+        attrs = re.sub(r'\s+lang="[^"]*"', "", attrs)
+        attrs = re.sub(rf'\s+{SERVER_LANGUAGE_ATTRIBUTE}="[^"]*"', "", attrs)
+        return f'<html{attrs} lang="{html_lang}" {SERVER_LANGUAGE_ATTRIBUTE}="{normalized}">'
+
+    return re.sub(r"<html([^>]*)>", repl, content, count=1)
+
+
+def _localize_template_content(content: str, language: str) -> str:
+    normalized = _normalize_template_language(language)
+    if normalized == "zh":
+        content = _TemplateLocalizer(normalized).render(content)
+    return _inject_server_language(content, normalized)
 
 
 class FrontendPreviewHandler(BaseHTTPRequestHandler):
@@ -507,7 +746,7 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
         }
         for placeholder, value in replacements.items():
             content = content.replace(placeholder, value)
-        return content
+        return _localize_template_content(content, self._request_language())
 
     @staticmethod
     def _render_sidebar(active_tab: str) -> str:
@@ -516,6 +755,18 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
             active_class = " active" if tab_name == active_tab else ""
             content = content.replace(f"{{{{ {tab_name}_active }}}}", active_class)
         return content
+
+    def _request_language(self) -> str:
+        cookie_header = self.headers.get("Cookie", "")
+        if not cookie_header:
+            return "en"
+        jar = SimpleCookie()
+        try:
+            jar.load(cookie_header)
+        except Exception:
+            return "en"
+        morsel = jar.get(LANGUAGE_COOKIE_NAME)
+        return _normalize_template_language(morsel.value if morsel else "en")
 
     def _proxy(self, upstream_path: str, *, method: str, query: str = "") -> None:
         target_url = urljoin(f"{API_BASE_URL}/", self._backend_upstream_path(upstream_path))

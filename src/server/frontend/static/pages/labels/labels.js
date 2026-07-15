@@ -27,10 +27,10 @@ function selectedAgentDisplayName() {
   return String(shell?.getState?.().selectedAgentLabel || selectedAgentId || "").trim();
 }
 
-shell?.setPageContext({
-  title: "Tool Labels",
-  description: "Inspect the tool catalog, tune label values, and keep the shared label surface clean.",
-});
+function copy(key, fallback, variables = {}) {
+  return shell?.getPageCopy?.(key, fallback, variables) || String(fallback || "");
+}
+
 
 function getToolMeta(toolKey) {
   return toolData?.findToolByKey?.(toolCatalog, toolKey) || null;
@@ -58,8 +58,8 @@ function renderNoAgentState() {
   configuredToolLabelsBody.innerHTML = "";
   labelRows = [];
   renderLabelRows();
-  updateSyncStatus("Choose an agent first to load that agent's tools.");
-  shell?.setToolStatus("Waiting for agent selection");
+  updateSyncStatus(copy("no-agent-tools", "Choose an agent first to load that agent's tools."));
+  shell?.setToolStatus(copy("waiting-agent-selection", "Waiting for agent selection"));
 }
 
 function renderToolOptions() {
@@ -68,7 +68,7 @@ function renderToolOptions() {
 
   const placeholder = document.createElement("option");
   placeholder.value = "";
-  placeholder.textContent = "Select a tool";
+  placeholder.textContent = copy("select-tool", "Select a tool");
   placeholder.disabled = true;
   placeholder.hidden = true;
   placeholder.selected = !currentValue;
@@ -100,14 +100,14 @@ function updatePreview() {
   pendingLabelPreview.innerHTML = "";
   const tool = getToolMeta(toolSelect.value);
   pendingLabelTitle.textContent = tool
-    ? `Labels to write for ${toolDisplayName(tool)}:`
-    : "Labels to write:";
+    ? copy("labels-to-write-for", "Labels to write for {tool}:", { tool: toolDisplayName(tool) })
+    : copy("labels-to-write", "Labels to write:");
 
   const completeRows = labelRows.filter((row) => row.category && row.value);
   if (!tool) {
     const empty = document.createElement("span");
     empty.className = "subtle";
-    empty.textContent = "Select a tool first.";
+    empty.textContent = copy("select-tool-first", "Select a tool first.");
     pendingLabelPreview.appendChild(empty);
     return;
   }
@@ -115,7 +115,7 @@ function updatePreview() {
   if (!completeRows.length) {
     const empty = document.createElement("span");
     empty.className = "subtle";
-    empty.textContent = "No label rows selected yet. Click + to add one.";
+    empty.textContent = copy("no-label-rows", "No label rows selected yet. Click + to add one.");
     pendingLabelPreview.appendChild(empty);
     return;
   }
@@ -211,8 +211,8 @@ function renderEmptyLabelRows() {
   const empty = document.createElement("div");
   empty.className = "empty-state";
   empty.textContent = toolSelect.value
-    ? "Click + to add a label row."
-    : "Select a tool, then click + to add a label row.";
+    ? copy("add-row-empty", "Click + to add a label row.")
+    : copy("add-row-before-tool", "Select a tool, then click + to add a label row.");
   labelConfigList.appendChild(empty);
 }
 
@@ -221,7 +221,7 @@ function createCategorySelect(row, index) {
 
   categorySelect.appendChild(createOption({
     value: "",
-    text: "Select category",
+    text: copy("select-category", "Select category"),
     selected: !row.category,
     disabled: true,
     hidden: true,
@@ -250,7 +250,7 @@ function createValueSelect(row, index) {
 
   valueSelect.appendChild(createOption({
     value: "",
-    text: row.category ? "Select value" : "Select category first",
+    text: row.category ? copy("select-value", "Select value") : copy("select-category-first", "Select category first"),
     selected: !row.value,
     disabled: true,
     hidden: true,
@@ -278,7 +278,7 @@ function createRemoveButton(index) {
   const removeButton = document.createElement("button");
   removeButton.className = "btn";
   removeButton.type = "button";
-  removeButton.textContent = "Remove";
+  removeButton.textContent = copy("remove", "Remove");
 
   removeButton.addEventListener("click", () => {
     labelRows.splice(index, 1);

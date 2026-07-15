@@ -112,6 +112,7 @@
     const root = options.root;
     const hint = options.hint;
     const onChange = options.onChange || (() => {});
+    const getCopy = typeof options.getCopy === "function" ? options.getCopy : (_key, fallback) => String(fallback || "");
     let segments = [];
     let finished = false;
 
@@ -121,7 +122,7 @@
 
     function syncHint() {
       if (!segments.length) {
-        hint.textContent = "Build Tool TRACE by adding one or more concrete or wildcard segments. Any tool or trigger stage filter refers to the final tool on the trace.";
+        hint.textContent = getCopy("rules-trace-hint", "Build Tool TRACE by adding one or more concrete or wildcard segments. Any tool or trigger stage filter refers to the final tool on the trace.");
         hint.classList.remove("path-builder-error");
         return;
       }
@@ -163,7 +164,7 @@
 
       const label = document.createElement("span");
       label.className = "path-summary-label";
-      label.textContent = "PATH:";
+      label.textContent = getCopy("rules-path-label", "PATH:");
       summary.appendChild(label);
 
       const text = document.createElement("div");
@@ -178,7 +179,7 @@
       if (!segments.length) {
         const empty = document.createElement("div");
         empty.className = "empty-state";
-        empty.textContent = "TRACE is empty. Click + to add the first segment.";
+        empty.textContent = getCopy("rules-trace-empty", "TRACE is empty. Click + to add the first segment.");
         root.appendChild(empty);
         return;
       }
@@ -189,7 +190,7 @@
 
         const step = document.createElement("span");
         step.className = "path-segment-step";
-        step.textContent = index === 0 ? "Start" : `Step ${index + 1}`;
+        step.textContent = index === 0 ? getCopy("rules-start", "Start") : `Step ${index + 1}`;
 
         const field = document.createElement("div");
         field.className = "field path-segment-field";
@@ -215,7 +216,7 @@
         const actions = document.createElement("div");
         actions.className = "path-row-actions";
         if (index > 0) {
-          actions.appendChild(createIconButton("close.png", "Delete path segment", () => removeSegment(index)));
+          actions.appendChild(createIconButton("close.png", getCopy("rules-delete-path-segment", "Delete path segment"), () => removeSegment(index)));
         } else {
           actions.setAttribute("aria-hidden", "true");
           actions.classList.add("path-row-actions-placeholder");

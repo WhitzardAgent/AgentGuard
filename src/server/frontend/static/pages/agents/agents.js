@@ -11,13 +11,13 @@
   let selectedAgentId = shell?.getState?.().selectedAgentId || "";
   const deletingAgentIds = new Set();
 
-  shell?.setPageContext({
-    title: "Agent Selection",
-    description: "Choose which registered agent you want to keep in view across the frontend.",
-  });
 
   function showToast(message, tone) {
     window.AgentGuardUI.showToast(message, tone);
+  }
+
+  function copy(key, fallback, variables = {}) {
+    return shell?.getPageCopy?.(key, fallback, variables) || String(fallback || "");
   }
 
   function updateSyncStatus(message) {
@@ -62,7 +62,7 @@
     const items = Array.isArray(agentCatalog) ? agentCatalog.slice() : [];
 
     if (!items.length) {
-      agentList.innerHTML = '<div class="empty-state">No agents are discoverable yet. Sync the tool catalog after agents register tools.</div>';
+      agentList.innerHTML = `<div class="empty-state">${escapeHtml(copy("empty-agent-list", "No agents are discoverable yet. Sync the tool catalog after agents register tools."))}</div>`;
       return;
     }
 
@@ -101,14 +101,14 @@
             <span class="pill">${mcpCount} MCP${mcpCount === 1 ? "" : "s"}</span>
           </div>
           ${subtitle ? `<p class="subtle">${escapeHtml(subtitle)}</p>` : ""}
-          <p class="subtle">${escapeHtml(toolPreviewText || "No tools registered.")}</p>
-          <p class="subtle">${escapeHtml(skillPreviewText ? `Skills: ${skillPreviewText}` : "No skills registered.")}</p>
-          <p class="subtle">${escapeHtml(mcpPreviewText ? `MCP: ${mcpPreviewText}` : "No MCP services registered.")}</p>
+          <p class="subtle">${escapeHtml(toolPreviewText || copy("no-tools-registered", "No tools registered."))}</p>
+          <p class="subtle">${escapeHtml(skillPreviewText ? copy("skills-preview", "Skills: {items}", { items: skillPreviewText }) : copy("no-skills-registered", "No skills registered."))}</p>
+          <p class="subtle">${escapeHtml(mcpPreviewText ? copy("mcps-preview", "MCP: {items}", { items: mcpPreviewText }) : copy("no-mcps-registered", "No MCP services registered."))}</p>
         </button>
         ${showDelete ? `
           <div class="agent-card-actions">
             <button class="link-button danger agent-delete-button" type="button" data-agent-action="delete" ${deletingAgentIds.has(agentId) ? "disabled" : ""}>
-              ${deletingAgentIds.has(agentId) ? "Deleting..." : "Delete"}
+              ${deletingAgentIds.has(agentId) ? copy("deleting", "Deleting...") : copy("delete", "Delete")}
             </button>
           </div>
         ` : ""}
@@ -117,7 +117,7 @@
       card.querySelector('[data-agent-action="select"]')?.addEventListener("click", () => {
         shell?.setSelectedAgent?.(agentId);
         renderAgentList();
-        showToast(`Now watching ${displayName}.`, "success");
+        showToast(copy("watching-agent", "Now watching {agent}.", { agent: displayName }), "success");
         if (typeof window !== "undefined" && window.location) {
           window.location.assign("/plugins.html");
         }
@@ -137,11 +137,11 @@
       return;
     }
     if (!canDeleteAgent(agent)) {
-      showToast("Only LangChain agents can be deleted from this page.", "warning");
+      showToast(copy("only-langchain-delete", "Only LangChain agents can be deleted from this page."), "warning");
       return;
     }
     const confirmed = window.confirm(
-      `Delete ${displayName || agentId}? This unregisters the agent and deletes its sessions.`,
+      copy("confirm-delete-agent", "Delete {agent}? This unregisters the agent and deletes its sessions.", { agent: displayName || agentId }),
     );
     if (!confirmed) {
       return;
@@ -149,7 +149,7 @@
 
     deletingAgentIds.add(agentId);
     renderAgentList();
-    updateSyncStatus(`Deleting ${displayName || agentId}...`);
+    updateSyncStatus(copy("deleting-agent", "Deleting {agent}...", { agent: displayName || agentId }));
 
     try {
       await api.fetchJson(`/api/agents/${encodeURIComponent(agentId)}`, {
@@ -161,12 +161,12 @@
         shell?.setSelectedAgent?.("");
       }
       renderAgentList();
-      showToast(`Deleted ${displayName || agentId}.`, "success");
+      showToast(copy("deleted-agent", "Deleted {agent}.", { agent: displayName || agentId }), "success");
       await refreshAgentCatalog();
     } catch (error) {
       showToast(api.formatErrorMessage(error, "Failed to delete agent."), "warning");
       renderAgentList();
-      updateSyncStatus("Delete failed. Agent catalog was not changed.");
+      updateSyncStatus(copy("delete-agent-failed", "Delete failed. Agent catalog was not changed."));
     } finally {
       deletingAgentIds.delete(agentId);
       renderAgentList();

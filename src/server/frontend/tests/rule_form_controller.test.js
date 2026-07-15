@@ -199,6 +199,18 @@ function setupController() {
       getState() {
         return { selectedAgentId: "" };
       },
+      getPageCopy(key, fallback, variables = {}) {
+        const dictionary = {
+          "rules-guided-builder": "引导式规则构建器",
+          "rules-create-subtitle": "按步骤创建新规则。",
+          "rules-default-description": "用这个字段记录面向运维人员的规则说明。",
+          "rules-edit-path": "编辑路径",
+          "rules-add-path": "添加路径段",
+          "rules-select-tool-optional": "选择工具（可选）",
+        };
+        const template = dictionary[key] || String(fallback || "");
+        return String(template).replace(/\{(\w+)\}/g, (match, name) => (Object.prototype.hasOwnProperty.call(variables, name) ? String(variables[name] ?? "") : match));
+      },
     },
     model: {
       pathSymbolsFromState(pathState) {
@@ -359,4 +371,16 @@ test("rule form controller includes ON clause in trace mode rules", () => {
 
   assert.equal(rule.entryMode, "trace");
   assert.equal(rule.onClause, "tool_call.requested(email.send)");
+});
+
+
+test("rule form controller reads builder copy from shell page copy", () => {
+  const { controller, elements } = setupController();
+
+  controller.resetRuleForm();
+  controller.renderPreview();
+
+  assert.equal(elements.ruleDescriptionInput.value, "用这个字段记录面向运维人员的规则说明。");
+  assert.equal(elements.pathContinueButton.attributes["aria-label"], "添加路径段");
+  assert.equal(elements.pathContinueButton.attributes.title, "添加路径段");
 });

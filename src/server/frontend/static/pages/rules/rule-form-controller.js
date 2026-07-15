@@ -55,6 +55,10 @@
     let builderMode = "create";
     let currentStep = 1;
 
+    function copy(key, fallback, variables = {}) {
+      return shell?.getPageCopy?.(key, fallback, variables) || String(fallback || "");
+    }
+
     function currentToolCatalog() {
       return toolData?.loadToolCatalog?.(selectedAgentId) || [];
     }
@@ -171,6 +175,7 @@
         syncWizardUI();
         renderPreview();
       },
+      getCopy: copy,
     });
 
     const conditionBuilder = window.AgentGuardConditionBuilder.createConditionBuilder({
@@ -261,7 +266,7 @@
 
       const placeholder = document.createElement("option");
       placeholder.value = "";
-      placeholder.textContent = tools.length ? (emptyLabel || "Select tool") : "No tools available";
+      placeholder.textContent = tools.length ? (emptyLabel || copy("rules-select-tool", "Select tool")) : copy("rules-no-tools", "No tools available");
       placeholder.disabled = !allowEmpty;
       placeholder.hidden = !allowEmpty;
       placeholder.selected = !selectedTool;
@@ -285,7 +290,7 @@
     }
 
     function renderOnToolOptions(catalog = toolData?.loadToolCatalog?.() || [], selectedTool = String(ruleOnInput.value || "").trim()) {
-      renderToolSelectOptions(ruleOnInput, catalog, selectedTool, { emptyLabel: "Select tool (optional)", allowEmpty: true });
+      renderToolSelectOptions(ruleOnInput, catalog, selectedTool, { emptyLabel: copy("rules-select-tool-optional", "Select tool (optional)"), allowEmpty: true });
       syncBuilderUI();
     }
 
@@ -458,7 +463,7 @@
       const rule = currentRule();
       if (step === 1) {
         if (!rule.name) {
-          return { ok: false, message: "Please enter a rule name first." };
+          return { ok: false, message: copy("rules-enter-name", "Please enter a rule name first.") };
         }
         return { ok: true, message: "" };
       }
@@ -474,10 +479,10 @@
       }
       if (step === 4) {
         if (!rule.action) {
-          return { ok: false, message: "Please select an action first." };
+          return { ok: false, message: copy("rules-select-action", "Please select an action first.") };
         }
         if (rule.action === "DEGRADE" && !rule.degradeTarget) {
-          return { ok: false, message: "Please select a DEGRADE target first." };
+          return { ok: false, message: copy("rules-select-degrade", "Please select a DEGRADE target first.") };
         }
         return { ok: true, message: "" };
       }
@@ -505,12 +510,12 @@
         returnToWizardButton.hidden = builderMode !== "edit";
       }
       if (ruleBuilderTitle) {
-        ruleBuilderTitle.textContent = builderMode === "edit" ? "Rule Editor" : "Guided Rule Builder";
+        ruleBuilderTitle.textContent = builderMode === "edit" ? copy("rules-rule-editor", "Rule Editor") : copy("rules-guided-builder", "Guided Rule Builder");
       }
       if (ruleBuilderSubtitle) {
         ruleBuilderSubtitle.textContent = builderMode === "edit"
-          ? "The legacy full-form editor is kept for modifying existing rules and drafts."
-          : "Create a new rule step by step.";
+          ? copy("rules-editor-subtitle", "The legacy full-form editor is kept for modifying existing rules and drafts.")
+          : copy("rules-create-subtitle", "Create a new rule step by step.");
       }
       if (ruleBuilderActions) {
         ruleBuilderActions.hidden = builderMode === "create" && currentStep < STEP_COUNT;
@@ -613,8 +618,8 @@
       if (pathContinueButtonIcon) {
         pathContinueButtonIcon.src = finished ? "/assets/modify.png" : "/assets/add.png";
       }
-      pathContinueButton?.setAttribute("aria-label", finished ? "Edit path" : "Add path segment");
-      pathContinueButton?.setAttribute("title", finished ? "Edit path" : "Add path segment");
+      pathContinueButton?.setAttribute("aria-label", finished ? copy("rules-edit-path", "Edit path") : copy("rules-add-path", "Add path segment"));
+      pathContinueButton?.setAttribute("title", finished ? copy("rules-edit-path", "Edit path") : copy("rules-add-path", "Add path segment"));
       changeHandler();
     }
 
@@ -622,7 +627,7 @@
       ruleNameInput.value = "";
       ruleActionInput.value = "";
       rulePromptInput.value = "";
-      ruleDescriptionInput.value = "Use this field to capture the operator-facing explanation for the rule.";
+      ruleDescriptionInput.value = copy("rules-default-description", "Use this field to capture the operator-facing explanation for the rule.");
       ruleSeverityInput.value = "";
       ruleCategoryInput.value = "";
       ruleReasonInput.value = "";

@@ -1114,7 +1114,7 @@ def test_runtime_page_renders_shared_sidebar_and_active_nav():
     assert 'href="/home.html">Home</a>' in body
     assert 'href="/agents.html">Agents</a>' in body
     assert 'href="/plugins.html"' in body
-    assert 'href="/user.html">User</a>' in body
+    assert 'href="/user.html">User Centre</a>' in body
     assert 'href="/runtime.html"' in body
     assert "active" in body
     assert 'href="/labels.html"' in body
@@ -1142,6 +1142,154 @@ def test_login_page_is_root_entrypoint():
     assert 'id="locale-toggle-button"' in body
     assert "Control Plane" not in body
     assert 'id="app-sidebar"' not in body
+
+
+def test_home_page_renders_chinese_when_language_cookie_set():
+    with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+        status, _headers, raw = _raw_request(
+            "GET",
+            preview.url,
+            "/home.html",
+            headers={"Cookie": "agentguard.language=zh"},
+        )
+
+    body = raw.decode("utf-8")
+    assert status == 200
+    assert 'data-agentguard-server-language="zh"' in body
+    assert 'lang="zh-CN"' in body
+    assert "AgentGuard 首页" in body
+    assert "首页" in body
+    assert "让你的智能体工作流变得可控。" in body
+
+
+def test_rules_page_renders_chinese_explicit_i18n_bindings_when_language_cookie_set():
+    with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+        status, _headers, raw = _raw_request(
+            "GET",
+            preview.url,
+            "/rules.html",
+            headers={"Cookie": "agentguard.language=zh"},
+        )
+
+    body = raw.decode("utf-8")
+    assert status == 200
+    assert 'data-agentguard-server-language="zh"' in body
+    assert "当你使用 <strong>Tool Trace</strong> 时" in body
+    assert 'aria-label="添加路径段"' in body
+    assert 'title="添加路径段"' in body
+    assert 'placeholder="该规则对应的 LLM 审查系统提示词。"' in body
+    assert 'id="agentguard-page-context-title">规则构建器</span>' in body
+    assert 'id="agentguard-page-context-description">从结构化输入构建规则、预览 DSL 输出，并管理未发布与已发布状态。</span>' in body
+    assert 'id="sidebar-current-user">当前用户</div>' in body
+
+
+
+def test_skills_page_renders_chinese_page_context_when_language_cookie_set():
+    with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+        status, _headers, raw = _raw_request(
+            "GET",
+            preview.url,
+            "/skills.html",
+            headers={"Cookie": "agentguard.language=zh"},
+        )
+
+    body = raw.decode("utf-8")
+    assert status == 200
+    assert 'data-agentguard-server-language="zh"' in body
+    assert 'aria-label="Skill 概览"' in body
+    assert 'title="刷新 Skill 目录"' in body
+    assert 'id="agentguard-page-context-title">Skill 安全检测</span>' in body
+    assert 'id="agentguard-page-context-description">查看已上报的 Skill，并为当前智能体运行静态检测。</span>' in body
+
+
+
+def test_agents_page_renders_chinese_template_copy_when_language_cookie_set():
+    with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+        status, _headers, raw = _raw_request(
+            "GET",
+            preview.url,
+            "/agents.html",
+            headers={"Cookie": "agentguard.language=zh"},
+        )
+
+    body = raw.decode("utf-8")
+    assert status == 200
+    assert 'data-agentguard-server-language="zh"' in body
+    assert 'id="agentguard-copy-no-tools-registered">尚未注册任何工具。</span>' in body
+    assert 'id="agentguard-copy-no-skills-registered">尚未注册任何 Skill。</span>' in body
+    assert 'id="agentguard-copy-delete">删除</span>' in body
+
+
+
+def test_labels_page_renders_chinese_template_copy_when_language_cookie_set():
+    with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+        status, _headers, raw = _raw_request(
+            "GET",
+            preview.url,
+            "/labels.html",
+            headers={"Cookie": "agentguard.language=zh"},
+        )
+
+    body = raw.decode("utf-8")
+    assert status == 200
+    assert 'data-agentguard-server-language="zh"' in body
+    assert 'id="agentguard-copy-select-tool">选择一个工具</span>' in body
+    assert 'id="agentguard-copy-labels-to-write-for">{tool} 待写入的标签：</span>' in body
+    assert 'id="agentguard-copy-remove">移除</span>' in body
+
+
+
+def test_plugins_page_renders_chinese_template_copy_when_language_cookie_set():
+    with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+        status, _headers, raw = _raw_request(
+            "GET",
+            preview.url,
+            "/plugins.html",
+            headers={"Cookie": "agentguard.language=zh"},
+        )
+
+    body = raw.decode("utf-8")
+    assert status == 200
+    assert 'data-agentguard-server-language="zh"' in body
+    assert 'id="agentguard-copy-no-agent-server-plugins">请先选择一个智能体以查看服务端插件。</span>' in body
+    assert 'id="agentguard-copy-switch-on">开启</span>' in body
+    assert 'id="agentguard-copy-switch-off">关闭</span>' in body
+
+
+
+def test_runtime_page_renders_chinese_template_copy_when_language_cookie_set():
+    with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+        status, _headers, raw = _raw_request(
+            "GET",
+            preview.url,
+            "/runtime.html",
+            headers={"Cookie": "agentguard.language=zh"},
+        )
+
+    body = raw.decode("utf-8")
+    assert status == 200
+    assert 'data-agentguard-server-language="zh"' in body
+    assert 'id="agentguard-copy-runtime-unreachable">不可达</span>' in body
+    assert 'id="agentguard-copy-runtime-empty-sessions">该智能体尚未创建任何运行时会话。</span>' in body
+    assert 'id="agentguard-copy-runtime-close">关闭</span>' in body
+
+
+
+def test_rules_page_renders_chinese_template_copy_when_language_cookie_set():
+    with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+        status, _headers, raw = _raw_request(
+            "GET",
+            preview.url,
+            "/rules.html",
+            headers={"Cookie": "agentguard.language=zh"},
+        )
+
+    body = raw.decode("utf-8")
+    assert status == 200
+    assert 'data-agentguard-server-language="zh"' in body
+    assert 'id="agentguard-copy-rules-guided-builder">引导式规则构建器</span>' in body
+    assert 'id="agentguard-copy-rules-edit-path">编辑路径</span>' in body
+    assert 'id="agentguard-copy-rules-trace-empty">TRACE 为空。点击 + 添加第一个段。</span>' in body
 
 
 def test_home_page_renders_intro_and_home_active_nav():
