@@ -1,6 +1,9 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const test = require("node:test");
 
 const { _private } = require("./index");
@@ -404,6 +407,91 @@ test("catalogContextForWorkflow uses n8n workflow owner as user", () => {
   assert.equal(context.metadata.n8n_project_name, "Personal");
 });
 
+test("syncWorkflowCatalog registers n8n workflow agent before syncing tools", async (t) => {
+  const calls = [];
+  const oldFetch = global.fetch;
+  const oldServerUrl = process.env.AGENTGUARD_SERVER_URL;
+  const oldApiKey = process.env.AGENTGUARD_API_KEY;
+  const oldKeyDir = process.env.AGENTGUARD_AGENT_KEY_DIR;
+  const keyDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-n8n-keys-"));
+  process.env.AGENTGUARD_SERVER_URL = "http://agentguard.test";
+  process.env.AGENTGUARD_API_KEY = "test-api-key";
+  process.env.AGENTGUARD_AGENT_KEY_DIR = keyDir;
+  global.fetch = async (url, options = {}) => {
+    const body = options.body ? JSON.parse(options.body) : {};
+    calls.push({ url: String(url), options, body });
+    if (String(url).endsWith("/v1/server/agents/register")) {
+      assert.equal(body.provider, "n8n");
+      assert.equal(body.external_agent_id, "wf-register-test");
+      assert.equal(body.agent_type, "workflow");
+      assert.equal(body.account_email, "owner@example.com");
+      assert.equal(body.metadata.display_agent_id, "n8n:wf-register-test");
+      assert.equal(body.public_key_jwk.kty, "OKP");
+      return {
+        ok: true,
+        json: async () => ({
+          status: "ok",
+          agent: {
+            agent_id: "ag_canonical_n8n",
+            agent_identity_code: "agic_test",
+            public_key_thumbprint: body.metadata.agent_public_key_thumbprint,
+          },
+          credential: {},
+          user_agent: { bound: true, user_id: 7 },
+        }),
+      };
+    }
+    if (String(url).endsWith("/v1/server/session/register")) {
+      assert.equal(body.context.agent_id, "ag_canonical_n8n");
+      assert.equal(body.context.metadata.agentguard_agent_id, "ag_canonical_n8n");
+      return { ok: true, json: async () => ({ status: "ok" }) };
+    }
+    if (String(url).endsWith("/v1/server/tools/sync")) {
+      assert.equal(body.context.agent_id, "ag_canonical_n8n");
+      return { ok: true, json: async () => ({ status: "ok", tool_count: body.tools.length }) };
+    }
+    return { ok: false, status: 404, json: async () => ({}) };
+  };
+  t.after(() => {
+    global.fetch = oldFetch;
+    restoreEnv("AGENTGUARD_SERVER_URL", oldServerUrl);
+    restoreEnv("AGENTGUARD_API_KEY", oldApiKey);
+    restoreEnv("AGENTGUARD_AGENT_KEY_DIR", oldKeyDir);
+    fs.rmSync(keyDir, { recursive: true, force: true });
+  });
+
+  const result = await _private.syncWorkflowCatalog({
+    id: "wf-register-test",
+    name: "Registered workflow",
+    active: true,
+    versionCounter: 5,
+    ownerUserId: "owner-1",
+    ownerUserEmail: "owner@example.com",
+    nodes: [
+      { id: "node-1", name: "Notify API", type: "n8n-nodes-base.httpRequest", parameters: {} },
+    ],
+    connections: {},
+  });
+
+  assert.equal(result.agent_id, "ag_canonical_n8n");
+  assert.deepEqual(
+    calls.map((call) => new URL(call.url).pathname),
+    [
+      "/v1/server/agents/register",
+      "/v1/server/session/register",
+      "/v1/server/tools/sync",
+    ]
+  );
+});
+
+function restoreEnv(name, value) {
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
+}
+
 test("buildRunNodeContext reads cached n8n workflow owner identity", () => {
   _private.cacheWorkflowIdentity({
     id: "wf-runtime-test",
@@ -430,6 +518,102 @@ test("buildRunNodeContext reads cached n8n workflow owner identity", () => {
   assert.equal(context.n8n_project_name, "Team");
   assert.equal(context.workflow_id, "wf-runtime-test");
   assert.equal(context.execution_id, "exec-1");
+});
+
+test("buildRunNodeContext uses n8n sessionId as external session", () => {
+  _private.cacheWorkflowIdentity({
+    id: "wf-session-test",
+    ownerUserId: "user-session",
+    ownerUserEmail: "owner@example.com",
+  });
+
+  const context = _private.buildRunNodeContext(
+    { id: "wf-session-test", name: "Session workflow" },
+    {
+      node: { id: "node-1", name: "Message a model", type: "@n8n/n8n-nodes-langchain.openAi" },
+      data: {
+        main: [[{ json: { sessionId: "3343066ded4b4b03babdd605c9bde44e", chatInput: "hello" } }]],
+      },
+    },
+    null,
+    0,
+    { executionId: "exec-llm-1" },
+    "manual"
+  );
+
+  assert.equal(context.execution_id, "exec-llm-1");
+  assert.equal(context.n8n_session_id, "3343066ded4b4b03babdd605c9bde44e");
+  assert.equal(context.external_session_id, "3343066ded4b4b03babdd605c9bde44e");
+});
+
+test("ensureN8nRuntimeAuth creates session from n8n sessionId before execution id", async (t) => {
+  const calls = [];
+  const oldFetch = global.fetch;
+  const oldServerUrl = process.env.AGENTGUARD_SERVER_URL;
+  const oldApiKey = process.env.AGENTGUARD_API_KEY;
+  const oldKeyDir = process.env.AGENTGUARD_AGENT_KEY_DIR;
+  const keyDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-n8n-session-keys-"));
+  process.env.AGENTGUARD_SERVER_URL = "http://agentguard.test";
+  process.env.AGENTGUARD_API_KEY = "test-api-key";
+  process.env.AGENTGUARD_AGENT_KEY_DIR = keyDir;
+  global.fetch = async (url, options = {}) => {
+    const body = options.body ? JSON.parse(options.body) : {};
+    calls.push({ url: String(url), body });
+    if (String(url).endsWith("/v1/server/agents/register")) {
+      return {
+        ok: true,
+        json: async () => ({
+          status: "ok",
+          agent: {
+            agent_id: "ag_n8n_session_test",
+            agent_identity_code: "agic_session_test",
+            public_key_thumbprint: body.metadata.agent_public_key_thumbprint,
+          },
+          credential: {},
+          user_agent: { bound: true, user_id: 7 },
+        }),
+      };
+    }
+    if (String(url).endsWith("/v1/server/session/create")) {
+      assert.equal(body.provider, "n8n");
+      assert.equal(body.agent_id, "ag_n8n_session_test");
+      assert.equal(body.account_email, "owner@example.com");
+      assert.equal(body.external_session_id, "3343066ded4b4b03babdd605c9bde44e");
+      assert.equal(body.metadata.execution_id, "exec-llm-1");
+      return {
+        ok: true,
+        json: async () => ({
+          session_id: "ags_n8n_reused",
+          session_token: "token",
+          user_id: "7",
+          expires_at: Math.floor(Date.now() / 1000) + 600,
+        }),
+      };
+    }
+    return { ok: false, status: 404, json: async () => ({}) };
+  };
+  t.after(() => {
+    global.fetch = oldFetch;
+    restoreEnv("AGENTGUARD_SERVER_URL", oldServerUrl);
+    restoreEnv("AGENTGUARD_API_KEY", oldApiKey);
+    restoreEnv("AGENTGUARD_AGENT_KEY_DIR", oldKeyDir);
+    fs.rmSync(keyDir, { recursive: true, force: true });
+  });
+
+  const auth = await _private.ensureN8nRuntimeAuth({
+    workflow_id: "wf-session-auth-test",
+    workflow_name: "Session auth workflow",
+    execution_id: "exec-llm-1",
+    n8n_session_id: "3343066ded4b4b03babdd605c9bde44e",
+    n8n_user_id: "owner-1",
+    n8n_user_email: "owner@example.com",
+  });
+
+  assert.equal(auth.session_id, "ags_n8n_reused");
+  assert.equal(
+    calls.map((call) => new URL(call.url).pathname).join(","),
+    "/v1/server/agents/register,/v1/server/session/create"
+  );
 });
 
 test("normalizeLLMOutput uses final output when no thought is present", () => {

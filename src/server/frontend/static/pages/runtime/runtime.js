@@ -482,8 +482,6 @@
       externalSessionId: String(item?.external_session_id || "-"),
       externalAccountEmail: String(item?.external_account_email || "-"),
       status: String(item?.status || "unknown").toLowerCase(),
-      createdAt: formatDateTime(item?.created_at),
-      lastSeenAt: formatDateTime(item?.last_seen_at),
       closedAt: formatDateTime(item?.closed_at),
       activeTokenCount: Number(item?.active_token_count || 0),
       latestTokenExpiresAt: formatDateTime(item?.latest_token_expires_at),
@@ -669,13 +667,13 @@
     elements.sessionBody.innerHTML = "";
     if (state.errors.sessions) {
       const row = document.createElement("tr");
-      row.innerHTML = `<td colspan="11"><div class="empty-state">${escapeHtml(state.errors.sessions)}</div></td>`;
+      row.innerHTML = `<td colspan="9"><div class="empty-state">${escapeHtml(state.errors.sessions)}</div></td>`;
       elements.sessionBody.appendChild(row);
       return;
     }
     if (!state.sessions.length) {
       const row = document.createElement("tr");
-      row.innerHTML = '<td colspan="11"><div class="empty-state">No runtime sessions have been created for this agent yet.</div></td>';
+      row.innerHTML = '<td colspan="9"><div class="empty-state">No runtime sessions have been created for this agent yet.</div></td>';
       elements.sessionBody.appendChild(row);
       return;
     }
@@ -689,8 +687,6 @@
         <td>${escapeHtml(item.externalSessionId)}</td>
         <td>${escapeHtml(item.externalAccountEmail)}</td>
         <td><span class="pill ${canClose ? "" : "muted"}">${escapeHtml(item.status.toUpperCase())}</span></td>
-        <td>${escapeHtml(item.createdAt)}</td>
-        <td>${escapeHtml(item.lastSeenAt)}</td>
         <td>${escapeHtml(item.closedAt)}</td>
         <td>${escapeHtml(formatNumber(item.activeTokenCount))}</td>
         <td>${escapeHtml(item.latestTokenExpiresAt)}</td>

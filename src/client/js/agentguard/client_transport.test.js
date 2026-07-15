@@ -30,6 +30,67 @@ test("remote guard client sends session identity headers including agent and use
   assert.equal(calls[0].options.headers["X-AgentGuard-Session-Key"], "sk-test");
 });
 
+test("remote guard client DPoP mode suppresses legacy identity headers", async () => {
+  const { RemoteGuardClient } = require("./u_guard/remote_client");
+  const calls = [];
+  global.fetch = async (url, options = {}) => {
+    calls.push({ url, options });
+    return {
+      ok: true,
+      async json() {
+        return { status: "ok", session_id: "ags_n8n_1", session_token: "token-2", user_id: "7", expires_at: 9999999999 };
+      },
+    };
+  };
+
+  const client = new RemoteGuardClient("http://server.test", {
+    api_key: "api-key",
+    session_id: "legacy-session",
+    agent_id: "legacy-agent",
+    user_id: "legacy-user",
+    session_key: "legacy-key",
+    use_dpop_auth: true,
+    legacy_identity_headers: false,
+    dpop_proof_factory: (method, url, token) => `proof:${method}:${url}:${token || ""}`,
+  });
+
+  await client.create_runtime_session({ provider: "n8n" });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].options.headers.Authorization, "Bearer api-key");
+  assert.equal(calls[0].options.headers.DPoP, "proof:POST:http://server.test/v1/server/session/create:");
+  assert.equal(calls[0].options.headers["X-AgentGuard-Session-Id"], undefined);
+  assert.equal(calls[0].options.headers["X-AgentGuard-Agent-Id"], undefined);
+  assert.equal(calls[0].options.headers["X-AgentGuard-User-Id"], undefined);
+  assert.equal(calls[0].options.headers["X-AgentGuard-Session-Key"], undefined);
+});
+
+test("remote guard client sends DPoP runtime token on refresh", async () => {
+  const { RemoteGuardClient } = require("./u_guard/remote_client");
+  const calls = [];
+  global.fetch = async (url, options = {}) => {
+    calls.push({ url, options });
+    return {
+      ok: true,
+      async json() {
+        return { status: "ok" };
+      },
+    };
+  };
+
+  const client = new RemoteGuardClient("http://server.test", {
+    session_token: "runtime-token",
+    use_dpop_auth: true,
+    legacy_identity_headers: false,
+    dpop_proof_factory: (method, url, token) => `proof:${method}:${url}:${token}`,
+  });
+
+  await client.refresh_runtime_session();
+
+  assert.equal(calls[0].options.headers.Authorization, "DPoP runtime-token");
+  assert.equal(calls[0].options.headers.DPoP, "proof:POST:http://server.test/v1/server/session/refresh:runtime-token");
+});
+
 test("client sync buffer includes agent and user in trace uploads", () => {
   const { ClientSyncBuffer } = require("./u_guard/sync_buffer");
   const buffer = new ClientSyncBuffer();

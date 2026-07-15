@@ -298,6 +298,7 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
             "/api/user/logout",
             "/api/user/password",
             "/api/user/tickets",
+            "/api/user/external-accounts",
         }:
             self._proxy(f"v1/user/{path.removeprefix('/api/user/')}", method="POST", query=query)
             return

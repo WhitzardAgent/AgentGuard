@@ -53,9 +53,18 @@ class RemoteGuardClient {
     this.tool_sync_path = options.tool_sync_path || options.toolSyncPath || "/v1/server/tools/sync";
     this.skill_report_path = options.skill_report_path || options.skillReportPath || "/v1/server/skills/report";
     this.mcp_report_path = options.mcp_report_path || options.mcpReportPath || "/v1/server/mcps/report";
+    this.agent_register_path = options.agent_register_path || options.agentRegisterPath || "/v1/server/agents/register";
+    this.agent_sync_path = options.agent_sync_path || options.agentSyncPath || "/v1/server/agents/sync";
+    this.runtime_session_create_path = options.runtime_session_create_path || options.runtimeSessionCreatePath || "/v1/server/session/create";
+    this.runtime_session_refresh_path = options.runtime_session_refresh_path || options.runtimeSessionRefreshPath || "/v1/server/session/refresh";
+    this.runtime_session_close_path = options.runtime_session_close_path || options.runtimeSessionClosePath || "/v1/server/session/close";
     this.approval_path = options.approval_path || "/v1/server/approvals/{ticket_id}";
     this.register_path = options.register_path || "/v1/server/session/register";
     this.unregister_path = options.unregister_path || "/v1/server/session/unregister";
+    this.session_token = options.session_token || options.sessionToken || null;
+    this.dpop_proof_factory = options.dpop_proof_factory || options.dpopProofFactory || null;
+    this.use_dpop_auth = Boolean(options.use_dpop_auth || options.useDpopAuth);
+    this.legacy_identity_headers = options.legacy_identity_headers ?? options.legacyIdentityHeaders ?? true;
     this.approval_wait_timeout_s = options.approval_wait_timeout_s ?? options.approvalWaitTimeoutS ?? 600.0;
     this.approval_wait_chunk_s = Math.max(1.0, options.approval_wait_chunk_s ?? options.approvalWaitChunkS ?? 25.0);
     this.breaker = new CircuitBreaker();
@@ -141,6 +150,26 @@ class RemoteGuardClient {
     return this.post(this.unregister_path, {});
   }
 
+  register_agent(agent) {
+    return this.post(this.agent_register_path, { ...(agent || {}) });
+  }
+
+  sync_agents(catalog) {
+    return this.post(this.agent_sync_path, { ...(catalog || {}) });
+  }
+
+  create_runtime_session(body, { extra_headers_factory = null, extraHeadersFactory = extra_headers_factory } = {}) {
+    return this.post(this.runtime_session_create_path, { ...(body || {}) }, { extra_headers_factory: extraHeadersFactory });
+  }
+
+  refresh_runtime_session() {
+    return this.post(this.runtime_session_refresh_path, {});
+  }
+
+  close_runtime_session() {
+    return this.post(this.runtime_session_close_path, {});
+  }
+
   upload_trace_async(trace, { on_success = null, on_error = null } = {}) {
     return this.upload_trace(trace).then(() => {
       if (typeof on_success === "function") {
@@ -153,24 +182,33 @@ class RemoteGuardClient {
     });
   }
 
-  headers() {
+  headers({ method = null, url = null } = {}) {
     const headers = {
       "Content-Type": "application/json",
       Accept: "application/json",
     };
-    if (this.api_key) {
+    if (this.use_dpop_auth) {
+      if (this.session_token) {
+        headers.Authorization = `DPoP ${this.session_token}`;
+      } else if (this.api_key) {
+        headers.Authorization = `Bearer ${this.api_key}`;
+      }
+      if (typeof this.dpop_proof_factory === "function" && method && url) {
+        headers.DPoP = String(this.dpop_proof_factory(method, url, this.session_token));
+      }
+    } else if (this.api_key) {
       headers.Authorization = `Bearer ${this.api_key}`;
     }
-    if (this.session_id) {
+    if (this.session_id && this.legacy_identity_headers) {
       headers["X-AgentGuard-Session-Id"] = this.session_id;
     }
-    if (this.agent_id) {
+    if (this.agent_id && this.legacy_identity_headers) {
       headers["X-AgentGuard-Agent-Id"] = this.agent_id;
     }
-    if (this.user_id) {
+    if (this.user_id && this.legacy_identity_headers) {
       headers["X-AgentGuard-User-Id"] = this.user_id;
     }
-    if (this.session_key) {
+    if (this.session_key && this.legacy_identity_headers) {
       headers["X-AgentGuard-Session-Key"] = this.session_key;
     }
     if (this.user_ticket) {
@@ -179,16 +217,20 @@ class RemoteGuardClient {
     return headers;
   }
 
-  async request(method, path, body = null) {
+  async request(method, path, body = null, { extra_headers_factory = null } = {}) {
     const url = `${this.server_url}${path}`;
     let lastError = null;
     for (let attempt = 0; attempt <= this.retries; attempt += 1) {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), this.timeout_s * 1000);
+      const headers = this.headers({ method, url });
+      if (typeof extra_headers_factory === "function") {
+        Object.assign(headers, extra_headers_factory(method, url, body || {}) || {});
+      }
       try {
         const response = await fetch(url, {
           method,
-          headers: this.headers(),
+          headers,
           body: body == null ? undefined : JSON.stringify(body),
           signal: controller.signal,
         });
@@ -207,8 +249,8 @@ class RemoteGuardClient {
     throw new RemoteGuardError(`remote guard call failed: ${String(lastError && lastError.message ? lastError.message : lastError)}`);
   }
 
-  post(path, body) {
-    return this.request("POST", path, body);
+  post(path, body, options = {}) {
+    return this.request("POST", path, body, options);
   }
 
   get(path) {

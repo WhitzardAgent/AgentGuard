@@ -34,7 +34,7 @@ Usage:
 Options:
   --server-url      AgentGuard server API URL reachable from the n8n container.
                     Defaults to http://host.docker.internal:38080.
-  --api-key         Optional AgentGuard API key.
+  --api-key         AgentGuard API key. Required when the server has AGENTGUARD_API_KEY set.
   --policy          Optional AgentGuard policy name or mounted rules path.
   --node-id         Optional n8n node id/name filter. Repeat or pass comma-separated values.
                     Omit to guard all eligible nodes.
@@ -217,6 +217,7 @@ Minimal local example:
     -e AGENTGUARD_ENVIRONMENT=n8n \\
     -e AGENTGUARD_ROOT=/agentguard \\
     -e AGENTGUARD_SERVER_URL=$SERVER_URL \\
+    -e AGENTGUARD_API_KEY=$API_KEY \\
     -e AGENTGUARD_N8N_CATALOG_SYNC_ENABLED=true \\
     -e AGENTGUARD_N8N_CATALOG_SYNC_INTERVAL_S=$CATALOG_SYNC_INTERVAL_S \\
     -e AGENTGUARD_N8N_DB_PATH=$CATALOG_DB_PATH \\

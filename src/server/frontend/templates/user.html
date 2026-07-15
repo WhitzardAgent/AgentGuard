@@ -57,9 +57,9 @@
           </form>
         </div>
 
-        <div class="card" id="dify-card" hidden>
+        <div class="card" id="external-account-card" hidden>
           <div class="heading-row">
-            <h3>Dify Account</h3>
+            <h3>External Accounts</h3>
           </div>
           <form class="form-grid" id="dify-bind-form">
             <label>
@@ -72,6 +72,15 @@
             </label>
             <div class="form-grid-actions">
               <button class="btn primary" type="submit">Bind Dify</button>
+            </div>
+          </form>
+          <form class="form-grid external-account-form" id="n8n-bind-form">
+            <label>
+              <span>n8n Email</span>
+              <input id="n8n-email" type="email" autocomplete="email" required maxlength="255">
+            </label>
+            <div class="form-grid-actions">
+              <button class="btn primary" type="submit">Bind n8n</button>
             </div>
           </form>
           <div class="table-card" id="external-account-list-card" hidden>
@@ -125,8 +134,9 @@
       const statusNode = document.getElementById("user-status");
       const passwordCard = document.getElementById("password-card");
       const passwordChangeForm = document.getElementById("password-change-form");
-      const difyCard = document.getElementById("dify-card");
+      const externalAccountCard = document.getElementById("external-account-card");
       const difyBindForm = document.getElementById("dify-bind-form");
+      const n8nBindForm = document.getElementById("n8n-bind-form");
       const externalAccountListCard = document.getElementById("external-account-list-card");
       const externalAccountList = document.getElementById("external-account-list");
       const ticketModalBackdrop = document.getElementById("ticket-modal-backdrop");
@@ -194,9 +204,11 @@
         logoutButton.hidden = !signedIn;
         generateTicketButton.hidden = !signedIn;
         passwordCard.hidden = !signedIn;
-        difyCard.hidden = !signedIn;
+        externalAccountCard.hidden = !signedIn;
         if (!signedIn) {
           passwordChangeForm.reset();
+          difyBindForm.reset();
+          n8nBindForm.reset();
           externalAccountListCard.hidden = true;
           externalAccountList.innerHTML = "";
           closeTicketModal();
@@ -226,6 +238,17 @@
         `).join("");
       }
 
+      function providerLabel(provider) {
+        const normalized = String(provider || "").toLowerCase();
+        if (normalized === "n8n") {
+          return "n8n";
+        }
+        if (normalized === "dify") {
+          return "Dify";
+        }
+        return provider || "External";
+      }
+
       function escapeHtml(value) {
         return String(value)
           .replaceAll("&", "&amp;")
@@ -239,7 +262,7 @@
         try {
           const payload = await api("/api/user/me");
           renderUser(payload.user);
-          const externalPayload = await api("/api/user/external-accounts?provider=dify");
+          const externalPayload = await api("/api/user/external-accounts");
           renderExternalAccounts(externalPayload.external_accounts || []);
         } catch {
           renderUser(null);
@@ -354,22 +377,35 @@
         }
       });
 
-      difyBindForm.addEventListener("submit", async (event) => {
-        event.preventDefault();
+      async function bindExternalAccount(provider, emailInputId, displayNameInputId, form) {
+        const label = providerLabel(provider);
         try {
-          await api("/api/user/dify/bind", {
+          await api("/api/user/external-accounts", {
             method: "POST",
             body: JSON.stringify({
-              email: document.getElementById("dify-email").value.trim(),
-              display_name: document.getElementById("dify-display-name").value.trim() || null,
+              provider,
+              email: document.getElementById(emailInputId).value.trim(),
+              display_name: displayNameInputId
+                ? document.getElementById(displayNameInputId).value.trim() || null
+                : null,
             }),
           });
-          difyBindForm.reset();
+          form.reset();
           await refresh();
-          showToast("Dify account bound.", "success");
+          showToast(`${label} account bound.`, "success");
         } catch (error) {
-          showToast(error.message || "Failed to bind Dify account.", "warning");
+          showToast(error.message || `Failed to bind ${label} account.`, "warning");
         }
+      }
+
+      difyBindForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        await bindExternalAccount("dify", "dify-email", "dify-display-name", difyBindForm);
+      });
+
+      n8nBindForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        await bindExternalAccount("n8n", "n8n-email", null, n8nBindForm);
       });
 
       externalAccountList.addEventListener("click", async (event) => {
@@ -386,9 +422,9 @@
             method: "DELETE",
           });
           await refresh();
-          showToast("Dify account unbound.", "success");
+          showToast("External account unbound.", "success");
         } catch (error) {
-          showToast(error.message || "Failed to unbind Dify account.", "warning");
+          showToast(error.message || "Failed to unbind external account.", "warning");
         }
       });
 
@@ -435,6 +471,12 @@
 
     .ticket-field input {
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+
+    .external-account-form {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
     }
   </style>
 </body>

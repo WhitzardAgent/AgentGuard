@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from backend.agents.store import AgentRecord, AgentStore, agent_delete_allowed_from_console
@@ -291,6 +292,14 @@ class FakeDB:
         return None
 
     def fetchall(self, sql: str, params: tuple[Any, ...] | None = None):
+        if "FROM agent_external_identities e" in sql and "WHERE e.provider = %s AND a.status = 'active'" in sql:
+            (provider,) = params
+            return [
+                identity
+                for identity in self.agent_external_identities
+                if identity["provider"] == provider
+                and self.agents[identity["agent_id"]]["status"] == "active"
+            ]
         if "FROM agent_external_identities e" in sql:
             provider, provider_instance_id, agent_type = params[:3]
             tenant_id = params[3] if len(params) > 3 else None
@@ -372,6 +381,35 @@ def test_register_agent_without_bound_email_does_not_create_user_binding():
     assert result.user_id is None
     assert result.user_binding_created is False
     assert db.user_agents == []
+    metadata = json.loads(db.agent_external_identities[0]["metadata_json"])
+    assert metadata["external_account_email"] == "bob@example.com"
+
+
+def test_bind_existing_agents_for_external_account_backfills_registered_agent():
+    db = FakeDB()
+    store = AgentStore(db)
+    agent = store.register_agent(
+        provider="n8n",
+        external_agent_id="workflow-1",
+        agent_type="workflow",
+        account_email="owner@example.com",
+        public_key_jwk=PUBLIC_JWK,
+        metadata={"external_account_email": "owner@example.com"},
+    ).agent
+    assert db.user_agents == []
+
+    result = store.bind_existing_agents_for_external_account(
+        user_id=7,
+        provider="n8n",
+        account_email="Owner@Example.com",
+    )
+
+    assert result["matched_count"] == 1
+    assert result["created_count"] == 1
+    assert result["agent_ids"] == [agent.agent_id]
+    assert db.user_agents[0]["user_id"] == 7
+    assert db.user_agents[0]["provider"] == "n8n"
+    assert db.user_agents[0]["account_email"] == "owner@example.com"
 
 
 def test_sync_agent_tools_persists_and_replaces_catalog():

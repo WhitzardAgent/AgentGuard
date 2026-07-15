@@ -305,6 +305,35 @@ def test_dify_session_create_issues_runtime_token_for_bound_email():
     assert issue.session_token
 
 
+def test_n8n_session_create_uses_bound_email_and_agent_proof():
+    broker, _ = _broker()
+    key = DPoPKey()
+    body = {
+        "provider": "n8n",
+        "agent_id": "ag_workflow",
+        "account_email": "alice@example.com",
+        "external_user_id": "n8n-user-1",
+        "external_session_id": "execution-1",
+        "metadata": {"workflow_id": "wf-1"},
+    }
+
+    issue = broker.create_session(
+        **body,
+        dpop_proof=key.proof("POST", CREATE_URL),
+        agent_proof=_agent_proof(key, body),
+        request_body=body,
+        method="POST",
+        url=CREATE_URL,
+    )
+
+    assert issue.session.provider == "n8n"
+    assert issue.session.session_id.startswith("ags_n8n_test_")
+    assert issue.session.agent_id == "ag_workflow"
+    assert issue.session.user_id == 7
+    assert issue.session.external_session_id == "execution-1"
+    assert issue.session.external_account_email == "alice@example.com"
+
+
 def test_langchain_ticket_session_create_issues_dpop_runtime_session():
     session_store = FakeRuntimeSessionStore()
     replay = FakeReplayStore()

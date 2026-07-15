@@ -153,6 +153,10 @@ class AgentStore:
         clean_agent_type = _normalize_required(agent_type, "agent_type")
         clean_email = _normalize_email_or_none(account_email)
         clean_public_jwk = _validate_public_jwk(public_key_jwk)
+        clean_metadata = dict(metadata or {})
+        if clean_email:
+            clean_metadata.setdefault("account_email", clean_email)
+            clean_metadata.setdefault("external_account_email", clean_email)
         identity_hash = _external_identity_hash(
             clean_provider,
             clean_provider_instance_id,
@@ -165,7 +169,7 @@ class AgentStore:
         existing = self._find_by_external_identity(
             identity_hash=identity_hash,
         )
-        metadata_json = _metadata_json(metadata)
+        metadata_json = _metadata_json(clean_metadata)
         if existing is None:
             clean_agent_id = _new_agent_id()
             agent_identity_code = _agent_identity_code(clean_agent_id)
@@ -252,7 +256,7 @@ class AgentStore:
             agent_id=agent.agent_id,
             public_key_jwk=clean_public_jwk,
             public_key_thumbprint=thumbprint,
-            metadata=metadata,
+            metadata=clean_metadata,
         )
 
         user_id = self._user_id_for_external_account(clean_provider, clean_email)
@@ -264,7 +268,7 @@ class AgentStore:
                 agent_id=agent.agent_id,
                 provider=clean_provider,
                 account_email=clean_email,
-                metadata=metadata,
+                metadata=clean_metadata,
             )
         return AgentRegistrationResult(
             agent=agent,
@@ -325,6 +329,69 @@ class AgentStore:
             source=_normalize_source(source),
             metadata=metadata,
         )
+
+    def bind_existing_agents_for_external_account(
+        self,
+        *,
+        user_id: int,
+        provider: str,
+        account_email: str,
+        source: str = "external_account_bind",
+    ) -> dict[str, Any]:
+        clean_provider = _normalize_provider(provider)
+        clean_email = _normalize_email_or_none(account_email)
+        if not clean_email:
+            return {
+                "provider": clean_provider,
+                "account_email": None,
+                "matched_count": 0,
+                "created_count": 0,
+                "updated_count": 0,
+                "agent_ids": [],
+            }
+        rows = self.db.fetchall(
+            """
+            SELECT e.agent_id, e.metadata_json
+            FROM agent_external_identities e
+            JOIN agents a ON a.agent_id = e.agent_id
+            WHERE e.provider = %s AND a.status = 'active'
+            """,
+            (clean_provider,),
+        )
+        agent_ids: list[str] = []
+        created_count = 0
+        updated_count = 0
+        for row in rows:
+            metadata = _json_dict(row.get("metadata_json"))
+            metadata_email = _normalize_email_or_none(
+                metadata.get("external_account_email")
+                or metadata.get("account_email")
+                or metadata.get(f"{clean_provider}_user_email")
+                or metadata.get("n8n_user_email")
+                or metadata.get("dify_user_email")
+            )
+            if metadata_email != clean_email:
+                continue
+            agent_id = str(row["agent_id"])
+            created, updated = self._upsert_user_agent(
+                user_id=int(user_id),
+                agent_id=agent_id,
+                provider=clean_provider,
+                account_email=clean_email,
+                source=_normalize_source(source),
+                metadata=metadata,
+            )
+            agent_ids.append(agent_id)
+            created_count += int(created)
+            updated_count += int(updated)
+        return {
+            "provider": clean_provider,
+            "account_email": clean_email,
+            "matched_count": len(agent_ids),
+            "created_count": created_count,
+            "updated_count": updated_count,
+            "agent_ids": agent_ids,
+        }
 
     def get_active_credential(
         self,

@@ -12,6 +12,12 @@ const { RuntimeContext } = require("../../../schemas/context");
 const { DecisionType } = require("../../../schemas/decisions");
 const { ToolMetadata } = require("../../../tools/metadata");
 const { RemoteGuardClient } = require("../../../u_guard/remote_client");
+const { DPoPKey, loadOrCreateDPoPKey } = require("../../../u_guard/dpop");
+const {
+  agentIdentityKeyId,
+  buildAgentRegistrationPayload,
+  loadOrCreateAgentKey,
+} = require("../../../u_guard/agent_keys");
 
 const PATCHED = Symbol.for("agentguard.n8n.patched");
 const LOADER_PATCHED = Symbol.for("agentguard.n8n.loader_patched");
@@ -21,6 +27,8 @@ const ALS = new AsyncLocalStorage();
 const GUARDS = new Map();
 const REPORTED_TOOLS = new Set();
 const CATALOG_FINGERPRINTS = new Map();
+const N8N_AGENT_REGISTRATIONS = new Map();
+const N8N_RUNTIME_AUTH = new Map();
 const WORKFLOW_IDENTITY_CACHE = new Map();
 const WORKFLOW_NODE_CACHE = new Map();
 const MAX_GUARDS = 128;
@@ -189,11 +197,14 @@ function isPlainObject(value) {
 
 function stableContextId(context) {
   const workflow = context.workflow_id || context.workflow_name || "unknown_workflow";
-  const execution = context.execution_id || `pid_${process.pid}`;
+  const execution = context.n8n_session_id || context.external_session_id || context.execution_id || `pid_${process.pid}`;
   return `n8n:${workflow}:execution:${execution}`;
 }
 
 function agentId(context) {
+  if (context.agentguard_agent_id) {
+    return context.agentguard_agent_id;
+  }
   const workflow = context.workflow_id || context.workflow_name || "unknown_workflow";
   return `n8n:${workflow}`;
 }
@@ -202,9 +213,23 @@ function workflowAgentId(workflowId) {
   return `n8n:${workflowId || "unknown_workflow"}`;
 }
 
+function n8nProviderInstanceId() {
+  return optionalString(
+    process.env.AGENTGUARD_N8N_INSTANCE_ID ||
+    process.env.N8N_HOST ||
+    process.env.N8N_EDITOR_BASE_URL ||
+    process.env.WEBHOOK_URL
+  ) || "";
+}
+
 function normalizeWorkflowIdentity(workflow = {}) {
   const userId = optionalString(workflow.user_id || workflow.ownerUserId || workflow.owner_user_id || workflow.creatorId);
-  const userEmail = optionalString(workflow.user_email || workflow.ownerUserEmail || workflow.owner_user_email || workflow.email);
+  const userEmail = optionalString(
+    workflow.user_email ||
+    workflow.ownerUserEmail ||
+    workflow.owner_user_email ||
+    workflow.email
+  );
   const firstName = optionalString(workflow.ownerUserFirstName || workflow.owner_user_first_name || workflow.firstName);
   const lastName = optionalString(workflow.ownerUserLastName || workflow.owner_user_last_name || workflow.lastName);
   return {
@@ -278,23 +303,114 @@ function workflowNodeForTool(workflowId, candidates = []) {
   return null;
 }
 
-function guardOptions(context) {
+function n8nSessionIdFromValue(value, depth = 0, seen = null) {
+  if (value == null || depth > 6) {
+    return null;
+  }
+  if (typeof value !== "object") {
+    return null;
+  }
+  const visited = seen || new Set();
+  if (visited.has(value)) {
+    return null;
+  }
+  visited.add(value);
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = n8nSessionIdFromValue(item, depth + 1, visited);
+      if (found) {
+        return found;
+      }
+    }
+    return null;
+  }
+  for (const key of [
+    "n8n_session_id",
+    "sessionId",
+    "session_id",
+    "chatSessionId",
+    "chat_session_id",
+    "conversationId",
+    "conversation_id",
+  ]) {
+    const raw = value[key];
+    if (raw != null && raw !== "") {
+      return String(raw);
+    }
+  }
+  for (const key of ["json", "metadata", "response_metadata", "additional_kwargs", "input", "data", "body"]) {
+    if (Object.prototype.hasOwnProperty.call(value, key)) {
+      const found = n8nSessionIdFromValue(value[key], depth + 1, visited);
+      if (found) {
+        return found;
+      }
+    }
+  }
+  for (const item of Object.values(value)) {
+    const found = n8nSessionIdFromValue(item, depth + 1, visited);
+    if (found) {
+      return found;
+    }
+  }
+  return null;
+}
+
+function n8nSessionIdFromSources(...sources) {
+  for (const source of sources) {
+    const found = n8nSessionIdFromValue(source);
+    if (found) {
+      return found;
+    }
+  }
+  return null;
+}
+
+function enrichContextWithN8nSession(context = {}, ...sources) {
+  const sessionId = optionalString(
+    context.n8n_session_id ||
+    context.external_session_id ||
+    n8nSessionIdFromSources(...sources)
+  );
+  if (!sessionId) {
+    return context;
+  }
+  return {
+    ...(context || {}),
+    n8n_session_id: sessionId,
+    external_session_id: sessionId,
+  };
+}
+
+function guardOptions(context, runtimeAuth = null) {
   return {
     server_url: process.env.AGENTGUARD_SERVER_URL || null,
     api_key: process.env.AGENTGUARD_API_KEY || null,
     policy: process.env.AGENTGUARD_POLICY || null,
-    user_id: context.user_id || process.env.AGENTGUARD_USER_ID || null,
-    agent_id: agentId(context),
+    user_id: (runtimeAuth && runtimeAuth.canonical_user_id) || context.user_id || process.env.AGENTGUARD_USER_ID || null,
+    agent_id: (runtimeAuth && runtimeAuth.agent_id) || context.agentguard_agent_id || agentId(context),
     environment: "n8n",
+    session_token: runtimeAuth && runtimeAuth.session_token,
+    dpop_proof_factory: runtimeAuth && runtimeAuth.proof,
+    use_dpop_auth: Boolean(runtimeAuth && runtimeAuth.session_token),
+    legacy_identity_headers: !(runtimeAuth && runtimeAuth.session_token),
+    auto_register_session: !(runtimeAuth && runtimeAuth.session_token),
+    auto_close_runtime_session: false,
   };
 }
 
-function getGuard(context = {}) {
+function getGuard(context = {}, runtimeAuth = null) {
   const key = stableContextId(context);
   if (GUARDS.has(key)) {
     const guard = GUARDS.get(key);
-    refreshGuardMetadata(guard, context);
-    return guard;
+    if (runtimeAuth && runtimeAuth.session_token && !(guard.remote && guard.remote.use_dpop_auth)) {
+      if (guard && typeof guard.close === "function") {
+        guard.close().catch(() => {});
+      }
+      GUARDS.delete(key);
+    } else {
+      refreshGuardMetadata(guard, context, runtimeAuth);
+      return guard;
+    }
   }
   if (GUARDS.size >= MAX_GUARDS) {
     const [oldestKey, oldestGuard] = GUARDS.entries().next().value;
@@ -303,18 +419,30 @@ function getGuard(context = {}) {
       oldestGuard.close().catch(() => {});
     }
   }
-  const guard = new AgentGuard(key, guardOptions(context));
-  refreshGuardMetadata(guard, context);
+  const guard = new AgentGuard((runtimeAuth && runtimeAuth.session_id) || key, guardOptions(context, runtimeAuth));
+  refreshGuardMetadata(guard, context, runtimeAuth);
   GUARDS.set(key, guard);
   return guard;
 }
 
-function refreshGuardMetadata(guard, context = {}) {
+async function getGuardForRuntime(context = {}) {
+  const effectiveContext = enrichContextWithN8nSession(context);
+  const runtimeAuth = await ensureN8nRuntimeAuth(effectiveContext).catch((error) => {
+    log("warn", "runtime auth unavailable; falling back to legacy session", error && error.message ? error.message : String(error));
+    return {
+      fallback: true,
+      fallback_reason: error && error.message ? error.message : String(error),
+    };
+  });
+  return getGuard(enrichContextWithAuth(effectiveContext, runtimeAuth), runtimeAuth && runtimeAuth.session_token ? runtimeAuth : null);
+}
+
+function refreshGuardMetadata(guard, context = {}, runtimeAuth = null) {
   if (!guard || !guard.context) {
     return;
   }
   guard.context.environment = "n8n";
-  const userId = context.user_id || process.env.AGENTGUARD_USER_ID || null;
+  const userId = (runtimeAuth && runtimeAuth.canonical_user_id) || context.user_id || process.env.AGENTGUARD_USER_ID || null;
   if (userId && guard.context.user_id !== userId) {
     guard.context.user_id = userId;
     if (guard.remote) {
@@ -330,12 +458,23 @@ function refreshGuardMetadata(guard, context = {}) {
     workflow_id: context.workflow_id || null,
     workflow_name: context.workflow_name || null,
     execution_id: context.execution_id || null,
+    n8n_session_id: context.n8n_session_id || null,
+    external_session_id: context.external_session_id || null,
     n8n_user_id: context.n8n_user_id || null,
     n8n_user_email: context.n8n_user_email || null,
     n8n_user_name: context.n8n_user_name || null,
     n8n_user_source: context.n8n_user_source || null,
     n8n_project_id: context.n8n_project_id || null,
     n8n_project_name: context.n8n_project_name || null,
+    external_provider: context.external_provider || null,
+    external_account_email: context.external_account_email || null,
+    display_agent_id: context.display_agent_id || null,
+    external_agent_id: context.external_agent_id || null,
+    agentguard_agent_id: context.agentguard_agent_id || null,
+    agent_identity_code: context.agent_identity_code || null,
+    agent_public_key_thumbprint: context.agent_public_key_thumbprint || null,
+    runtime_auth_fallback: context.runtime_auth_fallback || null,
+    runtime_auth_fallback_reason: context.runtime_auth_fallback_reason || null,
   };
 }
 
@@ -358,10 +497,13 @@ function buildRunNodeContext(workflow, executionData, runExecutionData, runIndex
   ) || (
     runExecutionData && runExecutionData.resultData && runExecutionData.resultData.runId
   );
+  const n8nSessionId = n8nSessionIdFromSources(executionData, runExecutionData, additionalData);
   return {
     workflow_id: workflowId == null ? null : String(workflowId),
     workflow_name: workflow && workflow.name ? String(workflow.name) : null,
     execution_id: executionId == null ? null : String(executionId),
+    n8n_session_id: n8nSessionId,
+    external_session_id: n8nSessionId,
     user_id: workflowIdentity.user_id || process.env.AGENTGUARD_USER_ID || null,
     n8n_user_id: workflowIdentity.user_id || null,
     n8n_user_email: workflowIdentity.user_email || null,
@@ -385,6 +527,8 @@ function eventMetadata(context = {}, extra = {}) {
     workflow_id: context.workflow_id || null,
     workflow_name: context.workflow_name || null,
     execution_id: context.execution_id || null,
+    n8n_session_id: context.n8n_session_id || null,
+    external_session_id: context.external_session_id || null,
     user_id: context.user_id || null,
     n8n_user_id: context.n8n_user_id || null,
     n8n_user_email: context.n8n_user_email || null,
@@ -406,6 +550,244 @@ function eventMetadata(context = {}, extra = {}) {
     mode: context.mode || null,
     ...(extra || {}),
   };
+}
+
+function registrationKeyForWorkflow({ workflow_id = null, tenant_id = null, account_email = null } = {}) {
+  return ["n8n", n8nProviderInstanceId(), tenant_id || "", workflow_id || "", account_email || ""].join("\x1f");
+}
+
+function n8nAccountEmail(context = {}) {
+  const email = optionalString(
+    context.external_account_email ||
+    context.n8n_user_email ||
+    context.user_email
+  );
+  return email && email.includes("@") ? email.toLowerCase() : null;
+}
+
+function n8nRegistrationMetadata(context = {}, extra = {}) {
+  const workflowId = optionalString(context.workflow_id);
+  const email = n8nAccountEmail(context);
+  const metadata = {
+    adapter: "n8n",
+    environment: "n8n",
+    external_provider: "n8n",
+    external_agent_id: workflowId,
+    display_agent_id: workflowAgentId(workflowId),
+    workflow_id: workflowId,
+    workflow_name: context.workflow_name || null,
+    workflow_version: context.workflow_version || null,
+    workflow_active: context.workflow_active ?? null,
+    n8n_user_id: context.n8n_user_id || null,
+    n8n_user_email: email,
+    n8n_user_name: context.n8n_user_name || null,
+    n8n_user_source: context.n8n_user_source || null,
+    n8n_project_id: context.n8n_project_id || null,
+    n8n_project_name: context.n8n_project_name || null,
+    provider_instance_id: n8nProviderInstanceId(),
+    ...(extra || {}),
+  };
+  if (email) {
+    metadata.external_account_email = email;
+  }
+  return metadata;
+}
+
+function registrationContextFromWorkflow(workflow = {}, tools = []) {
+  const version = workflow.activeVersionId || workflow.versionId || workflow.publishedVersionId || workflow.versionCounter || "published";
+  const identity = normalizeWorkflowIdentity(workflow);
+  return {
+    workflow_id: optionalString(workflow.id || workflow.workflowId || workflow.workflow_id),
+    workflow_name: optionalString(workflow.name),
+    workflow_version: optionalString(version),
+    workflow_active: Boolean(workflow.active),
+    tool_count: Array.isArray(tools) ? tools.length : 0,
+    n8n_user_id: identity.user_id || null,
+    n8n_user_email: identity.user_email || null,
+    n8n_user_name: identity.user_name || null,
+    n8n_user_source: identity.user_source || null,
+    n8n_project_id: identity.project_id || null,
+    n8n_project_name: identity.project_name || null,
+  };
+}
+
+async function registerN8nWorkflowAgent(context = {}, { remote = null, tools = null, reason = "runtime" } = {}) {
+  const workflowId = optionalString(context.workflow_id);
+  if (!workflowId || !process.env.AGENTGUARD_SERVER_URL) {
+    return null;
+  }
+  const accountEmail = n8nAccountEmail(context);
+  const key = registrationKeyForWorkflow({ workflow_id: workflowId, account_email: accountEmail });
+  if (N8N_AGENT_REGISTRATIONS.has(key)) {
+    return N8N_AGENT_REGISTRATIONS.get(key);
+  }
+  const providerInstanceId = n8nProviderInstanceId();
+  const metadata = n8nRegistrationMetadata(context, {
+    registration_reason: reason,
+    tool_count: Array.isArray(tools) ? tools.length : context.tool_count || null,
+  });
+  const agentType = "workflow";
+  const keyId = agentIdentityKeyId({
+    provider: "n8n",
+    provider_instance_id: providerInstanceId,
+    tenant_id: null,
+    external_agent_id: workflowId,
+    agent_type: agentType,
+  });
+  const payload = buildAgentRegistrationPayload({
+    provider: "n8n",
+    provider_instance_id: providerInstanceId,
+    tenant_id: null,
+    external_agent_id: workflowId,
+    agent_type: agentType,
+    name: context.workflow_name || workflowAgentId(workflowId),
+    description: context.workflow_name ? `n8n workflow: ${context.workflow_name}` : "n8n workflow",
+    account_email: accountEmail,
+    metadata,
+  });
+  const client = remote || new RemoteGuardClient(process.env.AGENTGUARD_SERVER_URL || null, {
+    api_key: process.env.AGENTGUARD_API_KEY || null,
+    timeout_s: numberEnv("AGENTGUARD_N8N_AGENT_REGISTER_TIMEOUT_S", 5.0),
+    retries: numberEnv("AGENTGUARD_N8N_AGENT_REGISTER_RETRIES", 1),
+  });
+  if (!client.enabled) {
+    return null;
+  }
+  const registration = await client.register_agent(payload);
+  const result = {
+    ...(registration || {}),
+    agent_identity_key_id: keyId,
+    provider_instance_id: providerInstanceId,
+    external_agent_id: workflowId,
+    agent_type: agentType,
+  };
+  N8N_AGENT_REGISTRATIONS.set(key, result);
+  return result;
+}
+
+function enrichContextWithRegistration(context = {}, registration = null) {
+  if (!registration || !registration.agent) {
+    return context;
+  }
+  const agent = registration.agent || {};
+  const agentIdValue = optionalString(agent.agent_id);
+  if (!agentIdValue) {
+    return context;
+  }
+  const email = n8nAccountEmail(context);
+  return {
+    ...(context || {}),
+    agentguard_agent_id: agentIdValue,
+    agent_identity_code: agent.agent_identity_code || null,
+    agent_public_key_thumbprint: agent.public_key_thumbprint || null,
+    agent_identity_key_id: registration.agent_identity_key_id || null,
+    external_provider: "n8n",
+    external_account_email: email,
+    external_agent_id: optionalString(context.workflow_id),
+    display_agent_id: workflowAgentId(context.workflow_id),
+  };
+}
+
+function enrichContextWithAuth(context = {}, runtimeAuth = null) {
+  if (!runtimeAuth) {
+    return context;
+  }
+  if (runtimeAuth.fallback) {
+    return {
+      ...(context || {}),
+      runtime_auth_fallback: true,
+      runtime_auth_fallback_reason: runtimeAuth.fallback_reason || "runtime_auth_unavailable",
+    };
+  }
+  return {
+    ...(context || {}),
+    agentguard_agent_id: runtimeAuth.agent_id || context.agentguard_agent_id,
+    user_id: runtimeAuth.canonical_user_id || context.user_id,
+    external_provider: "n8n",
+    external_account_email: n8nAccountEmail(context),
+    n8n_session_id: context.n8n_session_id || runtimeAuth.external_session_id || null,
+    external_session_id: context.external_session_id || runtimeAuth.external_session_id || null,
+  };
+}
+
+async function ensureN8nRuntimeAuth(context = {}) {
+  if (!process.env.AGENTGUARD_SERVER_URL) {
+    return null;
+  }
+  const accountEmail = n8nAccountEmail(context);
+  if (!accountEmail) {
+    return null;
+  }
+  const registration = await registerN8nWorkflowAgent(context, { reason: "runtime" });
+  const registeredAgent = registration && registration.agent;
+  const canonicalAgentId = registeredAgent && optionalString(registeredAgent.agent_id);
+  if (!canonicalAgentId) {
+    return null;
+  }
+  const externalSessionId = optionalString(context.n8n_session_id || context.external_session_id || context.execution_id);
+  const cacheKey = [canonicalAgentId, externalSessionId || context.workflow_id || `pid_${process.pid}`].join("\x1f");
+  const cached = N8N_RUNTIME_AUTH.get(cacheKey);
+  if (cached && cached.session_token && cached.expires_at - Math.floor(Date.now() / 1000) > 60) {
+    return cached;
+  }
+  const dpopKey = cached && cached.dpop_key
+    ? cached.dpop_key
+    : externalSessionId
+      ? loadOrCreateDPoPKey(["n8n", canonicalAgentId, externalSessionId].join("\x1f"))
+      : new DPoPKey();
+  const state = {
+    agent_id: canonicalAgentId,
+    dpop_key: dpopKey,
+    session_id: cached && cached.session_id,
+    session_token: cached && cached.session_token,
+    expires_at: cached && cached.expires_at || 0,
+    canonical_user_id: cached && cached.canonical_user_id,
+    proof: (method, url, accessToken = null) => dpopKey.proof(method, url, accessToken),
+  };
+  const client = new RemoteGuardClient(process.env.AGENTGUARD_SERVER_URL || null, {
+    api_key: process.env.AGENTGUARD_API_KEY || null,
+    session_token: state.session_token || null,
+    dpop_proof_factory: state.proof,
+    use_dpop_auth: true,
+    legacy_identity_headers: false,
+    timeout_s: numberEnv("AGENTGUARD_N8N_RUNTIME_AUTH_TIMEOUT_S", 5.0),
+    retries: numberEnv("AGENTGUARD_N8N_RUNTIME_AUTH_RETRIES", 1),
+  });
+  const metadata = n8nRegistrationMetadata(context, {
+    runtime_auth_provider: "n8n",
+    external_session_id: externalSessionId,
+    n8n_session_id: context.n8n_session_id || null,
+    execution_id: context.execution_id || null,
+  });
+  const body = {
+    provider: "n8n",
+    agent_id: canonicalAgentId,
+    account_email: accountEmail,
+    external_user_id: optionalString(context.n8n_user_id || context.user_id),
+    metadata,
+  };
+  if (externalSessionId) {
+    body.external_session_id = externalSessionId;
+  }
+  const agentKey = loadOrCreateAgentKey(registration.agent_identity_key_id);
+  const result = await client.create_runtime_session(body, {
+    extra_headers_factory: (method, url, requestBody) => ({
+      "X-AgentGuard-Agent-Proof": agentKey.signSessionCreateProof({
+        agent_id: canonicalAgentId,
+        method,
+        url,
+        body: requestBody,
+        dpop_jkt: dpopKey.thumbprint,
+      }),
+    }),
+  });
+  state.session_id = optionalString(result.session_id);
+  state.session_token = optionalString(result.session_token);
+  state.canonical_user_id = optionalString(result.user_id);
+  state.external_session_id = externalSessionId || null;
+  state.expires_at = Number(result.expires_at || 0);
+  N8N_RUNTIME_AUTH.set(cacheKey, state);
+  return state.session_token ? state : null;
 }
 
 function shouldUseAdapter() {
@@ -941,9 +1323,10 @@ function parseTaggedLLMOutput(output) {
 }
 
 async function guardLLMBefore(request, context, extra = {}) {
-  const guard = getGuard(context);
+  const effectiveContext = enrichContextWithN8nSession(context, request, extra);
+  const guard = await getGuardForRuntime(effectiveContext);
   const builtIns = extractProviderBuiltInTools(request && request.tools);
-  const metadata = eventMetadata(context, {
+  const metadata = eventMetadata(effectiveContext, {
     event_source: "langchain_openai_responses",
     model: request && request.model ? String(request.model) : null,
     stream: Boolean(request && request.stream),
@@ -957,8 +1340,9 @@ async function guardLLMBefore(request, context, extra = {}) {
 }
 
 async function guardLLMAfter(output, context, extra = {}) {
-  const guard = getGuard(context);
-  const metadata = eventMetadata(context, {
+  const effectiveContext = enrichContextWithN8nSession(context, output, extra);
+  const guard = await getGuardForRuntime(effectiveContext);
+  const metadata = eventMetadata(effectiveContext, {
     event_source: "langchain_openai_responses",
     ...(extra || {}),
   });
@@ -969,7 +1353,8 @@ async function guardLLMAfter(output, context, extra = {}) {
 }
 
 async function guardToolBefore(toolName, args, context, capabilities = [], extraMetadata = {}) {
-  const guard = getGuard(context);
+  const effectiveContext = enrichContextWithN8nSession(context, args, extraMetadata);
+  const guard = await getGuardForRuntime(effectiveContext);
   reportToolOnce(guard, toolName, {
     description: context.tool_description || "",
     capabilities,
@@ -981,18 +1366,19 @@ async function guardToolBefore(toolName, args, context, capabilities = [], extra
   const result = await guard.runtime.guard(
     ev.tool_invoke(guard.context, toolName, normalizeValue(args), {
       capabilities,
-      metadata: eventMetadata(context, extraMetadata),
+      metadata: eventMetadata(effectiveContext, extraMetadata),
     })
   );
   return result.decision;
 }
 
 async function guardToolAfter(toolName, output, context, { error = null, metadata = {} } = {}) {
-  const guard = getGuard(context);
+  const effectiveContext = enrichContextWithN8nSession(context, output, metadata);
+  const guard = await getGuardForRuntime(effectiveContext);
   const result = await guard.runtime.guard(
     ev.tool_result(guard.context, toolName, normalizeValue(output), {
       error: error ? safeString(error) : null,
-      metadata: eventMetadata(context, metadata),
+      metadata: eventMetadata(effectiveContext, metadata),
     }),
     { phase: "after" }
   );
@@ -1198,11 +1584,15 @@ function wrapConnectedTool(tool, sourceContext = {}) {
   const toolName = String((tool && tool.name) || (sourceContext && sourceContext.tool_name) || "n8n_ai_tool");
   tool.invoke = async function agentguardN8nToolInvoke(input, ...rest) {
     const activeSourceContext = tool[TOOL_SOURCE_CONTEXT] || sourceContext;
-    const context = toolContext(tool, activeSourceContext);
+    const invocation = buildAiToolInvocation(input || {}, sourceNodeForToolInvocation(activeSourceContext));
+    const context = enrichContextWithN8nSession(
+      toolContext(tool, activeSourceContext),
+      input,
+      invocation.metadata
+    );
     if (!matchesConfiguredFilters(context)) {
       return original.call(this, input, ...rest);
     }
-    const invocation = buildAiToolInvocation(input || {}, sourceNodeForToolInvocation(activeSourceContext));
     const capabilities = inferCapabilitiesFromNode(
       { type: context.node_type || (tool.metadata && tool.metadata.sourceNodeType), name: context.node_name || toolName },
       ["ai_tool"]
@@ -1241,10 +1631,10 @@ function patchOpenAI(moduleExports) {
     }
     const original = Klass.prototype.completionWithRetry;
     Klass.prototype.completionWithRetry = async function agentguardCompletionWithRetry(request, requestOptions) {
-      const context = currentContext({
+      const context = enrichContextWithN8nSession(currentContext({
         llm_provider: "openai",
         llm_class: key,
-      });
+      }), request, requestOptions);
       if (!matchesConfiguredFilters(context)) {
         return original.call(this, request, requestOptions);
       }
@@ -1516,12 +1906,13 @@ function patchN8nCore(moduleExports) {
 
 async function guardedRunNodeLLM(original, target, args) {
   const { workflow, runIndex, additionalData, mode, abortSignal, subNodeExecutionResults, context, node } = args;
-  const llmContext = {
+  const baseLLMContext = {
     ...context,
     llm_node: true,
     llm_provider: providerFromLLMNode(node),
   };
   let currentArgs = { ...(args || {}) };
+  let llmContext = baseLLMContext;
   let attempts = 0;
   try {
     while (true) {
@@ -1529,6 +1920,13 @@ async function guardedRunNodeLLM(original, target, args) {
         currentArgs.executionData,
         currentArgs.node,
         currentArgs.runExecutionData
+      );
+      llmContext = enrichContextWithN8nSession(
+        baseLLMContext,
+        request,
+        currentArgs.executionData,
+        currentArgs.runExecutionData,
+        additionalData
       );
       const beforeDecision = await guardLLMBefore(request, llmContext, {
         event_source: "n8n_run_node_llm",
@@ -1597,13 +1995,13 @@ async function guardedRunNodeAiTool(original, target, args) {
   const input = invocation.arguments;
   const invocationMetadata = invocation.metadata;
   const capabilities = inferCapabilitiesFromNode(node, ["ai_tool"]);
-  const toolContext = {
+  const toolContext = enrichContextWithN8nSession({
     ...context,
     connection_type: AI_TOOL_CONNECTION_TYPE,
     tool_name: toolName,
     tool_call_id: invocationMetadata.tool_call_id || null,
     tool_description: nodeType && nodeType.description ? nodeType.description.description : "",
-  };
+  }, invocationMetadata, executionData, runExecutionData, additionalData);
   const beforeDecision = await guardToolBefore(toolName, input, toolContext, capabilities, invocationMetadata);
   const blocked = blockedToolValue(beforeDecision, toolName);
   if (blocked) {
@@ -2149,6 +2547,7 @@ function catalogContextForWorkflow(workflow, tools) {
   const sessionKey = catalogSessionKey(workflow.id, version);
   const identity = cacheWorkflowIdentity(workflow);
   cacheWorkflowNodes(workflow);
+  const accountEmail = identity.user_email || null;
   return {
     sessionKey,
     context: new RuntimeContext({
@@ -2167,8 +2566,12 @@ function catalogContextForWorkflow(workflow, tools) {
         published_version_id: workflow.publishedVersionId || null,
         tool_count: tools.length,
         client_session_key: sessionKey,
+        external_provider: "n8n",
+        external_account_email: accountEmail,
+        external_agent_id: workflow.id,
+        display_agent_id: workflowAgentId(workflow.id),
         n8n_user_id: identity.user_id || null,
-        n8n_user_email: identity.user_email || null,
+        n8n_user_email: accountEmail,
         n8n_user_name: identity.user_name || null,
         n8n_user_source: identity.user_source || null,
         n8n_project_id: identity.project_id || null,
@@ -2207,6 +2610,22 @@ async function syncWorkflowCatalog(workflow) {
   if (!remote.enabled) {
     return { workflow_id: workflow.id, skipped: true, reason: "server_url_missing", tool_count: tools.length };
   }
+  const registration = await registerN8nWorkflowAgent(
+    registrationContextFromWorkflow(workflow, tools),
+    { remote, tools, reason: "catalog_sync" }
+  ).catch((error) => {
+    log("warn", "failed to register n8n workflow agent", error && error.message ? error.message : String(error));
+    return null;
+  });
+  if (registration && registration.agent && registration.agent.agent_id) {
+    const registeredAgent = registration.agent;
+    context.agent_id = registeredAgent.agent_id;
+    remote.agent_id = registeredAgent.agent_id;
+    context.metadata.agentguard_agent_id = registeredAgent.agent_id;
+    context.metadata.agent_identity_code = registeredAgent.agent_identity_code || null;
+    context.metadata.agent_public_key_thumbprint = registeredAgent.public_key_thumbprint || null;
+    context.metadata.agentguard_user_bound = Boolean(registration.user_agent && registration.user_agent.bound);
+  }
   await remote.register_session(context);
   const result = await remote.sync_tools(context, tools);
   CATALOG_FINGERPRINTS.set(workflow.id, fingerprint);
@@ -2233,6 +2652,13 @@ function catalogSyncProcessAllowed() {
 
 function n8nDatabasePath() {
   return process.env.AGENTGUARD_N8N_DB_PATH || path.join(process.env.HOME || "/home/node", ".n8n", "database.sqlite");
+}
+
+function configureN8nKeyDir() {
+  if (process.env.AGENTGUARD_AGENT_KEY_DIR) {
+    return;
+  }
+  process.env.AGENTGUARD_AGENT_KEY_DIR = path.join(path.dirname(n8nDatabasePath()), "agentguard_keys");
 }
 
 function openSqliteReadOnly() {
@@ -2398,7 +2824,7 @@ function primeWorkflowIdentityCache() {
 
 function flushGuardAsync(context) {
   try {
-    const guard = getGuard(context);
+    const guard = getGuard(enrichContextWithN8nSession(context));
     if (guard && guard.runtime && typeof guard.runtime.sync_local_cache_async === "function") {
       guard.runtime.sync_local_cache_async({ reason: "round_complete" });
     }
@@ -2464,6 +2890,7 @@ function installN8nAdapter() {
     log("info", "adapter disabled by AGENTGUARD_ENABLED");
     return { installed: false, reason: "disabled" };
   }
+  configureN8nKeyDir();
   installModuleLoadHook();
   for (const request of ["@langchain/openai", "n8n-core"]) {
     try {
@@ -2499,11 +2926,15 @@ module.exports = {
     cacheWorkflowIdentity,
     cacheWorkflowNodes,
     catalogContextForWorkflow,
+    enrichContextWithN8nSession,
+    enrichContextWithRegistration,
+    ensureN8nRuntimeAuth,
     buildConnectedToolSourceContext,
     eventMetadata,
     inferCapabilitiesFromNode,
     workflowIdentityForWorkflowId,
     workflowNodeForTool,
+    n8nSessionIdFromSources,
     aiToolArgumentsFromExecutionData,
     aiToolInvocationFromExecutionData,
     buildRunNodeContext,
@@ -2520,6 +2951,8 @@ module.exports = {
     patchConnectedToolsHelpers,
     scanPublishedWorkflows,
     sourceNodeForToolInvocation,
+    registerN8nWorkflowAgent,
+    syncWorkflowCatalog,
     syncPublishedWorkflowCatalogOnce,
     shouldTreatRunNodeAsTool,
     shouldCatalogOrdinaryNode,

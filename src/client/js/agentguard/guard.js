@@ -52,6 +52,10 @@ class AgentGuard {
       user_id: this.context.user_id,
       session_key: this.session_key,
       user_ticket: options.user_ticket || options.userTicket || null,
+      session_token: options.session_token || options.sessionToken || null,
+      dpop_proof_factory: options.dpop_proof_factory || options.dpopProofFactory || null,
+      use_dpop_auth: Boolean(options.use_dpop_auth || options.useDpopAuth),
+      legacy_identity_headers: options.legacy_identity_headers ?? options.legacyIdentityHeaders ?? true,
       timeout_s: options.remote_timeout_s ?? options.remoteTimeoutS ?? 5.0,
       retries: options.remote_retries ?? options.remoteRetries ?? 2,
     });
@@ -95,6 +99,8 @@ class AgentGuard {
     });
     this.remote_session_registration = null;
     this.remote_session_registered = false;
+    this.auto_register_session = options.auto_register_session ?? options.autoRegisterSession ?? true;
+    this.auto_close_runtime_session = options.auto_close_runtime_session ?? options.autoCloseRuntimeSession ?? false;
     this.pending_remote_operations = new Set();
     this.client_config_api_options = {
       host: options.client_config_api_host || options.clientConfigApiHost || "127.0.0.1",
@@ -110,7 +116,9 @@ class AgentGuard {
         ?? null
       ),
     };
-    this.registerRemoteSession();
+    if (this.auto_register_session) {
+      this.registerRemoteSession();
+    }
   }
 
   loadSnapshot(policy) {
@@ -286,11 +294,17 @@ class AgentGuard {
     await this.runtime.sync_local_cache_now({ reason: "session_close" });
     if (this.remote.enabled) {
       try {
-        const registered = await this.ensureRemoteSessionRegistered();
-        if (registered) {
-          await this.remote.unregister_session();
+        if (this.auto_close_runtime_session && this.remote.use_dpop_auth) {
+          await this.remote.close_runtime_session();
           this.remote_session_registered = false;
           this.remote_session_registration = null;
+        } else {
+          const registered = await this.ensureRemoteSessionRegistered();
+          if (registered) {
+            await this.remote.unregister_session();
+            this.remote_session_registered = false;
+            this.remote_session_registration = null;
+          }
         }
       } catch (_) {
         // swallow remote shutdown errors to match Python close()

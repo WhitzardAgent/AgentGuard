@@ -21,6 +21,7 @@ n8n 侧只运行 AgentGuard client adapter，不需要自己运行 AgentGuard se
 ```text
 AGENTGUARD_SERVER_URL=https://<your-agentguard-server>
 AGENTGUARD_CONSOLE_URL=https://<your-agentguard-console>
+AGENTGUARD_API_KEY=<your-agentguard-api-key>
 ```
 
 本地自测时，可以临时启动 AgentGuard：
@@ -35,6 +36,7 @@ cd /path/to/AgentGuard
 ```text
 AGENTGUARD_SERVER_URL=http://host.docker.internal:38080
 AGENTGUARD_CONSOLE_URL=http://127.0.0.1:38008/agents.html
+AGENTGUARD_API_KEY=sk-agentguard-backend-X9m42Vq7Tz8nL3pA6cR0yH5uJ1sWfKdE
 ```
 
 ### 2. 生成接入文件
@@ -55,6 +57,7 @@ scripts/setup-n8n-agentguard.sh \
 ```bash
 scripts/setup-n8n-agentguard.sh \
   --server-url http://host.docker.internal:38080 \
+  --api-key sk-agentguard-backend-X9m42Vq7Tz8nL3pA6cR0yH5uJ1sWfKdE \
   --console-url http://127.0.0.1:38008/agents.html
 ```
 
@@ -90,6 +93,7 @@ docker run -d --name n8n \
   -e AGENTGUARD_ENVIRONMENT=n8n \
   -e AGENTGUARD_ROOT=/agentguard \
   -e AGENTGUARD_SERVER_URL=http://host.docker.internal:38080 \
+  -e AGENTGUARD_API_KEY=sk-agentguard-backend-X9m42Vq7Tz8nL3pA6cR0yH5uJ1sWfKdE \
   -e AGENTGUARD_N8N_CATALOG_SYNC_ENABLED=true \
   -e AGENTGUARD_N8N_CATALOG_SYNC_INTERVAL_S=5 \
   -e AGENTGUARD_N8N_DB_PATH=/home/node/.n8n/database.sqlite \
@@ -98,6 +102,19 @@ docker run -d --name n8n \
   -v "$AGENTGUARD_ROOT/agentguard-n8n-bootstrap:/agentguard-n8n-bootstrap:ro" \
   --add-host host.docker.internal:host-gateway \
   docker.n8n.io/n8nio/n8n:2.26.8
+```
+
+如果已有 n8n 容器是缺少 `AGENTGUARD_API_KEY` 的旧配置，修改环境变量后必须重建容器。当前本地 AgentGuard server 的 API key 是：
+
+```text
+sk-agentguard-backend-X9m42Vq7Tz8nL3pA6cR0yH5uJ1sWfKdE
+```
+
+重建后用下面的命令确认 n8n 容器内已经拿到 key：
+
+```bash
+docker exec n8n printenv AGENTGUARD_API_KEY
+docker logs n8n 2>&1 | rg "agentguard:n8n|agents/register|catalog sync"
 ```
 
 ### 4. 在 AgentGuard 前端配置规则
@@ -186,12 +203,13 @@ model_builtin_tools_reason=provider_side_execution
 adapter 会定期扫描 n8n SQLite 数据库中的 active / published workflow，并把工具目录同步到 AgentGuard server。默认扫描间隔为 5 秒：
 
 ```text
+AGENTGUARD_API_KEY=<your-agentguard-api-key>
 AGENTGUARD_N8N_CATALOG_SYNC_ENABLED=true
 AGENTGUARD_N8N_CATALOG_SYNC_INTERVAL_S=5
 AGENTGUARD_N8N_DB_PATH=/home/node/.n8n/database.sqlite
 ```
 
-同步成功后，即使 workflow 还没有被运行，AgentGuard 前端也可以看到对应的 `n8n:<workflow_id>` agent 和工具目录。workflow 修改并保存 / 发布后，下一次扫描会自动同步新的工具目录。
+注册 agent 时，adapter 会从 n8n 数据库读取每个 workflow 的 owner email，并以 `provider=n8n + account_email=<workflow_owner_email>` 绑定到 AgentGuard 用户。因此同一个 n8n 容器里可以有多个 n8n 用户；不要用容器环境变量写死某一个 n8n 邮箱。每个 AgentGuard 用户只需要在用户中心绑定自己的 n8n 邮箱。同步成功后，即使 workflow 还没有被运行，AgentGuard 前端也可以看到对应的 `n8n:<workflow_id>` agent 和工具目录。workflow 修改并保存 / 发布后，下一次扫描会自动同步新的工具目录。
 
 ## 支持范围
 
@@ -244,7 +262,7 @@ services:
       AGENTGUARD_ENVIRONMENT: "n8n"
       AGENTGUARD_ROOT: "/agentguard"
       AGENTGUARD_SERVER_URL: "http://host.docker.internal:38080"
-      AGENTGUARD_API_KEY: ""
+      AGENTGUARD_API_KEY: "sk-agentguard-backend-X9m42Vq7Tz8nL3pA6cR0yH5uJ1sWfKdE"
       AGENTGUARD_POLICY: ""
       AGENTGUARD_N8N_NODE_IDS: ""
       AGENTGUARD_N8N_SKIP_NODE_TYPES: ""
@@ -269,10 +287,12 @@ Linux Docker 环境中，`host.docker.internal` 需要 `extra_hosts` 中的 `hos
 
 - 是否登录了正确的 AgentGuard 控制台地址。
 - n8n 容器是否能访问 `AGENTGUARD_SERVER_URL`。
+- n8n 容器是否设置了和 AgentGuard server 一致的 `AGENTGUARD_API_KEY`；缺少或错误会导致 `/v1/server/agents/register` 被拒绝，AgentGuard 里不会出现 n8n agent。
 - `NODE_OPTIONS` 是否包含 `/agentguard-n8n-bootstrap/register.cjs`。
 - n8n 容器是否挂载了 AgentGuard 源码目录和 bootstrap 目录。
 - `AGENTGUARD_N8N_CATALOG_SYNC_ENABLED` 是否为 `true`。
 - `AGENTGUARD_N8N_DB_PATH` 是否指向 n8n 容器内的 SQLite 数据库。
+- 当前 n8n workflow owner email 是否已经在 AgentGuard 用户中心绑定。adapter 注册时按 workflow owner email 自动绑定，不应在容器里写死单个邮箱。
 - 当前 workflow 是否 active 或 published。
 
 默认不需要设置 workflow 白名单。若容器里残留了旧的 `AGENTGUARD_N8N_WORKFLOW_IDS`，它会让 adapter 只接入指定 workflow。多 agent 场景应删除该变量，然后重新创建 n8n 容器。

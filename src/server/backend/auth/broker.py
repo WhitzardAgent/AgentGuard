@@ -75,8 +75,8 @@ class DifyAuthBroker:
         url: str,
     ) -> RuntimeSessionIssue:
         provider = _clean_provider(provider)
-        if provider != "dify":
-            raise BadAuthRequest("only provider=dify is supported for runtime session create")
+        if provider not in {"dify", "n8n"}:
+            raise BadAuthRequest("only provider=dify or provider=n8n is supported for runtime session create")
         account_email = _clean_email(account_email)
         if not account_email:
             raise BadAuthRequest("account_email is required")
@@ -87,7 +87,7 @@ class DifyAuthBroker:
             account_email=account_email,
         )
         if mapping is None:
-            raise RuntimeAuthForbidden("Dify account is not bound to an AgentGuard user")
+            raise RuntimeAuthForbidden(f"{provider} account is not bound to an AgentGuard user")
         verification = self._verify_proof(
             dpop_proof,
             method=method,
@@ -115,9 +115,9 @@ class DifyAuthBroker:
         )
         if existing is not None:
             if existing.user_id != mapping.user_id:
-                raise RuntimeAuthForbidden("Dify session belongs to another AgentGuard user")
+                raise RuntimeAuthForbidden(f"{provider} session belongs to another AgentGuard user")
             if existing.dpop_jkt != verification.jkt:
-                raise RuntimeAuthForbidden("Dify session is bound to another DPoP key")
+                raise RuntimeAuthForbidden(f"{provider} session is bound to another DPoP key")
             self.session_store.touch_session(existing.session_id)
             return self._issue_token(existing)
         session = self.session_store.create_session(

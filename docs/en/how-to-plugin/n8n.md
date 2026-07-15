@@ -90,6 +90,7 @@ docker run -d --name n8n \
   -e AGENTGUARD_ENVIRONMENT=n8n \
   -e AGENTGUARD_ROOT=/agentguard \
   -e AGENTGUARD_SERVER_URL=http://host.docker.internal:38080 \
+  -e AGENTGUARD_API_KEY=<your_agentguard_api_key> \
   -e AGENTGUARD_N8N_CATALOG_SYNC_ENABLED=true \
   -e AGENTGUARD_N8N_CATALOG_SYNC_INTERVAL_S=5 \
   -e AGENTGUARD_N8N_DB_PATH=/home/node/.n8n/database.sqlite \
@@ -191,7 +192,7 @@ AGENTGUARD_N8N_CATALOG_SYNC_INTERVAL_S=5
 AGENTGUARD_N8N_DB_PATH=/home/node/.n8n/database.sqlite
 ```
 
-After sync, the AgentGuard frontend can show the `n8n:<workflow_id>` agent and its tool catalog even before the workflow runs. When a workflow is modified and saved / published, the next scan syncs the updated catalog.
+During agent registration, the adapter reads each workflow owner email from n8n's database and binds with `provider=n8n + account_email=<workflow_owner_email>`. A single n8n container can therefore host workflows owned by multiple n8n users. Do not hard-code one account email as a container-wide environment variable. Each AgentGuard user only needs to bind their own n8n email in the User Centre. After sync, the AgentGuard frontend can show the `n8n:<workflow_id>` agent and its tool catalog even before the workflow runs. When a workflow is modified and saved / published, the next scan syncs the updated catalog.
 
 ## Supported Scope
 
@@ -269,10 +270,12 @@ Check:
 
 - You are logged in to the correct AgentGuard console.
 - The n8n container can reach `AGENTGUARD_SERVER_URL`.
+- The n8n container has the same `AGENTGUARD_API_KEY` as the AgentGuard server. A missing or wrong key makes `/v1/server/agents/register` fail.
 - `NODE_OPTIONS` includes `/agentguard-n8n-bootstrap/register.cjs`.
 - The n8n container mounts the AgentGuard source and bootstrap directory.
 - `AGENTGUARD_N8N_CATALOG_SYNC_ENABLED=true` is set.
 - `AGENTGUARD_N8N_DB_PATH` points to the SQLite database inside the n8n container.
+- The current workflow owner email is bound in the AgentGuard User Centre. The adapter binds by workflow owner email; do not hard-code one email for the whole container.
 - The workflow is active or published.
 
 By default, no workflow allowlist is needed. If the container still has an old `AGENTGUARD_N8N_WORKFLOW_IDS` value, the adapter only connects those workflows. For multi-agent use, remove that variable and recreate the n8n container.

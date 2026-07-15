@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Cookie, HTTPException, Response
 from pydantic import BaseModel, Field
 
+from backend.agents.store import AgentStore
 from backend.database import DatabaseUnavailable
 from backend.user.email import EmailDeliveryUnavailable, get_email_sender
 from backend.user.permissions import is_admin_user
@@ -44,6 +45,13 @@ class EmailCodeRequest(BaseModel):
 class PasswordChangeRequest(BaseModel):
     current_password: str = Field(min_length=1)
     new_password: str = Field(min_length=8)
+
+
+class ExternalAccountBindRequest(BaseModel):
+    provider: str = Field(min_length=1, max_length=64)
+    email: str = Field(min_length=3, max_length=255)
+    display_name: str | None = Field(default=None, max_length=255)
+    metadata_json: str | None = None
 
 
 class DifyBindRequest(BaseModel):
@@ -187,20 +195,62 @@ def bind_dify_account(
     req: DifyBindRequest,
     agentguard_user_session: str | None = Cookie(default=None),
 ) -> dict[str, Any]:
+    return _bind_external_account(
+        provider="dify",
+        email=req.email,
+        display_name=req.display_name,
+        metadata_json=req.metadata_json,
+        agentguard_user_session=agentguard_user_session,
+    )
+
+
+@router.post("/v1/user/external-accounts")
+def bind_external_account(
+    req: ExternalAccountBindRequest,
+    agentguard_user_session: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    return _bind_external_account(
+        provider=req.provider,
+        email=req.email,
+        display_name=req.display_name,
+        metadata_json=req.metadata_json,
+        agentguard_user_session=agentguard_user_session,
+    )
+
+
+def _bind_external_account(
+    *,
+    provider: str,
+    email: str,
+    display_name: str | None,
+    metadata_json: str | None,
+    agentguard_user_session: str | None,
+) -> dict[str, Any]:
     user = _current_user_or_401(agentguard_user_session)
     try:
         mapping = _store_or_503().bind_external_account(
             user,
-            provider="dify",
-            account_email=req.email,
-            display_name=req.display_name,
-            metadata_json=req.metadata_json,
+            provider=provider,
+            account_email=email,
+            display_name=display_name,
+            metadata_json=metadata_json,
         )
     except DuplicateExternalAccount as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"external_account": _external_account_payload(mapping)}
+    try:
+        bindings = AgentStore().bind_existing_agents_for_external_account(
+            user_id=user.id,
+            provider=mapping.provider,
+            account_email=mapping.account_email,
+        )
+    except DatabaseUnavailable:
+        bindings = None
+    return {
+        "external_account": _external_account_payload(mapping),
+        "user_agent_bindings": bindings,
+    }
 
 
 @router.get("/v1/user/external-accounts")

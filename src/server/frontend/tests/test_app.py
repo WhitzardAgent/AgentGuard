@@ -327,13 +327,13 @@ def test_user_register_email_code_proxy_forwards_payload():
 
 
 def test_user_external_account_proxy_forwards_requests():
-    observed: dict[str, object] = {}
+    observed: dict[str, object] = {"post_paths": [], "post_bodies": []}
 
     class UpstreamHandler(BaseHTTPRequestHandler):
         def do_POST(self) -> None:
-            observed["post_path"] = self.path
+            observed["post_paths"].append(self.path)
             length = int(self.headers.get("Content-Length", "0"))
-            observed["post_body"] = self.rfile.read(length).decode("utf-8")
+            observed["post_bodies"].append(self.rfile.read(length).decode("utf-8"))
             body = json.dumps(
                 {"external_account": {"id": 7, "provider": "dify", "account_email": "alice@example.com"}}
             ).encode("utf-8")
@@ -373,10 +373,16 @@ def test_user_external_account_proxy_forwards_requests():
                     "/api/user/dify/bind",
                     {"email": "alice@example.com"},
                 )
+                generic_post_status, _ = _json_request(
+                    "POST",
+                    preview.url,
+                    "/api/user/external-accounts",
+                    {"provider": "n8n", "email": "owner@example.com"},
+                )
                 get_status, _ = _json_request(
                     "GET",
                     preview.url,
-                    "/api/user/external-accounts?provider=dify",
+                    "/api/user/external-accounts",
                 )
                 delete_status, _ = _json_request(
                     "DELETE",
@@ -385,11 +391,14 @@ def test_user_external_account_proxy_forwards_requests():
                 )
 
     assert post_status == 200
+    assert generic_post_status == 200
     assert get_status == 200
     assert delete_status == 200
-    assert observed["post_path"] == "/v1/user/dify/bind"
-    assert json.loads(str(observed["post_body"]))["email"] == "alice@example.com"
-    assert observed["get_path"] == "/v1/user/external-accounts?provider=dify"
+    assert observed["post_paths"] == ["/v1/user/dify/bind", "/v1/user/external-accounts"]
+    first_body, second_body = [json.loads(body) for body in observed["post_bodies"]]
+    assert first_body["email"] == "alice@example.com"
+    assert second_body == {"provider": "n8n", "email": "owner@example.com"}
+    assert observed["get_path"] == "/v1/user/external-accounts"
     assert observed["delete_path"] == "/v1/user/external-accounts/7"
 
 
