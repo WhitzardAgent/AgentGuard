@@ -1132,7 +1132,15 @@ def test_login_page_is_root_entrypoint():
 
     assert status == 200
     assert "Sign in to AgentGuard" in body
+    assert 'id="auth-panel"' in body
     assert 'id="login-form"' in body
+    assert 'id="login-password-toggle"' in body
+    assert 'id="register-confirm-password"' in body
+    assert 'id="register-password-toggle"' in body
+    assert 'id="register-confirm-password-toggle"' in body
+    assert 'src="/static/common/i18n.js"' in body
+    assert 'id="locale-toggle-button"' in body
+    assert "Control Plane" not in body
     assert 'id="app-sidebar"' not in body
 
 

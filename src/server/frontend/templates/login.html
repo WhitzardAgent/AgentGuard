@@ -4,48 +4,98 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sign In - AgentGuard</title>
+  <script src="/static/common/i18n.js"></script>
   <link rel="stylesheet" href="/static/common/styles.css">
 </head>
 <body class="auth-page">
   <main class="auth-shell">
-    <section class="auth-panel" aria-labelledby="auth-title">
+    <section class="auth-panel" id="auth-panel" aria-labelledby="auth-title">
+      <div class="auth-panel-topbar">
+        <button class="auth-locale-button" id="locale-toggle-button" type="button" aria-label="Switch to Chinese" title="Switch to Chinese">中文</button>
+      </div>
       <div class="auth-brand">AgentGuard</div>
-      <p class="page-kicker">Control Plane</p>
       <h1 id="auth-title">Sign in to AgentGuard</h1>
-      <p class="subtle">Use your AgentGuard account to enter the console.</p>
+      <p class="subtle" id="auth-subtitle">Use your AgentGuard account to enter the console.</p>
 
       <form class="auth-form" id="login-form">
         <label>
-          <span>Username</span>
+          <span id="login-username-label">Username</span>
           <input id="login-username" autocomplete="username" required minlength="3" maxlength="255" autofocus>
         </label>
         <label>
-          <span>Password</span>
-          <input id="login-password" type="password" autocomplete="current-password" required minlength="8">
+          <span id="login-password-label">Password</span>
+          <div class="auth-input-row auth-password-row">
+            <input id="login-password" type="password" autocomplete="current-password" required minlength="8">
+            <button class="auth-inline-button auth-icon-button" id="login-password-toggle" type="button" aria-label="Show password" title="Show password">
+              <svg class="auth-icon auth-icon-eye" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M1.5 12s3.8-6.5 10.5-6.5S22.5 12 22.5 12 18.7 18.5 12 18.5 1.5 12 1.5 12Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"/>
+              </svg>
+              <svg class="auth-icon auth-icon-eye-off" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M3 3l18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                <path d="M10.6 5.8A12.4 12.4 0 0 1 12 5.5c6.7 0 10.5 6.5 10.5 6.5a18.3 18.3 0 0 1-3.3 4.1" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M6.2 6.2A18 18 0 0 0 1.5 12s3.8 6.5 10.5 6.5a11 11 0 0 0 4.2-.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M9.9 9.9A3.2 3.2 0 0 0 12 15.2c.7 0 1.4-.2 1.9-.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+          </div>
         </label>
         <button class="btn primary auth-submit" id="login-submit" type="submit">Sign In</button>
       </form>
 
       <div class="auth-register" id="register-panel" hidden>
-        <div class="auth-divider"></div>
         <form class="auth-form" id="register-form">
           <label>
-            <span>New Username</span>
+            <span id="register-username-label">New Username</span>
             <input id="register-username" autocomplete="username" required minlength="3" maxlength="255">
           </label>
           <label>
-            <span>Email</span>
+            <span id="register-password-label">New Password</span>
+            <div class="auth-input-row auth-password-row">
+              <input id="register-password" type="password" autocomplete="new-password" required minlength="8">
+              <button class="auth-inline-button auth-icon-button" id="register-password-toggle" type="button" aria-label="Show password" title="Show password">
+                <svg class="auth-icon auth-icon-eye" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M1.5 12s3.8-6.5 10.5-6.5S22.5 12 22.5 12 18.7 18.5 12 18.5 1.5 12 1.5 12Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                  <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"/>
+                </svg>
+                <svg class="auth-icon auth-icon-eye-off" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M3 3l18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                  <path d="M10.6 5.8A12.4 12.4 0 0 1 12 5.5c6.7 0 10.5 6.5 10.5 6.5a18.3 18.3 0 0 1-3.3 4.1" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M6.2 6.2A18 18 0 0 0 1.5 12s3.8 6.5 10.5 6.5a11 11 0 0 0 4.2-.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M9.9 9.9A3.2 3.2 0 0 0 12 15.2c.7 0 1.4-.2 1.9-.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
+            </div>
+          </label>
+          <label>
+            <span id="register-confirm-password-label">Confirm Password</span>
+            <div class="auth-input-row auth-password-row">
+              <input id="register-confirm-password" type="password" autocomplete="new-password" required minlength="8">
+              <button class="auth-inline-button auth-icon-button" id="register-confirm-password-toggle" type="button" aria-label="Show password" title="Show password">
+                <svg class="auth-icon auth-icon-eye" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M1.5 12s3.8-6.5 10.5-6.5S22.5 12 22.5 12 18.7 18.5 12 18.5 1.5 12 1.5 12Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                  <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"/>
+                </svg>
+                <svg class="auth-icon auth-icon-eye-off" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M3 3l18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                  <path d="M10.6 5.8A12.4 12.4 0 0 1 12 5.5c6.7 0 10.5 6.5 10.5 6.5a18.3 18.3 0 0 1-3.3 4.1" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M6.2 6.2A18 18 0 0 0 1.5 12s3.8 6.5 10.5 6.5a11 11 0 0 0 4.2-.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M9.9 9.9A3.2 3.2 0 0 0 12 15.2c.7 0 1.4-.2 1.9-.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
+            </div>
+          </label>
+          <label>
+            <span id="register-email-label">Email</span>
             <input id="register-email" type="email" autocomplete="email" required minlength="3" maxlength="255">
           </label>
-          <label>
-            <span>Verification Code</span>
-            <input id="register-code" inputmode="numeric" autocomplete="one-time-code" required minlength="6" maxlength="6">
-          </label>
-          <button class="btn auth-submit" id="send-register-code" type="button">Send Code</button>
-          <label>
-            <span>New Password</span>
-            <input id="register-password" type="password" autocomplete="new-password" required minlength="8">
-          </label>
+          <div class="auth-code-field">
+            <span id="register-code-label">Verification Code</span>
+            <div class="auth-code-row auth-input-row">
+              <input id="register-code" inputmode="numeric" autocomplete="one-time-code" required minlength="6" maxlength="6">
+              <button class="btn auth-submit" id="send-register-code" type="button">Send Code</button>
+            </div>
+          </div>
           <button class="btn auth-submit" id="register-submit" type="submit">Create Account</button>
         </form>
       </div>
@@ -57,13 +107,121 @@
 
   <script>
     (function () {
+      const AUTH_MODE_KEY = "agentguard.authMode";
+      const authPanel = document.getElementById("auth-panel");
       const loginForm = document.getElementById("login-form");
       const registerForm = document.getElementById("register-form");
       const registerPanel = document.getElementById("register-panel");
       const toggleRegister = document.getElementById("toggle-register");
+      const authTitle = document.getElementById("auth-title");
+      const authSubtitle = document.getElementById("auth-subtitle");
+      const loginUsernameLabel = document.getElementById("login-username-label");
+      const loginPasswordLabel = document.getElementById("login-password-label");
+      const registerUsernameLabel = document.getElementById("register-username-label");
+      const registerPasswordLabel = document.getElementById("register-password-label");
+      const registerConfirmPasswordLabel = document.getElementById("register-confirm-password-label");
+      const registerEmailLabel = document.getElementById("register-email-label");
+      const registerCodeLabel = document.getElementById("register-code-label");
       const loginSubmit = document.getElementById("login-submit");
       const registerSubmit = document.getElementById("register-submit");
       const sendRegisterCode = document.getElementById("send-register-code");
+      const loginUsername = document.getElementById("login-username");
+      const loginPassword = document.getElementById("login-password");
+      const registerUsername = document.getElementById("register-username");
+      const registerPassword = document.getElementById("register-password");
+      const registerConfirmPassword = document.getElementById("register-confirm-password");
+      const loginPasswordToggle = document.getElementById("login-password-toggle");
+      const registerPasswordToggle = document.getElementById("register-password-toggle");
+      const registerConfirmPasswordToggle = document.getElementById("register-confirm-password-toggle");
+
+      function t(message, variables) {
+        return window.AgentGuardI18n?.t?.(message, variables) || String(message || "");
+      }
+
+      function readAuthMode() {
+        try {
+          return window.localStorage?.getItem(AUTH_MODE_KEY) === "register" ? "register" : "login";
+        } catch {
+          return "login";
+        }
+      }
+
+      function persistAuthMode(mode) {
+        try {
+          window.localStorage?.setItem(AUTH_MODE_KEY, mode === "register" ? "register" : "login");
+        } catch {
+          // Ignore localStorage write issues.
+        }
+      }
+
+      function updatePasswordToggleLabel(button, input) {
+        if (!button || !input) {
+          return;
+        }
+        const reveal = input.type === "password";
+        button.classList.toggle("is-revealed", !reveal);
+        button.setAttribute("aria-label", reveal ? t("Show password") : t("Hide password"));
+        button.setAttribute("title", reveal ? t("Show password") : t("Hide password"));
+      }
+
+      function syncPasswordToggles() {
+        updatePasswordToggleLabel(loginPasswordToggle, loginPassword);
+        updatePasswordToggleLabel(registerPasswordToggle, registerPassword);
+        updatePasswordToggleLabel(registerConfirmPasswordToggle, registerConfirmPassword);
+      }
+
+      function setPasswordType(input, type) {
+        if (input) {
+          input.type = type;
+        }
+      }
+
+      function resetPasswordVisibility() {
+        setPasswordType(loginPassword, "password");
+        setPasswordType(registerPassword, "password");
+        setPasswordType(registerConfirmPassword, "password");
+        syncPasswordToggles();
+      }
+
+      function bindPasswordToggle(button, input) {
+        if (!button || !input) {
+          return;
+        }
+        button.addEventListener("click", () => {
+          input.type = input.type === "password" ? "text" : "password";
+          updatePasswordToggleLabel(button, input);
+        });
+      }
+
+      function renderAuthMode(mode, options = {}) {
+        const registerMode = mode === "register";
+        authPanel?.classList.toggle("is-register-mode", registerMode);
+        loginForm.hidden = registerMode;
+        loginForm.style.display = registerMode ? "none" : "";
+        registerPanel.hidden = !registerMode;
+        registerPanel.style.display = registerMode ? "" : "none";
+        authTitle.textContent = registerMode ? t("Create your AgentGuard account") : t("Sign in to AgentGuard");
+        authSubtitle.textContent = registerMode
+          ? t("Use email verification to register a new account.")
+          : t("Use your AgentGuard account to enter the console.");
+        loginUsernameLabel.textContent = t("Username");
+        loginPasswordLabel.textContent = t("Password");
+        registerUsernameLabel.textContent = t("New Username");
+        registerPasswordLabel.textContent = t("New Password");
+        registerConfirmPasswordLabel.textContent = t("Confirm Password");
+        registerEmailLabel.textContent = t("Email");
+        registerCodeLabel.textContent = t("Verification Code");
+        loginSubmit.textContent = t("Sign In");
+        sendRegisterCode.textContent = t("Send Code");
+        registerSubmit.textContent = t("Create Account");
+        toggleRegister.textContent = registerMode ? t("Use an existing account") : t("Create an account");
+        document.title = registerMode ? t("Create Account - AgentGuard") : t("Sign In - AgentGuard");
+        syncPasswordToggles();
+        persistAuthMode(mode);
+        if (options.focusField) {
+          (registerMode ? registerUsername : loginUsername)?.focus();
+        }
+      }
 
       function showToast(message, tone) {
         const toast = document.getElementById("toast");
@@ -124,10 +282,13 @@
         }
       }
 
+      bindPasswordToggle(loginPasswordToggle, loginPassword);
+      bindPasswordToggle(registerPasswordToggle, registerPassword);
+      bindPasswordToggle(registerConfirmPasswordToggle, registerConfirmPassword);
+
       toggleRegister.addEventListener("click", () => {
-        const show = registerPanel.hidden;
-        registerPanel.hidden = !show;
-        toggleRegister.textContent = show ? "Use an existing account" : "Create an account";
+        resetPasswordVisibility();
+        renderAuthMode(registerPanel.hidden ? "register" : "login", { focusField: true });
       });
 
       loginForm.addEventListener("submit", async (event) => {
@@ -137,14 +298,14 @@
           const payload = await api("/api/user/login", {
             method: "POST",
             body: JSON.stringify({
-              username: document.getElementById("login-username").value.trim(),
-              password: document.getElementById("login-password").value,
+              username: loginUsername.value.trim(),
+              password: loginPassword.value,
             }),
           });
           setCurrentUser(payload.user);
           window.location.replace(nextPath());
         } catch (error) {
-          showToast(error.message || "Login failed.", "warning");
+          showToast(error.message || t("Login failed."), "warning");
         } finally {
           setLoading(loginSubmit, false);
         }
@@ -153,7 +314,7 @@
       sendRegisterCode.addEventListener("click", async () => {
         const email = document.getElementById("register-email").value.trim();
         if (!email) {
-          showToast("Email is required.", "warning");
+          showToast(t("Email is required."), "warning");
           return;
         }
         setLoading(sendRegisterCode, true);
@@ -164,12 +325,12 @@
           });
           showToast(
             payload.cooldown_seconds
-              ? `Code sent. Try again in ${payload.cooldown_seconds} seconds.`
-              : "Code sent.",
+              ? t("Code sent. Try again in {seconds} seconds.", { seconds: payload.cooldown_seconds })
+              : t("Code sent."),
             "success",
           );
         } catch (error) {
-          showToast(error.message || "Failed to send code.", "warning");
+          showToast(error.message || t("Failed to send code."), "warning");
         } finally {
           setLoading(sendRegisterCode, false);
         }
@@ -177,28 +338,35 @@
 
       registerForm.addEventListener("submit", async (event) => {
         event.preventDefault();
+        if (registerPassword.value !== registerConfirmPassword.value) {
+          showToast(t("Passwords do not match."), "warning");
+          registerConfirmPassword.focus();
+          return;
+        }
         setLoading(registerSubmit, true);
         try {
           await api("/api/user/register", {
             method: "POST",
             body: JSON.stringify({
-              username: document.getElementById("register-username").value.trim(),
+              username: registerUsername.value.trim(),
               email: document.getElementById("register-email").value.trim(),
-              password: document.getElementById("register-password").value,
+              password: registerPassword.value,
               verification_code: document.getElementById("register-code").value.trim(),
             }),
           });
           registerForm.reset();
-          registerPanel.hidden = true;
-          toggleRegister.textContent = "Create an account";
-          showToast("Account created. Sign in with it.", "success");
+          resetPasswordVisibility();
+          renderAuthMode("login");
+          showToast(t("Account created. Sign in with it."), "success");
         } catch (error) {
-          showToast(error.message || "Registration failed.", "warning");
+          showToast(error.message || t("Registration failed."), "warning");
         } finally {
           setLoading(registerSubmit, false);
         }
       });
 
+      resetPasswordVisibility();
+      renderAuthMode(readAuthMode());
       redirectIfAlreadySignedIn();
     })();
   </script>

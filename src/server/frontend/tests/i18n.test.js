@@ -179,7 +179,7 @@ function createDocument(body, title = "AgentGuard Frontend Preview") {
   };
 }
 
-function loadI18n({ language = null, body, title } = {}) {
+function loadI18n({ language = null, body, title, storage = null } = {}) {
   global.Node = { TEXT_NODE, ELEMENT_NODE };
   global.NodeFilter = { SHOW_TEXT: 4 };
   global.HTMLElement = FakeElement;
@@ -188,7 +188,7 @@ function loadI18n({ language = null, body, title } = {}) {
   global.HTMLTextAreaElement = FakeTextAreaElement;
   global.MutationObserver = undefined;
 
-  global.localStorage = createStorage(language ? { "agentguard.language": language } : {});
+  global.localStorage = storage || createStorage(language ? { "agentguard.language": language } : {});
   global.document = createDocument(body, title);
 
   let reloadCount = 0;
@@ -269,4 +269,54 @@ test("i18n translates home page text nodes in Chinese mode", () => {
 
   assert.equal(pluginCardCopy.textContent, "为所选智能体启用远程或本地插件，包括可选的内置策略与安全流程。");
   assert.equal(ctaLabel.textContent, "从智能体选择开始");
+});
+
+test("i18n translates auth text and interpolates countdowns", () => {
+  const body = new FakeElement("body");
+  const button = new FakeButtonElement("button", { id: "locale-toggle-button", textContent: "中文" });
+  const title = new FakeElement("h1");
+  const toggle = new FakeButtonElement("button");
+  title.appendChild(new FakeTextNode("Sign in to AgentGuard"));
+  toggle.appendChild(new FakeTextNode("Create an account"));
+  body.appendChild(button);
+  body.appendChild(title);
+  body.appendChild(toggle);
+
+  const { api } = loadI18n({ language: "zh", body, title: "Sign In - AgentGuard" });
+
+  assert.equal(global.document.title, "登录 - AgentGuard");
+  assert.equal(title.textContent, "登录 AgentGuard");
+  assert.equal(toggle.textContent, "创建账号");
+  assert.equal(api.t("Confirm Password"), "确认密码");
+  assert.equal(api.t("Show"), "显示");
+  assert.equal(api.t("Hide"), "隐藏");
+  assert.equal(api.t("Passwords do not match."), "两次输入的密码不一致。");
+  assert.equal(api.t("Code sent. Try again in {seconds} seconds.", { seconds: 30 }), "验证码已发送。请在 30 秒后重试。");
+});
+
+
+test("language chosen on login persists to later pages", () => {
+  const loginBody = new FakeElement("body");
+  const loginToggle = new FakeButtonElement("button", { id: "locale-toggle-button", textContent: "中文" });
+  loginBody.appendChild(loginToggle);
+
+  const sharedStorage = createStorage();
+  const { reloadCount } = loadI18n({ body: loginBody, storage: sharedStorage });
+  loginToggle.click();
+
+  assert.equal(sharedStorage.getItem("agentguard.language"), "zh");
+  assert.equal(reloadCount(), 1);
+
+  const appBody = new FakeElement("body");
+  const appToggle = new FakeButtonElement("button", { id: "sidebar-language-toggle", textContent: "中文" });
+  const homeTitle = new FakeElement("h1");
+  homeTitle.appendChild(new FakeTextNode("Home"));
+  appBody.appendChild(appToggle);
+  appBody.appendChild(homeTitle);
+
+  loadI18n({ body: appBody, storage: sharedStorage, title: "AgentGuard Frontend Preview" });
+
+  assert.equal(global.document.documentElement.lang, "zh-CN");
+  assert.equal(global.document.title, "AgentGuard 前端预览");
+  assert.equal(homeTitle.textContent, "首页");
 });
