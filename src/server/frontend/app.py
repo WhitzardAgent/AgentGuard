@@ -640,8 +640,8 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
 
 
 def serve(host: str | None = None, port: int | None = None) -> None:
-    h = host or os.environ.get("FRONTEND_HOST", "127.0.0.1")
-    p = port or int(os.environ.get("FRONTEND_PORT", "8008"))
+    h = host or os.environ.get("FRONTEND_HOST", "0.0.0.0")
+    p = port or int(os.environ.get("FRONTEND_PORT", "38008"))
     server = ThreadingHTTPServer((h, p), FrontendPreviewHandler)
     print(f"AgentGuard frontend  http://{h}:{p}")
     if USE_MOCK_BACKEND:

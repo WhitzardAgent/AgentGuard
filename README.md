@@ -200,6 +200,8 @@ Start the control server:
 The control server listens on port `38080`.
 The UI listens on port `38008`.
 
+By default, `./scripts/start.sh -d` bind-mounts the current repository into the server/frontend containers, so restarting with the same command picks up the latest backend/frontend code automatically. If `Dockerfile` or `pyproject.toml` changes, the script rebuilds the image automatically.
+
 Visit `http://localhost:38008` to see the UI.
 
 ### 2. Agent-Side Setup

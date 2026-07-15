@@ -22,7 +22,7 @@ from backend.database.config import get_mysql_config  # noqa: E402
 from backend.user.passwords import hash_password  # noqa: E402
 
 ADMIN_USERNAME = "AgentGuardAdmin"
-ADMIN_PASSWORD = "！@#￥%……&*"
+ADMIN_PASSWORD = "AgentGuardAdmin123"
 ADMIN_PROFILE = {"role": "admin"}
 ADMIN_PROFILE_JSON = json.dumps(ADMIN_PROFILE, sort_keys=True, separators=(",", ":"))
 

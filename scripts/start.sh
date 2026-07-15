@@ -2,7 +2,7 @@
 # scripts/start.sh — One-click Docker Compose startup for AgentGuard.
 #
 # Usage:
-#   ./scripts/start.sh          # build images if needed, start all services
+#   ./scripts/start.sh          # start all services using the latest repo code
 #   ./scripts/start.sh --build  # force rebuild images
 #   ./scripts/start.sh -d       # start in background (detached)
 #   BUILD=1 ./scripts/start.sh  # alias for --build
@@ -25,7 +25,9 @@ info()  { echo -e "${_green}[agentguard]${_reset} $*"; }
 warn()  { echo -e "${_yellow}[warn]${_reset} $*"; }
 error() { echo -e "${_red}[error]${_reset} $*" >&2; exit 1; }
 
-# ── Parse arguments ───────────────────────────────────────────────────────────
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/compose-common.sh"
+
 BUILD_FLAG=""
 DETACH_FLAG=""
 for arg in "$@"; do
@@ -36,52 +38,44 @@ for arg in "$@"; do
 done
 [ "${BUILD:-0}" = "1" ] && BUILD_FLAG="--build"
 
-# ── Pre-flight checks ─────────────────────────────────────────────────────────
 if ! command -v docker &>/dev/null; then
     error "Docker is not installed or not in PATH. Install Docker Desktop / Docker Engine first."
 fi
 
-# Support both 'docker compose' (v2 plugin) and legacy 'docker-compose'
-if docker compose version &>/dev/null 2>&1; then
-    COMPOSE="docker compose"
-elif command -v docker-compose &>/dev/null; then
-    COMPOSE="docker-compose"
-else
-    error "Docker Compose is not available. Install the Docker Compose plugin or docker-compose."
-fi
-
-# ── Bootstrap .env ────────────────────────────────────────────────────────────
-if [ ! -f .env ]; then
-    info ".env not found — copying .env.example → .env"
-    cp .env.example .env
-    warn "Review .env and set any required secrets (e.g. AGENTGUARD_LLM_API_KEY) before proceeding."
-fi
-
-# ── Ensure rules directory exists ─────────────────────────────────────────────
-if [ ! -d rules ]; then
-    info "Creating empty rules/ directory (add your .rules files here)"
-    mkdir -p rules
-fi
-
-# ── Load .env for local variable substitution in this script ──────────────────
-set -a
-# shellcheck disable=SC1091
-. ./.env
-set +a
+agentguard_resolve_compose || error "Docker Compose is not available. Install the Docker Compose plugin or docker-compose."
+agentguard_bootstrap_project
+agentguard_load_env
+agentguard_select_compose_files
+agentguard_prepare_build_state
 
 AGENTGUARD_PORT="${AGENTGUARD_PORT:-38080}"
 AGENTGUARD_FRONTEND_PORT="${AGENTGUARD_FRONTEND_PORT:-38008}"
 
-# ── Start services ────────────────────────────────────────────────────────────
 info "Starting AgentGuard stack (this may take a moment on first run)…"
 
-# If no images exist yet, force a build regardless of flags.
 if ! docker image inspect agentguard:latest &>/dev/null; then
     BUILD_FLAG="--build"
+    info "agentguard:latest not found locally — enabling build."
+elif [ -n "$BUILD_FLAG" ]; then
+    info "Forced rebuild requested."
+elif agentguard_build_inputs_changed; then
+    BUILD_FLAG="--build"
+    info "Docker build inputs changed — enabling rebuild."
 fi
 
-# shellcheck disable=SC2086
-$COMPOSE up $BUILD_FLAG $DETACH_FLAG
+UP_ARGS=(up)
+[ -n "$BUILD_FLAG" ] && UP_ARGS+=("$BUILD_FLAG")
+[ -n "$DETACH_FLAG" ] && UP_ARGS+=("$DETACH_FLAG")
+SERVICE_ARGS=()
+
+if [ "$AGENTGUARD_LIVE_CODE_ENABLED" = "1" ]; then
+    info "Using bind-mounted repo code for server/frontend."
+    UP_ARGS+=(--force-recreate)
+    SERVICE_ARGS=(server frontend)
+fi
+
+"${AGENTGUARD_COMPOSE[@]}" "${AGENTGUARD_COMPOSE_FILES[@]}" "${UP_ARGS[@]}" "${SERVICE_ARGS[@]}"
+agentguard_persist_build_stamp
 
 if [ -n "$DETACH_FLAG" ]; then
     echo ""
@@ -89,6 +83,10 @@ if [ -n "$DETACH_FLAG" ]; then
     echo -e "  Runtime API  →  ${_green}http://localhost:${AGENTGUARD_PORT}${_reset}"
     echo -e "  Web UI       →  ${_green}http://localhost:${AGENTGUARD_FRONTEND_PORT}${_reset}"
     echo ""
+    if [ "$AGENTGUARD_LIVE_CODE_ENABLED" = "1" ]; then
+        echo "  Server/frontend source is bind-mounted from this repo."
+        echo "  Rerun ./scripts/start.sh after code changes to reload containers."
+    fi
     echo "  Logs:   ./scripts/logs.sh"
     echo "  Stop:   ./scripts/stop.sh"
 fi

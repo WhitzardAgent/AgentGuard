@@ -198,6 +198,8 @@ AGENTGUARD_SERVER_PLUGIN_CONFIG=./config/plugins.json
 中控服务监听在：`38080` 端口
 UI 界面监听在：`38008` 端口
 
+默认情况下，`./scripts/start.sh -d` 会把当前仓库目录挂载到 server/frontend 容器里，所以你在本地更新前后端代码后，再执行同一条命令即可加载最新代码；如果 `Dockerfile` 或 `pyproject.toml` 发生变化，脚本会自动重建镜像。
+
 你可以通过访问 `http://localhost:38008` 来查看 UI 界面。
 
 ### 2. 智能体端的设置

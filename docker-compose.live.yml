@@ -1,0 +1,8 @@
+services:
+  server:
+    volumes:
+      - ./:/opt/agentguard
+
+  frontend:
+    volumes:
+      - ./:/opt/agentguard

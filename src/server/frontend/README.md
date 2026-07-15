@@ -11,8 +11,10 @@ Start it locally with:
 The default preview URL is:
 
 ```text
-http://127.0.0.1:8008
+http://127.0.0.1:38008
 ```
+
+The local launcher mirrors the compose defaults (`FRONTEND_HOST=0.0.0.0`, `FRONTEND_PORT=38008`).
 
 By default, `/api/*` requests are proxied to the real AgentGuard API at:
 

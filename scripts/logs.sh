@@ -3,22 +3,19 @@
 #
 # Usage:
 #   ./scripts/logs.sh                    # tail all services
-#   ./scripts/logs.sh agentguard         # backend only
+#   ./scripts/logs.sh server             # backend only
 #   ./scripts/logs.sh frontend           # web UI only
-#   ./scripts/logs.sh agentguard --tail=50
+#   ./scripts/logs.sh server --tail=50
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$(dirname "$SCRIPT_DIR")"
 
-if docker compose version &>/dev/null 2>&1; then
-    COMPOSE="docker compose"
-elif command -v docker-compose &>/dev/null; then
-    COMPOSE="docker-compose"
-else
-    echo "docker compose not found" >&2; exit 1
-fi
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/compose-common.sh"
 
-# shellcheck disable=SC2086
-exec $COMPOSE logs -f "$@"
+agentguard_resolve_compose || { echo "docker compose not found" >&2; exit 1; }
+agentguard_select_compose_files
+
+exec "${AGENTGUARD_COMPOSE[@]}" "${AGENTGUARD_COMPOSE_FILES[@]}" logs -f "$@"

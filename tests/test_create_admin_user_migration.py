@@ -125,7 +125,7 @@ def test_admin_migration_inserts_admin_into_empty_database():
     assert admin["id"] == 1
     assert admin["username"] == "AgentGuardAdmin"
     assert admin["profile_json"] == '{"role":"admin"}'
-    assert verify_password("！@#￥%……&*", admin["password_hash"])
+    assert verify_password("AgentGuardAdmin123", admin["password_hash"])
 
 
 def test_admin_migration_shifts_existing_users_and_references():

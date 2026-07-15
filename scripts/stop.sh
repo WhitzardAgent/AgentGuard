@@ -15,14 +15,13 @@ cd "$PROJECT_ROOT"
 _green='\033[0;32m'
 _reset='\033[0m'
 info() { echo -e "${_green}[agentguard]${_reset} $*"; }
+warn() { :; }
 
-if docker compose version &>/dev/null 2>&1; then
-    COMPOSE="docker compose"
-elif command -v docker-compose &>/dev/null; then
-    COMPOSE="docker-compose"
-else
-    echo "docker compose not found" >&2; exit 1
-fi
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/compose-common.sh"
+
+agentguard_resolve_compose || { echo "docker compose not found" >&2; exit 1; }
+agentguard_select_compose_files
 
 VOLUMES_FLAG=""
 for arg in "$@"; do
@@ -30,8 +29,9 @@ for arg in "$@"; do
 done
 
 info "Stopping AgentGuard services…"
-# shellcheck disable=SC2086
-$COMPOSE down $VOLUMES_FLAG
+DOWN_ARGS=(down)
+[ -n "$VOLUMES_FLAG" ] && DOWN_ARGS+=("$VOLUMES_FLAG")
+"${AGENTGUARD_COMPOSE[@]}" "${AGENTGUARD_COMPOSE_FILES[@]}" "${DOWN_ARGS[@]}"
 
 if [ -n "$VOLUMES_FLAG" ]; then
     info "Persistent volumes removed."
