@@ -18,7 +18,13 @@ const {
   ClientConfigAPIServer,
   ClientSyncBuffer,
   DecisionType,
+  DPoPKey,
   EventType,
+  GuardDecision,
+  agentIdentityKeyId,
+  buildAgentRegistrationPayload,
+  loadOrCreateAgentKey,
+  loadOrCreateDPoPKey,
   PluginManager,
   PolicySnapshot,
   RemoteGuardClient,
@@ -31,6 +37,12 @@ const DEFAULT_WINDOW_SIZE = 8;
 const DEFAULT_POLICY = "builtin";
 const DEFAULT_REMOTE_UNAVAILABLE_MODE = "fail_closed";
 const DEFAULT_BLOCK_MESSAGE = "Request blocked by AgentGuard policy.";
+const CLOSED_SESSION_BLOCK_MESSAGE =
+  "AgentGuard closed this OpenClaw session. Start a new OpenClaw conversation before continuing.";
+const DEFAULT_BLOCK_PREPEND_CONTEXT = [
+  "AgentGuard policy blocked this request.",
+  "Do not call tools, do not continue the requested task, and respond only with the block message below.",
+].join(" ");
 const DEFAULT_SANITIZED_MESSAGE = "Response removed by AgentGuard.";
 const DEFAULT_PHASE_CONFIG_PATH = path.resolve(__dirname, "../../../../../../../../config/plugins.json");
 const DEFAULT_TOOL_CATALOG_PATH = path.resolve(
@@ -49,9 +61,12 @@ function normalizePluginConfig(raw = {}) {
     apiKey: resolveApiKey(config),
     policy: asNonEmptyString(config.policy) || DEFAULT_POLICY,
     auditPath: asNonEmptyString(config.auditPath),
+    providerInstanceId: resolveProviderInstanceId(config),
+    openclawConfigPath: resolveOpenClawConfigPath(config),
     phases: resolvePhaseConfig(config),
     toolCapabilities: normalizeToolCapabilities(config.toolCapabilities),
     identity: normalizeIdentity(config.identity),
+    runtimeAuth: normalizeRuntimeAuthConfig(config),
     defaultTools: resolveDefaultTools(config, configDir),
     skillScan: normalizeSkillScanConfig(config.skillScan, configDir),
     mcpScan: normalizeMcpScanConfig(config.mcpScan, configDir),
@@ -272,6 +287,15 @@ function normalizeIdentity(value) {
   };
 }
 
+function normalizeRuntimeAuthConfig(config) {
+  const userTicket = resolveUserTicket(config || {});
+  return {
+    provider: "openclaw",
+    userTicket,
+    configured: Boolean(userTicket),
+  };
+}
+
 function resolveApiKey(config) {
   const direct = asNonEmptyString(config.apiKey);
   if (direct) {
@@ -281,8 +305,45 @@ function resolveApiKey(config) {
   return envVar ? asNonEmptyString(process.env[envVar]) : undefined;
 }
 
+function resolveUserTicket(config) {
+  const direct = asNonEmptyString(config.userTicket);
+  if (direct) {
+    return direct;
+  }
+  const envVar = asNonEmptyString(config.userTicketEnvVar);
+  return envVar ? asNonEmptyString(process.env[envVar]) : undefined;
+}
+
+function resolveProviderInstanceId(config) {
+  return (
+    asNonEmptyString(config.providerInstanceId) ||
+    asNonEmptyString(process.env.AGENTGUARD_OPENCLAW_PROVIDER_INSTANCE_ID) ||
+    "openclaw-local"
+  );
+}
+
+function resolveOpenClawConfigPath(config) {
+  const configured =
+    asNonEmptyString(config.openclawConfigPath) ||
+    asNonEmptyString(process.env.AGENTGUARD_OPENCLAW_CONFIG_PATH);
+  if (configured) {
+    return path.resolve(expandHome(configured));
+  }
+  const home = process.env.HOME || process.env.USERPROFILE;
+  return home ? path.join(home, ".openclaw", "openclaw.json") : undefined;
+}
+
 function asNonEmptyString(value) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function expandHome(value) {
+  const text = String(value || "");
+  if (!text.startsWith("~")) {
+    return text;
+  }
+  const home = process.env.HOME || process.env.USERPROFILE || "";
+  return home ? text.replace(/^~(?=$|\/|\\)/, home) : text;
 }
 
 function asPositiveInteger(value, fallback) {
@@ -323,10 +384,8 @@ function deriveIdentityValue(source, identityContext) {
 }
 
 function buildRuntimeContext(config, identityContext) {
-  const sessionId =
-    asNonEmptyString(identityContext.sessionId) ||
-    asNonEmptyString(identityContext.sessionKey) ||
-    "unknown";
+  const openclawSessionId = asNonEmptyString(identityContext.sessionId);
+  const sessionId = openclawSessionId || asNonEmptyString(identityContext.sessionKey) || "unknown";
   const sessionKey = asNonEmptyString(identityContext.sessionKey) || sessionId;
   const derivedUserId =
     config.identity.userId ||
@@ -335,6 +394,7 @@ function buildRuntimeContext(config, identityContext) {
   const derivedAgentId =
     config.identity.agentId ||
     deriveIdentityValue(config.identity.agentIdFrom, identityContext) ||
+    openClawAgentIdFromSessionKey(sessionKey) ||
     null;
 
   return new RuntimeContext({
@@ -362,6 +422,8 @@ function buildRuntimeContext(config, identityContext) {
       client_plugin_config: { phases: config.phases },
       remote_plugin_config: { phases: config.phases },
       openclaw: {
+        agentId: derivedAgentId,
+        sessionId: openclawSessionId || null,
         sessionKey,
         channelId: identityContext.channelId || null,
         accountId: identityContext.accountId || null,
@@ -486,6 +548,16 @@ function buildUserBlockMessage(decision) {
   );
 }
 
+function buildBlockedPromptContext(decision) {
+  const message = buildUserBlockMessage(decision);
+  const reason = asNonEmptyString(decision && decision.reason);
+  return [
+    DEFAULT_BLOCK_PREPEND_CONTEXT,
+    reason ? `Reason: ${reason}` : null,
+    `Block message: ${message}`,
+  ].filter(Boolean).join("\n");
+}
+
 function resolveCapabilities(toolCapabilities, event) {
   const configured = toolCapabilities[event.toolName];
   if (configured && configured.length) {
@@ -498,6 +570,16 @@ function resolveCapabilities(toolCapabilities, event) {
 }
 
 function buildLlmInputMessages(event = {}) {
+  const prompt = asNonEmptyString(event.prompt);
+  if (prompt) {
+    const messages = [];
+    const systemPrompt = asNonEmptyString(event.systemPrompt);
+    if (systemPrompt) {
+      messages.push({ role: "system", content: systemPrompt });
+    }
+    messages.push({ role: "user", content: prompt });
+    return messages;
+  }
   if (Array.isArray(event.messages) && event.messages.length) {
     return event.messages.map(normalizeOpenClawMessage);
   }
@@ -1029,6 +1111,423 @@ function buildToolReportPayload(tool) {
   };
 }
 
+function buildRuntimeAuthState(config) {
+  const runtimeAuth = config && config.runtimeAuth;
+  if (!runtimeAuth || !runtimeAuth.configured) {
+    return null;
+  }
+  const dpopKey = new DPoPKey();
+  const state = {
+    provider: "openclaw",
+    user_ticket: runtimeAuth.userTicket,
+    dpop_key: dpopKey,
+    dpop_key_id: null,
+    session_id: null,
+    agent_id: null,
+    external_agent_id: null,
+    external_session_id: null,
+    user_id: null,
+    session_token: null,
+    expires_at: 0,
+  };
+  state.proof = (method, url, accessToken = null) =>
+    (state.dpop_key || dpopKey).proof(method, url, accessToken);
+  return state;
+}
+
+function runtimeAuthFresh(runtimeAuth) {
+  return Boolean(
+    runtimeAuth &&
+      runtimeAuth.session_token &&
+      runtimeAuth.expires_at - Math.floor(Date.now() / 1000) > 60,
+  );
+}
+
+function clearRuntimeAuthSession(runtimeAuth) {
+  if (!runtimeAuth) {
+    return;
+  }
+  runtimeAuth.session_id = null;
+  runtimeAuth.agent_id = null;
+  runtimeAuth.user_id = null;
+  runtimeAuth.external_session_id = null;
+  runtimeAuth.session_token = null;
+  runtimeAuth.expires_at = 0;
+}
+
+function openClawExternalSessionId(context) {
+  const metadata = context && context.metadata && typeof context.metadata === "object"
+    ? context.metadata
+    : {};
+  const openclaw = metadata.openclaw && typeof metadata.openclaw === "object"
+    ? metadata.openclaw
+    : {};
+  const sessionKey = asNonEmptyString(openclaw.sessionKey) || asNonEmptyString(metadata.client_session_key);
+  const openclawSessionId = asNonEmptyString(openclaw.sessionId);
+  const contextSessionId = asNonEmptyString(context && context.session_id);
+  return (
+    (openclawSessionId && openclawSessionId !== sessionKey ? openclawSessionId : undefined) ||
+    (contextSessionId && contextSessionId !== sessionKey ? contextSessionId : undefined) ||
+    sessionKey
+  );
+}
+
+function buildOpenClawRuntimeAuthMetadata(context) {
+  const metadata = context && context.metadata && typeof context.metadata === "object"
+    ? context.metadata
+    : {};
+  const openclaw = metadata.openclaw && typeof metadata.openclaw === "object"
+    ? metadata.openclaw
+    : {};
+  return {
+    adapter: "openclaw",
+    runtime_auth_provider: "openclaw",
+    agentguard_agent_id: context.agent_id || null,
+    openclaw_agent_id: openclaw.agentId || metadata.external_agent_id || context.agent_id || null,
+    openclaw_session_id: openclaw.sessionId || context.session_id || null,
+    openclaw_session_key: metadata.client_session_key || null,
+    client_session_key: metadata.client_session_key || null,
+    client_config_url: metadata.client_config_url || null,
+    client_plugin_list_url: metadata.client_plugin_list_url || null,
+    client_health_url: metadata.client_health_url || null,
+    openclaw: {
+      ...openclaw,
+    },
+  };
+}
+
+function openClawAgentIdFromSessionKey(sessionKey) {
+  const raw = asNonEmptyString(sessionKey);
+  if (!raw) {
+    return undefined;
+  }
+  const match = raw.match(/^agent:([^:]+)(?::|$)/);
+  return asNonEmptyString(match && match[1]) || undefined;
+}
+
+function resolveConfiguredOpenClawStorePath(store, agentId) {
+  const configured = asNonEmptyString(store);
+  if (!configured) {
+    return undefined;
+  }
+  const expanded = expandHome(configured.replaceAll("{agentId}", agentId || "main"));
+  return path.resolve(expanded);
+}
+
+function readOpenClawConfiguredSessionStore(config, agentId) {
+  const configPath = asNonEmptyString(config && config.openclawConfigPath);
+  if (!configPath || !fs.existsSync(configPath)) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    return parsed && parsed.session && parsed.session.store;
+  } catch (_) {
+    return undefined;
+  }
+}
+
+function resolveOpenClawStorePath(openclawRuntime, sessionKey, config = null) {
+  const agentId = openClawAgentIdFromSessionKey(sessionKey);
+  const sessionRuntime = openclawRuntime && openclawRuntime.channel && openclawRuntime.channel.session;
+  const resolveStorePath = sessionRuntime && sessionRuntime.resolveStorePath;
+  if (typeof resolveStorePath === "function") {
+    const cfg = openclawRuntime.config && typeof openclawRuntime.config.loadConfig === "function"
+      ? openclawRuntime.config.loadConfig()
+      : {};
+    return resolveStorePath(cfg && cfg.session && cfg.session.store, { agentId });
+  }
+  const configuredStore = readOpenClawConfiguredSessionStore(config, agentId);
+  const configuredStorePath = resolveConfiguredOpenClawStorePath(configuredStore, agentId);
+  if (configuredStorePath) {
+    return configuredStorePath;
+  }
+  const home = process.env.HOME || process.env.USERPROFILE || "";
+  if (!home) {
+    throw new Error("cannot resolve OpenClaw session store without HOME");
+  }
+  return path.join(home, ".openclaw", "agents", agentId || "main", "sessions", "sessions.json");
+}
+
+function readOpenClawSessionStore(storePath) {
+  if (!fs.existsSync(storePath)) {
+    return {};
+  }
+  const source = fs.readFileSync(storePath, "utf8");
+  if (!source.trim()) {
+    return {};
+  }
+  const parsed = JSON.parse(source);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new TypeError(`OpenClaw session store at ${storePath} must be a JSON object.`);
+  }
+  return parsed;
+}
+
+function resolveOpenClawSessionEntry(openclawRuntime, sessionKey, config = null, logger = console) {
+  const key = asNonEmptyString(sessionKey);
+  if (!key) {
+    return null;
+  }
+  try {
+    const storePath = resolveOpenClawStorePath(openclawRuntime, key, config);
+    const store = readOpenClawSessionStore(storePath);
+    const entry = store[key];
+    return {
+      storePath,
+      store,
+      entry: entry && typeof entry === "object" && !Array.isArray(entry) ? entry : null,
+    };
+  } catch (error) {
+    logger.warn?.("AgentGuard OpenClaw plugin failed to read OpenClaw session store.", error);
+    return null;
+  }
+}
+
+function resolveOpenClawSessionId(openclawRuntime, sessionKey, config = null, logger = console) {
+  const resolved = resolveOpenClawSessionEntry(openclawRuntime, sessionKey, config, logger);
+  return asNonEmptyString(resolved && resolved.entry && (resolved.entry.sessionId || resolved.entry.session_id));
+}
+
+function writeOpenClawSessionStore(storePath, store) {
+  fs.mkdirSync(path.dirname(storePath), { recursive: true });
+  fs.writeFileSync(storePath, `${JSON.stringify(store, null, 2)}\n`);
+}
+
+function isAgentGuardClosedOpenClawEntry(entry, sessionId) {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    return false;
+  }
+  const closedSessionId = asNonEmptyString(entry.agentguardClosedExternalSessionId);
+  const currentSessionId = asNonEmptyString(sessionId || entry.sessionId || entry.session_id);
+  if (closedSessionId && currentSessionId && closedSessionId !== currentSessionId) {
+    return false;
+  }
+  return (
+    Boolean(closedSessionId || asNonEmptyString(entry.agentguardRuntimeSessionId)) &&
+    Boolean(asNonEmptyString(entry.agentguardClosedAt) || asNonEmptyString(entry.agentguardRuntimeSessionId))
+  );
+}
+
+function hasAgentGuardClosedOpenClawMarker(entry) {
+  return Boolean(
+    entry &&
+      typeof entry === "object" &&
+      !Array.isArray(entry) &&
+      (asNonEmptyString(entry.agentguardClosedExternalSessionId) ||
+        asNonEmptyString(entry.agentguardClosedAt) ||
+        asNonEmptyString(entry.agentguardRuntimeSessionId))
+  );
+}
+
+function reconcileOpenClawSessionClosure(openclawRuntime, sessionKey, sessionId, config = null, logger = console) {
+  const resolved = resolveOpenClawSessionEntry(openclawRuntime, sessionKey, config, logger);
+  const entry = resolved && resolved.entry;
+  if (!entry) {
+    return { closed: false, cleared: false };
+  }
+  if (isAgentGuardClosedOpenClawEntry(entry, sessionId)) {
+    return { closed: true, cleared: false };
+  }
+
+  const closedSessionId = asNonEmptyString(entry.agentguardClosedExternalSessionId);
+  const currentSessionId = asNonEmptyString(sessionId || entry.sessionId || entry.session_id);
+  const isStaleAgentGuardClose =
+    closedSessionId &&
+    currentSessionId &&
+    closedSessionId !== currentSessionId &&
+    hasAgentGuardClosedOpenClawMarker(entry);
+  if (!isStaleAgentGuardClose) {
+    return { closed: false, cleared: false };
+  }
+
+  const nextEntry = { ...entry };
+  delete nextEntry.agentguardClosedAt;
+  delete nextEntry.agentguardClosedReason;
+  delete nextEntry.agentguardClosedExternalSessionId;
+  delete nextEntry.agentguardRuntimeSessionId;
+  nextEntry.updatedAt = Date.now();
+  resolved.store[sessionKey] = nextEntry;
+  try {
+    writeOpenClawSessionStore(resolved.storePath, resolved.store);
+  } catch (error) {
+    logger.warn?.("AgentGuard OpenClaw plugin failed to clear stale OpenClaw close marker.", error);
+    return { closed: false, cleared: false };
+  }
+  return { closed: false, cleared: true };
+}
+
+function isOpenClawExternalSessionClosedError(error) {
+  const message = String(error && error.message ? error.message : error || "");
+  return (
+    /openclaw external session is closed/i.test(message) ||
+    /external session is closed/i.test(message) ||
+    /remote guard call failed:\s*HTTP 401/i.test(message)
+  );
+}
+
+function resolveOpenClawCloseSessionKey(state, body = {}) {
+  return (
+    asNonEmptyString(body.openclaw_session_key) ||
+    asNonEmptyString(body.session_key) ||
+    asNonEmptyString(body.sessionKey) ||
+    asNonEmptyString(state && state.context && state.context.metadata && state.context.metadata.client_session_key)
+  );
+}
+
+function discoverOpenClawAgents(config, openclawRuntime = null, logger = console) {
+  const runtimeAgents = discoverOpenClawAgentsFromRuntime(openclawRuntime, logger);
+  if (runtimeAgents.length) {
+    return runtimeAgents;
+  }
+  return discoverOpenClawAgentsFromConfig(config && config.openclawConfigPath, logger);
+}
+
+function discoverOpenClawAgentsFromRuntime(openclawRuntime, logger = console) {
+  const candidates = [
+    openclawRuntime && openclawRuntime.agents && openclawRuntime.agents.list,
+    openclawRuntime && openclawRuntime.agentRegistry && openclawRuntime.agentRegistry.list,
+    openclawRuntime && openclawRuntime.listAgents,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate !== "function") {
+      continue;
+    }
+    try {
+      const value = candidate.call(openclawRuntime);
+      if (Array.isArray(value)) {
+        return normalizeOpenClawAgentCatalog(value);
+      }
+    } catch (error) {
+      logger.warn?.("AgentGuard OpenClaw plugin failed to read runtime agent catalog.", error);
+    }
+  }
+  return [];
+}
+
+function discoverOpenClawAgentsFromConfig(configPath, logger = console) {
+  const resolvedPath = asNonEmptyString(configPath);
+  if (!resolvedPath || !fs.existsSync(resolvedPath)) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(resolvedPath, "utf8"));
+    const list = parsed && parsed.agents && Array.isArray(parsed.agents.list)
+      ? parsed.agents.list
+      : [];
+    return normalizeOpenClawAgentCatalog(list);
+  } catch (error) {
+    logger.warn?.("AgentGuard OpenClaw plugin failed to read OpenClaw agent catalog.", error);
+    return [];
+  }
+}
+
+function normalizeOpenClawAgentCatalog(items) {
+  const byId = new Map();
+  for (const item of Array.isArray(items) ? items : []) {
+    const agent = normalizeOpenClawCatalogAgent(item);
+    if (agent && !byId.has(agent.id)) {
+      byId.set(agent.id, agent);
+    }
+  }
+  return [...byId.values()];
+}
+
+function normalizeOpenClawCatalogAgent(item) {
+  const source = item && typeof item === "object" && !Array.isArray(item)
+    ? item
+    : { id: item };
+  const id = asNonEmptyString(source.id || source.agentId || source.agent_id || source.name);
+  if (!id) {
+    return null;
+  }
+  return {
+    id,
+    name: asNonEmptyString(source.name) || id,
+    description: asNonEmptyString(source.description) || `OpenClaw agent: ${id}`,
+    workspace: asNonEmptyString(source.workspace || source.workspaceDir),
+    agentDir: asNonEmptyString(source.agentDir || source.agent_dir),
+    model: asNonEmptyString(source.model),
+    isDefault: source.isDefault === true,
+  };
+}
+
+function ensureCatalogContainsAgent(catalog, agentId) {
+  const id = asNonEmptyString(agentId);
+  const existing = normalizeOpenClawAgentCatalog(catalog);
+  if (!id || existing.some((agent) => agent.id === id)) {
+    return existing;
+  }
+  return [
+    ...existing,
+    {
+      id,
+      name: id,
+      description: `OpenClaw agent: ${id}`,
+    },
+  ];
+}
+
+function buildOpenClawAgentRegistration(config, agent, extraMetadata = {}) {
+  const providerInstanceId = asNonEmptyString(config && config.providerInstanceId) || "openclaw-local";
+  const agentType = "agent";
+  const keyId = agentIdentityKeyId({
+    provider: "openclaw",
+    provider_instance_id: providerInstanceId,
+    tenant_id: null,
+    external_agent_id: agent.id,
+    agent_type: agentType,
+  });
+  const payload = buildAgentRegistrationPayload({
+    provider: "openclaw",
+    provider_instance_id: providerInstanceId,
+    tenant_id: null,
+    external_agent_id: agent.id,
+    agent_type: agentType,
+    name: agent.name || agent.id,
+    description: agent.description || `OpenClaw agent: ${agent.id}`,
+    metadata: {
+      adapter: "openclaw",
+      external_provider: "openclaw",
+      external_agent_id: agent.id,
+      display_agent_id: `openclaw:${agent.id}`,
+      provider_instance_id: providerInstanceId,
+      openclaw_agent_id: agent.id,
+      openclaw_agent_name: agent.name || agent.id,
+      openclaw_workspace: agent.workspace || null,
+      openclaw_agent_dir: agent.agentDir || null,
+      openclaw_model: agent.model || null,
+      openclaw_is_default: Boolean(agent.isDefault),
+      ...(extraMetadata && typeof extraMetadata === "object" && !Array.isArray(extraMetadata)
+        ? extraMetadata
+        : {}),
+    },
+  });
+  return { payload, keyId, externalAgentId: agent.id };
+}
+
+function registrationMapFromBootstrap(response, registrations) {
+  const byExternalId = new Map();
+  const keyIds = new Map(registrations.map((item) => [item.externalAgentId, item.keyId]));
+  const agents = Array.isArray(response && response.agents) ? response.agents : [];
+  for (const agent of agents) {
+    const externalAgentId = asNonEmptyString(agent.external_agent_id || agent.externalAgentId);
+    const agentId = asNonEmptyString(agent.agent_id || agent.agentId);
+    if (!externalAgentId || !agentId) {
+      continue;
+    }
+    byExternalId.set(externalAgentId, {
+      external_agent_id: externalAgentId,
+      agent_id: agentId,
+      agent_identity_code: asNonEmptyString(agent.agent_identity_code),
+      public_key_thumbprint: asNonEmptyString(agent.public_key_thumbprint),
+      agent_identity_key_id: keyIds.get(externalAgentId),
+      user_bound: agent.user_bound !== false,
+    });
+  }
+  return byExternalId;
+}
+
 function mergeDefaultToolCapabilities(tool, capabilityMap) {
   const configuredCapabilities = capabilityMap?.[tool.name];
   if (Array.isArray(tool.capabilities) && tool.capabilities.length) {
@@ -1048,6 +1547,11 @@ class AgentGuardOpenClawBridge {
     this.pluginId = options.pluginId || "agentguard";
     this.config = normalizePluginConfig(options.pluginConfig || {});
     this.logger = options.logger || console;
+    this.openclawRuntime = options.openclawRuntime || null;
+    this.openclawAgents = discoverOpenClawAgents(this.config, this.openclawRuntime, this.logger);
+    this.agentBootstrap = null;
+    this.agentRegistrations = new Map();
+    this.agentRegistrationPayloads = new Map();
     this.skillScan = scanConfiguredSkills(this.config.skillScan, this.logger);
     this.mcpScan = scanConfiguredMcps(this.config.mcpScan, this.logger);
     this.sessions = new Map();
@@ -1061,26 +1565,81 @@ class AgentGuardOpenClawBridge {
     return this.mcpScan;
   }
 
+  resolveIdentityContext(identityContext = {}) {
+    const input = identityContext && typeof identityContext === "object" ? { ...identityContext } : {};
+    const resolvedSessionId = resolveOpenClawSessionId(
+      this.openclawRuntime,
+      input.sessionKey,
+      this.config,
+      this.logger,
+    );
+    if (resolvedSessionId) {
+      input.sessionId = resolvedSessionId;
+    }
+    return input;
+  }
+
   getState(identityContext) {
-    const context = buildRuntimeContext(this.config, identityContext);
+    const resolvedIdentityContext = this.resolveIdentityContext(identityContext);
+    const context = buildRuntimeContext(this.config, resolvedIdentityContext);
     const sessionKey = context.metadata.client_session_key || context.session_id;
+    const openclawSessionId = context.metadata.openclaw && context.metadata.openclaw.sessionId;
+    const openclawSessionClosure = this.reconcileOpenClawSessionClosure(sessionKey, openclawSessionId);
+    const openclawSessionClosed = openclawSessionClosure.closed;
     let state = this.sessions.get(sessionKey);
     if (state) {
+      const previousOpenClaw = state.context &&
+        state.context.metadata &&
+        state.context.metadata.openclaw &&
+        typeof state.context.metadata.openclaw === "object"
+        ? state.context.metadata.openclaw
+        : {};
+      const nextOpenClaw = context.metadata &&
+        context.metadata.openclaw &&
+        typeof context.metadata.openclaw === "object"
+        ? context.metadata.openclaw
+        : {};
+      const previousSessionId = asNonEmptyString(previousOpenClaw.sessionId);
+      const nextSessionId = asNonEmptyString(nextOpenClaw.sessionId);
+      if (previousSessionId && nextSessionId && previousSessionId !== nextSessionId) {
+        this.resetSessionStateForOpenClawSessionChange(state, context);
+      }
+      if (
+        !nextSessionId &&
+        !asNonEmptyString(resolvedIdentityContext && resolvedIdentityContext.conversationId) &&
+        previousSessionId
+      ) {
+        context.session_id = state.context.session_id;
+        context.metadata.openclaw = {
+          ...nextOpenClaw,
+          sessionId: previousSessionId,
+        };
+      }
       state.context = context;
+      state.openclawSessionClosed = openclawSessionClosed;
+      if (state.openclawSessionClosed) {
+        this.resetRuntimeStateAfterOpenClawSessionClosed(state);
+      }
       this.syncContextMetadata(state);
-      state.enforcer.remote.session_id = context.session_id;
-      state.enforcer.remote.agent_id = context.agent_id;
-      state.enforcer.remote.user_id = context.user_id;
+      this.applyRuntimeAuthContext(state);
+      state.enforcer.remote.session_id = state.context.session_id;
+      state.enforcer.remote.agent_id = state.context.agent_id;
+      state.enforcer.remote.user_id = state.context.user_id;
       state.enforcer.remote.session_key = sessionKey;
       return state;
     }
 
+    const runtimeAuth = buildRuntimeAuthState(this.config);
     const remote = new RemoteGuardClient(this.config.serverUrl || null, {
       api_key: this.config.apiKey || null,
       session_id: context.session_id,
       agent_id: context.agent_id,
       user_id: context.user_id,
       session_key: sessionKey,
+      session_token: runtimeAuth && runtimeAuth.session_token,
+      dpop_proof_factory: runtimeAuth && runtimeAuth.proof,
+      use_dpop_auth: Boolean(runtimeAuth),
+      legacy_identity_headers: !runtimeAuth,
     });
     const pluginManager = new PluginManager({
       config: { phases: this.config.phases },
@@ -1107,18 +1666,113 @@ class AgentGuardOpenClawBridge {
       remotePluginConfig: buildPluginConfigPayload(this.config),
       clientConfigApi: null,
       clientConfigApiStartup: null,
+      runtimeAuth,
+      runtimeAuthStartup: null,
+      runtimeAuthError: null,
       remoteSessionRegistration: null,
       defaultToolReporting: null,
       recentLlmOutputs: new Map(),
       skillReporting: null,
       mcpReporting: null,
+      openclawSessionClosed,
     };
+    if (state.openclawSessionClosed) {
+      this.resetRuntimeStateAfterOpenClawSessionClosed(state);
+    }
     this.syncContextMetadata(state);
     this.sessions.set(sessionKey, state);
-    this.ensureDefaultToolReports(state);
-    this.ensureSkillReports(state);
-    this.ensureMcpReports(state);
+    if (!state.openclawSessionClosed) {
+      this.ensureDefaultToolReports(state);
+      this.ensureSkillReports(state);
+      this.ensureMcpReports(state);
+    }
     return state;
+  }
+
+  isOpenClawSessionClosed(sessionKey, sessionId) {
+    return this.reconcileOpenClawSessionClosure(sessionKey, sessionId).closed;
+  }
+
+  reconcileOpenClawSessionClosure(sessionKey, sessionId) {
+    return reconcileOpenClawSessionClosure(
+      this.openclawRuntime,
+      sessionKey,
+      sessionId,
+      this.config,
+      this.logger,
+    );
+  }
+
+  resetRuntimeStateAfterOpenClawSessionClosed(state) {
+    if (state.runtimeAuth) {
+      clearRuntimeAuthSession(state.runtimeAuth);
+      state.runtimeAuthStartup = null;
+    }
+    state.remoteSessionRegistration = null;
+    state.defaultToolReporting = null;
+    state.skillReporting = null;
+    state.mcpReporting = null;
+    const remote = state.enforcer && state.enforcer.remote;
+    if (remote) {
+      remote.session_token = null;
+    }
+  }
+
+  markOpenClawSessionClosed(state, reason = "agentguard_closed") {
+    const metadata = state && state.context && state.context.metadata && typeof state.context.metadata === "object"
+      ? state.context.metadata
+      : {};
+    const openclaw = metadata.openclaw && typeof metadata.openclaw === "object" ? metadata.openclaw : {};
+    const sessionKey = asNonEmptyString(metadata.client_session_key || openclaw.sessionKey);
+    if (!sessionKey) {
+      return false;
+    }
+    const resolved = resolveOpenClawSessionEntry(this.openclawRuntime, sessionKey, this.config, this.logger);
+    if (!resolved) {
+      return false;
+    }
+    const current = resolved.entry || {};
+    const externalSessionId = asNonEmptyString(openclaw.sessionId || current.sessionId || current.session_id);
+    resolved.store[sessionKey] = {
+      ...current,
+      sessionId: externalSessionId || current.sessionId,
+      updatedAt: Date.now(),
+      agentguardClosedAt: asNonEmptyString(current.agentguardClosedAt) || new Date().toISOString(),
+      agentguardClosedReason: reason,
+      agentguardClosedExternalSessionId: externalSessionId || null,
+      agentguardRuntimeSessionId:
+        asNonEmptyString(current.agentguardRuntimeSessionId) ||
+        asNonEmptyString(state && state.runtimeAuth && state.runtimeAuth.session_id) ||
+        asNonEmptyString(metadata.agentguard_session_id),
+    };
+    writeOpenClawSessionStore(resolved.storePath, resolved.store);
+    if (state) {
+      state.openclawSessionClosed = true;
+      this.resetRuntimeStateAfterOpenClawSessionClosed(state);
+    }
+    return true;
+  }
+
+  resetSessionStateForOpenClawSessionChange(state, context) {
+    if (state.runtimeAuth) {
+      clearRuntimeAuthSession(state.runtimeAuth);
+      state.runtimeAuthStartup = null;
+    }
+    state.remoteSessionRegistration = null;
+    state.defaultToolReporting = null;
+    state.skillReporting = null;
+    state.mcpReporting = null;
+    state.recentLlmOutputs = new Map();
+    state.audit = new AuditRecorder(
+      context.session_id,
+      new AuditLogger(this.config.auditPath || null),
+    );
+    if (state.enforcer) {
+      state.enforcer.trace_window_provider = () => state.audit.trace.window(this.config.windowSize);
+      if (state.enforcer.remote) {
+        state.enforcer.remote.session_token = null;
+      }
+    }
   }
 
   clearSession(sessionKey) {
@@ -1149,6 +1803,253 @@ class AgentGuardOpenClawBridge {
       state.context.metadata.client_plugin_list_url = state.clientConfigApi.plugin_list_url;
       state.context.metadata.client_health_url = state.clientConfigApi.health_url;
     }
+  }
+
+  async ensureAgentBootstrap(state) {
+    if (!state || !state.runtimeAuth) {
+      return null;
+    }
+    const externalAgentId = asNonEmptyString(
+      state.context.metadata &&
+        state.context.metadata.openclaw &&
+        state.context.metadata.openclaw.agentId,
+    ) || asNonEmptyString(state.context.agent_id);
+    const existing = externalAgentId ? this.agentRegistrations.get(externalAgentId) : null;
+    if (existing) {
+      this.applyCanonicalAgentRegistration(state, existing);
+      return existing;
+    }
+    if (this.agentBootstrap) {
+      await this.agentBootstrap;
+      const registered = externalAgentId ? this.agentRegistrations.get(externalAgentId) : null;
+      if (registered) {
+        this.applyCanonicalAgentRegistration(state, registered);
+      }
+      return registered;
+    }
+    const remote = state.enforcer && state.enforcer.remote;
+    if (!remote || !remote.enabled) {
+      return null;
+    }
+    const discoveredCatalog = normalizeOpenClawAgentCatalog(this.openclawAgents);
+    const catalog = discoveredCatalog.length
+      ? discoveredCatalog
+      : ensureCatalogContainsAgent(discoveredCatalog, externalAgentId);
+    this.openclawAgents = catalog;
+    const registrations = catalog.map((agent) =>
+      buildOpenClawAgentRegistration(this.config, agent, {
+        registration_reason: "bootstrap",
+      }),
+    );
+    for (const registration of registrations) {
+      this.agentRegistrationPayloads.set(registration.externalAgentId, registration);
+    }
+    this.agentBootstrap = remote.bootstrap_agents({
+      provider: "openclaw",
+      user_ticket: state.runtimeAuth.user_ticket,
+      provider_instance_id: this.config.providerInstanceId,
+      agents: registrations.map((item) => item.payload),
+      metadata: {
+        adapter: "openclaw",
+        runtime_auth_provider: "openclaw",
+        provider_instance_id: this.config.providerInstanceId,
+      },
+    })
+      .then((response) => {
+        const mapped = registrationMapFromBootstrap(response, registrations);
+        for (const [key, value] of mapped.entries()) {
+          this.agentRegistrations.set(key, value);
+        }
+        return mapped;
+      })
+      .catch((error) => {
+        this.logger.warn?.("AgentGuard OpenClaw plugin failed to bootstrap OpenClaw agents.", error);
+        throw error;
+      })
+      .finally(() => {
+        this.agentBootstrap = null;
+      });
+    await this.agentBootstrap;
+    const registered = externalAgentId ? this.agentRegistrations.get(externalAgentId) : null;
+    if (registered) {
+      this.applyCanonicalAgentRegistration(state, registered);
+    }
+    return registered;
+  }
+
+  applyCanonicalAgentRegistration(state, registration) {
+    if (!state || !registration || !registration.agent_id) {
+      return;
+    }
+    const originalAgentId = asNonEmptyString(
+      state.context.metadata &&
+        state.context.metadata.openclaw &&
+        state.context.metadata.openclaw.agentId,
+    ) || asNonEmptyString(state.context.agent_id);
+    state.context.agent_id = registration.agent_id;
+    state.context.metadata = {
+      ...(state.context.metadata || {}),
+      agentguard_agent_id: registration.agent_id,
+      agent_identity_code: registration.agent_identity_code || null,
+      agent_public_key_thumbprint: registration.public_key_thumbprint || null,
+      agent_identity_key_id: registration.agent_identity_key_id || null,
+      external_provider: "openclaw",
+      external_agent_id: registration.external_agent_id || originalAgentId || null,
+      display_agent_id: registration.external_agent_id
+        ? `openclaw:${registration.external_agent_id}`
+        : null,
+      agentguard_user_bound: Boolean(registration.user_bound),
+    };
+    if (state.runtimeAuth) {
+      state.runtimeAuth.agent_id = registration.agent_id;
+      state.runtimeAuth.external_agent_id = registration.external_agent_id || originalAgentId || null;
+      state.runtimeAuth.agent_identity_key_id = registration.agent_identity_key_id || null;
+    }
+    const remote = state.enforcer && state.enforcer.remote;
+    if (remote) {
+      remote.agent_id = registration.agent_id;
+    }
+  }
+
+  applyRuntimeAuthContext(state) {
+    const runtimeAuth = state && state.runtimeAuth;
+    if (!runtimeAuth || !runtimeAuth.session_token) {
+      return;
+    }
+    state.context.session_id = runtimeAuth.session_id || state.context.session_id;
+    state.context.agent_id = runtimeAuth.agent_id || state.context.agent_id;
+    state.context.user_id = runtimeAuth.user_id || state.context.user_id;
+    state.context.metadata = {
+      ...(state.context.metadata || {}),
+      agentguard_session_id: runtimeAuth.session_id || null,
+      agentguard_agent_id: runtimeAuth.agent_id || null,
+      agentguard_user_id: runtimeAuth.user_id || null,
+      runtime_auth_provider: "openclaw",
+    };
+    const remote = state.enforcer && state.enforcer.remote;
+    if (remote) {
+      remote.session_id = state.context.session_id;
+      remote.agent_id = state.context.agent_id;
+      remote.user_id = state.context.user_id;
+      remote.session_token = runtimeAuth.session_token || null;
+      remote.dpop_proof_factory = runtimeAuth.proof;
+      remote.use_dpop_auth = true;
+      remote.legacy_identity_headers = false;
+    }
+  }
+
+  async ensureRuntimeAuth(state) {
+    const runtimeAuth = state && state.runtimeAuth;
+    if (!runtimeAuth) {
+      return true;
+    }
+    if (state.openclawSessionClosed) {
+      throw new Error("OpenClaw external session is closed");
+    }
+    const desiredExternalSessionId = openClawExternalSessionId(state.context);
+    if (runtimeAuthFresh(runtimeAuth) && runtimeAuth.external_session_id === desiredExternalSessionId) {
+      this.applyRuntimeAuthContext(state);
+      return true;
+    }
+    if (runtimeAuthFresh(runtimeAuth) && runtimeAuth.external_session_id !== desiredExternalSessionId) {
+      clearRuntimeAuthSession(runtimeAuth);
+      state.remoteSessionRegistration = null;
+      state.defaultToolReporting = null;
+      state.skillReporting = null;
+      state.mcpReporting = null;
+      const remote = state.enforcer && state.enforcer.remote;
+      if (remote) {
+        remote.session_token = null;
+      }
+    }
+    if (state.runtimeAuthStartup) {
+      await state.runtimeAuthStartup;
+      return Boolean(runtimeAuth.session_token);
+    }
+    const remote = state.enforcer && state.enforcer.remote;
+    if (!remote || !remote.enabled) {
+      return false;
+    }
+    state.runtimeAuthStartup = (async () => {
+      await this.ensureClientConfigApi(state);
+      this.syncContextMetadata(state);
+      if (runtimeAuth.session_token) {
+        remote.session_token = runtimeAuth.session_token;
+        try {
+          const refreshed = await remote.refresh_runtime_session();
+          this.applyRuntimeAuthIssue(state, refreshed);
+          return true;
+        } catch (error) {
+          clearRuntimeAuthSession(runtimeAuth);
+          remote.session_token = null;
+          this.logger.warn?.(
+            "AgentGuard OpenClaw plugin discarded stale runtime auth session after refresh failure.",
+            error,
+          );
+        }
+      }
+      const registration = await this.ensureAgentBootstrap(state);
+      if (!registration || !registration.agent_id) {
+        throw new Error("OpenClaw agent bootstrap did not return a canonical AgentGuard agent");
+      }
+      const externalSessionId = openClawExternalSessionId(state.context);
+      const dpopKeyId = ["openclaw", registration.agent_id, externalSessionId].join("\x1f");
+      if (runtimeAuth.dpop_key_id !== dpopKeyId) {
+        runtimeAuth.dpop_key = loadOrCreateDPoPKey(dpopKeyId);
+        runtimeAuth.dpop_key_id = dpopKeyId;
+      }
+      remote.dpop_proof_factory = runtimeAuth.proof;
+      remote.use_dpop_auth = true;
+      remote.legacy_identity_headers = false;
+      const body = {
+        provider: "openclaw",
+        agent_id: registration.agent_id,
+        external_session_id: externalSessionId,
+        external_user_id: asNonEmptyString(state.context.user_id) || null,
+        metadata: buildOpenClawRuntimeAuthMetadata(state.context),
+      };
+      const agentKey = loadOrCreateAgentKey(registration.agent_identity_key_id);
+      const result = await remote.create_runtime_session({
+        ...body,
+      }, {
+        extra_headers_factory: (method, url, requestBody) => ({
+          "X-AgentGuard-Agent-Proof": agentKey.signSessionCreateProof({
+            agent_id: registration.agent_id,
+            method,
+            url,
+            body: requestBody,
+            dpop_jkt: runtimeAuth.dpop_key.thumbprint,
+          }),
+        }),
+      });
+      this.applyRuntimeAuthIssue(state, result, { externalSessionId });
+      return true;
+    })()
+      .catch((error) => {
+        if (isOpenClawExternalSessionClosedError(error)) {
+          this.markOpenClawSessionClosed(state, "server_closed_external_session");
+        }
+        state.runtimeAuthError = error;
+        throw error;
+      })
+      .finally(() => {
+        state.runtimeAuthStartup = null;
+      });
+    await state.runtimeAuthStartup;
+    return Boolean(runtimeAuth.session_token);
+  }
+
+  applyRuntimeAuthIssue(state, result, { externalSessionId = null } = {}) {
+    const runtimeAuth = state.runtimeAuth;
+    runtimeAuth.session_id = asNonEmptyString(result && result.session_id) || runtimeAuth.session_id;
+    runtimeAuth.agent_id = asNonEmptyString(result && result.agent_id) || runtimeAuth.agent_id;
+    runtimeAuth.user_id = asNonEmptyString(result && result.user_id) || runtimeAuth.user_id;
+    runtimeAuth.external_session_id = asNonEmptyString(externalSessionId) || runtimeAuth.external_session_id;
+    runtimeAuth.session_token = asNonEmptyString(result && result.session_token) || runtimeAuth.session_token;
+    runtimeAuth.expires_at = Number(result && result.expires_at || 0);
+    state.runtimeAuthError = null;
+    this.applyRuntimeAuthContext(state);
+    this.syncContextMetadata(state);
   }
 
   async updatePluginConfig(state, pluginConfig, { syncRemote = true, syncRemoteSession = syncRemote } = {}) {
@@ -1185,6 +2086,9 @@ class AgentGuardOpenClawBridge {
           update_plugin_config(pluginConfig, options) {
             return bridge.updatePluginConfig(state, pluginConfig, options);
           },
+          close_runtime_session(body) {
+            return bridge.closeRuntimeSession(state, body);
+          },
         },
         { host: "127.0.0.1", port: 0 },
       );
@@ -1217,6 +2121,61 @@ class AgentGuardOpenClawBridge {
     Promise.resolve(server.stop()).catch(() => {});
   }
 
+  async closeRuntimeSession(state, body = {}) {
+    const sessionKey = resolveOpenClawCloseSessionKey(state, body);
+    if (!sessionKey) {
+      throw new Error("missing OpenClaw session key");
+    }
+    let agentguardClose = null;
+    const remote = state && state.enforcer && state.enforcer.remote;
+    if (state && state.runtimeAuth && state.runtimeAuth.session_token && remote && remote.enabled) {
+      this.applyRuntimeAuthContext(state);
+      try {
+        agentguardClose = await remote.close_runtime_session();
+      } catch (error) {
+        this.logger.warn?.("AgentGuard OpenClaw plugin failed to close runtime session.", error);
+      }
+    }
+    const storePath = resolveOpenClawStorePath(this.openclawRuntime, sessionKey, this.config);
+    const store = readOpenClawSessionStore(storePath);
+    const current = store[sessionKey] && typeof store[sessionKey] === "object" && !Array.isArray(store[sessionKey])
+      ? store[sessionKey]
+      : {};
+    const closedExternalSessionId =
+      asNonEmptyString(current.sessionId) ||
+      asNonEmptyString(body.openclaw_session_id) ||
+      asNonEmptyString(body.session_id);
+    store[sessionKey] = {
+      ...current,
+      sessionId: closedExternalSessionId,
+      updatedAt: Date.now(),
+      agentguardClosedAt: new Date().toISOString(),
+      agentguardClosedReason: "agentguard_runtime_session_closed",
+      agentguardClosedExternalSessionId: closedExternalSessionId || null,
+      agentguardRuntimeSessionId:
+        asNonEmptyString(body.agentguard_session_id) ||
+        asNonEmptyString(state && state.runtimeAuth && state.runtimeAuth.session_id),
+    };
+    writeOpenClawSessionStore(storePath, store);
+    if (state && state.runtimeAuth) {
+      clearRuntimeAuthSession(state.runtimeAuth);
+      state.runtimeAuthStartup = null;
+      state.remoteSessionRegistration = null;
+      state.defaultToolReporting = null;
+      state.skillReporting = null;
+      state.mcpReporting = null;
+    }
+    if (remote) {
+      remote.session_token = null;
+    }
+    return {
+      sessionKey,
+      storePath,
+      agentguardClosed: Boolean(agentguardClose && agentguardClose.closed),
+      agentguardSessionId: asNonEmptyString(agentguardClose && agentguardClose.session_id) || null,
+    };
+  }
+
   ensureRemoteSessionRegistered(state) {
     const remote = state.enforcer.remote;
     if (!remote || !remote.enabled) {
@@ -1225,9 +2184,13 @@ class AgentGuardOpenClawBridge {
     if (state.remoteSessionRegistration) {
       return state.remoteSessionRegistration;
     }
-    state.remoteSessionRegistration = this.ensureClientConfigApi(state)
+    state.remoteSessionRegistration = Promise.resolve()
+      .then(() => this.ensureClientConfigApi(state))
       .then(() => {
         this.syncContextMetadata(state);
+        if (state.runtimeAuth) {
+          return this.ensureRuntimeAuth(state);
+        }
         return remote.register_session(state.context);
       })
       .then(() => true)
@@ -1347,6 +2310,14 @@ class AgentGuardOpenClawBridge {
     if (!remote || !remote.enabled || !buffer || !buffer.has_entries()) {
       return false;
     }
+    if (state.runtimeAuth) {
+      try {
+        await this.ensureRuntimeAuth(state);
+      } catch (error) {
+        this.logger.warn?.("AgentGuard OpenClaw plugin skipped async trace upload after runtime auth failure.", error);
+        return false;
+      }
+    }
     const entries = buffer.snapshot();
     if (!entries.length) {
       return false;
@@ -1367,6 +2338,14 @@ class AgentGuardOpenClawBridge {
     const buffer = state.enforcer.sync_buffer;
     if (!remote || !remote.enabled || !buffer || !buffer.has_entries()) {
       return false;
+    }
+    if (state.runtimeAuth) {
+      try {
+        await this.ensureRuntimeAuth(state);
+      } catch (error) {
+        this.logger.warn?.("AgentGuard OpenClaw plugin skipped trace upload after runtime auth failure.", error);
+        return false;
+      }
     }
     const entries = buffer.pop_all();
     if (!entries.length) {
@@ -1417,11 +2396,61 @@ class AgentGuardOpenClawBridge {
   }
 
   async enforce(state, runtimeEvent, options = {}) {
+    if (state.openclawSessionClosed) {
+      const decision = GuardDecision.deny(CLOSED_SESSION_BLOCK_MESSAGE, {
+        metadata: {
+          fail_closed: true,
+          route: "openclaw_session_closed",
+          runtime_auth_provider: "openclaw",
+        },
+      });
+      state.audit.record(runtimeEvent, decision);
+      return { event: runtimeEvent, decision };
+    }
+    if (state.runtimeAuth) {
+      try {
+        await this.ensureRuntimeAuth(state);
+      } catch (error) {
+        if (isOpenClawExternalSessionClosedError(error)) {
+          this.markOpenClawSessionClosed(state, "server_closed_external_session");
+          const decision = GuardDecision.deny(CLOSED_SESSION_BLOCK_MESSAGE, {
+            metadata: {
+              fail_closed: true,
+              route: "openclaw_session_closed",
+              runtime_auth_provider: "openclaw",
+              error: String(error && error.message ? error.message : error),
+            },
+          });
+          state.audit.record(runtimeEvent, decision);
+          return { event: runtimeEvent, decision };
+        }
+        if (shouldFailClosed(this.config, options.phase)) {
+          this.markOpenClawSessionClosed(state, "runtime_auth_failed");
+          const decision = GuardDecision.deny(CLOSED_SESSION_BLOCK_MESSAGE, {
+            metadata: {
+              fail_closed: true,
+              route: "openclaw_session_closed",
+              runtime_auth_provider: "openclaw",
+              error: String(error && error.message ? error.message : error),
+            },
+          });
+          state.audit.record(runtimeEvent, decision);
+          return { event: runtimeEvent, decision };
+        }
+        this.logger.warn?.("AgentGuard OpenClaw plugin runtime authentication failed.", error);
+      }
+    }
     let result;
     try {
       result = await state.enforcer.enforce(runtimeEvent, state.context, {
         extensions: options.extensions || {},
       });
+      if (state.runtimeAuth && isRemoteUnavailableDecision(result.decision)) {
+        const retry = await this.retryAfterRuntimeAuthUnavailable(state, runtimeEvent, options);
+        if (retry) {
+          result = retry;
+        }
+      }
     } catch (error) {
       await this.flushNow(state, "client_error");
       throw error;
@@ -1443,6 +2472,31 @@ class AgentGuardOpenClawBridge {
 
     state.audit.record(result.event, decision);
     return { ...result, decision };
+  }
+
+  async retryAfterRuntimeAuthUnavailable(state, runtimeEvent, options = {}) {
+    if (!state || !state.runtimeAuth || !state.runtimeAuth.session_token) {
+      return null;
+    }
+    clearRuntimeAuthSession(state.runtimeAuth);
+    state.runtimeAuthStartup = null;
+    state.remoteSessionRegistration = null;
+    const remote = state.enforcer && state.enforcer.remote;
+    if (remote) {
+      remote.session_token = null;
+    }
+    try {
+      await this.ensureRuntimeAuth(state);
+      return await state.enforcer.enforce(runtimeEvent, state.context, {
+        extensions: {
+          ...(options.extensions || {}),
+          runtime_auth_retry: true,
+        },
+      });
+    } catch (error) {
+      this.logger.warn?.("AgentGuard OpenClaw plugin failed to recover runtime auth session.", error);
+      return null;
+    }
   }
 
   async runBeforeToolCall({ ctx, event }) {
@@ -1568,9 +2622,7 @@ class AgentGuardOpenClawBridge {
 
     await this.flushNow(state, "guard_decide");
     return {
-      outcome: "block",
-      reason: decision.reason || "AgentGuard blocked model call.",
-      message: buildUserBlockMessage(decision),
+      prependContext: buildBlockedPromptContext(decision),
     };
   }
 
@@ -1641,7 +2693,7 @@ class AgentGuardOpenClawBridge {
   async runAgentEnd({ ctx, event }) {
     const state = this.getState({
       agentId: ctx.agentId,
-      sessionId: ctx.sessionKey,
+      sessionId: ctx.sessionId,
       sessionKey: ctx.sessionKey,
       channelId: ctx.messageProvider || "agent",
     });

@@ -21,6 +21,7 @@ You need:
 ```text
 AGENTGUARD_SERVER_URL=https://<your-agentguard-server>
 AGENTGUARD_CONSOLE_URL=https://<your-agentguard-console>
+AGENTGUARD_API_KEY=<your-agentguard-api-key>
 ```
 
 For local testing, start AgentGuard on the host:
@@ -35,6 +36,7 @@ Then n8n containers usually reach the host server with:
 ```text
 AGENTGUARD_SERVER_URL=http://host.docker.internal:38080
 AGENTGUARD_CONSOLE_URL=http://127.0.0.1:38008/agents.html
+AGENTGUARD_API_KEY=sk-agentguard-backend-X9m42Vq7Tz8nL3pA6cR0yH5uJ1sWfKdE
 ```
 
 ### 2. Generate Integration Files
@@ -55,6 +57,7 @@ Local test example:
 ```bash
 scripts/setup-n8n-agentguard.sh \
   --server-url http://host.docker.internal:38080 \
+  --api-key sk-agentguard-backend-X9m42Vq7Tz8nL3pA6cR0yH5uJ1sWfKdE \
   --console-url http://127.0.0.1:38008/agents.html
 ```
 
@@ -139,11 +142,15 @@ AgentGuard session metadata includes:
 environment=n8n
 workflow_id
 workflow_name
+external_session_id
+n8n_session_id
 execution_id
 node_id
 node_name
 node_type
 ```
+
+`external_session_id` and `n8n_session_id` come from n8n's stable session identifier, such as `sessionId`, `chatSessionId`, or `conversationId` in the Chat Trigger / Agent runtime context. `execution_id` is the n8n per-run execution number. It is kept for audit and troubleshooting, but it is not the primary mapping key for AgentGuard Runtime Sessions.
 
 ## Adapter Behavior
 
@@ -182,17 +189,50 @@ model_builtin_tools_hooked=false
 model_builtin_tools_reason=provider_side_execution
 ```
 
+## Runtime Session Mapping
+
+At runtime, the n8n adapter creates or refreshes AgentGuard Runtime Sessions with DPoP auth. The mapping is:
+
+```text
+provider=n8n
+agent_id=n8n:<workflow_id>
+external_session_id=<n8n sessionId>
+```
+
+One n8n conversation / session should map to one AgentGuard `ags_n8n_*` Runtime Session. Multiple `llm_input`, `llm_output`, `tool_invoke`, and `tool_result` events under the same n8n `sessionId` reuse the same AgentGuard Runtime Session instead of creating a new session for every LLM input or workflow execution.
+
+In the AgentGuard frontend Runtime Sessions page, `External Session` should show n8n's stable `sessionId`, for example:
+
+```text
+3343066ded4b4b03babdd605c9bde44e
+```
+
+If `external_session_id` is a small increasing number such as `54`, `55`, or `56`, the container is usually still running an old adapter, or the current n8n runtime context did not expose a stable `sessionId` and the adapter fell back to n8n `execution_id`.
+
 ## Pre-Run Tool Catalog Sync
 
 The adapter periodically scans n8n's SQLite database for active / published workflows and syncs the tool catalog to the AgentGuard server. The default interval is 5 seconds:
 
 ```text
+AGENTGUARD_API_KEY=<your-agentguard-api-key>
 AGENTGUARD_N8N_CATALOG_SYNC_ENABLED=true
 AGENTGUARD_N8N_CATALOG_SYNC_INTERVAL_S=5
 AGENTGUARD_N8N_DB_PATH=/home/node/.n8n/database.sqlite
 ```
 
 During agent registration, the adapter reads each workflow owner email from n8n's database and binds with `provider=n8n + account_email=<workflow_owner_email>`. A single n8n container can therefore host workflows owned by multiple n8n users. Do not hard-code one account email as a container-wide environment variable. Each AgentGuard user only needs to bind their own n8n email in the User Centre. After sync, the AgentGuard frontend can show the `n8n:<workflow_id>` agent and its tool catalog even before the workflow runs. When a workflow is modified and saved / published, the next scan syncs the updated catalog.
+
+## Identity Key And DPoP Key Persistence
+
+The n8n adapter uses an agent identity key for workflow-agent registration and DPoP keys for Runtime Sessions. By default, if `AGENTGUARD_AGENT_KEY_DIR` is not set explicitly, the adapter stores keys under:
+
+```text
+/home/node/.n8n/agentguard_keys
+```
+
+In the Docker examples above, `n8n_data:/home/node/.n8n` persists the n8n database, AgentGuard agent identity keys, and DPoP keys together. Do not mount `/home/node/.n8n` read-only. If keys are regenerated after container restarts, existing Runtime Sessions may no longer refresh consistently.
+
+If you set `AGENTGUARD_AGENT_KEY_DIR` or `AGENTGUARD_DPOP_KEY_DIR` explicitly, make sure the directory is writable inside the n8n container and persisted across restarts.
 
 ## Supported Scope
 
@@ -305,3 +345,18 @@ docker compose -f docker-compose.yml -f /path/to/AgentGuard/docker-compose.n8n-a
 ```
 
 For `docker run` deployments, remove the old container and run it again.
+
+### One n8n Session Becomes Multiple AgentGuard Runtime Sessions
+
+Normally, one n8n `sessionId` maps to one AgentGuard Runtime Session. First make sure the n8n container was recreated and is loading the latest adapter. Then inspect n8n Runtime Sessions in the AgentGuard database:
+
+```bash
+docker exec agentguard-mysql-1 mysql -uagentguard -pagentguard agentguard -e \
+"SELECT session_id, agent_id, provider, external_session_id, status, created_at
+ FROM runtime_sessions
+ WHERE provider='n8n'
+ ORDER BY created_at DESC
+ LIMIT 10"
+```
+
+The expected `external_session_id` is a stable n8n session string such as `3343066ded4b4b03babdd605c9bde44e`. If it is an increasing execution id such as `54`, `55`, or `56`, the adapter did not receive n8n `sessionId`, or the n8n container is still running old integration files.

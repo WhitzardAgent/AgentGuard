@@ -155,11 +155,15 @@ AgentGuard session metadata 会记录：
 environment=n8n
 workflow_id
 workflow_name
+external_session_id
+n8n_session_id
 execution_id
 node_id
 node_name
 node_type
 ```
+
+其中 `external_session_id` 和 `n8n_session_id` 来自 n8n 的稳定会话标识，例如 Chat Trigger / Agent 运行上下文里的 `sessionId`、`chatSessionId` 或 `conversationId`。`execution_id` 是 n8n 每次执行的运行编号，只用于审计和排查，不作为 AgentGuard Runtime Session 的主映射键。
 
 ## Adapter 行为
 
@@ -198,6 +202,26 @@ model_builtin_tools_hooked=false
 model_builtin_tools_reason=provider_side_execution
 ```
 
+## Runtime Session 映射
+
+n8n adapter 在运行时会使用 DPoP 向 AgentGuard server 创建或刷新 Runtime Session。映射关系是：
+
+```text
+provider=n8n
+agent_id=n8n:<workflow_id>
+external_session_id=<n8n sessionId>
+```
+
+也就是说，一个 n8n 对话 / 会话应该只对应一个 AgentGuard `ags_n8n_*` Runtime Session。同一个 n8n `sessionId` 下的多次 `llm_input`、`llm_output`、`tool_invoke`、`tool_result` 会复用同一个 AgentGuard Runtime Session，而不是按每次 LLM 输入或每次 workflow execution 创建新 session。
+
+AgentGuard 前端 Runtime Sessions 页面里的 `External Session` 应该显示 n8n 的稳定 `sessionId`，例如：
+
+```text
+3343066ded4b4b03babdd605c9bde44e
+```
+
+如果看到 `external_session_id` 是 `54`、`55`、`56` 这类递增数字，通常说明仍在使用旧 adapter，或者当前 n8n 运行上下文没有暴露稳定 `sessionId`，adapter 退回到了 n8n `execution_id`。
+
 ## 运行前工具目录同步
 
 adapter 会定期扫描 n8n SQLite 数据库中的 active / published workflow，并把工具目录同步到 AgentGuard server。默认扫描间隔为 5 秒：
@@ -210,6 +234,18 @@ AGENTGUARD_N8N_DB_PATH=/home/node/.n8n/database.sqlite
 ```
 
 注册 agent 时，adapter 会从 n8n 数据库读取每个 workflow 的 owner email，并以 `provider=n8n + account_email=<workflow_owner_email>` 绑定到 AgentGuard 用户。因此同一个 n8n 容器里可以有多个 n8n 用户；不要用容器环境变量写死某一个 n8n 邮箱。每个 AgentGuard 用户只需要在用户中心绑定自己的 n8n 邮箱。同步成功后，即使 workflow 还没有被运行，AgentGuard 前端也可以看到对应的 `n8n:<workflow_id>` agent 和工具目录。workflow 修改并保存 / 发布后，下一次扫描会自动同步新的工具目录。
+
+## 身份密钥与 DPoP Key 持久化
+
+n8n adapter 会为注册到 AgentGuard 的 workflow agent 使用 agent identity key，并为 Runtime Session 使用 DPoP key。默认情况下，如果没有显式设置 `AGENTGUARD_AGENT_KEY_DIR`，adapter 会把密钥目录设置为：
+
+```text
+/home/node/.n8n/agentguard_keys
+```
+
+在上面的 Docker 示例里，`n8n_data:/home/node/.n8n` 会同时持久化 n8n 数据库、AgentGuard agent identity key 和 DPoP key。不要把 `/home/node/.n8n` 换成只读挂载；否则容器重启后可能重新生成 key，导致已有 Runtime Session 无法稳定刷新。
+
+如果你显式设置 `AGENTGUARD_AGENT_KEY_DIR` 或 `AGENTGUARD_DPOP_KEY_DIR`，需要确保该目录在 n8n 容器内可写，并且被持久化。
 
 ## 支持范围
 
@@ -322,3 +358,18 @@ docker compose -f docker-compose.yml -f /path/to/AgentGuard/docker-compose.n8n-a
 ```
 
 如果是 `docker run` 部署，需要删除旧容器后重新运行。
+
+### 同一个 n8n 会话被拆成多个 AgentGuard Runtime Session
+
+正常情况下，同一个 n8n `sessionId` 应该映射到同一个 AgentGuard Runtime Session。先确认 n8n 已经重建容器并加载了最新版 adapter，然后查看 AgentGuard 数据库里的 n8n Runtime Session：
+
+```bash
+docker exec agentguard-mysql-1 mysql -uagentguard -pagentguard agentguard -e \
+"SELECT session_id, agent_id, provider, external_session_id, status, created_at
+ FROM runtime_sessions
+ WHERE provider='n8n'
+ ORDER BY created_at DESC
+ LIMIT 10"
+```
+
+期望看到 `external_session_id` 是 n8n 的稳定会话字符串，例如 `3343066ded4b4b03babdd605c9bde44e`。如果这里是递增的 execution id，例如 `54`、`55`、`56`，说明 adapter 没有拿到 n8n `sessionId`，或者 n8n 容器仍在运行旧的接入文件。

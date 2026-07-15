@@ -43,6 +43,29 @@ class RuntimeSessionStore:
         )
         return _session_from_row(row) if row else None
 
+    def find_external_session(
+        self,
+        *,
+        provider: str,
+        external_session_id: str,
+        agent_id: str,
+    ) -> RuntimeSession | None:
+        row = self.db.fetchone(
+            """
+            SELECT session_id, agent_id, user_id, provider, external_session_id,
+                   external_account_email, dpop_jkt, status, metadata_json,
+                   created_at, last_seen_at, closed_at
+            FROM runtime_sessions
+            WHERE provider = %s
+              AND external_session_id = %s
+              AND agent_id = %s
+            ORDER BY CASE WHEN status = 'closed' THEN 0 ELSE 1 END, created_at DESC
+            LIMIT 1
+            """,
+            (_normalize_provider(provider), external_session_id, agent_id),
+        )
+        return _session_from_row(row) if row else None
+
     def create_session(
         self,
         *,

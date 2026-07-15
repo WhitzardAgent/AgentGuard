@@ -38,6 +38,7 @@ OpenClaw adapter 目录中比较关键的文件包括：
 {
   "serverUrl": "http://127.0.0.1:38080",
   "apiKeyEnvVar": "AGENTGUARD_API_KEY",
+  "userTicketEnvVar": "AGENTGUARD_USER_TICKET",
   "policy": "builtin",
   "auditPath": "./tmp/openclaw-agentguard-audit.jsonl",
   "remoteUnavailableMode": "fail_closed"
@@ -83,6 +84,7 @@ OpenClaw adapter 会从下面这个共享仓库配置中读取 phase wiring：
 
 - `serverUrl`
 - `apiKeyEnvVar`
+- `userTicketEnvVar`
 - `policy`
 - `auditPath`
 - `remoteUnavailableMode`
@@ -91,10 +93,13 @@ OpenClaw adapter 会从下面这个共享仓库配置中读取 phase wiring：
 
 如果配置了远端 AgentGuard server，这个 adapter 还会：
 
-- 自动注册每个新 session
+- 未配置用户 ticket 时，自动注册每个新 session
+- 配置了 `userTicket` 或 `userTicketEnvVar` 时，创建 AgentGuard DPoP runtime session
 - 上报一组基础的内置 OpenClaw tool 清单
 
 这样即使在较老的 OpenClaw 版本里没有包装后的 tool metadata，AgentGuard 仍然能拿到一份有意义的工具清单。
+
+如果需要绑定 AgentGuard 用户，先在 AgentGuard 中创建一个临时用户 ticket，把它导出为 `AGENTGUARD_USER_TICKET`，再启动 OpenClaw。这个 ticket 只会被消费一次，用来把 OpenClaw runtime agent/session 绑定到 AgentGuard 用户；之后 guard 和 report 请求会使用返回的 DPoP session token，不再发送 legacy identity headers。
 
 ## 测试
 

@@ -308,6 +308,18 @@ class AgentStore:
         )
         return {str(row["agent_id"]) for row in rows}
 
+    def user_ids_for_agent(self, agent_id: str) -> set[int]:
+        rows = self.db.fetchall(
+            """
+            SELECT ua.user_id
+            FROM user_agents ua
+            JOIN agents a ON a.agent_id = ua.agent_id
+            WHERE ua.agent_id = %s AND a.status = 'active'
+            """,
+            (str(agent_id or "").strip(),),
+        )
+        return {int(row["user_id"]) for row in rows}
+
     def bind_agent_to_user(
         self,
         *,

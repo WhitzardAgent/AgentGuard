@@ -36,7 +36,10 @@ class FakeAgentStore:
         self.bound = bound
         self.credential_active = credential_active
         self.registered: dict[str, Any] = {}
+        self.credentials: dict[str, Any] = {}
+        self.user_agent_ids: set[str] = set()
         self.bindings: list[dict[str, Any]] = []
+        self.syncs: list[dict[str, Any]] = []
 
     def get_agent(self, agent_id: str):
         if agent_id in self.registered:
@@ -53,9 +56,21 @@ class FakeAgentStore:
     def agent_ids_for_user(self, user_id: int) -> set[str]:
         if not self.bound:
             return set()
-        return {AGENT_ID, "ag_workflow"}
+        return {AGENT_ID, "ag_workflow", *self.user_agent_ids}
+
+    def user_ids_for_agent(self, agent_id: str) -> set[int]:
+        if not self.bound:
+            return set()
+        if agent_id in {AGENT_ID, "ag_workflow", *self.user_agent_ids}:
+            return {7}
+        return set()
 
     def get_active_credential(self, *, agent_id: str, public_key_thumbprint: str):
+        stored = self.credentials.get(agent_id)
+        if stored is not None:
+            if not self.credential_active or stored.public_key_thumbprint != public_key_thumbprint:
+                return None
+            return stored
         if not self.credential_active or public_key_thumbprint != AGENT_KEY.thumbprint:
             return None
         if agent_id != AGENT_ID and agent_id != "ag_workflow":
@@ -70,16 +85,22 @@ class FakeAgentStore:
         )
 
     def register_agent(self, **kwargs):
-        agent_id = f"ag_langchain_{len(self.registered) + 1}"
+        provider = str(kwargs.get("provider") or "langchain")
+        external_agent_id = str(kwargs.get("external_agent_id") or len(self.registered) + 1)
+        agent_id = f"ag_{provider}_{external_agent_id.replace(':', '_')}"
+        thumbprint = (
+            (kwargs.get("metadata") or {}).get("agent_public_key_thumbprint")
+            or "langchain-thumbprint"
+        )
         agent = dataclass_record(
             agent_id=agent_id,
             agent_identity_code=f"agic_{agent_id}",
-            provider=kwargs.get("provider"),
-            external_agent_id=kwargs.get("external_agent_id"),
+            provider=provider,
+            external_agent_id=external_agent_id,
             agent_type=kwargs.get("agent_type"),
             status="active",
             public_key_jwk=json.dumps(kwargs.get("public_key_jwk"), sort_keys=True, separators=(",", ":")),
-            public_key_thumbprint="langchain-thumbprint",
+            public_key_thumbprint=thumbprint,
         )
         credential = dataclass_record(
             credential_id=f"agcred_{agent_id}",
@@ -89,6 +110,7 @@ class FakeAgentStore:
             status="active",
         )
         self.registered[agent_id] = agent
+        self.credentials[agent_id] = credential
         return dataclass_record(
             agent=agent,
             credential=credential,
@@ -100,7 +122,12 @@ class FakeAgentStore:
 
     def bind_agent_to_user(self, **kwargs):
         self.bindings.append(dict(kwargs))
+        self.user_agent_ids.add(str(kwargs["agent_id"]))
         return True, False
+
+    def sync_provider_agents(self, **kwargs):
+        self.syncs.append(dict(kwargs))
+        return {"deactivated_count": 0}
 
 
 def dataclass_record(**kwargs):
@@ -165,6 +192,26 @@ class FakeRuntimeSessionStore:
                 and session.external_session_id == external_session_id
                 and session.agent_id == agent_id
                 and session.status == "active"
+            ):
+                return session
+        return None
+
+    def find_external_session(self, *, provider: str, external_session_id: str, agent_id: str):
+        candidates = [
+            session
+            for session in self.sessions.values()
+            if (
+                session.provider == provider
+                and session.external_session_id == external_session_id
+                and session.agent_id == agent_id
+            )
+        ]
+        candidates.sort(key=lambda session: 0 if session.status == "closed" else 1)
+        for session in candidates:
+            if (
+                session.provider == provider
+                and session.external_session_id == external_session_id
+                and session.agent_id == agent_id
             ):
                 return session
         return None
@@ -390,6 +437,318 @@ def test_langchain_ticket_session_create_issues_dpop_runtime_session():
     assert claims["sid"] == issue.session.session_id
     assert claims["sub"] == issue.session.agent_id
     assert claims["uid"] == "7"
+
+
+def test_openclaw_ticket_session_create_binds_agentguard_user():
+    session_store = FakeRuntimeSessionStore()
+    replay = FakeReplayStore()
+    user_store = FakeUserStore()
+    agent_store = FakeAgentStore()
+    broker = DifyAuthBroker(
+        session_store=session_store,
+        replay_store=replay,
+        user_store=user_store,
+        agent_store=agent_store,
+        token_service=RuntimeTokenService(secret="test-secret", ttl_seconds=900),
+    )
+    key = DPoPKey()
+    body = {
+        "provider": "openclaw",
+        "user_ticket": "agt_valid_ticket",
+        "metadata": {
+            "openclaw_agent_id": "main",
+            "openclaw_session_id": "session-1",
+            "openclaw_session_key": "agent:main:session-1",
+        },
+    }
+
+    issue = broker.create_ticket_session(
+        provider="openclaw",
+        user_ticket="agt_valid_ticket",
+        metadata=body["metadata"],
+        dpop_proof=key.proof("POST", CREATE_URL),
+        request_body=body,
+        method="POST",
+        url=CREATE_URL,
+    )
+
+    assert issue.session.provider == "openclaw"
+    assert issue.session.session_id.startswith("ags_openclaw_test_")
+    assert issue.session.user_id == 7
+    assert issue.session.external_account_email is None
+    registered = agent_store.registered[issue.session.agent_id]
+    assert registered.provider == "openclaw"
+    assert agent_store.bindings == [
+        {
+            "user_id": 7,
+            "agent_id": issue.session.agent_id,
+            "provider": "openclaw",
+            "account_email": None,
+            "source": "user_ticket",
+            "metadata": {
+                "openclaw_agent_id": "main",
+                "openclaw_session_id": "session-1",
+                "openclaw_session_key": "agent:main:session-1",
+                "ticket_id": 99,
+                "ticket_prefix": "agt_fake_ticket",
+                "runtime_auth_provider": "openclaw",
+                "request_body_provider": "openclaw",
+            },
+        }
+    ]
+    assert user_store.consumed == [
+        {"agent_id": issue.session.agent_id, "session_id": issue.session.session_id}
+    ]
+    claims = broker.token_service.verify(issue.session_token)
+    assert claims["sid"] == issue.session.session_id
+    assert claims["sub"] == issue.session.agent_id
+    assert claims["uid"] == "7"
+
+
+def test_openclaw_bootstrap_registers_catalog_and_consumes_ticket_once():
+    session_store = FakeRuntimeSessionStore()
+    replay = FakeReplayStore()
+    user_store = FakeUserStore()
+    agent_store = FakeAgentStore()
+    broker = DifyAuthBroker(
+        session_store=session_store,
+        replay_store=replay,
+        user_store=user_store,
+        agent_store=agent_store,
+        token_service=RuntimeTokenService(secret="test-secret", ttl_seconds=900),
+    )
+    main_key = AgentIdentityKey(Ed25519PrivateKey.generate())
+    helper_key = AgentIdentityKey(Ed25519PrivateKey.generate())
+
+    identity, results = broker.bootstrap_openclaw_agents(
+        user_ticket="agt_valid_ticket",
+        provider_instance_id="local-openclaw",
+        agents=[
+            {
+                "provider": "openclaw",
+                "provider_instance_id": "local-openclaw",
+                "external_agent_id": "main",
+                "agent_type": "agent",
+                "name": "main",
+                "public_key_jwk": main_key.public_jwk,
+                "metadata": {"agent_public_key_thumbprint": main_key.thumbprint},
+            },
+            {
+                "provider": "openclaw",
+                "provider_instance_id": "local-openclaw",
+                "external_agent_id": "helper",
+                "agent_type": "agent",
+                "name": "helper",
+                "public_key_jwk": helper_key.public_jwk,
+                "metadata": {"agent_public_key_thumbprint": helper_key.thumbprint},
+            },
+        ],
+        metadata={"bootstrap": True},
+    )
+
+    assert identity.user_id == 7
+    assert [item.agent.external_agent_id for item in results] == ["main", "helper"]
+    assert {item.agent.agent_id for item in results} <= agent_store.user_agent_ids
+    assert len(agent_store.bindings) == 2
+    assert agent_store.syncs == [
+        {
+            "provider": "openclaw",
+            "provider_instance_id": "local-openclaw",
+            "tenant_id": None,
+            "agent_type": "agent",
+            "external_agent_ids": ["helper", "main"],
+            "metadata": {
+                "bootstrap": True,
+                "ticket_id": 99,
+                "ticket_prefix": "agt_fake_ticket",
+                "runtime_auth_provider": "openclaw",
+                "sync_source": "openclaw_bootstrap",
+            },
+        }
+    ]
+    assert user_store.consumed == [
+        {"agent_id": results[0].agent.agent_id, "session_id": "openclaw-bootstrap:local-openclaw"}
+    ]
+
+
+def test_openclaw_runtime_session_uses_canonical_agent_and_external_session():
+    broker, store = _broker()
+    agent_store = broker.agent_store
+    user_store = broker.user_store
+    agent_key = AgentIdentityKey(Ed25519PrivateKey.generate())
+    _, bootstrap = broker.bootstrap_openclaw_agents(
+        user_ticket="agt_valid_ticket",
+        provider_instance_id="local-openclaw",
+        agents=[
+            {
+                "provider": "openclaw",
+                "provider_instance_id": "local-openclaw",
+                "external_agent_id": "main",
+                "agent_type": "agent",
+                "name": "main",
+                "public_key_jwk": agent_key.public_jwk,
+                "metadata": {"agent_public_key_thumbprint": agent_key.thumbprint},
+            }
+        ],
+    )
+    canonical_agent_id = bootstrap[0].agent.agent_id
+    key = DPoPKey()
+    body = {
+        "provider": "openclaw",
+        "agent_id": canonical_agent_id,
+        "external_session_id": "agent:main:session-1",
+        "external_user_id": "openclaw-user",
+        "metadata": {
+            "openclaw_agent_id": "main",
+            "openclaw_session_key": "agent:main:session-1",
+        },
+    }
+    proof = agent_key.sign_session_create_proof(
+        agent_id=canonical_agent_id,
+        method="POST",
+        url=CREATE_URL,
+        body=body,
+        dpop_jkt=key.thumbprint,
+    )
+
+    issue = broker.create_openclaw_session(
+        external_session_id=body["external_session_id"],
+        agent_id=canonical_agent_id,
+        external_user_id=body["external_user_id"],
+        metadata=body["metadata"],
+        dpop_proof=key.proof("POST", CREATE_URL),
+        agent_proof=proof,
+        request_body=body,
+        method="POST",
+        url=CREATE_URL,
+    )
+
+    assert issue.session.provider == "openclaw"
+    assert issue.session.agent_id == canonical_agent_id
+    assert issue.session.user_id == 7
+    assert issue.session.external_session_id == "agent:main:session-1"
+    assert issue.session.external_account_email is None
+    assert canonical_agent_id in agent_store.user_agent_ids
+    assert user_store.consumed
+    claims = broker.token_service.verify(issue.session_token)
+    assert claims["sub"] == canonical_agent_id
+
+    second_key = DPoPKey()
+    second_body = {**body, "external_session_id": "agent:main:session-2"}
+    second = broker.create_openclaw_session(
+        external_session_id=second_body["external_session_id"],
+        agent_id=canonical_agent_id,
+        external_user_id=second_body["external_user_id"],
+        metadata=second_body["metadata"],
+        dpop_proof=second_key.proof("POST", CREATE_URL),
+        agent_proof=agent_key.sign_session_create_proof(
+            agent_id=canonical_agent_id,
+            method="POST",
+            url=CREATE_URL,
+            body=second_body,
+            dpop_jkt=second_key.thumbprint,
+        ),
+        request_body=second_body,
+        method="POST",
+        url=CREATE_URL,
+    )
+
+    assert second.session.agent_id == canonical_agent_id
+    assert second.session.session_id != issue.session.session_id
+    assert len(store.sessions) == 2
+
+
+def test_openclaw_external_session_cannot_recreate_after_close():
+    session_store = FakeRuntimeSessionStore()
+    replay = FakeReplayStore()
+    user_store = FakeUserStore()
+    agent_store = FakeAgentStore()
+    broker = DifyAuthBroker(
+        session_store=session_store,
+        replay_store=replay,
+        user_store=user_store,
+        agent_store=agent_store,
+        token_service=RuntimeTokenService(secret="test-secret", ttl_seconds=900),
+    )
+    agent_key = AgentIdentityKey(Ed25519PrivateKey.generate())
+    _, bootstrap = broker.bootstrap_openclaw_agents(
+        user_ticket="agt_valid_ticket",
+        provider_instance_id="local-openclaw",
+        agents=[
+            {
+                "provider": "openclaw",
+                "provider_instance_id": "local-openclaw",
+                "external_agent_id": "main",
+                "agent_type": "agent",
+                "name": "main",
+                "public_key_jwk": agent_key.public_jwk,
+                "metadata": {"agent_public_key_thumbprint": agent_key.thumbprint},
+            }
+        ],
+    )
+    canonical_agent_id = bootstrap[0].agent.agent_id
+    body = {
+        "provider": "openclaw",
+        "agent_id": canonical_agent_id,
+        "external_session_id": "02cba761-9e90-4bb7-a962-f31b52491877",
+        "external_user_id": "openclaw-user",
+        "metadata": {
+            "openclaw_agent_id": "main",
+            "openclaw_session_key": "agent:main:main",
+            "openclaw_session_id": "02cba761-9e90-4bb7-a962-f31b52491877",
+        },
+    }
+    first_key = DPoPKey()
+    first = broker.create_openclaw_session(
+        external_session_id=body["external_session_id"],
+        agent_id=canonical_agent_id,
+        external_user_id=body["external_user_id"],
+        metadata=body["metadata"],
+        dpop_proof=first_key.proof("POST", CREATE_URL),
+        agent_proof=agent_key.sign_session_create_proof(
+            agent_id=canonical_agent_id,
+            method="POST",
+            url=CREATE_URL,
+            body=body,
+            dpop_jkt=first_key.thumbprint,
+        ),
+        request_body=body,
+        method="POST",
+        url=CREATE_URL,
+    )
+    broker.close_session(
+        token=first.session_token,
+        dpop_proof=first_key.proof("POST", CLOSE_URL, first.session_token),
+        method="POST",
+        url=CLOSE_URL,
+    )
+
+    second_key = DPoPKey()
+    with pytest.raises(RuntimeAuthUnauthorized, match="OpenClaw external session is closed"):
+        broker.create_openclaw_session(
+            external_session_id=body["external_session_id"],
+            agent_id=canonical_agent_id,
+            external_user_id=body["external_user_id"],
+            metadata=body["metadata"],
+            dpop_proof=second_key.proof("POST", CREATE_URL),
+            agent_proof=agent_key.sign_session_create_proof(
+                agent_id=canonical_agent_id,
+                method="POST",
+                url=CREATE_URL,
+                body=body,
+                dpop_jkt=second_key.thumbprint,
+            ),
+            request_body=body,
+            method="POST",
+            url=CREATE_URL,
+        )
+
+    assert len(session_store.sessions) == 1
+    assert session_store.find_external_session(
+        provider="openclaw",
+        external_session_id=body["external_session_id"],
+        agent_id=canonical_agent_id,
+    ).session_id == first.session.session_id
 
 
 def test_langchain_ticket_session_rejects_reused_ticket():

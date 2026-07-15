@@ -4,7 +4,9 @@ const fs = require("fs");
 const { CheckResult, BasePlugin } = require("./base");
 const { getPluginClass, discoverPlugins } = require("./registry");
 const { JailbreakCheckPlugin } = require("./llm_before/jailbreak_check");
+const { Qwen3GuardInputPlugin } = require("./llm_before/qwen3guard");
 const { LLMOutputPlugin } = require("./llm_after/llm_output");
+const { Qwen3GuardOutputPlugin } = require("./llm_after/qwen3guard");
 const { ToolInvokePlugin } = require("./tool_before/tool_invoke");
 const { ToolResultPlugin } = require("./tool_after/tool_result");
 
@@ -17,7 +19,9 @@ const EVENT_PHASE = {
 };
 const BUILTIN_PLUGINS = {
   jailbreak_check: JailbreakCheckPlugin,
+  qwen3guard_input: Qwen3GuardInputPlugin,
   llm_output: LLMOutputPlugin,
+  qwen3guard_output: Qwen3GuardOutputPlugin,
   tool_invoke: ToolInvokePlugin,
   tool_result: ToolResultPlugin,
 };
@@ -188,7 +192,7 @@ class PluginManager {
     this.plugins = PHASE_ORDER.flatMap((phase) => this.plugins_by_phase[phase] || []);
   }
 
-  run(event, context) {
+  async run(event, context) {
     const phase = EVENT_PHASE[event.event_type] || "global";
     const phasePlugins = [...(this.plugins_by_phase[phase] || []), ...(this.plugins_by_phase.global || [])];
     const mergedSignals = [];
@@ -200,7 +204,7 @@ class PluginManager {
         continue;
       }
       try {
-        const result = plugin.check(event, context);
+        const result = await plugin.check(event, context);
         for (const signal of result.risk_signals) {
           if (!mergedSignals.includes(signal)) {
             mergedSignals.push(signal);

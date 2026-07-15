@@ -38,6 +38,7 @@ A minimal AgentGuard runtime config looks like this:
 {
   "serverUrl": "http://127.0.0.1:38080",
   "apiKeyEnvVar": "AGENTGUARD_API_KEY",
+  "userTicketEnvVar": "AGENTGUARD_USER_TICKET",
   "policy": "builtin",
   "auditPath": "./tmp/openclaw-agentguard-audit.jsonl",
   "remoteUnavailableMode": "fail_closed"
@@ -83,6 +84,7 @@ So the JSON file referenced by `configPath` only needs runtime settings such as:
 
 - `serverUrl`
 - `apiKeyEnvVar`
+- `userTicketEnvVar`
 - `policy`
 - `auditPath`
 - `remoteUnavailableMode`
@@ -91,10 +93,13 @@ So the JSON file referenced by `configPath` only needs runtime settings such as:
 
 When a remote AgentGuard server is configured, the adapter also:
 
-- auto-registers each new session
+- auto-registers each new session when no user ticket is configured
+- creates an AgentGuard DPoP runtime session when `userTicket` or `userTicketEnvVar` is configured
 - reports a baseline set of built-in OpenClaw tools
 
 This helps older OpenClaw versions still expose a useful tool inventory even when wrapped tool metadata is not available.
+
+For AgentGuard user binding, create a temporary user ticket in AgentGuard, export it as `AGENTGUARD_USER_TICKET`, then start OpenClaw. The ticket is consumed once and binds the OpenClaw runtime agent/session to the AgentGuard user; after that, guard and report requests use the returned DPoP session token instead of legacy identity headers.
 
 ## Test
 

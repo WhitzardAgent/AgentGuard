@@ -108,6 +108,7 @@ export default {
       pluginId: api.id || "agentguard",
       pluginConfig: api.pluginConfig || {},
       logger: api.logger || console,
+      openclawRuntime: api.runtime || api,
     });
 
     api.registerTool(RETRIEVE_DOC_TOOL);

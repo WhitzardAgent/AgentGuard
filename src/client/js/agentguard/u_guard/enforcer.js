@@ -37,7 +37,7 @@ class UGuardEnforcer {
   }
 
   async enforce(event, context, { extensions = null } = {}) {
-    const check = this.plugins.run(event, context);
+    const check = await this.plugins.run(event, context);
     const traceWindow = this.trace_window_provider ? this.trace_window_provider() : null;
     if (check.is_final && check.decision_candidate) {
       const decision = check.decision_candidate;

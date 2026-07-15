@@ -67,6 +67,15 @@ class AgentCatalogSyncRequest(_ApiModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class AgentBootstrapRequest(_ApiModel):
+    provider: str
+    user_ticket: str | None = None
+    provider_instance_id: str | None = None
+    tenant_id: str | None = None
+    agents: list[AgentRegisterRequest] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class SkillReportRequest(_ApiModel):
     context: dict[str, Any] = Field(default_factory=dict)
     skills: list[dict[str, Any]] = Field(default_factory=list)

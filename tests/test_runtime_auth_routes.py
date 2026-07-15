@@ -28,25 +28,73 @@ class FakeBroker:
             expires_at=1000,
         )
 
+    def bootstrap_openclaw_agents(self, **kwargs):
+        agent = SimpleNamespace(
+            external_agent_id="main",
+            agent_id="ag_openclaw_main",
+            agent_identity_code="agic_openclaw_main",
+            public_key_thumbprint="thumb-main",
+            status="active",
+        )
+        credential = SimpleNamespace(
+            credential_id="agcred_openclaw_main",
+            agent_id="ag_openclaw_main",
+            public_key_thumbprint="thumb-main",
+        )
+        return (
+            SimpleNamespace(user_id=7, ticket_prefix="agt-ticket"),
+            [
+                SimpleNamespace(
+                    agent=agent,
+                    credential=credential,
+                    user_id=7,
+                    user_binding_created=True,
+                    user_binding_updated=False,
+                )
+            ],
+        )
 
-class FakeLangChainBroker(FakeBroker):
-    def create_langchain_ticket_session(self, **kwargs):
+    def create_openclaw_session(self, **kwargs):
         return SimpleNamespace(
             session=RuntimeSession(
-                session_id="ags_langchain_created",
-                agent_id="ag_langchain_created",
-                user_id=8,
-                provider="langchain",
-                external_session_id=None,
+                session_id="ags_openclaw_canonical",
+                agent_id=kwargs["agent_id"],
+                user_id=7,
+                provider="openclaw",
+                external_session_id=kwargs.get("external_session_id"),
                 external_account_email=None,
-                dpop_jkt="jkt-langchain",
+                dpop_jkt="jkt-openclaw",
                 status="active",
             ),
-            session_token="runtime-token-langchain",
-            token_jti="rtok-langchain",
+            session_token="runtime-token-openclaw-canonical",
+            token_jti="rtok-openclaw-canonical",
+            issued_at=102,
+            expires_at=1002,
+        )
+
+
+class FakeLangChainBroker(FakeBroker):
+    def create_ticket_session(self, **kwargs):
+        provider = kwargs["provider"]
+        return SimpleNamespace(
+            session=RuntimeSession(
+                session_id=f"ags_{provider}_created",
+                agent_id=f"ag_{provider}_created",
+                user_id=8,
+                provider=provider,
+                external_session_id=None,
+                external_account_email=None,
+                dpop_jkt=f"jkt-{provider}",
+                status="active",
+            ),
+            session_token=f"runtime-token-{provider}",
+            token_jti=f"rtok-{provider}",
             issued_at=101,
             expires_at=1001,
         )
+
+    def create_langchain_ticket_session(self, **kwargs):
+        return self.create_ticket_session(provider="langchain", **kwargs)
 
     def authenticate_runtime_request(self, **kwargs):
         return AuthContext(
@@ -128,6 +176,85 @@ def test_session_create_route_dispatches_langchain_ticket_provider(monkeypatch):
     assert payload["user_id"] == "8"
     assert payload["session_token"] == "runtime-token-langchain"
     assert payload["auth_method"] == "langchain_dpop"
+
+
+def test_session_create_route_dispatches_openclaw_ticket_provider(monkeypatch):
+    monkeypatch.setattr("backend.api.client_router.get_dify_auth_broker", lambda: FakeLangChainBroker())
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/v1/server/session/create",
+        headers={"DPoP": "proof"},
+        json={
+            "provider": "openclaw",
+            "user_ticket": "agt-ticket",
+            "metadata": {"openclaw_agent_id": "main", "openclaw_session_id": "session-1"},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["session_id"] == "ags_openclaw_created"
+    assert payload["agent_id"] == "ag_openclaw_created"
+    assert payload["user_id"] == "8"
+    assert payload["session_token"] == "runtime-token-openclaw"
+    assert payload["auth_method"] == "openclaw_dpop"
+
+
+def test_agent_bootstrap_route_registers_openclaw_catalog(monkeypatch):
+    monkeypatch.setattr("backend.api.client_router.get_dify_auth_broker", lambda: FakeBroker())
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/v1/server/agents/bootstrap",
+        json={
+            "provider": "openclaw",
+            "user_ticket": "agt-ticket",
+            "provider_instance_id": "local-openclaw",
+            "agents": [
+                {
+                    "provider": "openclaw",
+                    "provider_instance_id": "local-openclaw",
+                    "external_agent_id": "main",
+                    "agent_type": "agent",
+                    "name": "main",
+                    "public_key_jwk": {"kty": "OKP", "crv": "Ed25519", "x": "abc"},
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "openclaw"
+    assert payload["user_id"] == "7"
+    assert payload["agents"][0]["external_agent_id"] == "main"
+    assert payload["agents"][0]["agent_id"] == "ag_openclaw_main"
+    assert payload["agents"][0]["user_bound"] is True
+
+
+def test_session_create_route_dispatches_openclaw_canonical_provider(monkeypatch):
+    monkeypatch.setattr("backend.api.client_router.get_dify_auth_broker", lambda: FakeBroker())
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/v1/server/session/create",
+        headers={"DPoP": "proof", "X-AgentGuard-Agent-Proof": "agent-proof"},
+        json={
+            "provider": "openclaw",
+            "agent_id": "ag_openclaw_main",
+            "external_session_id": "agent:main:session-1",
+            "metadata": {"openclaw_agent_id": "main"},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["session_id"] == "ags_openclaw_canonical"
+    assert payload["agent_id"] == "ag_openclaw_main"
+    assert payload["external_session_id"] == "agent:main:session-1"
+    assert payload["session_token"] == "runtime-token-openclaw-canonical"
+    assert payload["auth_method"] == "openclaw_dpop"
 
 
 def test_session_create_route_keeps_dify_required_fields(monkeypatch):

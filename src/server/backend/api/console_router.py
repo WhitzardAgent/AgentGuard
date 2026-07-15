@@ -7,6 +7,9 @@ real server state (policy store, live traffic, approvals) via ConsoleState.
 from __future__ import annotations
 
 import json
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime, timezone
 from typing import Any
 
@@ -73,7 +76,7 @@ def list_agents(
         records = AgentStore().list_agents(visible["agent_ids"])
     except DatabaseUnavailable:
         return []
-    return [_agent_record_to_console_item(record) for record in records]
+    return [_agent_record_to_console_item(record) for record in records if _agent_record_visible_in_console(record)]
 
 
 @router.delete("/v1/backend/agents/{agent_id}")
@@ -358,13 +361,22 @@ def close_agent_runtime_session(
         ):
             return _err("runtime session not found", 404)
         store.close_session(session_id)
+        client_close = _notify_client_runtime_session_closed(session)
         updated = store.list_sessions(agent_id=agent_id, user_id=session_user_id, status="all", limit=200)
     except DatabaseUnavailable:
         return _err("database unavailable", 503)
     for summary in updated:
         if summary.session.session_id == session_id:
-            return {"ok": True, "session": _runtime_session_summary_to_item(summary)}
-    return {"ok": True, "session": {"session_id": session_id, "status": "closed"}}
+            return {
+                "ok": True,
+                "session": _runtime_session_summary_to_item(summary),
+                "client_close": client_close,
+            }
+    return {
+        "ok": True,
+        "session": {"session_id": session_id, "status": "closed"},
+        "client_close": client_close,
+    }
 
 
 @router.post("/v1/backend/approvals/{ticket_id}/approve")
@@ -385,6 +397,56 @@ def _visible_external_accounts(
     session_token: str | None,
 ) -> set[tuple[str, str]] | None:
     return _visible_scope(session_token)["external_accounts"]
+
+
+def _notify_client_runtime_session_closed(session: Any) -> dict[str, Any]:
+    metadata = _runtime_session_metadata(session)
+    config_url = str(metadata.get("client_config_url") or "").strip()
+    session_key = str(metadata.get("client_session_key") or metadata.get("openclaw_session_key") or "").strip()
+    if not config_url:
+        return {"status": "skipped", "reason": "no client_config_url"}
+    control_url = _client_session_control_url(config_url)
+    body = {
+        "action": "close",
+        "provider": getattr(session, "provider", None),
+        "agentguard_session_id": getattr(session, "session_id", None),
+        "agentguard_agent_id": getattr(session, "agent_id", None),
+        "agentguard_user_id": getattr(session, "user_id", None),
+        "openclaw_session_key": metadata.get("openclaw_session_key"),
+        "openclaw_session_id": metadata.get("openclaw_session_id"),
+    }
+    data = json.dumps(body).encode("utf-8")
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    if session_key:
+        headers["X-AgentGuard-Session-Key"] = session_key
+    request = urllib.request.Request(control_url, data=data, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=2.0) as response:
+            payload = response.read().decode("utf-8")
+            parsed = json.loads(payload) if payload else {}
+            return {"status": "ok", "url": control_url, "response": parsed}
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        return {"status": "error", "url": control_url, "code": exc.code, "error": detail}
+    except Exception as exc:
+        return {"status": "error", "url": control_url, "error": str(exc)}
+
+
+def _runtime_session_metadata(session: Any) -> dict[str, Any]:
+    raw = getattr(session, "metadata_json", None)
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(str(raw))
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _client_session_control_url(config_url: str) -> str:
+    parsed = urllib.parse.urlsplit(config_url)
+    path = "/v1/client/session/control"
+    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
 
 
 def _visible_scope(session_token: str | None) -> dict[str, Any]:
@@ -478,6 +540,20 @@ def _agent_record_to_console_item(record: AgentRecord) -> dict[str, Any]:
         "mcp_count": 0,
         "mcp_names": [],
     }
+
+
+def _agent_record_visible_in_console(record: AgentRecord) -> bool:
+    metadata = _safe_json_object(record.metadata_json)
+    provider = str(record.provider or metadata.get("external_provider") or metadata.get("provider") or "").strip()
+    if provider != "openclaw":
+        return True
+    agent_type = str(record.agent_type or metadata.get("agent_type") or "").strip()
+    external_agent_id = str(record.external_agent_id or metadata.get("external_agent_id") or "").strip()
+    if agent_type != "agent":
+        return False
+    if external_agent_id.startswith("ticket-"):
+        return False
+    return True
 
 
 def _safe_json_object(value: str | None) -> dict[str, Any]:

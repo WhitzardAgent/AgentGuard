@@ -9,6 +9,7 @@ const { builtinPluginEntries } = require("./plugins/manager");
 const PLUGIN_CONFIG_PATH = "/v1/client/plugins/config";
 const PLUGIN_LIST_PATH = "/v1/client/plugins/list";
 const CLIENT_HEALTH_PATH = "/v1/client/health";
+const CLIENT_SESSION_CONTROL_PATH = "/v1/client/session/control";
 
 class ClientConfigAPIServer {
   constructor(
@@ -106,6 +107,25 @@ class ClientConfigAPIServer {
             applies: "next_event",
             endpoint: PLUGIN_CONFIG_PATH,
           });
+        }
+        if (req.method === "POST" && req.url === CLIENT_SESSION_CONTROL_PATH) {
+          if (typeof this.guard.close_runtime_session !== "function") {
+            return this.send(res, 501, {
+              status: "error",
+              error: "client session control is not supported",
+            });
+          }
+          const body = await readJson(req);
+          try {
+            const result = await this.guard.close_runtime_session(body || {});
+            return this.send(res, 200, {
+              status: "ok",
+              endpoint: CLIENT_SESSION_CONTROL_PATH,
+              result: result || {},
+            });
+          } catch (error) {
+            return this.send(res, 400, { status: "error", error: String(error.message || error) });
+          }
         }
         return this.send(res, 404, { error: "not found" });
       } catch (error) {
@@ -232,6 +252,7 @@ module.exports = {
   PLUGIN_CONFIG_PATH,
   PLUGIN_LIST_PATH,
   CLIENT_HEALTH_PATH,
+  CLIENT_SESSION_CONTROL_PATH,
   listRegisteredPlugins,
   defaultAdvertisedHost,
 };

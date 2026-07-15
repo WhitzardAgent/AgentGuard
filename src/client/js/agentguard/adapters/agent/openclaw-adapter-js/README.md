@@ -38,6 +38,7 @@ Example AgentGuard config:
 {
   "serverUrl": "http://127.0.0.1:38080",
   "apiKeyEnvVar": "AGENTGUARD_API_KEY",
+  "userTicketEnvVar": "AGENTGUARD_USER_TICKET",
   "policy": "builtin",
   "defaultToolCatalogPath": "./openclaw-default-tools.json",
   "auditPath": "./tmp/openclaw-agentguard-audit.jsonl",
@@ -93,11 +94,14 @@ AgentGuard config file directory. The adapter keeps the full skill descriptors
 locally in bridge state for later reporting/scanning integration, while session
 metadata only includes a compact scan summary.
 
-When a remote AgentGuard server is configured, the adapter also auto-registers
-each new session and reports a baseline set of built-in OpenClaw tools so older
-OpenClaw versions without wrapped tool metadata still expose a useful tool
-inventory to AgentGuard, including top-level `input_params` for each catalog
-entry.
+When a remote AgentGuard server is configured, the adapter auto-registers each
+new session unless `userTicket` or `userTicketEnvVar` is configured. With a user
+ticket, the adapter consumes that ticket through `/v1/server/session/create`,
+binds the OpenClaw runtime agent/session to the AgentGuard user, then uses the
+returned DPoP session token for guard and reporting requests. In both modes it
+reports a baseline set of built-in OpenClaw tools so older OpenClaw versions
+without wrapped tool metadata still expose a useful tool inventory to
+AgentGuard, including top-level `input_params` for each catalog entry.
 
 ## Test
 

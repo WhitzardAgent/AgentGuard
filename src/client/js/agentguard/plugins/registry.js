@@ -39,7 +39,9 @@ function discoverPlugins() {
   }
   DISCOVERED = true;
   require("./llm_before/jailbreak_check");
+  require("./llm_before/qwen3guard");
   require("./llm_after/llm_output");
+  require("./llm_after/qwen3guard");
   require("./llm_after/llm_thought");
   require("./llm_after/final_response");
   require("./tool_before/tool_invoke");

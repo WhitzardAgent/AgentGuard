@@ -54,6 +54,7 @@ class RemoteGuardClient {
     this.skill_report_path = options.skill_report_path || options.skillReportPath || "/v1/server/skills/report";
     this.mcp_report_path = options.mcp_report_path || options.mcpReportPath || "/v1/server/mcps/report";
     this.agent_register_path = options.agent_register_path || options.agentRegisterPath || "/v1/server/agents/register";
+    this.agent_bootstrap_path = options.agent_bootstrap_path || options.agentBootstrapPath || "/v1/server/agents/bootstrap";
     this.agent_sync_path = options.agent_sync_path || options.agentSyncPath || "/v1/server/agents/sync";
     this.runtime_session_create_path = options.runtime_session_create_path || options.runtimeSessionCreatePath || "/v1/server/session/create";
     this.runtime_session_refresh_path = options.runtime_session_refresh_path || options.runtimeSessionRefreshPath || "/v1/server/session/refresh";
@@ -154,6 +155,10 @@ class RemoteGuardClient {
     return this.post(this.agent_register_path, { ...(agent || {}) });
   }
 
+  bootstrap_agents(catalog) {
+    return this.post(this.agent_bootstrap_path, { ...(catalog || {}) });
+  }
+
   sync_agents(catalog) {
     return this.post(this.agent_sync_path, { ...(catalog || {}) });
   }
@@ -236,7 +241,17 @@ class RemoteGuardClient {
         });
         clearTimeout(timeout);
         if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
+          let detail = "";
+          try {
+            const text = await response.text();
+            if (text) {
+              const parsed = JSON.parse(text);
+              detail = parsed && parsed.detail ? String(parsed.detail) : text;
+            }
+          } catch (_) {
+            detail = "";
+          }
+          throw new Error(`HTTP ${response.status}${detail ? `: ${detail}` : ""}`);
         }
         this.breaker.record_success();
         return await response.json();
