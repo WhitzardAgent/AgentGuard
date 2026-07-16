@@ -119,7 +119,7 @@ def test_generate_repairs_after_validation_failure() -> None:
     assert len(session.attempts) == 2
     assert session.attempts[0].validation.ok is False
     assert session.accepted_candidate is not None
-    assert "上一轮输出未通过校验" in client.prompts[1]
+    assert "current round output failed validation" in client.prompts[1]
     assert "unknown_tool_match" in client.prompts[1]
 
 
@@ -148,8 +148,8 @@ def test_refine_uses_user_feedback_and_revalidates() -> None:
     assert updated.accepted_candidate is not None
     assert len(updated.attempts) == 2
     assert updated.user_feedback_history == ["不要直接 deny，改成 LLM_CHECK 审查邮件内容"]
-    assert "用户修改意见" in client.prompts[1]
-    assert "当前已通过校验的候选规则" in client.prompts[1]
+    assert "user feedback" in client.prompts[1]
+    assert "current accepted candidate rules" in client.prompts[1]
     normalized = updated.accepted_candidate.validation.normalized_rules[0]
     assert normalized.effect.value == "require_remote_review"
     assert normalized.metadata["llm_prompt"].startswith("Decide allow, deny, or human_check")

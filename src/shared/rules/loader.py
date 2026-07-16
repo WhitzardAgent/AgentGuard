@@ -29,17 +29,22 @@ def load_rules_file(path: str | Path) -> list[PolicyRule]:
     p = Path(path)
     if not p.exists():
         raise PolicyError(f"rule file not found: {p}")
-    if p.suffix.lower() == ".rules":
-        try:
-            parsed, report = parse_legacy_rules(p.read_text(encoding="utf-8"))
-        except OSError as exc:
-            raise PolicyError(f"cannot read rule file {p}: {exc}") from exc
+    try:
+        text = p.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise PolicyError(f"cannot read rule file {p}: {exc}") from exc
+    # `.rules` is the legacy text-DSL extension, but some callers (and tests)
+    # write plain JSON rule lists to a `.rules`-suffixed path; sniff the
+    # content rather than trusting the suffix so both work.
+    looks_like_json = text.lstrip()[:1] in ("[", "{")
+    if p.suffix.lower() == ".rules" and not looks_like_json:
+        parsed, report = parse_legacy_rules(text)
         if not report.ok:
             raise PolicyError(f"cannot parse rule file {p}: {report.errors[0]['message']}")
         return parsed
     try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
         raise PolicyError(f"cannot read rule file {p}: {exc}") from exc
     return _coerce_rules(data)
 

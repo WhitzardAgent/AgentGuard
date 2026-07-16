@@ -21,7 +21,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from shared.rules.trace_pattern import parse_trace_pattern, trace_steps_to_pattern
-from shared.schemas.policy import PolicyEffect, PolicyRule, RuleCondition, TraceClause
+from shared.schemas.policy import (
+    PolicyEffect,
+    PolicyRule,
+    RuleCondition,
+    TraceClause,
+    extract_condition_atoms,
+)
 
 ACTION_TO_EFFECT = {
     "DENY": PolicyEffect.DENY,
@@ -175,88 +181,22 @@ def _on_event_types(block: str) -> list[str]:
 
 
 def _parse_conditions(cond_text: str) -> tuple[list[RuleCondition], list[dict[str, Any]]]:
-    """Translate DSL conditions to runtime conditions and preserve full source."""
-    enforce: list[RuleCondition] = []
+    """Translate DSL conditions to runtime conditions and preserve full source.
+
+    `raw` mirrors the top-level AND-separated source segments (used to
+    reconstruct DSL source text); `enforce` is the full set of atomic field
+    conditions referenced anywhere in the expression (including inside
+    OR/NOT/parenthesized groups), kept on the rule for introspection only --
+    `PolicyRule.matches()` evaluates `condition_expr` itself, not this list.
+    """
     raw: list[dict[str, Any]] = []
     parts = re.split(r"\s+AND\s+", cond_text, flags=re.IGNORECASE)
     for part in parts:
         expr = part.strip()
-        if not expr:
-            continue
-        raw.append({"expr": expr})
-        compiled = _compile_condition(expr.strip("()"))
-        if compiled is not None:
-            enforce.append(compiled)
+        if expr:
+            raw.append({"expr": expr})
+    enforce = extract_condition_atoms(cond_text)
     return enforce, raw
-
-
-def _compile_condition(expr: str) -> RuleCondition | None:
-    parsed = re.match(
-        r'^(?P<path>[A-Za-z_][A-Za-z0-9_.]*)\s+'
-        r'(?P<op>NOT IN|MATCHES|CONTAINS|==|!=|>=|<=|>|<|IN)\s+'
-        r'(?P<value>.+)$',
-        expr.strip(),
-        flags=re.IGNORECASE,
-    )
-    if not parsed:
-        return None
-    field = _condition_field(parsed.group("path"))
-    if field is None:
-        return None
-    op = _condition_op(parsed.group("op"))
-    value = _condition_value(parsed.group("value"))
-    return RuleCondition(field=field, op=op, value=value)
-
-
-def _condition_field(path: str) -> str | None:
-    normalized = str(path or "").strip()
-    if not normalized:
-        return None
-    if re.match(r"^[A-Za-z_][A-Za-z0-9_-]*\.", normalized):
-        return normalized
-    if normalized.startswith("principal."):
-        return normalized
-    if normalized == "tool.name":
-        return "tool.name"
-    if normalized.startswith("tool."):
-        return normalized
-    if normalized.startswith("target."):
-        return normalized
-    if normalized.startswith("payload."):
-        return normalized
-    return None
-
-
-def _condition_op(token: str) -> str:
-    normalized = str(token or "").strip().upper()
-    return {
-        "==": "eq",
-        "!=": "ne",
-        ">": "gt",
-        "<": "lt",
-        ">=": "gte",
-        "<=": "lte",
-        "IN": "in",
-        "NOT IN": "not_in",
-        "CONTAINS": "contains",
-        "MATCHES": "regex",
-    }.get(normalized, "eq")
-
-
-def _condition_value(raw_value: str) -> Any:
-    value = str(raw_value or "").strip()
-    if value.startswith("{") and value.endswith("}"):
-        inner = value[1:-1].strip()
-        if not inner:
-            return []
-        return [_unquote(item.strip()) for item in inner.split(",") if item.strip()]
-    if re.fullmatch(r"-?\d+", value):
-        return int(value)
-    if re.fullmatch(r"-?\d+\.\d+", value):
-        return float(value)
-    if value.lower() in {"true", "false"}:
-        return value.lower() == "true"
-    return _unquote(value)
 
 
 # ---- public API --------------------------------------------------------

@@ -97,7 +97,7 @@ def _cmd_check(args: argparse.Namespace) -> int:
     except PolicyError as exc:
         print(str(exc), file=sys.stderr)
         return 1
-    print(f"ok: {target} ({len(rules)} rules)")
+    print(f"ok: {target.as_posix()} ({len(rules)} rules)")
     return 0
 
 
@@ -121,11 +121,11 @@ def _check_rules_file(path: Path) -> tuple[bool, int]:
 
     _, report = parse_legacy_rules(source)
     if report.ok:
-        print(f"ok: {path} ({report.rule_count} rule block(s))")
+        print(f"ok: {path.as_posix()} ({report.rule_count} rule block(s))")
         return True, report.rule_count
 
     for error in report.errors:
-        print(f"error: {path}: {error['message']}", file=sys.stderr)
+        print(f"error: {path.as_posix()}: {error['message']}", file=sys.stderr)
     return False, report.rule_count
 
 

@@ -6,7 +6,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from shared.rules.trace_pattern import parse_trace_pattern
-from shared.schemas.policy import PolicyEffect, PolicyRule, RuleCondition, TraceClause
+from shared.schemas.policy import (
+    PolicyEffect,
+    PolicyRule,
+    RuleCondition,
+    TraceClause,
+    extract_condition_atoms,
+)
 
 _ACTION_TO_EFFECT = {
     "DENY": PolicyEffect.DENY,
@@ -227,7 +233,7 @@ def _supports_runtime(fields: dict[str, str]) -> bool:
 def _runtime_rule(fields: dict[str, str], action: str) -> PolicyRule:
     condition_text = str(fields.get("CONDITION", "")).strip()
     raw_conditions = [part.strip() for part in re.split(r"\s+AND\s+", condition_text, flags=re.IGNORECASE) if part.strip()]
-    conditions = [_compile_condition(expr.strip("()")) for expr in raw_conditions]
+    conditions = extract_condition_atoms(condition_text)
     tool_pattern = _tool_pattern(fields.get("ON", ""))
     prompt = _unquote(fields.get("Prompt", ""))
     metadata = {
@@ -252,7 +258,7 @@ def _runtime_rule(fields: dict[str, str], action: str) -> PolicyRule:
         priority=_PRIORITY_BY_ACTION.get(action, 50),
         event_types=_on_event_types(fields.get("ON", "")),
         tool_names=[] if tool_pattern in ("", "*") else [tool_pattern],
-        conditions=[condition for condition in conditions if condition is not None],
+        conditions=conditions,
         condition_expr=condition_text,
         metadata=metadata,
         trace_clause=(
@@ -306,11 +312,15 @@ def parse_legacy_rules(source: str) -> tuple[list[PolicyRule], DSLCompatReport]:
             parsed.append(_runtime_rule(fields, action))
             continue
 
-        report.errors.append(
+        # Not a syntax error -- the block is well-formed DSL, but references
+        # features the current runtime compiler doesn't execute yet (e.g.
+        # history_arg(), exists_path(), allowlist.*). Skip it without failing
+        # the whole file so the rest of a tutorial/example file still loads.
+        report.warnings.append(
             {
                 "message": (
                     f"Rule block {index} ('{rule_id}') uses unsupported DSL features in the current "
-                    "runtime compiler."
+                    "runtime compiler; skipped."
                 )
             }
         )

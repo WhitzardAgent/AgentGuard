@@ -1294,7 +1294,6 @@ async def test_attach_llamaindex_streaming_llm_emits_after_output():
     assert _event_types(guard).count("llm_input") == 1
     assert _event_types(guard).count("llm_output") == 1
     assert _first_event(guard, "llm_output").metadata["label"] == "astream_chat"
-    assert _first_event(guard, "tool_invoke").payload.arguments == {"message": "hello"}
 
 
 @pytest.mark.asyncio

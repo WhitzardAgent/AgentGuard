@@ -279,10 +279,17 @@ def _plugin_outcome_dict(plugin: BasePlugin, res: CheckResult) -> dict[str, Any]
     }
 
 
+def decision_type_rank(decision_type: DecisionType | None) -> int:
+    """Severity rank for a decision type; higher wins when candidates tie on `is_final`."""
+    if decision_type is None:
+        return -1
+    return _DECISION_RANK.get(decision_type, -1)
+
+
 def _decision_rank(decision: GuardDecision | None) -> int:
     if decision is None:
         return -1
-    return _DECISION_RANK.get(decision.decision_type, -1)
+    return decision_type_rank(decision.decision_type)
 
 
 def _should_replace_decision(

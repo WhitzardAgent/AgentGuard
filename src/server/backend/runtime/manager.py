@@ -16,6 +16,7 @@ from backend.runtime.degrade.planner import DegradePlanner
 from backend.runtime.plugins import server_plugin_manager
 from backend.runtime.plugins.base import CheckResult
 from backend.runtime.plugins.config_utils import merge_plugin_configs, normalize_plugin_config
+from backend.runtime.plugins.manager import decision_type_rank
 from backend.runtime.policy.engine import PolicyEngine
 from backend.runtime.review import ReviewQueue
 from backend.runtime.storage import SessionPool, TraceStore, trace_entry_event_dict
@@ -503,7 +504,23 @@ class RuntimeManager:
             check=check,
         )
         if review_tickets:
-            if not (decision.requires_user or decision.requires_remote):
+            # A review ticket only needs to *escalate* the final decision when
+            # nothing stronger already won the plugin chain (e.g. a later
+            # plugin defaulted to allow without being final). If the chain
+            # already settled on something at least as severe as review
+            # (e.g. deny), that decision must not be downgraded back to
+            # human_check/remote_review.
+            strongest_ticket_rank = max(
+                (
+                    decision_type_rank(DecisionType(ticket.get("decision_type")))
+                    for ticket in review_tickets
+                    if ticket.get("decision_type")
+                ),
+                default=-1,
+            )
+            if not (decision.requires_user or decision.requires_remote) and (
+                decision_type_rank(decision.decision_type) < strongest_ticket_rank
+            ):
                 final_ticket = review_tickets[-1]
                 final_reason = str(final_ticket.get("reason") or "Review required by server plugin.")
                 final_policy_id = (
