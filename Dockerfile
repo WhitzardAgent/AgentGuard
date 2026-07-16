@@ -1,6 +1,6 @@
 # AgentGuard server/runtime image. The server image only carries server + shared
 # source; client code is not required for backend imports.
-FROM python:3.11-slim AS runtime
+FROM python:3.14-slim AS runtime
 
 ARG APT_MIRROR=mirrors.tuna.tsinghua.edu.cn
 ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
