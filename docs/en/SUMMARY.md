@@ -18,6 +18,7 @@
 * [AgentGuard Plugins](plugins.md)
   * [Builtin Plugins](plugins/builtin_plugins.md)
     * [rule_based_plugin](plugins/rule_based_plugin.md)
+    * [Thought-Aligner](plugins/thought_aligner.md)
       * [Visual Policy Configuration](policies/quick_config.md)
       * [Policy DSL Structure](policies/dsl_basic_structure.md)
     * [jailbreak_check](plugins/jailbreak_check.md)

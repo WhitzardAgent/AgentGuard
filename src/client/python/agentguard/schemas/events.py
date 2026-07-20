@@ -384,6 +384,8 @@ def _coerce_llm_output(value: Any) -> LLMOutput:
         return LLMOutput(output=_coerce_text(value))
 
     thought = data.get("thought")
+    if thought is None:
+        thought = _nested_reasoning_value(data)
     final_output = data.get("final_output")
     output = data.get("output")
     if output is None:
@@ -422,7 +424,18 @@ def _llm_output_fields(value: Any) -> dict[str, Any] | None:
         if data is None:
             attrs = {
                 key: getattr(value, key)
-                for key in ("output", "text", "content", "message", "thought", "final_output")
+                for key in (
+                    "output",
+                    "text",
+                    "content",
+                    "message",
+                    "thought",
+                    "reasoning_content",
+                    "reasoning",
+                    "thinking",
+                    "analysis",
+                    "final_output",
+                )
                 if getattr(value, key, None) is not None
             }
             data = attrs or None
@@ -430,7 +443,64 @@ def _llm_output_fields(value: Any) -> dict[str, Any] | None:
     if not data:
         return None
 
-    recognized = ("output", "text", "content", "message", "thought", "final_output")
+    recognized = (
+        "output",
+        "text",
+        "content",
+        "message",
+        "thought",
+        "reasoning_content",
+        "reasoning",
+        "thinking",
+        "analysis",
+        "final_output",
+    )
     if not any(key in data for key in recognized):
         return None
     return data
+
+
+_REASONING_KEYS = (
+    "reasoning_content",
+    "reasoningContent",
+    "reasoning",
+    "thinking",
+    "plan",
+    "analysis",
+)
+
+
+def _nested_reasoning_value(value: Any, depth: int = 0) -> str | None:
+    if depth > 5:
+        return None
+    if isinstance(value, dict):
+        for key in _REASONING_KEYS:
+            text = _reasoning_text(value.get(key))
+            if text:
+                return text
+        for item in value.values():
+            nested = _nested_reasoning_value(item, depth + 1)
+            if nested:
+                return nested
+    elif isinstance(value, list):
+        for item in value:
+            nested = _nested_reasoning_value(item, depth + 1)
+            if nested:
+                return nested
+    return None
+
+
+def _reasoning_text(value: Any) -> str | None:
+    if isinstance(value, str):
+        return value.strip() or None
+    if isinstance(value, list):
+        parts: list[str] = []
+        for item in value:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text") or item.get("content") or item.get("summary")
+                if isinstance(text, str) and text.strip():
+                    parts.append(text)
+        return "\n".join(parts).strip() or None
+    return None

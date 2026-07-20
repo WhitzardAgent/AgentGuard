@@ -158,7 +158,7 @@ def test_llm_output_does_not_parse_thought_only_output():
     assert event.payload.final_output is None
 
 
-def test_llm_output_ignores_nested_reasoning_fields():
+def test_llm_output_extracts_nested_reasoning_alias():
     ctx = RuntimeContext(session_id="s")
     event = ev.llm_output(
         ctx,
@@ -169,5 +169,19 @@ def test_llm_output_ignores_nested_reasoning_fields():
     )
 
     assert event.payload.output == "visible answer"
-    assert event.payload.thought is None
+    assert event.payload.thought == "hidden reasoning"
     assert event.payload.final_output is None
+
+
+def test_llm_output_prefers_explicit_thought_over_nested_reasoning_alias():
+    ctx = RuntimeContext(session_id="s")
+    event = ev.llm_output(
+        ctx,
+        {
+            "text": "visible answer",
+            "thought": "explicit thought",
+            "additional_kwargs": {"reasoning_content": "nested reasoning"},
+        },
+    )
+
+    assert event.payload.thought == "explicit thought"

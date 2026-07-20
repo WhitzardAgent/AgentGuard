@@ -10,5 +10,6 @@ AgentGuard includes built-in plugins for common runtime protection needs. This p
 
 - [rule_based_plugin](rule_based_plugin.md): a server-only rule engine for tool-call access control and policy evaluation that can either return fixed `ALLOW` / `DENY` decisions or escalate matched cases to `HUMAN_CHECK` / `LLM_CHECK`.
 - [jailbreak_check](jailbreak_check.md): the same LLM-input detector can also run on the AgentGuard server when you want centralized governance and auditing.
+- [Thought-Aligner](thought_aligner.md): an opt-in `llm_after` intervention that rewrites exposed reasoning on the server and makes a compatible Python client regenerate its action before execution.
 
 Other utility plugins also exist in the codebase, but this page focuses on the built-in plugins that are documented for direct use in the public docs.

@@ -6,6 +6,7 @@ import inspect
 from collections.abc import Callable
 from typing import Any
 
+from agentguard.adapters.agent import thought_alignment
 from agentguard.adapters.agent.normalization import (
     DEFAULT_AGENT_EVENT_NORMALIZER,
     AgentEventNormalizer,
@@ -127,6 +128,8 @@ def guard_llm_after(
     normalizer: AgentEventNormalizer | None = None,
     fn: Callable[..., Any] | None = None,
     owner: Any = None,
+    extra_metadata: dict[str, Any] | None = None,
+    thought_override: str | None = None,
 ) -> GuardDecision:
     normalized = _resolve_normalizer(normalizer).normalize_llm_output(
         label=label,
@@ -134,8 +137,19 @@ def guard_llm_after(
         fn=fn,
         owner=owner,
     )
+    payload = normalized.payload
+    metadata = dict(normalized.metadata)
+    metadata.setdefault("output_type", type(output).__name__)
+    if extra_metadata:
+        metadata.update(extra_metadata)
+    if thought_override:
+        if isinstance(payload, dict):
+            payload = dict(payload)
+            payload["thought"] = thought_override
+        else:
+            payload = {"output": payload, "thought": thought_override}
     return guard.runtime.guard(
-        ev.llm_output(guard.context, normalized.payload, **dict(normalized.metadata)),
+        ev.llm_output(guard.context, payload, **metadata),
         phase="after",
     ).decision
 
@@ -302,6 +316,9 @@ def make_guarded_llm_callable(
                 if before_blocked is not None:
                     return before_blocked
                 raw = await fn(*args, **kwargs)
+                regeneration_supported = thought_alignment.supports_thought_regeneration(
+                    args, kwargs
+                )
                 decision = guard_llm_after(
                     guard,
                     raw,
@@ -309,7 +326,23 @@ def make_guarded_llm_callable(
                     normalizer=normalizer,
                     fn=fn,
                     owner=owner,
+                    extra_metadata={
+                        "thought_regeneration_supported": regeneration_supported,
+                        "thought_alignment_attempt": 0,
+                    },
                 )
+                if decision.decision_type == DecisionType.ALIGN_THOUGHT:
+                    return await _regenerate_async(
+                        guard,
+                        fn,
+                        args=args,
+                        kwargs=kwargs,
+                        raw=raw,
+                        decision=decision,
+                        label=label,
+                        normalizer=normalizer,
+                        owner=owner,
+                    )
                 blocked = _blocked_llm_value(decision)
                 return blocked if blocked is not None else raw
             except Exception:
@@ -336,6 +369,7 @@ def make_guarded_llm_callable(
             if before_blocked is not None:
                 return before_blocked
             raw = fn(*args, **kwargs)
+            regeneration_supported = thought_alignment.supports_thought_regeneration(args, kwargs)
             decision = guard_llm_after(
                 guard,
                 raw,
@@ -343,7 +377,23 @@ def make_guarded_llm_callable(
                 normalizer=normalizer,
                 fn=fn,
                 owner=owner,
+                extra_metadata={
+                    "thought_regeneration_supported": regeneration_supported,
+                    "thought_alignment_attempt": 0,
+                },
             )
+            if decision.decision_type == DecisionType.ALIGN_THOUGHT:
+                return _regenerate_sync(
+                    guard,
+                    fn,
+                    args=args,
+                    kwargs=kwargs,
+                    raw=raw,
+                    decision=decision,
+                    label=label,
+                    normalizer=normalizer,
+                    owner=owner,
+                )
             blocked = _blocked_llm_value(decision)
             return blocked if blocked is not None else raw
         except Exception:
@@ -453,7 +503,124 @@ def _blocked_llm_value(decision: GuardDecision) -> Any | None:
             "reason": decision.reason,
             "decision": decision.decision_type.value,
         }
+    if decision.decision_type in {
+        DecisionType.ALIGN_THOUGHT,
+        DecisionType.LOOP_BACK_TO_LLM,
+    }:
+        return {
+            "agentguard": "blocked",
+            "reason": decision.reason,
+            "decision": decision.decision_type.value,
+        }
     return None
+
+
+def _regenerate_sync(
+    guard: Any,
+    fn: Callable[..., Any],
+    *,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    raw: Any,
+    decision: GuardDecision,
+    label: str,
+    normalizer: AgentEventNormalizer | None,
+    owner: Any,
+) -> Any:
+    aligned_thought = thought_alignment.aligned_thought(decision)
+    prepared = (
+        thought_alignment.prepare_thought_regeneration(args, kwargs, aligned_thought)
+        if aligned_thought
+        else None
+    )
+    if prepared is None:
+        return _blocked_llm_value(decision)
+    retry_args, retry_kwargs = prepared
+    before_decision = guard_llm_before(
+        guard,
+        label=label,
+        args=retry_args,
+        kwargs=retry_kwargs,
+        normalizer=normalizer,
+        fn=fn,
+        owner=owner,
+    )
+    before_blocked = _blocked_llm_value(before_decision)
+    if before_blocked is not None:
+        return before_blocked
+    regenerated = fn(*retry_args, **retry_kwargs)
+    retry_decision = guard_llm_after(
+        guard,
+        regenerated,
+        label=label,
+        normalizer=normalizer,
+        fn=fn,
+        owner=owner,
+        extra_metadata={
+            "thought_regeneration_supported": True,
+            "thought_alignment_attempt": 1,
+            "thought_alignment_protocol": "thought_alignment_v1",
+        },
+        thought_override=aligned_thought,
+    )
+    blocked = _blocked_llm_value(retry_decision)
+    if blocked is not None:
+        return blocked
+    return thought_alignment.merge_aligned_thought(regenerated, raw, aligned_thought)
+
+
+async def _regenerate_async(
+    guard: Any,
+    fn: Callable[..., Any],
+    *,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    raw: Any,
+    decision: GuardDecision,
+    label: str,
+    normalizer: AgentEventNormalizer | None,
+    owner: Any,
+) -> Any:
+    aligned_thought = thought_alignment.aligned_thought(decision)
+    prepared = (
+        thought_alignment.prepare_thought_regeneration(args, kwargs, aligned_thought)
+        if aligned_thought
+        else None
+    )
+    if prepared is None:
+        return _blocked_llm_value(decision)
+    retry_args, retry_kwargs = prepared
+    before_decision = guard_llm_before(
+        guard,
+        label=label,
+        args=retry_args,
+        kwargs=retry_kwargs,
+        normalizer=normalizer,
+        fn=fn,
+        owner=owner,
+    )
+    before_blocked = _blocked_llm_value(before_decision)
+    if before_blocked is not None:
+        return before_blocked
+    regenerated = await fn(*retry_args, **retry_kwargs)
+    retry_decision = guard_llm_after(
+        guard,
+        regenerated,
+        label=label,
+        normalizer=normalizer,
+        fn=fn,
+        owner=owner,
+        extra_metadata={
+            "thought_regeneration_supported": True,
+            "thought_alignment_attempt": 1,
+            "thought_alignment_protocol": "thought_alignment_v1",
+        },
+        thought_override=aligned_thought,
+    )
+    blocked = _blocked_llm_value(retry_decision)
+    if blocked is not None:
+        return blocked
+    return thought_alignment.merge_aligned_thought(regenerated, raw, aligned_thought)
 
 
 def _sync_local_cache_now(guard: Any, *, reason: str) -> None:

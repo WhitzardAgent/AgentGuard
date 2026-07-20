@@ -371,6 +371,15 @@ def _normalize_langchain_request(
 
 def _normalize_langchain_llm_output(value: Any) -> Any:
     normalized = _normalize_langchain_value(value)
+    if isinstance(normalized, str):
+        parsed = _parse_tagged_llm_output(normalized)
+        if parsed.thought is None:
+            return normalized
+        return {
+            "output": normalized,
+            "thought": parsed.thought,
+            "final_output": parsed.final_output,
+        }
     return _extract_langchain_llm_output_fields(normalized)
 
 
@@ -419,7 +428,7 @@ def _first_non_empty_text(value: dict[str, Any], *keys: str) -> str | None:
 @dataclass(frozen=True)
 class _ParsedLLMOutput:
     thought: str | None
-    final_output: str
+    final_output: str | None
 
 
 _THOUGHT_TAG_RE = re.compile(
@@ -430,12 +439,28 @@ _FINAL_TAG_RE = re.compile(
     r"<(?P<tag>answer|final|final_output)\b[^>]*>(?P<body>.*?)</(?P=tag)>",
     flags=re.IGNORECASE | re.DOTALL,
 )
+_REACT_THOUGHT_RE = re.compile(
+    r"(?:^|\n)\s*(?:Thought|Reasoning|Analysis|思考)\s*:\s*(?P<body>.*?)"
+    r"(?=\n\s*(?:Action(?:\s+Input)?|Observation|Final\s+Answer|Answer|"
+    r"行动|观察|最终答案)\s*:|\Z)",
+    flags=re.IGNORECASE | re.DOTALL,
+)
 
 
 def _parse_tagged_llm_output(output: str) -> _ParsedLLMOutput:
     thought_matches = list(_THOUGHT_TAG_RE.finditer(output))
     if not thought_matches:
-        return _ParsedLLMOutput(thought=None, final_output=output)
+        react_match = _REACT_THOUGHT_RE.search(output)
+        if react_match is None:
+            return _ParsedLLMOutput(thought=None, final_output=output)
+        thought = react_match.group("body").strip() or None
+        remainder = f"{output[:react_match.start()]}{output[react_match.end():]}".strip()
+        final_output = (
+            None
+            if re.match(r"^\s*Action\s*:", remainder, flags=re.IGNORECASE)
+            else remainder
+        )
+        return _ParsedLLMOutput(thought=thought, final_output=final_output)
 
     thought_parts = [match.group("body").strip() for match in thought_matches]
     thought = "\n\n".join(part for part in thought_parts if part) or None

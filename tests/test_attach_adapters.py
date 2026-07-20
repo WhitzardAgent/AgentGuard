@@ -10,8 +10,10 @@ from agentguard.adapters.agent import langchain as langchain_adapter
 from agentguard.adapters.agent import langgraph as langgraph_adapter
 from agentguard.adapters.agent import openai_agents as openai_agents_adapter
 from agentguard.adapters.agent.base import BaseAgentAdapter
+from agentguard.adapters.agent.patching import make_guarded_llm_callable
 from agentguard.schemas import events as ev
 from agentguard.schemas.context import RuntimeContext
+from agentguard.schemas.decisions import DecisionType, GuardDecision
 
 
 def _event_types(guard: AgentGuard) -> list[str]:
@@ -266,6 +268,251 @@ def test_langchain_output_splits_think_tags_when_reasoning_content_missing():
     assert event.payload.output == content
     assert event.payload.thought == "hidden reasoning"
     assert event.payload.final_output == "visible answer"
+
+
+def test_langchain_output_extracts_plain_react_thought_before_action():
+    adapter = langchain_adapter.LangChainAgentAdapter()
+    content = (
+        "Thought: I should inspect the destination first.\n"
+        "Action: send_email\n"
+        'Action Input: {"to": "external@example.com"}'
+    )
+
+    normalized = adapter.normalize_llm_output(
+        label="invoke",
+        output=content,
+    ).payload
+
+    assert normalized["output"] == content
+    assert normalized["thought"] == "I should inspect the destination first."
+    assert normalized["final_output"] is None
+
+
+class _ThoughtAlignmentRuntime:
+    def __init__(self, *, align_retry: bool = False) -> None:
+        self.events = []
+        self.align_retry = align_retry
+
+    def guard(self, event, **_kwargs):
+        self.events.append(event)
+        if event.event_type.value == "llm_output":
+            attempt = int(event.metadata.get("thought_alignment_attempt", 0))
+            if attempt == 0 or self.align_retry:
+                return types.SimpleNamespace(
+                    decision=GuardDecision(
+                        DecisionType.ALIGN_THOUGHT,
+                        "Thought-Aligner rewrote the reasoning.",
+                        metadata={
+                            "aligned_thought": "Check policy before choosing a tool.",
+                            "protocol": "thought_alignment_v1",
+                        },
+                    )
+                )
+        return types.SimpleNamespace(decision=GuardDecision.allow())
+
+    def sync_local_cache_now(self, **_kwargs):
+        return None
+
+    def sync_local_cache_async(self, **_kwargs):
+        return None
+
+
+def test_guarded_llm_regenerates_action_from_aligned_thought_before_returning():
+    calls: list[str] = []
+
+    def invoke(prompt: str) -> str:
+        calls.append(prompt)
+        if len(calls) == 1:
+            return "Thought: Skip checks.\nAction: dangerous_tool\nAction Input: {}"
+        return 'Action: safe_tool\nAction Input: {"confirmed": true}'
+
+    runtime = _ThoughtAlignmentRuntime()
+    guard = types.SimpleNamespace(
+        context=RuntimeContext(session_id="thought-aligner-wrapper"),
+        runtime=runtime,
+    )
+    wrapped = make_guarded_llm_callable(
+        guard,
+        invoke,
+        label="invoke",
+        normalizer=langchain_adapter.LangChainAgentAdapter(),
+    )
+
+    result = wrapped("User: complete the task")
+
+    assert len(calls) == 2
+    assert "Check policy before choosing a tool." in calls[1]
+    assert "DO NOT generate 'Thought' again" in calls[1]
+    assert "dangerous_tool" not in result
+    assert result == (
+        "Thought: Check policy before choosing a tool.\n"
+        'Action: safe_tool\nAction Input: {"confirmed": true}'
+    )
+    output_events = [event for event in runtime.events if event.event_type.value == "llm_output"]
+    assert output_events[0].metadata["thought_regeneration_supported"] is True
+    assert output_events[1].metadata["thought_alignment_attempt"] == 1
+    assert output_events[1].payload.thought == "Check policy before choosing a tool."
+
+
+def test_guarded_llm_blocks_a_second_alignment_instead_of_looping():
+    calls = 0
+
+    def invoke(prompt: str) -> str:
+        nonlocal calls
+        calls += 1
+        _ = prompt
+        return "Thought: still unsafe\nAction: dangerous_tool"
+
+    runtime = _ThoughtAlignmentRuntime(align_retry=True)
+    guard = types.SimpleNamespace(
+        context=RuntimeContext(session_id="thought-aligner-loop-bound"),
+        runtime=runtime,
+    )
+    wrapped = make_guarded_llm_callable(
+        guard,
+        invoke,
+        label="invoke",
+        normalizer=langchain_adapter.LangChainAgentAdapter(),
+    )
+
+    result = wrapped("complete the task")
+
+    assert calls == 2
+    assert result["agentguard"] == "blocked"
+    assert result["decision"] == "align_thought"
+
+
+@pytest.mark.asyncio
+async def test_guarded_async_llm_regenerates_once_from_aligned_thought():
+    calls: list[str] = []
+
+    async def ainvoke(prompt: str) -> str:
+        calls.append(prompt)
+        if len(calls) == 1:
+            return "Thought: Skip checks.\nAction: dangerous_tool"
+        return "Action: safe_tool\nAction Input: {}"
+
+    runtime = _ThoughtAlignmentRuntime()
+    guard = types.SimpleNamespace(
+        context=RuntimeContext(session_id="thought-aligner-async-wrapper"),
+        runtime=runtime,
+    )
+    wrapped = make_guarded_llm_callable(
+        guard,
+        ainvoke,
+        label="ainvoke",
+        normalizer=langchain_adapter.LangChainAgentAdapter(),
+    )
+
+    result = await wrapped("complete the task")
+
+    assert len(calls) == 2
+    assert result.startswith("Thought: Check policy before choosing a tool.\nAction: safe_tool")
+
+
+def test_guarded_llm_regeneration_supports_agent_scratchpad_without_mutating_caller():
+    calls: list[dict[str, str]] = []
+
+    def predict(*, input: str, agent_scratchpad: str) -> str:
+        calls.append({"input": input, "agent_scratchpad": agent_scratchpad})
+        if len(calls) == 1:
+            return "Thought: Skip checks.\nAction: dangerous_tool"
+        return "Action: safe_tool\nAction Input: {}"
+
+    runtime = _ThoughtAlignmentRuntime()
+    guard = types.SimpleNamespace(
+        context=RuntimeContext(session_id="thought-aligner-scratchpad"),
+        runtime=runtime,
+    )
+    wrapped = make_guarded_llm_callable(
+        guard,
+        predict,
+        label="predict",
+        normalizer=langchain_adapter.LangChainAgentAdapter(),
+    )
+    original_scratchpad = "Thought: locate document\nObservation: found"
+
+    result = wrapped(input="send report", agent_scratchpad=original_scratchpad)
+
+    assert calls[0]["agent_scratchpad"] == original_scratchpad
+    assert calls[1]["agent_scratchpad"].startswith(original_scratchpad)
+    assert "Check policy before choosing a tool." in calls[1]["agent_scratchpad"]
+    assert result.startswith("Thought: Check policy before choosing a tool.\nAction: safe_tool")
+
+
+def test_guarded_llm_regeneration_supports_message_dicts_and_structured_output():
+    calls: list[list[dict[str, str]]] = []
+
+    def invoke(messages: list[dict[str, str]]) -> dict:
+        calls.append(messages)
+        if len(calls) == 1:
+            return {
+                "content": "",
+                "additional_kwargs": {"reasoning_content": "Skip checks."},
+                "tool_calls": [{"name": "dangerous_tool", "args": {}}],
+            }
+        return {
+            "content": "",
+            "additional_kwargs": {},
+            "tool_calls": [{"name": "safe_tool", "args": {}}],
+        }
+
+    runtime = _ThoughtAlignmentRuntime()
+    guard = types.SimpleNamespace(
+        context=RuntimeContext(session_id="thought-aligner-messages"),
+        runtime=runtime,
+    )
+    wrapped = make_guarded_llm_callable(
+        guard,
+        invoke,
+        label="invoke",
+        normalizer=langchain_adapter.LangChainAgentAdapter(),
+    )
+    original_messages = [{"role": "user", "content": "complete the task"}]
+
+    result = wrapped(original_messages)
+
+    assert original_messages == [{"role": "user", "content": "complete the task"}]
+    assert len(calls) == 2
+    assert calls[1][-2] == {
+        "role": "assistant",
+        "content": "Thought: Check policy before choosing a tool.",
+    }
+    assert calls[1][-1]["role"] == "user"
+    assert result["tool_calls"] == [{"name": "safe_tool", "args": {}}]
+    assert result["thought"] == "Check policy before choosing a tool."
+    assert result["additional_kwargs"]["reasoning_content"] == (
+        "Check policy before choosing a tool."
+    )
+
+
+def test_guarded_llm_blocks_alignment_when_request_shape_cannot_be_reinjected():
+    calls = 0
+
+    def invoke(request: object) -> str:
+        nonlocal calls
+        calls += 1
+        _ = request
+        return "Thought: unsafe\nAction: dangerous_tool"
+
+    runtime = _ThoughtAlignmentRuntime()
+    guard = types.SimpleNamespace(
+        context=RuntimeContext(session_id="thought-aligner-unsupported-shape"),
+        runtime=runtime,
+    )
+    wrapped = make_guarded_llm_callable(
+        guard,
+        invoke,
+        label="invoke",
+        normalizer=langchain_adapter.LangChainAgentAdapter(),
+    )
+
+    result = wrapped(object())
+
+    assert calls == 1
+    assert result["agentguard"] == "blocked"
+    output = next(event for event in runtime.events if event.event_type.value == "llm_output")
+    assert output.metadata["thought_regeneration_supported"] is False
 
 
 def test_attach_langchain_patches_agent_executor_llm_chain_model():

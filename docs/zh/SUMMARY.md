@@ -18,6 +18,7 @@
 * [AgentGuard插件](plugins.md)
   * [内置插件](plugins/builtin_plugins.md)
     * [rule_based_plugin](plugins/rule_based_plugin.md)
+    * [Thought-Aligner](plugins/thought_aligner.md)
       * [可视化策略配置](policies/quick_config.md)
       * [策略 DSL 基本结构](policies/dsl_basic_structure.md)
     * [jailbreak_check](plugins/jailbreak_check.md)
