@@ -784,10 +784,32 @@ button.sidebar-nav-item {
 }
 
 .agent-list-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
   gap: 12px;
+}
+
+.agent-list-heading {
+  min-width: 0;
+}
+
+.agent-list-heading strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.agent-list-counts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(112px, 112px));
+  justify-content: end;
+  gap: 12px;
+}
+
+.agent-count-pill {
+  display: inline-flex;
+  justify-content: center;
+  white-space: nowrap;
 }
 
 .plugin-toggle-card {
@@ -3453,6 +3475,15 @@ textarea {
 
   .home-hero-badge {
     min-width: 0;
+  }
+
+  .agent-list-top {
+    grid-template-columns: 1fr;
+  }
+
+  .agent-list-counts {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    justify-content: stretch;
   }
 
   .heading-row {

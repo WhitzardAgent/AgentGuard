@@ -95,10 +95,14 @@
       card.innerHTML = `
         <button class="agent-card-select" type="button" data-agent-action="select">
           <div class="agent-list-top">
-            <strong>${escapeHtml(displayName)}</strong>
-            <span class="pill">${toolCount} tool${toolCount === 1 ? "" : "s"}</span>
-            <span class="pill">${skillCount} skill${skillCount === 1 ? "" : "s"}</span>
-            <span class="pill">${mcpCount} MCP${mcpCount === 1 ? "" : "s"}</span>
+            <div class="agent-list-heading">
+              <strong>${escapeHtml(displayName)}</strong>
+            </div>
+            <div class="agent-list-counts" aria-label="Agent resource counts">
+              <span class="pill agent-count-pill">${toolCount} tool${toolCount === 1 ? "" : "s"}</span>
+              <span class="pill agent-count-pill">${skillCount} skill${skillCount === 1 ? "" : "s"}</span>
+              <span class="pill agent-count-pill">${mcpCount} MCP${mcpCount === 1 ? "" : "s"}</span>
+            </div>
           </div>
           ${subtitle ? `<p class="subtle">${escapeHtml(subtitle)}</p>` : ""}
           <p class="subtle">${escapeHtml(toolPreviewText || copy("no-tools-registered", "No tools registered."))}</p>

@@ -1,4 +1,9 @@
-"""ThoughtAlignSkill: detect and strip unsafe reasoning intent."""
+"""ThoughtAlignSkill: detect and strip unsafe reasoning intent.
+
+See `skills/runtime/thought_align/langchain_adapter_notes.md` for the
+framework-adapter notes that document how LangChain was made compatible with
+the server-side `thought_aligner` plugin.
+"""
 from __future__ import annotations
 
 from skills.base import BaseSkill, SkillInput, SkillOutput

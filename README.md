@@ -210,6 +210,13 @@ By default, `./scripts/start.sh -d` bind-mounts the current repository into the 
 
 Visit `http://localhost:38008` to see the UI.
 
+Default admin credentials for the first sign-in:
+
+- Username: `AgentGuardAdmin`
+- Password: `AgentGuardAdmin123`
+
+Change this password immediately after the first login in production or any shared environment.
+
 ### 2. Agent-Side Setup
 
 On the agent host, run:

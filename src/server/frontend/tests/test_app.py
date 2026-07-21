@@ -1311,6 +1311,32 @@ def test_plugins_page_renders_chinese_template_copy_when_language_cookie_set():
 
 
 
+def test_user_page_renders_chinese_when_language_cookie_set():
+    with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+        status, _headers, raw = _raw_request(
+            "GET",
+            preview.url,
+            "/user.html",
+            headers={"Cookie": "agentguard.language=zh"},
+        )
+
+    body = raw.decode("utf-8")
+    assert status == 200
+    assert 'data-agentguard-server-language="zh"' in body
+    assert "用户工作台" in body
+    assert "当前用户" in body
+    assert "生成凭证" in body
+    assert "退出登录" in body
+    assert "修改密码" in body
+    assert "当前密码" in body
+    assert "确认新密码" in body
+    assert "外部账号" in body
+    assert "绑定 Dify" in body
+    assert "绑定 n8n" in body
+    assert "提供方" in body
+    assert "复制凭证" in body
+
+
 def test_runtime_page_renders_chinese_template_copy_when_language_cookie_set():
     with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
         status, _headers, raw = _raw_request(

@@ -141,6 +141,10 @@
       const closeTicketModalButton = document.getElementById("close-ticket-modal-button");
       let activeTicket = "";
 
+      function t(message, variables) {
+        return window.AgentGuardI18n?.t?.(message, variables) || String(message || "");
+      }
+
       function showToast(message, tone) {
         const toast = document.getElementById("toast");
         if (!toast) {
@@ -191,11 +195,17 @@
       function renderUser(user) {
         const signedIn = Boolean(user);
         const emailLabel = user?.email
-          ? ` Email: ${user.email}${user.email_verified ? "" : " (unverified)"}.`
-          : " Email: not bound.";
+          ? (user.email_verified
+            ? t("Email: {email}.", { email: user.email })
+            : t("Email: {email} (unverified).", { email: user.email }))
+          : t("Email: not bound.");
         statusNode.textContent = signedIn
-          ? `Signed in as ${user.username} (user #${user.id}).${emailLabel}`
-          : "Not signed in.";
+          ? t("Signed in as {username} (user #{id}). {email_status}", {
+            username: user.username,
+            id: user.id,
+            email_status: emailLabel,
+          })
+          : t("Not signed in.");
         logoutButton.hidden = !signedIn;
         generateTicketButton.hidden = !signedIn;
         passwordCard.hidden = !signedIn;
@@ -231,7 +241,7 @@
                 data-external-account-id="${escapeHtml(account.id || "")}"
                 data-binding-type="${escapeHtml(account.binding_type || "external")}"
               >
-                Unbind
+                ${escapeHtml(t("Unbind"))}
               </button>
             </td>
           </tr>
@@ -246,7 +256,7 @@
         if (normalized === "dify") {
           return "Dify";
         }
-        return provider || "External";
+        return provider || t("External");
       }
 
       function escapeHtml(value) {
@@ -291,8 +301,8 @@
         activeTicket = String(payload.ticket || "");
         ticketValue.value = activeTicket;
         ticketExpiry.textContent = payload.ttl_seconds
-          ? `Expires in ${payload.ttl_seconds} seconds.`
-          : "This ticket is short-lived.";
+          ? t("Expires in {seconds} seconds.", { seconds: payload.ttl_seconds })
+          : t("This ticket is short-lived.");
         ticketModalBackdrop.hidden = false;
         ticketValue.focus();
         ticketValue.select();
@@ -324,7 +334,7 @@
           });
           openTicketModal(payload);
         } catch (error) {
-          showToast(error.message || "Failed to generate ticket.", "warning");
+          showToast(error.message || t("Failed to generate ticket."), "warning");
         } finally {
           generateTicketButton.disabled = false;
         }
@@ -338,9 +348,9 @@
         try {
           await copyText(activeTicket);
           closeTicketModal();
-          showToast("Ticket copied.", "success");
+          showToast(t("Ticket copied."), "success");
         } catch (error) {
-          showToast(error.message || "Failed to copy ticket.", "warning");
+          showToast(error.message || t("Failed to copy ticket."), "warning");
         }
       });
 
@@ -365,7 +375,7 @@
           // Continue local logout even if the session is already gone.
         }
         renderUser(null);
-        showToast("Signed out.", "success");
+        showToast(t("Signed out."), "success");
         window.setTimeout(() => window.location.replace("/login.html"), 300);
       });
 
@@ -375,7 +385,7 @@
         const newPassword = document.getElementById("new-password").value;
         const confirmPassword = document.getElementById("confirm-new-password").value;
         if (newPassword !== confirmPassword) {
-          showToast("New passwords do not match.", "warning");
+          showToast(t("New passwords do not match."), "warning");
           return;
         }
         try {
@@ -387,9 +397,9 @@
             }),
           });
           passwordChangeForm.reset();
-          showToast("Password updated.", "success");
+          showToast(t("Password updated."), "success");
         } catch (error) {
-          showToast(error.message || "Failed to update password.", "warning");
+          showToast(error.message || t("Failed to update password."), "warning");
         }
       });
 
@@ -405,9 +415,9 @@
           });
           form.reset();
           await refresh();
-          showToast(`${label} account bound.`, "success");
+          showToast(t("{label} account bound.", { label }), "success");
         } catch (error) {
-          showToast(error.message || `Failed to bind ${label} account.`, "warning");
+          showToast(error.message || t("Failed to bind {label} account.", { label }), "warning");
         }
       }
 
@@ -443,14 +453,14 @@
           }
           await refresh();
           showToast(
-            bindingType === "openclaw" ? "OpenClaw binding unbound." : "External account unbound.",
+            bindingType === "openclaw" ? t("OpenClaw binding unbound.") : t("External account unbound."),
             "success",
           );
         } catch (error) {
           showToast(
             error.message || (bindingType === "openclaw"
-              ? "Failed to unbind OpenClaw binding."
-              : "Failed to unbind external account."),
+              ? t("Failed to unbind OpenClaw binding.")
+              : t("Failed to unbind external account.")),
             "warning",
           );
         }
