@@ -316,6 +316,23 @@ test("i18n applies explicit translations and translated values in Chinese mode",
   assert.equal(textarea.value, "用这个字段记录面向运维人员的规则说明。");
 });
 
+test("i18n translates runtime session headings in Chinese mode", () => {
+  const body = new FakeElement("body");
+  const button = new FakeButtonElement("button", { id: "sidebar-language-toggle", textContent: "中文" });
+  body.appendChild(button);
+
+  const { api } = loadI18n({ language: "zh", body });
+
+  assert.equal(api.t("Runtime Sessions"), "运行时会话");
+  assert.equal(api.t("External Session"), "外部会话");
+  assert.equal(api.t("Account"), "账号");
+  assert.equal(api.t("Status"), "状态");
+  assert.equal(api.t("Closed"), "已关闭");
+  assert.equal(api.t("Tokens"), "Tokens");
+  assert.equal(api.t("Token Expires"), "令牌过期时间");
+  assert.equal(api.t("Action"), "操作");
+});
+
 test("i18n translates home page text nodes in Chinese mode", () => {
   const body = new FakeElement("body");
   const button = new FakeButtonElement("button", { id: "sidebar-language-toggle", textContent: "中文" });

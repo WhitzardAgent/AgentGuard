@@ -1399,6 +1399,12 @@ textarea {
   margin-bottom: 0;
 }
 
+.runtime-header .heading-actions .pill,
+.runtime-header .heading-actions .btn {
+  font-size: 14px;
+  line-height: 1.2;
+}
+
 .runtime-meta-row {
   display: flex;
   flex-wrap: wrap;
