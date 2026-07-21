@@ -3,9 +3,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from shared.schemas.decisions import GuardDecision
 from backend.plugins.base import ServerPlugin
 from backend.plugins.registry import PluginRegistry
+from shared.schemas.decisions import GuardDecision
 
 
 class PluginManager:

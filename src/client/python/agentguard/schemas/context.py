@@ -22,13 +22,13 @@ class RuntimeContext:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "RuntimeContext":
+    def from_dict(cls, data: dict[str, Any]) -> RuntimeContext:
         known = {f for f in cls.__dataclass_fields__}  # noqa: C416
         kwargs = {k: v for k, v in (data or {}).items() if k in known}
         kwargs.setdefault("session_id", "unknown")
         return cls(**kwargs)
 
-    def child(self, **overrides: Any) -> "RuntimeContext":
+    def child(self, **overrides: Any) -> RuntimeContext:
         """Derive a new context with overrides."""
         data = self.to_dict()
         data.update(overrides)

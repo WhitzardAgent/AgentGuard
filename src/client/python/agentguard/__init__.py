@@ -4,8 +4,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from agentguard.guard import AgentGuard
     from agentguard.compat import Guard, Principal
+    from agentguard.guard import AgentGuard
 
 __all__ = ["AgentGuard", "Guard", "Principal"]
 __version__ = "0.3.0"

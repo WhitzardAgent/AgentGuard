@@ -8,12 +8,11 @@ import json
 from pathlib import Path
 from typing import Any
 
+from backend.runtime.plugins.base import BasePlugin, CheckResult
+from backend.runtime.plugins.registry import get_plugin_class
 from shared.schemas.context import RuntimeContext
 from shared.schemas.decisions import DecisionType, GuardDecision
 from shared.schemas.events import EventType, RuntimeEvent
-
-from backend.runtime.plugins.base import BasePlugin, CheckResult
-from backend.runtime.plugins.registry import get_plugin_class
 
 PHASE_ORDER = ("llm_before", "llm_after", "tool_before", "tool_after", "global")
 
@@ -283,10 +282,17 @@ def _plugin_outcome_dict(plugin: BasePlugin, res: CheckResult) -> dict[str, Any]
     }
 
 
+def decision_type_rank(decision_type: DecisionType | None) -> int:
+    """Severity rank for a decision type; higher wins when candidates tie on `is_final`."""
+    if decision_type is None:
+        return -1
+    return _DECISION_RANK.get(decision_type, -1)
+
+
 def _decision_rank(decision: GuardDecision | None) -> int:
     if decision is None:
         return -1
-    return _DECISION_RANK.get(decision.decision_type, -1)
+    return decision_type_rank(decision.decision_type)
 
 
 def _should_replace_decision(

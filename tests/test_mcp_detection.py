@@ -4,11 +4,12 @@ import json
 import urllib.request
 
 from backend.api.dev_server import start_dev_server
-from backend.console.state import ConsoleState
 from backend.console.mcp_record import McpRecord
-from backend.preprocess.detectors.mcp_llm_detector import MCPLLMDetector
+from backend.console.state import ConsoleState
 from backend.preprocess.detectors.base import DetectionResult
+from backend.preprocess.detectors.mcp_llm_detector import MCPLLMDetector
 from backend.runtime.manager import RuntimeManager
+
 from shared.schemas.context import RuntimeContext
 
 

@@ -2,19 +2,13 @@
 from __future__ import annotations
 
 import ast
-from collections.abc import Callable
 import json
 import time
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlparse
 
 from backend.llm import LLMClient
-from shared.audit.redactor import redact
-from shared.schemas.context import RuntimeContext
-from shared.schemas.decisions import GuardDecision
-from shared.schemas.policy import PolicyEffect, PolicyRule
-from shared.tools.capability import CAP_EXTERNAL_SEND
-from shared.schemas.events import RuntimeEvent
 from backend.runtime.plugins.base import BasePlugin, CheckResult
 from backend.runtime.plugins.registry import register
 from backend.runtime.plugins.tool_before.rule_based_plugin.matcher import (
@@ -22,6 +16,11 @@ from backend.runtime.plugins.tool_before.rule_based_plugin.matcher import (
     effect_to_decision,
     match_rules,
 )
+from shared.audit.redactor import redact
+from shared.schemas.context import RuntimeContext
+from shared.schemas.decisions import GuardDecision
+from shared.schemas.events import RuntimeEvent
+from shared.schemas.policy import PolicyRule
 
 
 @register(

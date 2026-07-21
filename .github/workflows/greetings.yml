@@ -1,0 +1,32 @@
+name: Greet first-time contributors
+
+on:
+  pull_request_target:
+    types: [opened]
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  greeting:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/first-interaction@v3
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          issue_message: >
+            👋 Thanks for opening your first issue in AgentGuard! A maintainer
+            will take a look soon. In the meantime, please make sure you've
+            included enough detail to reproduce the problem (see the issue
+            template checklist) — see [CONTRIBUTING.md](https://github.com/WhitzardAgent/AgentGuard/blob/main/CONTRIBUTING.md)
+            for more on how the project is organized.
+          pr_message: >
+            🎉 Thanks for your first pull request to AgentGuard! A maintainer
+            will review it soon. While you wait, please double-check the PR
+            checklist and make sure `ruff check src tests`, `pytest -q`, and
+            `node --test` pass locally — see
+            [CONTRIBUTING.md](https://github.com/WhitzardAgent/AgentGuard/blob/main/CONTRIBUTING.md)
+            for details.

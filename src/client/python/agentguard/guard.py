@@ -3,17 +3,18 @@ from __future__ import annotations
 
 import json
 import secrets
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from agentguard.adapters.llm import default_llm_adapters, select_llm_adapter
 from agentguard.audit.logger import AuditLogger
 from agentguard.audit.recorder import AuditRecorder
-from agentguard.plugins.manager import PluginManager
 from agentguard.config_api import ClientConfigAPIServer
 from agentguard.harness.event_bus import EventBus
 from agentguard.harness.lifecycle import Lifecycle
 from agentguard.harness.runtime import HarnessRuntime
+from agentguard.plugins.manager import PluginManager
 from agentguard.rules.loader import load_policy
 from agentguard.sandbox.executor import SandboxExecutor
 from agentguard.schemas.context import RuntimeContext

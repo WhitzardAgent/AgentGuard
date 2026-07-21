@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from backend.api.auth import check_backend_api_key
 from backend.api.client_router import router as client_router

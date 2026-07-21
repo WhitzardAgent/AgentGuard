@@ -26,7 +26,7 @@ class DecisionType(str, Enum):
     LOG_ONLY = "log_only"
 
     @classmethod
-    def _missing_(cls, value: object) -> "DecisionType" | None:
+    def _missing_(cls, value: object) -> DecisionType | None:
         if value == "ask_user":
             return cls.HUMAN_CHECK
         return None
@@ -84,7 +84,7 @@ class GuardDecision:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "GuardDecision":
+    def from_dict(cls, data: dict[str, Any]) -> GuardDecision:
         return cls(
             decision_type=DecisionType(data["decision_type"]),
             reason=data.get("reason", ""),
@@ -97,41 +97,41 @@ class GuardDecision:
 
     # ---- static constructors -------------------------------------------
     @staticmethod
-    def allow(reason: str = "allowed", **kw: Any) -> "GuardDecision":
+    def allow(reason: str = "allowed", **kw: Any) -> GuardDecision:
         return GuardDecision(DecisionType.ALLOW, reason, **kw)
 
     @staticmethod
-    def deny(reason: str, **kw: Any) -> "GuardDecision":
+    def deny(reason: str, **kw: Any) -> GuardDecision:
         return GuardDecision(DecisionType.DENY, reason, **kw)
 
     @staticmethod
-    def sanitize(reason: str, **kw: Any) -> "GuardDecision":
+    def sanitize(reason: str, **kw: Any) -> GuardDecision:
         return GuardDecision(DecisionType.SANITIZE, reason, **kw)
 
     @staticmethod
-    def rewrite(reason: str, **kw: Any) -> "GuardDecision":
+    def rewrite(reason: str, **kw: Any) -> GuardDecision:
         return GuardDecision(DecisionType.REWRITE, reason, **kw)
 
     @staticmethod
-    def repair(reason: str, **kw: Any) -> "GuardDecision":
+    def repair(reason: str, **kw: Any) -> GuardDecision:
         return GuardDecision(DecisionType.REPAIR, reason, **kw)
 
     @staticmethod
-    def degrade(reason: str, **kw: Any) -> "GuardDecision":
+    def degrade(reason: str, **kw: Any) -> GuardDecision:
         return GuardDecision(DecisionType.DEGRADE, reason, **kw)
 
     @staticmethod
-    def human_check(reason: str, **kw: Any) -> "GuardDecision":
+    def human_check(reason: str, **kw: Any) -> GuardDecision:
         return GuardDecision(DecisionType.HUMAN_CHECK, reason, **kw)
 
     @staticmethod
-    def require_approval(reason: str, **kw: Any) -> "GuardDecision":
+    def require_approval(reason: str, **kw: Any) -> GuardDecision:
         return GuardDecision(DecisionType.REQUIRE_APPROVAL, reason, **kw)
 
     @staticmethod
-    def require_remote_review(reason: str, **kw: Any) -> "GuardDecision":
+    def require_remote_review(reason: str, **kw: Any) -> GuardDecision:
         return GuardDecision(DecisionType.REQUIRE_REMOTE_REVIEW, reason, **kw)
 
     @staticmethod
-    def log_only(reason: str = "log only", **kw: Any) -> "GuardDecision":
+    def log_only(reason: str = "log only", **kw: Any) -> GuardDecision:
         return GuardDecision(DecisionType.LOG_ONLY, reason, **kw)

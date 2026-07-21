@@ -1,0 +1,35 @@
+# Code owners for AgentGuard.
+#
+# These entries are requested for review automatically when a PR touches the
+# matching paths. Owned by the @WhitzardAgent/agentguard-maintainers team:
+# https://github.com/orgs/WhitzardAgent/teams/agentguard-maintainers
+# Make sure that team has write access to this repository, otherwise GitHub
+# will not request reviews from its members.
+#
+# Docs: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owners for everything, unless a later match takes precedence.
+*                                       @WhitzardAgent/agentguard-maintainers
+
+# Client SDKs
+/src/client/python/                     @WhitzardAgent/agentguard-maintainers
+/src/client/js/                         @WhitzardAgent/agentguard-maintainers
+
+# Control server / policy engine (security-critical - require extra review)
+/src/server/backend/runtime/            @WhitzardAgent/agentguard-maintainers
+/src/shared/rules/                      @WhitzardAgent/agentguard-maintainers
+/src/shared/schemas/                    @WhitzardAgent/agentguard-maintainers
+
+# Web console
+/src/server/frontend/                   @WhitzardAgent/agentguard-maintainers
+
+# Skills
+/skills/                                @WhitzardAgent/agentguard-maintainers
+
+# Docs
+/docs/                                  @WhitzardAgent/agentguard-maintainers
+README.md                               @WhitzardAgent/agentguard-maintainers
+README_CN.md                            @WhitzardAgent/agentguard-maintainers
+
+# CI/CD and repo governance
+/.github/                               @WhitzardAgent/agentguard-maintainers

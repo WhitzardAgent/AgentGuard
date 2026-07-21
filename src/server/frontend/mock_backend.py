@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass
 from fnmatch import fnmatch
 from http import HTTPStatus
-import json
-import re
 from threading import Lock
 from typing import Any
 

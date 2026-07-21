@@ -44,7 +44,7 @@ class TraceClause:
         return {"steps": [step.to_dict() for step in self.steps]}
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "TraceClause":
+    def from_dict(cls, data: dict[str, Any]) -> TraceClause:
         return cls(
             steps=[TraceStep.from_dict(item) for item in data.get("steps") or []],
         )
@@ -66,7 +66,7 @@ class RuleCondition:
         return {"field": self.field, "op": self.op, "value": self.value}
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "RuleCondition":
+    def from_dict(cls, data: dict[str, Any]) -> RuleCondition:
         return cls(field=data["field"], op=data.get("op", "eq"), value=data.get("value"))
 
 
@@ -175,7 +175,7 @@ class PolicyRule:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "PolicyRule":
+    def from_dict(cls, data: dict[str, Any]) -> PolicyRule:
         return cls(
             rule_id=data["rule_id"],
             effect=PolicyEffect(data["effect"]),
@@ -243,8 +243,11 @@ class PolicyRule:
             "_trace_bindings": trace_bindings or {},
         }
         if self.condition_expr.strip():
-            if not _evaluate_condition_expr(self.condition_expr, match_root, trace_window or []):
-                return False
+            # `conditions` is a flattened list of the atoms referenced inside
+            # `condition_expr` (kept for introspection/UI display); the boolean
+            # structure (AND/OR/NOT) only lives in the expression itself, so it
+            # is the sole source of truth here and must not be ANDed again.
+            return _evaluate_condition_expr(self.condition_expr, match_root, trace_window or [])
         for cond in self.conditions:
             if cond.field.startswith("trace."):
                 if not _match_trace(cond, trace_window or []):
@@ -540,6 +543,25 @@ def _eval_condition_node(
     if kind == "or":
         return _eval_condition_node(node[1], match_root, trace_window) or _eval_condition_node(node[2], match_root, trace_window)
     return False
+
+
+def extract_condition_atoms(expr: str) -> list[RuleCondition]:
+    """Flatten an AND/OR/NOT `condition_expr` into its atomic field conditions.
+
+    This is used to populate `PolicyRule.conditions` for introspection/UI
+    purposes (e.g. "which fields does this rule reference?"). It intentionally
+    ignores the boolean structure -- `matches()` only evaluates `condition_expr`
+    itself when it is set.
+    """
+    tokens = _tokenize_condition_expr(expr)
+    conditions: list[RuleCondition] = []
+    for token in tokens:
+        if token in {"AND", "OR", "NOT", "(", ")"}:
+            continue
+        cond = _parse_expr_atom(token)
+        if cond is not None:
+            conditions.append(cond)
+    return conditions
 
 
 def _parse_expr_atom(expr: str) -> RuleCondition | None:

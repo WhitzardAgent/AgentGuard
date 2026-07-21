@@ -92,8 +92,8 @@ def _patch_app_factory(module: ModuleType) -> dict[str, Any]:
         return result
 
     setattr(wrapper, _PATCHED_ATTR, True)
-    setattr(wrapper, "__agentguard_dify_original__", create_app)
-    setattr(module, "create_app", wrapper)
+    wrapper.__agentguard_dify_original__ = create_app
+    module.create_app = wrapper
     return {"installed": True, "patched": True}
 
 

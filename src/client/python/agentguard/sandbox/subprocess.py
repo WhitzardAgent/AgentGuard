@@ -5,8 +5,9 @@ import io
 import multiprocessing as mp
 import os
 import time
+from collections.abc import Callable
 from contextlib import redirect_stderr, redirect_stdout
-from typing import Any, Callable
+from typing import Any
 
 from agentguard.sandbox.base import BaseSandbox
 from agentguard.sandbox.profiles import PermissionProfile

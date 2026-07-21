@@ -15,7 +15,6 @@ from agentguard.adapters.agent.langchain import (
 from agentguard.schemas.context import RuntimeContext
 from agentguard.utils.errors import AdapterError
 
-
 _MODEL_NODE_NAMES = {"agent", "model", "llm"}
 _MODEL_CLOSURE_NAMES = {
     "model",

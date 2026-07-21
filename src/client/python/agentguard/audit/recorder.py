@@ -1,6 +1,8 @@
 """Audit recorder: turns events+decisions into redacted audit records."""
 from __future__ import annotations
 
+from typing import Any
+
 from agentguard.audit.logger import AuditLogger
 from agentguard.audit.redactor import redact
 from agentguard.audit.trace import Trace

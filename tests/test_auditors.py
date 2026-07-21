@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import pytest
-
-from fastapi import HTTPException
-
 from backend.api import frontend_router
-from backend.audit import AuditTraceEntry, auditor_manager
 from backend.api.schemas import TraceAuditRequest
+from backend.audit import AuditTraceEntry, auditor_manager
 from backend.runtime.manager import RuntimeManager
+from fastapi import HTTPException
 
 
 def test_runtime_manager_persists_trace_window_and_current_event():

@@ -30,7 +30,7 @@ class RemoteGuardRequest:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "RemoteGuardRequest":
+    def from_dict(cls, data: dict[str, Any]) -> RemoteGuardRequest:
         return cls(
             current_event=dict(data.get("current_event") or {}),
             context=dict(data.get("context") or {}),
@@ -58,7 +58,7 @@ class RemoteGuardResponse:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "RemoteGuardResponse":
+    def from_dict(cls, data: dict[str, Any]) -> RemoteGuardResponse:
         return cls(
             decision=dict(data.get("decision") or {}),
             risk_signals=list(data.get("risk_signals") or []),

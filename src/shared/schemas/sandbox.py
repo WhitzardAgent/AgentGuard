@@ -31,9 +31,9 @@ class SandboxResult:
         }
 
     @staticmethod
-    def ok(value: Any, **kw: Any) -> "SandboxResult":
+    def ok(value: Any, **kw: Any) -> SandboxResult:
         return SandboxResult(success=True, value=value, **kw)
 
     @staticmethod
-    def fail(error: str, **kw: Any) -> "SandboxResult":
+    def fail(error: str, **kw: Any) -> SandboxResult:
         return SandboxResult(success=False, error=error, **kw)

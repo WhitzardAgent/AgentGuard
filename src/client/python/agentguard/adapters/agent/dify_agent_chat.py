@@ -23,6 +23,8 @@ from typing import Any
 from agentguard.adapters.agent.dify_flask import (
     get_dify_flask_app,
     on_dify_flask_app_ready,
+)
+from agentguard.adapters.agent.dify_flask import (
     register_dify_flask_app as _register_shared_dify_flask_app,
 )
 from agentguard.schemas import events as ev
@@ -174,7 +176,7 @@ def _patch_agent_chat_runner(runner_cls: Any) -> bool:
             _current_guard.reset(token_guard)
 
     _mark_patched(wrapper, original)
-    setattr(runner_cls, "run", wrapper)
+    runner_cls.run = wrapper
     return True
 
 
@@ -191,7 +193,7 @@ def _patch_init_prompt_tools(base_runner_cls: Any) -> bool:
         return result
 
     _mark_patched(wrapper, original)
-    setattr(base_runner_cls, "_init_prompt_tools", wrapper)
+    base_runner_cls._init_prompt_tools = wrapper
     return True
 
 
@@ -221,7 +223,7 @@ def _patch_model_invoke_llm(model_instance_cls: Any) -> bool:
         return result
 
     _mark_patched(wrapper, original)
-    setattr(model_instance_cls, "invoke_llm", wrapper)
+    model_instance_cls.invoke_llm = wrapper
     return True
 
 
@@ -250,7 +252,7 @@ def _patch_tool_agent_invoke(tool_engine_cls: Any) -> bool:
         return response
 
     _mark_patched(wrapper, original)
-    setattr(tool_engine_cls, "agent_invoke", wrapper)
+    tool_engine_cls.agent_invoke = wrapper
     return True
 
 

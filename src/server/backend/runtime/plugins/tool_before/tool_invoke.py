@@ -1,6 +1,9 @@
 """Plugin for tool invocation events."""
 from __future__ import annotations
 
+from backend.runtime.plugins.base import BasePlugin, CheckResult
+from backend.runtime.plugins.common.patterns import SHELL_RE, find_signals, text_of
+from backend.runtime.plugins.registry import register
 from shared.schemas.context import RuntimeContext
 from shared.schemas.decisions import GuardDecision
 from shared.schemas.events import EventType, RuntimeEvent
@@ -8,9 +11,6 @@ from shared.tools.capability import (
     CAP_EXTERNAL_SEND,
     CAP_SHELL,
 )
-from backend.runtime.plugins.base import BasePlugin, CheckResult
-from backend.runtime.plugins.common.patterns import SHELL_RE, find_signals, text_of
-from backend.runtime.plugins.registry import register
 
 _DANGEROUS_SHELL = ("rm -rf /", "mkfs", ":(){", "dd if=")
 _TRACE_EXFIL_SIGNALS = {"secret_detected", "api_key_detected", "system_prompt_leak"}

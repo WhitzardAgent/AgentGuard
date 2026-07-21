@@ -1,0 +1,49 @@
+python-client:
+  - changed-files:
+      - any-glob-to-any-file: "src/client/python/**"
+
+js-client:
+  - changed-files:
+      - any-glob-to-any-file: "src/client/js/**"
+
+server:
+  - changed-files:
+      - any-glob-to-any-file: "src/server/backend/**"
+
+frontend:
+  - changed-files:
+      - any-glob-to-any-file: "src/server/frontend/**"
+
+rules-engine:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "src/shared/rules/**"
+          - "rules/**"
+
+skills:
+  - changed-files:
+      - any-glob-to-any-file: "skills/**"
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "docs/**"
+          - "**/*.md"
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file: ".github/**"
+
+tests:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "tests/**"
+          - "**/*.test.js"
+          - "**/*.test.cjs"
+
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "pyproject.toml"
+          - "package.json"
+          - "package-lock.json"

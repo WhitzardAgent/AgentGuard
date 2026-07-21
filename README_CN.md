@@ -10,6 +10,12 @@
   <a href="./LICENSE">
     <img src="https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF%E8%AF%81-GPL%20v3-16a34a?style=for-the-badge&logo=open-source-initiative&logoColor=white" alt="许可证" />
   </a>
+  <a href="https://github.com/WhitzardAgent/AgentGuard/actions/workflows/ci.yml">
+    <img src="https://img.shields.io/github/actions/workflow/status/WhitzardAgent/AgentGuard/ci.yml?branch=main&style=for-the-badge&logo=github&label=CI" alt="CI" />
+  </a>
+  <a href="./CODE_OF_CONDUCT.md">
+    <img src="https://img.shields.io/badge/%E8%A1%8C%E4%B8%BA%E5%87%86%E5%88%99-Contributor%20Covenant%202.1-4baaaa?style=for-the-badge" alt="行为准则" />
+  </a>
 </p>
 
 <p align="center">
@@ -353,12 +359,11 @@ UI 界面还支持策略可视化配置和动态热更新。
 
 <p align="center">
   <a href="https://ik.imagekit.io/4vsnlaxpc/6dd7e279a6b8d9be652002280d026a46_raw.mp4">
-    <img src="./docs/figs/begin.png" alt="Watch the AgentGuard demo video" width="900" />
+    <img src="./docs/figs/begin.png" alt="观看 AgentGuard 演示视频" width="900" />
   </a>
 </p>
 
-<p align="center">点击观看演示视频.</p>
-
+<p align="center">点击观看演示视频。</p>
 
 ## 🏆 相比于现有框架的能力优势
 
@@ -397,6 +402,13 @@ UI 界面还支持策略可视化配置和动态热更新。
 - 扩展对 LLM 输入输出的监控与 plugin 覆盖范围
 - 添加更丰富的策略执行动作
 - 提供策略自动推荐的能力
+
+## 🤝 参与贡献
+
+欢迎各种形式的贡献！环境搭建、测试与 PR 提交规范见 [CONTRIBUTING_CN.md](./CONTRIBUTING_CN.md)
+（English: [CONTRIBUTING.md](./CONTRIBUTING.md)），使用 AI 编码助手开发可参考
+[AGENTS.md](./AGENTS.md)（英文）。请遵守我们的[行为准则](./CODE_OF_CONDUCT.md)，
+安全问题请按 [SECURITY.md](./SECURITY.md) 私下报告，而非提交公开 Issue。
 
 ## 📚 引用
 

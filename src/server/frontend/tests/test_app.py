@@ -2,18 +2,18 @@ from __future__ import annotations
 
 import http.client
 import json
+import sys
 import threading
 from contextlib import contextmanager
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-import sys
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-import frontend.app as frontend_app
+import frontend.app as frontend_app  # noqa: E402
 
 
 class _ThreadedServer:
@@ -26,7 +26,7 @@ class _ThreadedServer:
         host, port = self.server.server_address
         return f"http://{host}:{port}"
 
-    def __enter__(self) -> "_ThreadedServer":
+    def __enter__(self) -> _ThreadedServer:
         self.thread.start()
         return self
 

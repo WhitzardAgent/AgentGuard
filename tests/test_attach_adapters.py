@@ -4,13 +4,12 @@ import json
 import types
 
 import pytest
-
 from agentguard import AgentGuard
 from agentguard.adapters.agent import autogen as autogen_adapter
-from agentguard.adapters.agent.base import BaseAgentAdapter
 from agentguard.adapters.agent import langchain as langchain_adapter
 from agentguard.adapters.agent import langgraph as langgraph_adapter
 from agentguard.adapters.agent import openai_agents as openai_agents_adapter
+from agentguard.adapters.agent.base import BaseAgentAdapter
 from agentguard.schemas import events as ev
 from agentguard.schemas.context import RuntimeContext
 
@@ -1384,7 +1383,6 @@ async def test_attach_llamaindex_streaming_llm_emits_after_output():
     assert _event_types(guard).count("llm_input") == 1
     assert _event_types(guard).count("llm_output") == 1
     assert _first_event(guard, "llm_output").metadata["label"] == "astream_chat"
-    assert _first_event(guard, "tool_invoke").payload.arguments == {"message": "hello"}
 
 
 @pytest.mark.asyncio

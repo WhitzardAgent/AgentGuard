@@ -23,13 +23,10 @@ from agentguard.adapters.agent.patching import (
     guard_tool_before,
     is_guarded,
     mark_guarded,
-    make_guarded_llm_callable,
-    make_guarded_tool,
     register_tool_metadata,
     set_attr,
     tool_name,
 )
-from agentguard.schemas import events as ev
 from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.decisions import DecisionType, GuardDecision
 from agentguard.tools.metadata import ToolMetadata

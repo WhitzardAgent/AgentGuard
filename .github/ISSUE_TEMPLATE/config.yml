@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 Documentation
+    url: https://whitzard.tech/AgentGuard/en/
+    about: Read the AgentGuard documentation (English/简体中文) before filing an issue.
+  - name: 🔒 Report a security vulnerability
+    url: https://github.com/WhitzardAgent/AgentGuard/security/advisories/new
+    about: Please report vulnerabilities privately instead of opening a public issue — see SECURITY.md.
+  - name: ❓ Ask a question / start a discussion
+    url: https://github.com/WhitzardAgent/AgentGuard/discussions
+    about: For usage questions or open-ended design discussions.

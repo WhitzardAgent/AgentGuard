@@ -29,7 +29,7 @@ class TraceStep:
         return {"name": self.name, "sep": self.sep}
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "TraceStep":
+    def from_dict(cls, data: dict[str, Any]) -> TraceStep:
         return cls(
             name=str(data.get("name") or "").strip(),
             sep=str(data.get("sep") or ""),

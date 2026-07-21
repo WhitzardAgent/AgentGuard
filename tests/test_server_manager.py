@@ -3,14 +3,14 @@ from __future__ import annotations
 import json
 
 import pytest
-
-from shared.rules.loader import load_rules_file
+from backend.llm.provider import HeuristicProvider, OpenAICompatibleProvider, get_provider
+from backend.runtime.manager import RuntimeManager
 from backend.runtime.plugins.base import BasePlugin, CheckResult
 from backend.runtime.plugins.manager import PluginManager, load_plugin_config
 from backend.runtime.plugins.registry import plugin_descriptions, register
 from backend.runtime.plugins.tool_before.rule_based_plugin import RuleBasedPlugin
-from backend.runtime.manager import RuntimeManager
-from backend.llm.provider import HeuristicProvider, OpenAICompatibleProvider, get_provider
+
+from shared.rules.loader import load_rules_file
 from shared.schemas.context import RuntimeContext
 from shared.schemas.decisions import GuardDecision
 from shared.schemas.events import EventType, RuntimeEvent

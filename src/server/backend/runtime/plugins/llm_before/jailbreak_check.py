@@ -3,14 +3,13 @@ from __future__ import annotations
 
 import re
 
-from shared.schemas.context import RuntimeContext
-from shared.schemas.decisions import GuardDecision
-from shared.schemas.events import EventType, RuntimeEvent
-
 from backend.runtime.plugins.base import BasePlugin, CheckResult
 from backend.runtime.plugins.common.patterns import text_of
 from backend.runtime.plugins.llm_before.jailbreak_templates import SUSPICIOUS_PROMPT_TEMPLATES
 from backend.runtime.plugins.registry import register
+from shared.schemas.context import RuntimeContext
+from shared.schemas.decisions import GuardDecision
+from shared.schemas.events import EventType, RuntimeEvent
 
 
 @register(

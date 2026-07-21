@@ -8,7 +8,6 @@ from typing import Any
 from shared.schemas.decisions import DecisionType
 from shared.schemas.events import RuntimeEvent
 
-
 _EFFECT_RANK = {
     "deny": 7,
     "require_remote_review": 6,

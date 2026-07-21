@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from agentguard import Guard, Principal
 from agentguard.cli import build_parser, main
 from agentguard.guard import AgentGuard

@@ -1,7 +1,8 @@
 """Sandbox executor: choose a backend by config and run all tool calls."""
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from agentguard.sandbox.base import BaseSandbox
 from agentguard.sandbox.local import LocalPermissionSandbox

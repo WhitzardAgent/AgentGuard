@@ -7,23 +7,25 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
-from shared.schemas.context import RuntimeContext
-from shared.schemas.decisions import DecisionType, GuardDecision
-from shared.schemas.events import RuntimeEvent
-from backend.audit.audit_logger import AuditLogger
 from backend.audit import AuditTraceEntry
+from backend.audit.audit_logger import AuditLogger
 from backend.database import DatabaseUnavailable, get_mysql_config
-from backend.runtime.plugins.base import CheckResult
-from backend.runtime.plugins import server_plugin_manager
-from backend.runtime.plugins.config_utils import merge_plugin_configs, normalize_plugin_config
 from backend.runtime.degrade.planner import DegradePlanner
+from backend.runtime.plugins import server_plugin_manager
+from backend.runtime.plugins.base import CheckResult
+from backend.runtime.plugins.config_utils import merge_plugin_configs, normalize_plugin_config
+from backend.runtime.plugins.manager import decision_type_rank
 from backend.runtime.policy.engine import PolicyEngine
 from backend.runtime.review import ReviewQueue
 from backend.runtime.storage import SessionPool, TraceStore, trace_entry_event_dict
 from backend.runtime.trace_store import TraceEventStore
 from backend.user.store import resolve_user_ticket
+from shared.schemas.context import RuntimeContext
+from shared.schemas.decisions import DecisionType, GuardDecision
+from shared.schemas.events import RuntimeEvent
 from shared.utils.json import safe_dumps, safe_loads
 from shared.utils.time import now_ts
 
@@ -516,10 +518,22 @@ class RuntimeManager:
             check=check,
         )
         if review_tickets:
-            if (
-                not decision.requires_user
-                and not decision.requires_remote
-                and not decision.is_blocking
+            # A review ticket only needs to *escalate* the final decision when
+            # nothing stronger already won the plugin chain (e.g. a later
+            # plugin defaulted to allow without being final). If the chain
+            # already settled on something at least as severe as review
+            # (e.g. deny), that decision must not be downgraded back to
+            # human_check/remote_review.
+            strongest_ticket_rank = max(
+                (
+                    decision_type_rank(DecisionType(ticket.get("decision_type")))
+                    for ticket in review_tickets
+                    if ticket.get("decision_type")
+                ),
+                default=-1,
+            )
+            if not (decision.requires_user or decision.requires_remote) and (
+                decision_type_rank(decision.decision_type) < strongest_ticket_rank
             ):
                 final_ticket = review_tickets[-1]
                 final_reason = str(final_ticket.get("reason") or "Review required by server plugin.")

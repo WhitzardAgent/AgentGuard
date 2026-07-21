@@ -325,12 +325,11 @@ def _install_fake_legacy_dify_modules(monkeypatch):
 
         def _run(self):
             model = ModelInstance()
-            for chunk in model.invoke_llm(
+            yield from model.invoke_llm(
                 [types.SimpleNamespace(content="query")],
                 tools=[types.SimpleNamespace(name="web_search")],
                 stream=True,
-            ):
-                yield chunk
+            )
             yield ToolEngine.agent_invoke(
                 FakeTool(),
                 {"q": "today news"},
@@ -383,12 +382,11 @@ def _install_fake_legacy_dify_modules(monkeypatch):
 
         def run(self):
             model = ModelInstance()
-            for chunk in model.invoke_llm(
+            yield from model.invoke_llm(
                 [types.SimpleNamespace(content=f"{self.node_data.type} query")],
                 tools=None,
                 stream=True,
-            ):
-                yield chunk
+            )
 
     class WorkflowToolNode:
         def __init__(self, node_config):

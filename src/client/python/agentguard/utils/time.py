@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 def now_ts() -> float:
@@ -17,4 +17,4 @@ def now_ms() -> int:
 
 def iso_now() -> str:
     """ISO-8601 UTC timestamp."""
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()

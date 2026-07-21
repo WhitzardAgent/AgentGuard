@@ -5,8 +5,8 @@ import os
 
 from backend.console.state import ConsoleState
 from backend.runtime.manager import RuntimeManager
-from shared.rules.loader import load_policy
 from backend.skill_service.router import SkillServiceRouter
+from shared.rules.loader import load_policy
 
 _manager: RuntimeManager | None = None
 _console: ConsoleState | None = None

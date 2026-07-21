@@ -22,8 +22,8 @@ from agentguard.adapters.agent.patching import (
     set_attr,
     tool_name,
 )
-from agentguard.schemas.decisions import DecisionType
 from agentguard.schemas.context import RuntimeContext
+from agentguard.schemas.decisions import DecisionType
 from agentguard.utils.errors import AdapterError
 
 

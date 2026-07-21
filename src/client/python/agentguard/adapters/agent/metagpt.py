@@ -1,12 +1,12 @@
 """MetaGPT agent adapter (best-effort, optional dependency)."""
 from __future__ import annotations
 
-from collections.abc import Iterable
 import contextvars
 from dataclasses import dataclass
 import functools
 import inspect
 import re
+from collections.abc import Iterable
 from typing import Any
 
 from agentguard.adapters.agent.base import BaseAgentAdapter, LLMBinding, ToolBinding
@@ -27,8 +27,8 @@ from agentguard.adapters.agent.patching import (
     set_attr,
     tool_name,
 )
-from agentguard.schemas.decisions import DecisionType, GuardDecision
 from agentguard.schemas.context import RuntimeContext
+from agentguard.schemas.decisions import DecisionType, GuardDecision
 from agentguard.tools.metadata import ToolMetadata
 from agentguard.utils.errors import AdapterError
 

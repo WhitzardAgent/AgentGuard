@@ -20,7 +20,6 @@ from agentguard.adapters.agent.normalization import (
 )
 from agentguard.adapters.agent.openai_agents import OpenAIAgentsAdapter
 
-
 __all__ = [
     "BaseAgentAdapter",
     "CustomAgentAdapter",

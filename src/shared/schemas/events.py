@@ -156,7 +156,7 @@ class RuntimeEvent:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "RuntimeEvent":
+    def from_dict(cls, data: dict[str, Any]) -> RuntimeEvent:
         return cls(
             event_id=data.get("event_id") or _new_id(),
             event_type=EventType(data["event_type"]),
@@ -167,7 +167,7 @@ class RuntimeEvent:
             metadata=dict(data.get("metadata") or {}),
         )
 
-    def redacted(self) -> "RuntimeEvent":
+    def redacted(self) -> RuntimeEvent:
         """Return a copy with secrets removed from payload/metadata."""
         return RuntimeEvent(
             event_id=self.event_id,

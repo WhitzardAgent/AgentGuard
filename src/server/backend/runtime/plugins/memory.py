@@ -1,10 +1,10 @@
 """Deprecated plugin for removed memory events."""
 from __future__ import annotations
 
-from shared.schemas.context import RuntimeContext
-from shared.schemas.events import RuntimeEvent
 from backend.runtime.plugins.base import BasePlugin, CheckResult
 from backend.runtime.plugins.registry import register
+from shared.schemas.context import RuntimeContext
+from shared.schemas.events import RuntimeEvent
 
 
 @register(

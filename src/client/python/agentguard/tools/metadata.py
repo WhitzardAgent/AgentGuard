@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import inspect
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 
 @dataclass
@@ -30,7 +31,7 @@ class ToolMetadata:
         }
 
     @classmethod
-    def infer(cls, fn: Callable[..., Any], **overrides: Any) -> "ToolMetadata":
+    def infer(cls, fn: Callable[..., Any], **overrides: Any) -> ToolMetadata:
         name = overrides.pop("name", None) or getattr(fn, "__name__", "tool")
         doc = overrides.pop("description", None) or (inspect.getdoc(fn) or "")
         is_async = inspect.iscoroutinefunction(fn)

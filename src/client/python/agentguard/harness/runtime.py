@@ -1,7 +1,8 @@
 """HarnessRuntime: orchestrates the full client-side execution flow."""
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from agentguard.audit.recorder import AuditRecorder
 from agentguard.harness.event_bus import EventBus

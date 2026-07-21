@@ -17,7 +17,7 @@ class AuditResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @staticmethod
-    def ok(reason: str = "No issue detected in trace.") -> "AuditResult":
+    def ok(reason: str = "No issue detected in trace.") -> AuditResult:
         return AuditResult(level="ok", reason=reason)
 
     def to_dict(self) -> dict[str, Any]:
@@ -42,7 +42,7 @@ class AuditTraceEntry:
     timestamp: float | None = None
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "AuditTraceEntry":
+    def from_dict(cls, data: dict[str, Any]) -> AuditTraceEntry:
         event = _runtime_event_from_trace_entry_data(data)
         decision = _decision_from_trace_entry_data(data)
         event_context = event.context if event is not None else None
@@ -92,7 +92,7 @@ class AuditTraceEntry:
             data["decision"] = self.decision.to_dict()
         return data
 
-    def merged_with(self, incoming: "AuditTraceEntry") -> "AuditTraceEntry":
+    def merged_with(self, incoming: AuditTraceEntry) -> AuditTraceEntry:
         plugin_result = dict(self.plugin_result)
         plugin_result.update(incoming.plugin_result)
         plugin_input = dict(self.plugin_input)

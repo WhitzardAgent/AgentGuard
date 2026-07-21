@@ -52,7 +52,7 @@ class PolicySnapshot:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "PolicySnapshot":
+    def from_dict(cls, data: dict[str, Any]) -> PolicySnapshot:
         return cls(
             version=data.get("version", "v0"),
             rules=[PolicyRule.from_dict(rule) for rule in data.get("rules") or []],
@@ -65,5 +65,5 @@ class PolicySnapshot:
         )
 
     @classmethod
-    def default(cls) -> "PolicySnapshot":
+    def default(cls) -> PolicySnapshot:
         return cls(version="builtin", rules=builtin_rules())

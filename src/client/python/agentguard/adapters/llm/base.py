@@ -11,7 +11,7 @@ from agentguard.utils.errors import AdapterError
 class GuardedLLM:
     """Wraps an LLM so that every call is guarded for input and output."""
 
-    def __init__(self, llm: Any, adapter: "BaseLLMAdapter", runtime: Any) -> None:
+    def __init__(self, llm: Any, adapter: BaseLLMAdapter, runtime: Any) -> None:
         self._llm = llm
         self._adapter = adapter
         self._runtime = runtime

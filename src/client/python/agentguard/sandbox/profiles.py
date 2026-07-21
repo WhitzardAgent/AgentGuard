@@ -20,13 +20,13 @@ class PermissionProfile:
     memory_limit_mb: int | None = None
 
     @staticmethod
-    def permissive() -> "PermissionProfile":
+    def permissive() -> PermissionProfile:
         return PermissionProfile(
             allow_subprocess=True, allow_network=True, allow_write=True, timeout_s=30.0
         )
 
     @staticmethod
-    def restricted() -> "PermissionProfile":
+    def restricted() -> PermissionProfile:
         return PermissionProfile(
             allow_subprocess=False, allow_network=False, allow_write=False, timeout_s=5.0
         )

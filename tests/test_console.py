@@ -3,9 +3,9 @@ from __future__ import annotations
 
 from backend.console.dsl import parse_source, policy_rule_to_source
 from backend.console.state import ConsoleState
-from backend.runtime.plugins.base import BasePlugin, CheckResult
 from backend.runtime.manager import RuntimeManager
 from backend.runtime.plugins.base import BasePlugin, CheckResult
+
 from shared.schemas.decisions import GuardDecision
 from shared.schemas.events import EventType, RuntimeContext, tool_event
 from shared.schemas.policy import PolicyEffect, PolicyRule, RuleCondition

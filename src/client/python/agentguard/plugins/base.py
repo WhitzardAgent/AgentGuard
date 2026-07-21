@@ -19,7 +19,7 @@ class CheckResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @staticmethod
-    def empty() -> "CheckResult":
+    def empty() -> CheckResult:
         return CheckResult()
 
 

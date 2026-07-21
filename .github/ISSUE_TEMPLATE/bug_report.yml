@@ -1,0 +1,106 @@
+name: 🐛 Bug Report
+description: Report a reproducible problem in AgentGuard.
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug!
+
+        ⚠️ **If this is a security vulnerability** (e.g. a policy that should
+        deny an action but allows it), please do **not** file a public issue.
+        Follow [SECURITY.md](../../SECURITY.md) instead.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear and concise description of the bug.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to Reproduce
+      description: |
+        Steps, minimal code sample, and/or the policy (`.rules`) file and
+        agent trace that reproduces the issue.
+      placeholder: |
+        1. Configure plugins with '...'
+        2. Load rule '...'
+        3. Run agent action '...'
+        4. See error / unexpected decision
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: AgentGuard Version / Commit
+      placeholder: v2.1 or commit SHA
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected Component
+      multiple: true
+      options:
+        - Python client SDK
+        - JS client SDK
+        - Control server (backend)
+        - Web console (frontend)
+        - Rule/policy engine (DSL)
+        - Framework adapter (LangChain/LangGraph/AutoGen/LlamaIndex/OpenAI Agents/Dify/MetaGPT/OpenClaw)
+        - Skills
+        - Docs
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python/Node version, deployment mode (Docker / in-process), relevant config.
+      placeholder: |
+        - OS: Ubuntu 22.04
+        - Python: 3.11.8
+        - Deployment: Docker (control server) + LangChain client
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Log Output
+      description: Please redact secrets/PII before pasting.
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and this hasn't been reported.
+          required: true
+        - label: This is not a security vulnerability (see SECURITY.md if it is).
+          required: true

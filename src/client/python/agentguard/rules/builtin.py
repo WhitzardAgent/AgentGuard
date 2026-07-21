@@ -1,13 +1,7 @@
 """Built-in baseline policy rules (enterprise-safe defaults)."""
 from __future__ import annotations
 
-from agentguard.schemas.policy import PolicyEffect, PolicyRule, RuleCondition
-from agentguard.tools.capability import (
-    CAP_DATABASE_WRITE,
-    CAP_EXTERNAL_SEND,
-    CAP_PAYMENT,
-    CAP_SHELL,
-)
+from agentguard.schemas.policy import PolicyRule
 
 
 def builtin_rules() -> list[PolicyRule]:

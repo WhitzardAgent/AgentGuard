@@ -1,9 +1,10 @@
 """Agent adapter interface for attach-mode integrations."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import inspect
-from typing import Any, Callable
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Any
 
 from agentguard.adapters.agent.normalization import (
     LLMInputDenormalization,
@@ -29,7 +30,7 @@ class ToolBinding:
     capabilities: list[str] | None = None
     container: Any = None
     key: Any = None
-    installer: Callable[[Any, "ToolBinding", "BaseAgentAdapter"], int] | None = None
+    installer: Callable[[Any, ToolBinding, BaseAgentAdapter], int] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
@@ -44,7 +45,7 @@ class LLMBinding:
     attr: str | None = None
     container: Any = None
     key: Any = None
-    installer: Callable[[Any, "LLMBinding", "BaseAgentAdapter"], int] | None = None
+    installer: Callable[[Any, LLMBinding, BaseAgentAdapter], int] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
@@ -366,7 +367,7 @@ class BaseAgentAdapter:
         capabilities: list[str] | None = None,
         container: Any = None,
         key: Any = None,
-        installer: Callable[[Any, ToolBinding, "BaseAgentAdapter"], int] | None = None,
+        installer: Callable[[Any, ToolBinding, BaseAgentAdapter], int] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> ToolBinding:
         return ToolBinding(
@@ -392,7 +393,7 @@ class BaseAgentAdapter:
         attr: str | None = None,
         container: Any = None,
         key: Any = None,
-        installer: Callable[[Any, LLMBinding, "BaseAgentAdapter"], int] | None = None,
+        installer: Callable[[Any, LLMBinding, BaseAgentAdapter], int] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> LLMBinding:
         return LLMBinding(
@@ -570,9 +571,14 @@ class BaseAgentAdapter:
         self,
         guard: Any,
         binding: ToolBinding,
-        adapter: "BaseAgentAdapter",
+        adapter: BaseAgentAdapter,
     ) -> int:
-        from agentguard.adapters.agent.patching import is_guarded, make_guarded_tool, set_attr, tool_name
+        from agentguard.adapters.agent.patching import (
+            is_guarded,
+            make_guarded_tool,
+            set_attr,
+            tool_name,
+        )
 
         original = binding.callable
         agent = binding.owner

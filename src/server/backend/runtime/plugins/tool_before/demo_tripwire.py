@@ -1,12 +1,11 @@
 """Demo-only plugin that makes custom server plugin effects easy to observe."""
 from __future__ import annotations
 
+from backend.runtime.plugins.base import BasePlugin, CheckResult
+from backend.runtime.plugins.registry import register
 from shared.schemas.context import RuntimeContext
 from shared.schemas.decisions import GuardDecision
 from shared.schemas.events import EventType, RuntimeEvent
-
-from backend.runtime.plugins.base import BasePlugin, CheckResult
-from backend.runtime.plugins.registry import register
 
 
 @register(

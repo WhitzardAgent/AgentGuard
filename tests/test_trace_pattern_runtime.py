@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from backend.console.dsl import parse_source
+
+from shared.rules.trace_pattern import TraceStep, match_trace
 from shared.schemas.context import RuntimeContext
 from shared.schemas.events import RuntimeEvent
 from shared.schemas.policy import PolicyEffect, PolicyRule, RuleCondition, TraceClause
-from shared.rules.trace_pattern import TraceStep, match_trace
 
 
 def _tool_invoke(tool_name: str, arguments: dict[str, object] | None = None) -> RuntimeEvent:

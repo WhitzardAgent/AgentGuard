@@ -30,8 +30,8 @@ from backend.auth.dependencies import (
 )
 from backend.auth.models import AuthContext
 from backend.database import DatabaseUnavailable
-from shared.schemas.context import RuntimeContext
 from backend.runtime.policy.snapshot_builder import snapshot_dict
+from shared.schemas.context import RuntimeContext
 
 router = APIRouter()
 

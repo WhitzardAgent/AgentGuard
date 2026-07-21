@@ -1,0 +1,57 @@
+name: 💡 Feature Request
+description: Suggest an idea, framework adapter, or policy capability for AgentGuard.
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an improvement! Please check open issues and
+        the [Roadmap section of the README](../../README.md#-roadmap) first
+        to avoid duplicates.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / Motivation
+      description: What problem does this solve? What can't you do today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Solution
+      description: Describe the feature, adapter, or policy capability you'd like to see.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - New agent framework adapter
+        - Rule/policy DSL
+        - Runtime plugin (client or server)
+        - Web console / visual policy configuration
+        - Auditing / observability
+        - Cluster / control-plane management
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any alternative solutions or workarounds you've considered.
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: I'd be willing to submit a PR for this feature.

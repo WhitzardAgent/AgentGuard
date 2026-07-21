@@ -54,7 +54,7 @@ class PolicyStore:
         self._version = version or self._compute_version()
 
     @classmethod
-    def from_path(cls, path: str | Path) -> "PolicyStore":
+    def from_path(cls, path: str | Path) -> PolicyStore:
         p = Path(path)
         rules = list(builtin_rules())
         if p.is_dir():
@@ -64,7 +64,7 @@ class PolicyStore:
         return cls(rules=rules)
 
     @classmethod
-    def default(cls) -> "PolicyStore":
+    def default(cls) -> PolicyStore:
         # Include repo rules/builtin and rules/examples if present.
         rules = list(builtin_rules())
         for sub in ("rules/builtin", "rules/examples/enterprise_default.json"):

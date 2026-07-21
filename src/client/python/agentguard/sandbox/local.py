@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from agentguard.sandbox.base import BaseSandbox
 from agentguard.sandbox.permissions import check_permissions

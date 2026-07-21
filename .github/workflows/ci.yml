@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint-python:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install ruff
+        run: pip install "ruff>=0.4"
+
+      - name: Run ruff
+        run: ruff check src tests
+
+  typecheck-python:
+    name: Type check (mypy, advisory)
+    runs-on: ubuntu-latest
+    # Advisory only: the codebase is incrementally adopting strict typing and
+    # is not yet fully clean under `strict = true`. This job surfaces the
+    # report without blocking merges. See AGENTS.md for context.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install project + dev deps
+        run: pip install -e ".[dev,server]"
+
+      - name: Run mypy
+        run: mypy src
+
+  test-python:
+    name: Test (pytest, py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Set up Node.js (needed by JS-bridge e2e tests)
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+
+      - name: Install project + dev/server deps
+        run: pip install -e ".[dev,server]"
+
+      - name: Run pytest
+        run: pytest -q -m "not load"
+
+  test-js:
+    name: Test (node --test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          # No `cache: npm` here: package-lock.json is gitignored in this repo
+          # (see docs.yml, which uses the same plain install), so there's no
+          # lockfile for actions/setup-node to hash.
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Run node --test
+        run: node --test
+
+  all-required-checks:
+    name: All required checks passed
+    if: always()
+    needs: [lint-python, test-python, test-js]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check job results
+        run: |
+          if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "true" ]; then
+            echo "One or more required jobs failed."
+            exit 1
+          fi
+          echo "All required jobs passed."

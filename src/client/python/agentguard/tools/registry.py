@@ -1,8 +1,9 @@
 """Tool registry mapping names to callables and metadata."""
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from agentguard.tools.metadata import ToolMetadata
 

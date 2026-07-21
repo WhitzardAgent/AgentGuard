@@ -4,9 +4,9 @@ from __future__ import annotations
 import functools
 import inspect
 import re
-from collections.abc import AsyncIterator, Iterator, Sequence
+from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from agentguard.adapters.agent.base import BaseAgentAdapter, LLMBinding
 from agentguard.adapters.agent.normalization import (

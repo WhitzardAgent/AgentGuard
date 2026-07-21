@@ -1,8 +1,8 @@
 """Remote guard client: talk to the server decision service over HTTP."""
 from __future__ import annotations
 
-import time
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request

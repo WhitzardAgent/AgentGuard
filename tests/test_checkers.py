@@ -6,7 +6,6 @@ import urllib.request
 from pathlib import Path
 
 import pytest
-
 from agentguard.config_api import (
     CLIENT_HEALTH_PATH,
     PLUGIN_CONFIG_PATH,

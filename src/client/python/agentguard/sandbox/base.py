@@ -1,7 +1,8 @@
 """Sandbox backend interface."""
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from agentguard.schemas.sandbox import SandboxResult
 
