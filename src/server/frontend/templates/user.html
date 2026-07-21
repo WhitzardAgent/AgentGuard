@@ -71,10 +71,6 @@
               <span>Dify Email</span>
               <input id="dify-email" type="email" autocomplete="email" required maxlength="255">
             </label>
-            <label>
-              <span>Display Name</span>
-              <input id="dify-display-name" maxlength="255">
-            </label>
             <div class="form-grid-actions">
               <button class="btn primary" type="submit">Bind Dify</button>
             </div>
@@ -397,7 +393,7 @@
         }
       });
 
-      async function bindExternalAccount(provider, emailInputId, displayNameInputId, form) {
+      async function bindExternalAccount(provider, emailInputId, form) {
         const label = providerLabel(provider);
         try {
           await api("/api/user/external-accounts", {
@@ -405,9 +401,6 @@
             body: JSON.stringify({
               provider,
               email: document.getElementById(emailInputId).value.trim(),
-              display_name: displayNameInputId
-                ? document.getElementById(displayNameInputId).value.trim() || null
-                : null,
             }),
           });
           form.reset();
@@ -420,12 +413,12 @@
 
       difyBindForm.addEventListener("submit", async (event) => {
         event.preventDefault();
-        await bindExternalAccount("dify", "dify-email", "dify-display-name", difyBindForm);
+        await bindExternalAccount("dify", "dify-email", difyBindForm);
       });
 
       n8nBindForm.addEventListener("submit", async (event) => {
         event.preventDefault();
-        await bindExternalAccount("n8n", "n8n-email", null, n8nBindForm);
+        await bindExternalAccount("n8n", "n8n-email", n8nBindForm);
       });
 
       externalAccountList.addEventListener("click", async (event) => {

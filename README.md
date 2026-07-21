@@ -228,7 +228,12 @@ The following LangChain example shows the required integration points:
 > pip install langchain-openai==1.2.1
 > ```
 
+For remote LangChain integration, `ticket` is required. Sign in to the AgentGuard frontend, open `User Centre`, click `Generate Ticket` in the `Current User` section, copy the one-time ticket from the popup, and pass it to the LangChain program. Tickets are short-lived and consumed once, so avoid storing them in environment variables or config files.
+
 ```python
+import argparse
+import os
+
 from langchain.agents import create_agent
 from langchain.tools import tool
 
@@ -237,6 +242,26 @@ from agentguard import Guard, Principal
 
 LLM_API_KEY = "<YOUR KEY>"         # Fill this manually
 LLM_MODEL_NAME = "gpt-5.4-mini"
+
+def get_control_server_url() -> str:
+    url = os.getenv("AGENTGUARD_SERVER_URL", "http://127.0.0.1:38080").strip()
+    if "<" in url or ">" in url or " " in url:
+        raise ValueError(
+            "Invalid AGENTGUARD_SERVER_URL. Replace the documentation placeholder "
+            "with a real URL, for example http://127.0.0.1:38080."
+        )
+    return url
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run the LangChain AgentGuard remote demo with a user ticket."
+    )
+    parser.add_argument(
+        "--ticket",
+        required=True,
+        help="One-time AgentGuard user ticket generated from the User Centre.",
+    )
+    return parser.parse_args()
 
 @tool
 def retrieve_doc(id: int) -> str:
@@ -280,15 +305,17 @@ def run(agent, prompt):
             ]
         }
     )
-    print(f"Output: {result["messages"][-1].content}")
+    print(f"Output: {result['messages'][-1].content}")
     print("===================================\n")
 
 if __name__ == "__main__":
+    args = parse_args()
     agent = build_agent()
 
     # 🚩 Load the guard client
     guard = Guard(
-        remote_url="http://<Control Server IP>:38080",      # Replace with your control server IP and port
+        remote_url=get_control_server_url(),
+        ticket=args.ticket,                                 # Generate this in User Centre before each run
         mode="enforce",
         fail_open=False,
     )
@@ -319,10 +346,10 @@ Lines marked with 🚩 indicate where the AgentGuard client is inserted into the
 
 ### 3. Run the Agent
 
-Execute the LangChain agent script:
+Set the control server URL, generate a fresh one-time ticket in `User Centre`, and pass that ticket to the LangChain script:
 
 ```bash
-python <LANGCHAIN_AGENT_FILE>
+AGENTGUARD_SERVER_URL=http://127.0.0.1:38080 python <LANGCHAIN_AGENT_FILE> --ticket agt_xxx
 ```
 
 The agent performs two different tasks. The first sends document 0 (simulating a confidential file) to the admin email address, which the policy permits. The second sends the same document to another user, which the policy forbids.

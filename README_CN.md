@@ -226,7 +226,12 @@ pip install -e .
 > pip install langchain-openai==1.2.1
 > ```
 
+远程接入 LangChain 时，`ticket` 是必填项。用户需要先登录 AgentGuard 前端，在 `User Centre` 的 `Current User` 区域点击 `Generate Ticket`，复制弹窗中的一次性 ticket，然后传给 LangChain 程序。ticket 是短时有效且一次性消费的，不建议写入环境变量或配置文件。
+
 ```python
+import argparse
+import os
+
 from langchain.agents import create_agent
 from langchain.tools import tool
 
@@ -235,6 +240,26 @@ from agentguard import Guard, Principal
 
 LLM_API_KEY = "<YOUR KEY>"         # Fill this manually
 LLM_MODEL_NAME = "gpt-5.4-mini"
+
+def get_control_server_url() -> str:
+    url = os.getenv("AGENTGUARD_SERVER_URL", "http://127.0.0.1:38080").strip()
+    if "<" in url or ">" in url or " " in url:
+        raise ValueError(
+            "Invalid AGENTGUARD_SERVER_URL. Replace the documentation placeholder "
+            "with a real URL, for example http://127.0.0.1:38080."
+        )
+    return url
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run the LangChain AgentGuard remote demo with a user ticket."
+    )
+    parser.add_argument(
+        "--ticket",
+        required=True,
+        help="One-time AgentGuard user ticket generated from the User Centre.",
+    )
+    return parser.parse_args()
 
 @tool
 def retrieve_doc(id: int) -> str:
@@ -278,15 +303,17 @@ def run(agent, prompt):
             ]
         }
     )
-    print(f"Output: {result["messages"][-1].content}")
+    print(f"Output: {result['messages'][-1].content}")
     print("===================================\n")
 
 if __name__ == "__main__":
+    args = parse_args()
     agent = build_agent()
 
     # 🚩 Load the guard client
     guard = Guard(
-        remote_url="http://<Control Server IP>:38080",      # Replace with your control server IP and port
+        remote_url=get_control_server_url(),
+        ticket=args.ticket,                                 # Generate this in User Centre before each run
         mode="enforce",
         fail_open=False,
     )
@@ -317,10 +344,10 @@ if __name__ == "__main__":
 
 ### 3. 运行智能体
 
-执行刚刚准备的 LangChain 智能体代码：
+先设置中控服务地址，在 `User Centre` 里生成一张新的单次 ticket，然后把 ticket 作为命令行参数传给 LangChain 脚本：
 
 ```bash
-python <LANGCHAIN_AGENT_FILE>
+AGENTGUARD_SERVER_URL=http://127.0.0.1:38080 python <LANGCHAIN_AGENT_FILE> --ticket agt_xxx
 ```
 
 智能体执行了两项不同的任务，第一次是将 id 为 0 的文档（模拟机密文件）发送给管理员邮箱，这是访问控制策略允许的操作；第二次是将 id 为 0 的文档发送给其他用户邮箱，这是访问控制策略不允许的操作。
