@@ -927,7 +927,7 @@ def _decision_from_plugin_result(check: CheckResult) -> GuardDecision:
         return check.decision_candidate
     return GuardDecision.allow(
         "No server plugin returned a final decision; default allow.",
-        policy_id="server:no_final_plugin",
+        policy_id="-",
         risk_signals=list(check.risk_signals),
         metadata={"explanation": "no final plugin decision"},
     )
