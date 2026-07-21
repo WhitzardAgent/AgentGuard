@@ -229,7 +229,12 @@
             <td>${escapeHtml(account.account_email || "")}</td>
             <td>${escapeHtml(account.display_name || "-")}</td>
             <td>
-              <button class="btn" type="button" data-external-account-id="${escapeHtml(account.id || "")}">
+              <button
+                class="btn"
+                type="button"
+                data-external-account-id="${escapeHtml(account.id || "")}"
+                data-binding-type="${escapeHtml(account.binding_type || "external")}"
+              >
                 Unbind
               </button>
             </td>
@@ -261,8 +266,24 @@
         try {
           const payload = await api("/api/user/me");
           renderUser(payload.user);
-          const externalPayload = await api("/api/user/external-accounts");
-          renderExternalAccounts(externalPayload.external_accounts || []);
+          const [externalPayload, openclawPayload] = await Promise.all([
+            api("/api/user/external-accounts"),
+            api("/api/user/openclaw-bindings"),
+          ]);
+          const openclawAsAccounts = (openclawPayload.openclaw_bindings || []).map((binding) => ({
+            id: "openclaw",
+            provider: binding.provider || "openclaw",
+            account_email: binding.account_email || "-",
+            display_name: binding.display_name || "-",
+            binding_type: "openclaw",
+          }));
+          renderExternalAccounts([
+            ...(externalPayload.external_accounts || []).map((account) => ({
+              ...account,
+              binding_type: "external",
+            })),
+            ...openclawAsAccounts,
+          ]);
         } catch {
           renderUser(null);
           const next = encodeURIComponent(`${window.location.pathname}${window.location.search || ""}`);
@@ -413,17 +434,32 @@
           return;
         }
         const mappingId = button.dataset.externalAccountId;
+        const bindingType = button.dataset.bindingType || "external";
         if (!mappingId) {
           return;
         }
         try {
-          await api(`/api/user/external-accounts/${encodeURIComponent(mappingId)}`, {
-            method: "DELETE",
-          });
+          if (bindingType === "openclaw") {
+            await api("/api/user/openclaw-bindings", {
+              method: "DELETE",
+            });
+          } else {
+            await api(`/api/user/external-accounts/${encodeURIComponent(mappingId)}`, {
+              method: "DELETE",
+            });
+          }
           await refresh();
-          showToast("External account unbound.", "success");
+          showToast(
+            bindingType === "openclaw" ? "OpenClaw binding unbound." : "External account unbound.",
+            "success",
+          );
         } catch (error) {
-          showToast(error.message || "Failed to unbind external account.", "warning");
+          showToast(
+            error.message || (bindingType === "openclaw"
+              ? "Failed to unbind OpenClaw binding."
+              : "Failed to unbind external account."),
+            "warning",
+          );
         }
       });
 

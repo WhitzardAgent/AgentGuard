@@ -263,16 +263,67 @@ def list_external_accounts(
     return {"external_accounts": [_external_account_payload(item) for item in accounts]}
 
 
+@router.get("/v1/user/openclaw-bindings")
+def list_openclaw_bindings(
+    agentguard_user_session: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    user = _current_user_or_401(agentguard_user_session)
+    try:
+        bindings = AgentStore().list_user_agent_bindings(user.id, provider="openclaw")
+    except DatabaseUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not bindings:
+        return {"openclaw_bindings": []}
+    return {
+        "openclaw_bindings": [
+            {
+                "provider": "openclaw",
+                "account_email": "-",
+                "display_name": "-",
+                "agent_count": len(bindings),
+            }
+        ]
+    }
+
+
 @router.delete("/v1/user/external-accounts/{mapping_id}")
 def delete_external_account(
     mapping_id: int,
     agentguard_user_session: str | None = Cookie(default=None),
 ) -> dict[str, Any]:
     user = _current_user_or_401(agentguard_user_session)
+    mappings = _store_or_503().list_external_accounts(user)
+    mapping = next((item for item in mappings if item.id == int(mapping_id)), None)
     deleted = _store_or_503().delete_external_account(user, mapping_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="external account not found")
+    if mapping is not None:
+        try:
+            AgentStore().unbind_agents_for_external_account(
+                user_id=user.id,
+                provider=mapping.provider,
+                account_email=mapping.account_email,
+            )
+        except DatabaseUnavailable:
+            pass
     return {"status": "ok", "external_account_id": mapping_id}
+
+
+@router.delete("/v1/user/openclaw-bindings")
+def delete_openclaw_binding(
+    agentguard_user_session: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    user = _current_user_or_401(agentguard_user_session)
+    try:
+        result = AgentStore().unbind_user_provider(
+            user_id=user.id,
+            provider="openclaw",
+        )
+    except DatabaseUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not result["unbound_count"]:
+        raise HTTPException(status_code=404, detail="openclaw binding not found")
+    return {"status": "ok", **result}
 
 
 def _store_or_503() -> UserStore:

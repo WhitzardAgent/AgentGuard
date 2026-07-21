@@ -699,22 +699,43 @@
       ));
   }
 
+  function agentCatalogAliasKey(agent) {
+    const provider = String(agent?.external_provider || "").trim().toLowerCase();
+    const displayAgentId = String(agent?.display_agent_id || "").trim();
+    if (provider !== "n8n" || !displayAgentId) {
+      return "";
+    }
+    return `${provider}::${displayAgentId}`;
+  }
+
   function mergeAgentCatalogs(baseCatalog, resourceCatalog) {
     const merged = new Map();
+    const registeredAliases = new Map();
     (Array.isArray(baseCatalog) ? baseCatalog : [])
       .map(normalizeAgentSummary)
       .filter((agent) => agent.agent_id)
       .forEach((agent) => {
         merged.set(agent.agent_id, agent);
+        const aliasKey = agentCatalogAliasKey(agent);
+        if (aliasKey) {
+          registeredAliases.set(aliasKey, agent.agent_id);
+        }
       });
     (Array.isArray(resourceCatalog) ? resourceCatalog : [])
       .map(normalizeAgentSummary)
       .filter((agent) => agent.agent_id)
       .forEach((agent) => {
-        const existing = merged.get(agent.agent_id) || {};
-        merged.set(agent.agent_id, {
+        const aliasKey = agentCatalogAliasKey(agent);
+        const canonicalAgentId = (
+          aliasKey
+          && String(agent.agent_id || "").trim().startsWith("n8n:")
+          && registeredAliases.get(aliasKey)
+        ) || agent.agent_id;
+        const existing = merged.get(canonicalAgentId) || {};
+        merged.set(canonicalAgentId, {
           ...existing,
           ...agent,
+          agent_id: canonicalAgentId,
           display_agent_id: existing.display_agent_id || agent.display_agent_id,
           external_agent_id: existing.external_agent_id || agent.external_agent_id,
           external_provider: existing.external_provider || agent.external_provider,

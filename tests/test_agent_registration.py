@@ -67,8 +67,54 @@ class FakeDB:
             ]
             return before - len(self.external_runtime_sessions)
         if "DELETE FROM user_agents" in sql:
-            agent_id = str(params[0])
             before = len(self.user_agents)
+            if "WHERE user_id = %s AND provider = %s AND account_email = %s" in sql:
+                user_id, provider, account_email = params
+                self.user_agents = [
+                    row
+                    for row in self.user_agents
+                    if not (
+                        row["user_id"] == int(user_id)
+                        and row["provider"] == provider
+                        and row["account_email"] == account_email
+                    )
+                ]
+                return before - len(self.user_agents)
+            if "WHERE user_id = %s AND provider = %s" in sql:
+                user_id, provider = params
+                self.user_agents = [
+                    row
+                    for row in self.user_agents
+                    if not (
+                        row["user_id"] == int(user_id)
+                        and row["provider"] == provider
+                    )
+                ]
+                return before - len(self.user_agents)
+            if "WHERE user_id = %s AND agent_id = %s AND provider = %s" in sql:
+                user_id, agent_id, provider = params
+                self.user_agents = [
+                    row
+                    for row in self.user_agents
+                    if not (
+                        row["user_id"] == int(user_id)
+                        and row["agent_id"] == str(agent_id)
+                        and row["provider"] == provider
+                    )
+                ]
+                return before - len(self.user_agents)
+            if "WHERE user_id = %s AND agent_id = %s" in sql:
+                user_id, agent_id = params
+                self.user_agents = [
+                    row
+                    for row in self.user_agents
+                    if not (
+                        row["user_id"] == int(user_id)
+                        and row["agent_id"] == str(agent_id)
+                    )
+                ]
+                return before - len(self.user_agents)
+            agent_id = str(params[0])
             self.user_agents = [row for row in self.user_agents if row["agent_id"] != agent_id]
             return before - len(self.user_agents)
         if "DELETE FROM agent_credentials" in sql:
@@ -323,10 +369,89 @@ class FakeDB:
                 return [row for row in self.agent_tools if row["agent_id"] in allowed]
             return list(self.agent_tools)
         if "FROM user_agents" in sql:
-            user_id = int(params[0])
-            rows = [row for row in self.user_agents if row["user_id"] == user_id]
+            if "SELECT ua.user_id, ua.agent_id, ua.provider, ua.account_email, ua.source" in sql:
+                user_id = int(params[0])
+                provider = params[1] if len(params) > 1 else None
+                rows = [row for row in self.user_agents if row["user_id"] == user_id]
+                if provider is not None:
+                    rows = [row for row in rows if row["provider"] == provider]
+                result = []
+                for row in rows:
+                    agent = self.agents.get(row["agent_id"])
+                    if not agent or agent["status"] != "active":
+                        continue
+                    if row.get("account_email") is not None and not any(
+                        account["user_id"] == row["user_id"]
+                        and account["provider"] == row["provider"]
+                        and account["account_email"] == row["account_email"]
+                        for account in self.user_external_accounts
+                    ):
+                        continue
+                    identity = next(
+                        (
+                            item
+                            for item in self.agent_external_identities
+                            if item["agent_id"] == row["agent_id"] and item["provider"] == row["provider"]
+                        ),
+                        {},
+                    )
+                    result.append(
+                        {
+                            **row,
+                            "agent_name": agent.get("name"),
+                            "agent_status": agent.get("status"),
+                            "provider_instance_id": identity.get("provider_instance_id"),
+                            "tenant_id": identity.get("tenant_id"),
+                            "external_agent_id": identity.get("external_agent_id"),
+                            "agent_type": identity.get("agent_type"),
+                        }
+                    )
+                result.sort(
+                    key=lambda item: (
+                        item.get("updated_at") or "",
+                        item.get("created_at") or "",
+                        item["agent_id"],
+                    ),
+                    reverse=True,
+                )
+                return result
+            if "WHERE user_id = %s AND provider = %s AND account_email = %s" in sql:
+                user_id, provider, account_email = params
+                return [
+                    row
+                    for row in self.user_agents
+                    if row["user_id"] == int(user_id)
+                    and row["provider"] == provider
+                    and row["account_email"] == account_email
+                ]
+            if "WHERE user_id = %s AND provider = %s" in sql:
+                user_id, provider = params
+                return [
+                    row
+                    for row in self.user_agents
+                    if row["user_id"] == int(user_id)
+                    and row["provider"] == provider
+                ]
+            if "WHERE ua.agent_id = %s" in sql:
+                agent_id = str(params[0])
+                rows = [row for row in self.user_agents if row["agent_id"] == agent_id]
+            else:
+                user_id = int(params[0])
+                rows = [row for row in self.user_agents if row["user_id"] == user_id]
             if "JOIN agents" in sql:
                 rows = [row for row in rows if self.agents[row["agent_id"]]["status"] == "active"]
+            if "LEFT JOIN user_external_accounts" in sql:
+                rows = [
+                    row
+                    for row in rows
+                    if row.get("account_email") is None
+                    or any(
+                        account["user_id"] == row["user_id"]
+                        and account["provider"] == row["provider"]
+                        and account["account_email"] == row["account_email"]
+                        for account in self.user_external_accounts
+                    )
+                ]
             return rows
         return []
 
@@ -410,6 +535,213 @@ def test_bind_existing_agents_for_external_account_backfills_registered_agent():
     assert db.user_agents[0]["user_id"] == 7
     assert db.user_agents[0]["provider"] == "n8n"
     assert db.user_agents[0]["account_email"] == "owner@example.com"
+
+
+def test_agent_ids_for_user_ignores_stale_external_account_binding():
+    db = FakeDB()
+    store = AgentStore(db)
+    agent = store.register_agent(
+        provider="n8n",
+        external_agent_id="workflow-1",
+        agent_type="workflow",
+        account_email="owner@example.com",
+        public_key_jwk=PUBLIC_JWK,
+    ).agent
+    db.user_agents.append(
+        {
+            "id": db.next_id,
+            "user_id": 7,
+            "agent_id": agent.agent_id,
+            "provider": "n8n",
+            "account_email": "owner@example.com",
+            "source": "adapter_scan",
+            "metadata_json": None,
+        }
+    )
+    db.next_id += 1
+
+    assert store.agent_ids_for_user(7) == set()
+    assert store.user_ids_for_agent(agent.agent_id) == set()
+
+    db.user_external_accounts.append(
+        {"user_id": 7, "provider": "n8n", "account_email": "owner@example.com"}
+    )
+
+    assert store.agent_ids_for_user(7) == {agent.agent_id}
+    assert store.user_ids_for_agent(agent.agent_id) == {7}
+
+
+def test_unbind_agents_for_external_account_removes_matching_bindings():
+    db = FakeDB()
+    store = AgentStore(db)
+    db.user_agents.extend(
+        [
+            {
+                "id": 1,
+                "user_id": 7,
+                "agent_id": "ag_1",
+                "provider": "n8n",
+                "account_email": "owner@example.com",
+                "source": "adapter_scan",
+                "metadata_json": None,
+            },
+            {
+                "id": 2,
+                "user_id": 7,
+                "agent_id": "ag_2",
+                "provider": "n8n",
+                "account_email": "other@example.com",
+                "source": "adapter_scan",
+                "metadata_json": None,
+            },
+            {
+                "id": 3,
+                "user_id": 7,
+                "agent_id": "ag_3",
+                "provider": "openclaw",
+                "account_email": None,
+                "source": "user_ticket",
+                "metadata_json": None,
+            },
+        ]
+    )
+
+    result = store.unbind_agents_for_external_account(
+        user_id=7,
+        provider="n8n",
+        account_email="Owner@Example.com",
+    )
+
+    assert result == {
+        "provider": "n8n",
+        "account_email": "owner@example.com",
+        "unbound_count": 1,
+        "agent_ids": ["ag_1"],
+    }
+    assert [row["agent_id"] for row in db.user_agents] == ["ag_2", "ag_3"]
+
+
+def test_list_user_agent_bindings_includes_openclaw_agent_details():
+    db = FakeDB()
+    store = AgentStore(db)
+    registered = store.register_agent(
+        provider="openclaw",
+        external_agent_id="agentguard-emailcase2",
+        agent_type="agent",
+        public_key_jwk=PUBLIC_JWK,
+        name="agentguard-emailcase2",
+    ).agent
+    db.user_agents.append(
+        {
+            "id": db.next_id,
+            "user_id": 7,
+            "agent_id": registered.agent_id,
+            "provider": "openclaw",
+            "account_email": None,
+            "source": "user_ticket_bootstrap",
+            "metadata_json": '{"ticket_prefix":"agt_test"}',
+            "created_at": "2026-07-15 09:15:05",
+            "updated_at": "2026-07-15 10:50:38",
+        }
+    )
+    db.next_id += 1
+
+    bindings = store.list_user_agent_bindings(7, provider="openclaw")
+
+    assert len(bindings) == 1
+    assert bindings[0].user_id == 7
+    assert bindings[0].agent_id == registered.agent_id
+    assert bindings[0].provider == "openclaw"
+    assert bindings[0].agent_name == "agentguard-emailcase2"
+    assert bindings[0].external_agent_id == "agentguard-emailcase2"
+    assert bindings[0].agent_type == "agent"
+    assert bindings[0].provider_instance_id is None
+    assert bindings[0].account_email is None
+    assert bindings[0].source == "user_ticket_bootstrap"
+
+
+def test_unbind_user_agent_removes_matching_openclaw_binding():
+    db = FakeDB()
+    store = AgentStore(db)
+    db.user_agents.extend(
+        [
+            {
+                "id": 1,
+                "user_id": 7,
+                "agent_id": "ag_openclaw_1",
+                "provider": "openclaw",
+                "account_email": None,
+                "source": "user_ticket_bootstrap",
+                "metadata_json": None,
+            },
+            {
+                "id": 2,
+                "user_id": 7,
+                "agent_id": "ag_n8n_1",
+                "provider": "n8n",
+                "account_email": "owner@example.com",
+                "source": "adapter_scan",
+                "metadata_json": None,
+            },
+        ]
+    )
+
+    changed = store.unbind_user_agent(
+        user_id=7,
+        agent_id="ag_openclaw_1",
+        provider="openclaw",
+    )
+
+    assert changed is True
+    assert [row["agent_id"] for row in db.user_agents] == ["ag_n8n_1"]
+
+
+def test_unbind_user_provider_removes_all_openclaw_bindings():
+    db = FakeDB()
+    store = AgentStore(db)
+    db.user_agents.extend(
+        [
+            {
+                "id": 1,
+                "user_id": 7,
+                "agent_id": "ag_openclaw_1",
+                "provider": "openclaw",
+                "account_email": None,
+                "source": "user_ticket_bootstrap",
+                "metadata_json": None,
+            },
+            {
+                "id": 2,
+                "user_id": 7,
+                "agent_id": "ag_openclaw_2",
+                "provider": "openclaw",
+                "account_email": None,
+                "source": "user_ticket_bootstrap",
+                "metadata_json": None,
+            },
+            {
+                "id": 3,
+                "user_id": 7,
+                "agent_id": "ag_n8n_1",
+                "provider": "n8n",
+                "account_email": "owner@example.com",
+                "source": "adapter_scan",
+                "metadata_json": None,
+            },
+        ]
+    )
+
+    result = store.unbind_user_provider(
+        user_id=7,
+        provider="openclaw",
+    )
+
+    assert result == {
+        "provider": "openclaw",
+        "unbound_count": 2,
+        "agent_ids": ["ag_openclaw_1", "ag_openclaw_2"],
+    }
+    assert [row["agent_id"] for row in db.user_agents] == ["ag_n8n_1"]
 
 
 def test_sync_agent_tools_persists_and_replaces_catalog():

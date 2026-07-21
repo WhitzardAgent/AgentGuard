@@ -402,6 +402,60 @@ def test_user_external_account_proxy_forwards_requests():
     assert observed["delete_path"] == "/v1/user/external-accounts/7"
 
 
+def test_user_openclaw_binding_proxy_forwards_requests():
+    observed: dict[str, object] = {}
+
+    class UpstreamHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            observed["get_path"] = self.path
+            body = json.dumps({"openclaw_bindings": []}).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_DELETE(self) -> None:
+            observed["delete_path"] = self.path
+            body = json.dumps(
+                {"status": "ok", "provider": "openclaw", "unbound_count": 3, "agent_ids": ["ag_1", "ag_2", "ag_3"]}
+            ).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    with _ThreadedServer(UpstreamHandler) as upstream:
+        with patched_proxy_target(upstream.url):
+            with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+                get_status, get_payload = _json_request(
+                    "GET",
+                    preview.url,
+                    "/api/user/openclaw-bindings",
+                )
+                delete_status, delete_payload = _json_request(
+                    "DELETE",
+                    preview.url,
+                    "/api/user/openclaw-bindings",
+                )
+
+    assert get_status == 200
+    assert get_payload == {"openclaw_bindings": []}
+    assert delete_status == 200
+    assert delete_payload == {
+        "status": "ok",
+        "provider": "openclaw",
+        "unbound_count": 3,
+        "agent_ids": ["ag_1", "ag_2", "ag_3"],
+    }
+    assert observed["get_path"] == "/v1/user/openclaw-bindings"
+    assert observed["delete_path"] == "/v1/user/openclaw-bindings"
+
+
 def test_rules_check_proxy_forwards_api_key_and_payload():
     observed: dict[str, object] = {}
 

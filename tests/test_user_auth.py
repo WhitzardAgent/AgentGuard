@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 
-from backend.agents.store import AgentRecord
+from backend.agents.store import AgentRecord, UserAgentBindingRecord
 from backend.api.app import create_app
 from backend.database.config import parse_mysql_url
 from backend.user.passwords import hash_password, verify_password
@@ -419,6 +419,145 @@ def test_console_visibility_requires_logged_in_user(monkeypatch):
     assert _visible_external_accounts(None) == set()
     assert _visible_external_accounts("missing-session") == set()
     assert _visible_external_accounts(session.token) == {("dify", "alice@example.com")}
+
+
+def test_delete_external_account_unbinds_matching_agents(monkeypatch):
+    store = FakeUserStore()
+    user = store.create_user(
+        "alice",
+        "correct horse",
+        email="alice@example.com",
+        verification_code="",
+        require_verified_email=False,
+    )
+    session = store.create_web_session(user)
+    mapping = store.bind_external_account(
+        user,
+        provider="n8n",
+        account_email="owner@example.com",
+    )
+    patch_user_store_and_email(monkeypatch, store)
+    calls: list[dict[str, object]] = []
+
+    class FakeAgentStore:
+        def unbind_agents_for_external_account(self, **kwargs):
+            calls.append(dict(kwargs))
+            return {"unbound_count": 1}
+
+    monkeypatch.setattr("backend.user.router.AgentStore", FakeAgentStore)
+    client = TestClient(create_app())
+
+    deleted = client.delete(
+        f"/v1/user/external-accounts/{mapping.id}",
+        cookies={"agentguard_user_session": session.token},
+    )
+
+    assert deleted.status_code == 200
+    assert deleted.json() == {"status": "ok", "external_account_id": mapping.id}
+    assert calls == [
+        {
+            "user_id": user.id,
+            "provider": "n8n",
+            "account_email": "owner@example.com",
+        }
+    ]
+    assert store.list_external_accounts(user) == []
+
+
+def test_list_openclaw_bindings_returns_user_agent_bindings(monkeypatch):
+    store = FakeUserStore()
+    user = store.create_user(
+        "alice",
+        "correct horse",
+        email="alice@example.com",
+        verification_code="",
+        require_verified_email=False,
+    )
+    session = store.create_web_session(user)
+    patch_user_store_and_email(monkeypatch, store)
+
+    class FakeAgentStore:
+        def list_user_agent_bindings(self, user_id: int, *, provider: str | None = None):
+            assert user_id == user.id
+            assert provider == "openclaw"
+            return [
+                UserAgentBindingRecord(
+                    user_id=user.id,
+                    agent_id="ag_openclaw_1",
+                    provider="openclaw",
+                    source="user_ticket_bootstrap",
+                    agent_name="agentguard-emailcase2",
+                    agent_status="active",
+                    provider_instance_id="openclaw-local",
+                    external_agent_id="agentguard-emailcase2",
+                    agent_type="agent",
+                )
+            ]
+
+    monkeypatch.setattr("backend.user.router.AgentStore", FakeAgentStore)
+    client = TestClient(create_app())
+
+    response = client.get(
+        "/v1/user/openclaw-bindings",
+        cookies={"agentguard_user_session": session.token},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "openclaw_bindings": [
+            {
+                "provider": "openclaw",
+                "account_email": "-",
+                "display_name": "-",
+                "agent_count": 1,
+            }
+        ]
+    }
+
+
+def test_delete_openclaw_binding_unbinds_all_openclaw_agents(monkeypatch):
+    store = FakeUserStore()
+    user = store.create_user(
+        "alice",
+        "correct horse",
+        email="alice@example.com",
+        verification_code="",
+        require_verified_email=False,
+    )
+    session = store.create_web_session(user)
+    patch_user_store_and_email(monkeypatch, store)
+    calls: list[dict[str, object]] = []
+
+    class FakeAgentStore:
+        def unbind_user_provider(self, **kwargs):
+            calls.append(dict(kwargs))
+            return {
+                "provider": "openclaw",
+                "unbound_count": 3,
+                "agent_ids": ["ag_openclaw_1", "ag_openclaw_2", "ag_openclaw_3"],
+            }
+
+    monkeypatch.setattr("backend.user.router.AgentStore", FakeAgentStore)
+    client = TestClient(create_app())
+
+    deleted = client.delete(
+        "/v1/user/openclaw-bindings",
+        cookies={"agentguard_user_session": session.token},
+    )
+
+    assert deleted.status_code == 200
+    assert deleted.json() == {
+        "status": "ok",
+        "provider": "openclaw",
+        "unbound_count": 3,
+        "agent_ids": ["ag_openclaw_1", "ag_openclaw_2", "ag_openclaw_3"],
+    }
+    assert calls == [
+        {
+            "user_id": user.id,
+            "provider": "openclaw",
+        }
+    ]
 
 
 def test_admin_user_payload_and_visibility_are_unrestricted(monkeypatch):

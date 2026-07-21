@@ -122,6 +122,24 @@ class AgentDeletionResult:
         }
 
 
+@dataclass(frozen=True)
+class UserAgentBindingRecord:
+    user_id: int
+    agent_id: str
+    provider: str
+    account_email: str | None = None
+    source: str | None = None
+    metadata_json: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    agent_name: str | None = None
+    agent_status: str = "active"
+    provider_instance_id: str | None = None
+    tenant_id: str | None = None
+    external_agent_id: str | None = None
+    agent_type: str | None = None
+
+
 class AgentStore:
     def __init__(self, db: MySQLDatabase | None = None) -> None:
         self.db = db or get_database()
@@ -302,7 +320,13 @@ class AgentStore:
             SELECT ua.agent_id
             FROM user_agents ua
             JOIN agents a ON a.agent_id = ua.agent_id
-            WHERE ua.user_id = %s AND a.status = 'active'
+            LEFT JOIN user_external_accounts uea
+              ON uea.user_id = ua.user_id
+             AND uea.provider = ua.provider
+             AND uea.account_email = ua.account_email
+            WHERE ua.user_id = %s
+              AND a.status = 'active'
+              AND (ua.account_email IS NULL OR uea.id IS NOT NULL)
             """,
             (int(user_id),),
         )
@@ -314,7 +338,13 @@ class AgentStore:
             SELECT ua.user_id
             FROM user_agents ua
             JOIN agents a ON a.agent_id = ua.agent_id
-            WHERE ua.agent_id = %s AND a.status = 'active'
+            LEFT JOIN user_external_accounts uea
+              ON uea.user_id = ua.user_id
+             AND uea.provider = ua.provider
+             AND uea.account_email = ua.account_email
+            WHERE ua.agent_id = %s
+              AND a.status = 'active'
+              AND (ua.account_email IS NULL OR uea.id IS NOT NULL)
             """,
             (str(agent_id or "").strip(),),
         )
@@ -402,6 +432,136 @@ class AgentStore:
             "matched_count": len(agent_ids),
             "created_count": created_count,
             "updated_count": updated_count,
+            "agent_ids": agent_ids,
+        }
+
+    def unbind_agents_for_external_account(
+        self,
+        *,
+        user_id: int,
+        provider: str,
+        account_email: str,
+    ) -> dict[str, Any]:
+        clean_provider = _normalize_provider(provider)
+        clean_email = _normalize_email_or_none(account_email)
+        if not clean_email:
+            return {
+                "provider": clean_provider,
+                "account_email": None,
+                "unbound_count": 0,
+                "agent_ids": [],
+            }
+        rows = self.db.fetchall(
+            """
+            SELECT agent_id
+            FROM user_agents
+            WHERE user_id = %s AND provider = %s AND account_email = %s
+            """,
+            (int(user_id), clean_provider, clean_email),
+        )
+        agent_ids = [str(row["agent_id"]) for row in rows]
+        changed = self.db.execute(
+            """
+            DELETE FROM user_agents
+            WHERE user_id = %s AND provider = %s AND account_email = %s
+            """,
+            (int(user_id), clean_provider, clean_email),
+        )
+        return {
+            "provider": clean_provider,
+            "account_email": clean_email,
+            "unbound_count": int(changed or 0),
+            "agent_ids": agent_ids,
+        }
+
+    def list_user_agent_bindings(
+        self,
+        user_id: int,
+        *,
+        provider: str | None = None,
+    ) -> list[UserAgentBindingRecord]:
+        params: list[Any] = [int(user_id)]
+        provider_clause = ""
+        if provider is not None:
+            provider_clause = "AND ua.provider = %s"
+            params.append(_normalize_provider(provider))
+        rows = self.db.fetchall(
+            f"""
+            SELECT ua.user_id, ua.agent_id, ua.provider, ua.account_email, ua.source,
+                   ua.metadata_json, ua.created_at, ua.updated_at, a.name AS agent_name,
+                   a.status AS agent_status, e.provider_instance_id, e.tenant_id,
+                   e.external_agent_id, e.agent_type
+            FROM user_agents ua
+            JOIN agents a ON a.agent_id = ua.agent_id
+            LEFT JOIN agent_external_identities e
+              ON e.agent_id = ua.agent_id
+             AND e.provider = ua.provider
+            LEFT JOIN user_external_accounts uea
+              ON uea.user_id = ua.user_id
+             AND uea.provider = ua.provider
+             AND uea.account_email = ua.account_email
+            WHERE ua.user_id = %s
+              AND a.status = 'active'
+              AND (ua.account_email IS NULL OR uea.id IS NOT NULL)
+              {provider_clause}
+            ORDER BY ua.updated_at DESC, ua.created_at DESC, ua.agent_id ASC
+            """,
+            tuple(params),
+        )
+        return [binding for binding in (_user_agent_binding_from_row(row) for row in rows) if binding is not None]
+
+    def unbind_user_agent(
+        self,
+        *,
+        user_id: int,
+        agent_id: str,
+        provider: str | None = None,
+    ) -> bool:
+        clean_agent_id = _normalize_required(agent_id, "agent_id")
+        if provider is None:
+            changed = self.db.execute(
+                """
+                DELETE FROM user_agents
+                WHERE user_id = %s AND agent_id = %s
+                """,
+                (int(user_id), clean_agent_id),
+            )
+        else:
+            changed = self.db.execute(
+                """
+                DELETE FROM user_agents
+                WHERE user_id = %s AND agent_id = %s AND provider = %s
+                """,
+                (int(user_id), clean_agent_id, _normalize_provider(provider)),
+            )
+        return changed > 0
+
+    def unbind_user_provider(
+        self,
+        *,
+        user_id: int,
+        provider: str,
+    ) -> dict[str, Any]:
+        clean_provider = _normalize_provider(provider)
+        rows = self.db.fetchall(
+            """
+            SELECT agent_id
+            FROM user_agents
+            WHERE user_id = %s AND provider = %s
+            """,
+            (int(user_id), clean_provider),
+        )
+        agent_ids = [str(row["agent_id"]) for row in rows]
+        changed = self.db.execute(
+            """
+            DELETE FROM user_agents
+            WHERE user_id = %s AND provider = %s
+            """,
+            (int(user_id), clean_provider),
+        )
+        return {
+            "provider": clean_provider,
+            "unbound_count": int(changed or 0),
             "agent_ids": agent_ids,
         }
 
@@ -1097,6 +1257,27 @@ def _agent_tool_params(record: AgentToolRecord) -> tuple[Any, ...]:
         record.schema_json,
         record.metadata_json,
         record.raw_payload_json,
+    )
+
+
+def _user_agent_binding_from_row(row: dict[str, Any] | None) -> UserAgentBindingRecord | None:
+    if not row:
+        return None
+    return UserAgentBindingRecord(
+        user_id=int(row["user_id"]),
+        agent_id=str(row["agent_id"]),
+        provider=str(row["provider"]),
+        account_email=_normalize_email_or_none(row.get("account_email")),
+        source=_optional_text(row.get("source")),
+        metadata_json=_optional_text(row.get("metadata_json")),
+        created_at=_coerce_datetime(row.get("created_at")) if row.get("created_at") else None,
+        updated_at=_coerce_datetime(row.get("updated_at")) if row.get("updated_at") else None,
+        agent_name=_optional_text(row.get("agent_name")),
+        agent_status=_optional_text(row.get("agent_status")) or "active",
+        provider_instance_id=_optional_text(row.get("provider_instance_id")),
+        tenant_id=_optional_text(row.get("tenant_id")),
+        external_agent_id=_optional_text(row.get("external_agent_id")),
+        agent_type=_optional_text(row.get("agent_type")),
     )
 
 

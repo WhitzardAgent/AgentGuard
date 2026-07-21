@@ -220,6 +220,78 @@ test("shared app core exposes agent-aware tool helpers", async () => {
   );
 });
 
+test("shared app core merges synthetic n8n resource agents into registered AgentGuard agents", async () => {
+  const listeners = {};
+  global.window = {
+    AgentGuardConfig: { apiBase: "http://127.0.0.1:38080" },
+    AgentGuardShell: {
+      setToolStatus() {},
+      setApiStatus() {},
+    },
+    addEventListener(name, handler) {
+      listeners[name] = handler;
+    },
+  };
+  global.localStorage = createStorage();
+  global.document = {
+    getElementById() {
+      return createToastElement();
+    },
+  };
+  global.fetch = async (url) => ({
+    ok: true,
+    async json() {
+      if (String(url).endsWith("/api/agents")) {
+        return [
+          {
+            agent_id: "ag_registered",
+            display_agent_id: "n8n:tZhuuNFuKnIVy0lc",
+            external_provider: "n8n",
+            agent_type: "workflow",
+            tool_count: 0,
+            tool_names: [],
+            skill_count: 0,
+            skill_names: [],
+            mcp_count: 0,
+            mcp_names: [],
+          },
+        ];
+      }
+      if (String(url).endsWith("/api/tools")) {
+        return [
+          {
+            owner_agent_id: "n8n:tZhuuNFuKnIVy0lc",
+            name: "HTTP_Request",
+            labels: {},
+            input_params: [],
+            external_provider: "n8n",
+            display_agent_id: "n8n:tZhuuNFuKnIVy0lc",
+          },
+        ];
+      }
+      return [];
+    },
+  });
+  global.setTimeout = (fn) => {
+    fn();
+    return 1;
+  };
+  global.clearTimeout = () => {};
+
+  delete require.cache[require.resolve("../static/common/app.js")];
+  require("../static/common/app.js");
+
+  const catalog = await global.window.AgentGuardData.refreshAgentCatalog();
+
+  assert.equal(catalog.length, 1);
+  assert.equal(catalog[0].agent_id, "ag_registered");
+  assert.equal(catalog[0].display_agent_id, "n8n:tZhuuNFuKnIVy0lc");
+  assert.equal(catalog[0].external_provider, "n8n");
+  assert.equal(catalog[0].agent_type, "workflow");
+  assert.equal(catalog[0].tool_count, 1);
+  assert.deepEqual(catalog[0].tool_names, ["HTTP_Request"]);
+});
+
 test("shared app core updates scoped tool labels through the new patch endpoint", async () => {
   const listeners = {};
   let lastFetchUrl = "";

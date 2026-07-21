@@ -419,6 +419,10 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
             self._proxy("v1/user/external-accounts", method="GET", query=query)
             return
 
+        if path == "/api/user/openclaw-bindings":
+            self._proxy("v1/user/openclaw-bindings", method="GET", query=query)
+            return
+
         if path == "/api/agents":
             self._proxy("agents", method="GET", query=query)
             return
@@ -570,6 +574,23 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
             mapping_id = path.rsplit("/", 1)[-1]
             self._proxy(
                 f"v1/user/external-accounts/{mapping_id}",
+                method="DELETE",
+                query=query,
+            )
+            return
+
+        if path == "/api/user/openclaw-bindings":
+            self._proxy(
+                "v1/user/openclaw-bindings",
+                method="DELETE",
+                query=query,
+            )
+            return
+
+        if path.startswith("/api/user/openclaw-bindings/"):
+            agent_id = path.rsplit("/", 1)[-1]
+            self._proxy(
+                f"v1/user/openclaw-bindings/{agent_id}",
                 method="DELETE",
                 query=query,
             )
