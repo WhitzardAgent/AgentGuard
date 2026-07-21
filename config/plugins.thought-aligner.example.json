@@ -16,7 +16,7 @@
           },
           "kwargs": {
             "timeout_s": 30,
-            "failure_mode": "deny",
+            "failure_mode": "allow",
             "max_history_items": 8,
             "max_instruction_chars": 12000,
             "max_thought_chars": 8000,

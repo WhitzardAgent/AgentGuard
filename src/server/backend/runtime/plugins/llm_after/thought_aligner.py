@@ -113,8 +113,8 @@ class ThoughtAlignerPlugin(BasePlugin):
         )
 
     def _failure_result(self) -> CheckResult:
-        failure_mode = str(getattr(self, "failure_mode", "deny") or "deny").lower()
-        if failure_mode == "allow":
+        failure_mode = str(getattr(self, "failure_mode", "allow") or "allow").lower()
+        if failure_mode != "deny":
             return CheckResult(
                 risk_signals=["thought_alignment_error"],
                 metadata={"thought_alignment": "error_allowed"},

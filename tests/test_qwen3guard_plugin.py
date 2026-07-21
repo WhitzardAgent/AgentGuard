@@ -18,6 +18,7 @@ from backend.runtime.manager import RuntimeManager
 from backend.runtime.plugins.llm_after.qwen3guard import (
     Qwen3GuardOutputPlugin as ServerQwen3GuardOutputPlugin,
 )
+from backend.runtime.plugins.llm_after.thought_aligner import ThoughtAlignerPlugin
 from backend.runtime.plugins.llm_before.qwen3guard import (
     Qwen3GuardInputPlugin as ServerQwen3GuardInputPlugin,
 )
@@ -110,6 +111,26 @@ def test_qwen3guard_output_sends_output_as_user_message_for_classification():
     assert captured == [[{"role": "user", "content": "dangerous model output"}]]
     assert result.decision_candidate is not None
     assert result.decision_candidate.decision_type == DecisionType.DENY
+
+
+def test_thought_aligner_failure_defaults_to_allow():
+    plugin = ThoughtAlignerPlugin()
+
+    result = plugin._failure_result()
+
+    assert result.decision_candidate is None
+    assert result.risk_signals == ["thought_alignment_error"]
+    assert result.metadata == {"thought_alignment": "error_allowed"}
+
+
+def test_thought_aligner_failure_can_be_forced_to_deny():
+    plugin = ThoughtAlignerPlugin(failure_mode="deny")
+
+    result = plugin._failure_result()
+
+    assert result.decision_candidate is not None
+    assert result.decision_candidate.decision_type == DecisionType.DENY
+    assert result.metadata == {"thought_alignment": "error_denied"}
 
 
 def test_qwen3guard_plugins_load_from_server_config():

@@ -18,6 +18,10 @@ class AdapterError(AgentGuardError):
     """Adapter wiring failure, e.g. missing optional dependency."""
 
 
+class DecisionBlockedError(AgentGuardError):
+    """A guard decision blocked the current adapter operation."""
+
+
 class SandboxError(AgentGuardError):
     """Sandbox execution boundary violation or failure."""
 

@@ -1,6 +1,7 @@
 ﻿"""LangChain agent adapter (best-effort, optional dependency)."""
 from __future__ import annotations
 
+import copy
 import functools
 import inspect
 import json
@@ -27,10 +28,11 @@ from agentguard.adapters.agent.patching import (
     set_attr,
     tool_name,
 )
+from agentguard.schemas import events as ev
 from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.decisions import DecisionType, GuardDecision
 from agentguard.tools.metadata import ToolMetadata
-from agentguard.utils.errors import AdapterError
+from agentguard.utils.errors import AdapterError, DecisionBlockedError
 
 
 def _module_name(obj: Any) -> str:
@@ -47,6 +49,16 @@ class LangChainAgentAdapter(BaseAgentAdapter):
         if owner is not None:
             meta["owner_type"] = type(owner).__name__
             meta["owner_module"] = type(owner).__module__
+        return meta
+
+    def _langchain_llm_meta(
+        self,
+        *,
+        label: str | None = None,
+        owner: Any = None,
+    ) -> dict[str, Any]:
+        meta = self._langchain_meta(label=label, owner=owner)
+        meta["thought_regeneration_supported"] = True
         return meta
 
     def can_wrap(self, agent: Any) -> bool:
@@ -100,7 +112,7 @@ class LangChainAgentAdapter(BaseAgentAdapter):
         _ = fn
         return LLMInputNormalization(
             payload=_normalize_langchain_request(args, kwargs),
-            metadata=self._langchain_meta(label=label, owner=owner),
+            metadata=self._langchain_llm_meta(label=label, owner=owner),
         )
 
     def denormalize_llm_input(
@@ -113,8 +125,13 @@ class LangChainAgentAdapter(BaseAgentAdapter):
         fn: Any = None,
         owner: Any = None,
     ) -> LLMInputDenormalization:
-        denormalized = _denormalize_langchain_request(
+        loopback_payload = _build_langchain_loopback_payload(
             payload=payload,
+            args=args,
+            kwargs=kwargs,
+        )
+        denormalized = _denormalize_langchain_request(
+            payload=loopback_payload if loopback_payload is not None else payload,
             args=args,
             kwargs=kwargs,
             fn=fn,
@@ -122,7 +139,7 @@ class LangChainAgentAdapter(BaseAgentAdapter):
         return LLMInputDenormalization(
             args=denormalized.args,
             kwargs=denormalized.kwargs,
-            metadata=self._langchain_meta(label=label, owner=owner),
+            metadata=self._langchain_llm_meta(label=label, owner=owner),
         )
 
     def normalize_llm_output(
@@ -136,8 +153,40 @@ class LangChainAgentAdapter(BaseAgentAdapter):
         _ = fn
         return LLMOutputNormalization(
             payload=_normalize_langchain_llm_output(output),
-            metadata=self._langchain_meta(label=label, owner=owner),
+            metadata=self._langchain_llm_meta(label=label, owner=owner),
         )
+
+    def handle_blocked_llm_decision(
+        self,
+        *,
+        guard: Any,
+        decision: GuardDecision,
+        label: str,
+        owner: Any = None,
+    ) -> Any:
+        if decision.decision_type == DecisionType.LOOP_BACK_TO_LLM:
+            return None
+
+        protocol = str((decision.metadata or {}).get("protocol") or "").strip()
+        block_metadata = self._langchain_llm_meta(label=label, owner=owner)
+        block_metadata.update(
+            {
+                "agentguard": "blocked",
+                "blocked_event": True,
+                "blocked_decision_type": decision.decision_type.value,
+            }
+        )
+        if protocol:
+            block_metadata["protocol"] = protocol
+
+        blocked_event = ev.final_response(
+            guard.context,
+            decision.reason,
+            **block_metadata,
+        )
+        guard.runtime.audit.record(blocked_event, decision)
+        guard.runtime.bus.publish(blocked_event)
+        raise DecisionBlockedError(decision.reason)
 
     def normalize_tool_invoke(
         self,
@@ -435,6 +484,86 @@ def _denormalize_langchain_request(
     return LLMInputDenormalization(args=tuple(current_args), kwargs=current_kwargs)
 
 
+def _build_langchain_loopback_payload(
+    *,
+    payload: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> dict[str, Any] | None:
+    if not isinstance(payload, str):
+        return None
+
+    aligned_thought = payload.strip()
+    if not aligned_thought:
+        return None
+
+    model_input = kwargs.get("input")
+    if model_input is None and args:
+        model_input = args[0]
+
+    rebuilt_input = _inject_langchain_thought_message(
+        _normalize_langchain_value(model_input),
+        aligned_thought,
+    )
+    if rebuilt_input is None:
+        return None
+
+    return {"input": rebuilt_input}
+
+
+def _inject_langchain_thought_message(
+    model_input: Any,
+    aligned_thought: str,
+) -> Any | None:
+    if isinstance(model_input, list):
+        updated = copy.deepcopy(model_input)
+        updated.append(_assistant_message_for_sequence(updated, aligned_thought))
+        return updated
+
+    if isinstance(model_input, dict):
+        if isinstance(model_input.get("messages"), list):
+            updated = copy.deepcopy(model_input)
+            messages = list(updated.get("messages") or [])
+            messages.append(_assistant_message_for_sequence(messages, aligned_thought))
+            updated["messages"] = messages
+            return updated
+
+        for nested_key in ("input", "prompt", "query", "request"):
+            nested = model_input.get(nested_key)
+            rebuilt_nested = _inject_langchain_thought_message(nested, aligned_thought)
+            if rebuilt_nested is not None:
+                updated = copy.deepcopy(model_input)
+                updated[nested_key] = rebuilt_nested
+                return updated
+
+    return None
+
+
+def _assistant_message_for_sequence(messages: Sequence[Any], aligned_thought: str) -> dict[str, Any]:
+    for item in reversed(messages):
+        if not isinstance(item, dict):
+            continue
+        message_type = str(item.get("type") or "").strip().lower()
+        if message_type:
+            return {"type": _assistant_type_for(message_type), "content": aligned_thought}
+        role = str(item.get("role") or "").strip().lower()
+        if role:
+            return {"role": _assistant_role_for(role), "content": aligned_thought}
+    return {"role": "assistant", "content": aligned_thought}
+
+
+def _assistant_type_for(message_type: str) -> str:
+    if message_type in {"assistant", "ai"}:
+        return "ai"
+    return "ai"
+
+
+def _assistant_role_for(role: str) -> str:
+    if role in {"assistant", "ai"}:
+        return "assistant"
+    return "assistant"
+
+
 def _set_langchain_argument(
     name: str,
     value: Any,
@@ -627,6 +756,7 @@ def _normalize_langchain_value(value: Any) -> Any:
         for attr in (
             "name",
             "id",
+            "tool_call_id",
             "tool_calls",
             "invalid_tool_calls",
             "additional_kwargs",
@@ -659,6 +789,7 @@ def _normalize_langchain_message_dict(value: Any) -> Any:
     for attr in (
         "name",
         "id",
+        "tool_call_id",
         "tool_calls",
         "invalid_tool_calls",
         "additional_kwargs",

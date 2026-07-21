@@ -49,6 +49,22 @@
           },
           "temperature": 0,
           "timeout_s": 20
+        },
+         {
+          "name": "thought_aligner",
+          "env": {
+            "base_url": "https://b9ko9jmahpqockpah8gbhc5he8kbp5g9.openapi-qb.sii.edu.cn/v1",
+            "api_key": "bOB2mlx+tXDhadnBL1K4DdY30W3i/XKK29a6oEhOj78=",
+            "model": "thought-aligner-7b"
+          },
+          "kwargs": {
+            "timeout_s": 30,
+            "failure_mode": "allow",
+            "max_history_items": 8,
+            "max_instruction_chars": 12000,
+            "max_thought_chars": 8000,
+            "max_observation_chars": 12000
+          }
         }
       ]
     },

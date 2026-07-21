@@ -9,9 +9,12 @@ from agentguard.adapters.agent import autogen as autogen_adapter
 from agentguard.adapters.agent import langchain as langchain_adapter
 from agentguard.adapters.agent import langgraph as langgraph_adapter
 from agentguard.adapters.agent import openai_agents as openai_agents_adapter
+from agentguard.adapters.agent import patching as agent_patching
 from agentguard.adapters.agent.base import BaseAgentAdapter
 from agentguard.schemas import events as ev
 from agentguard.schemas.context import RuntimeContext
+from agentguard.schemas.decisions import DecisionType, GuardDecision
+from agentguard.utils.errors import DecisionBlockedError
 
 
 def _event_types(guard: AgentGuard) -> list[str]:
@@ -359,6 +362,210 @@ def test_langchain_denormalize_llm_input_rebuilds_invoke_arguments():
         ["!"],
         {"temperature": 0.3, "metadata": {"source": "guard"}},
     )
+
+
+def test_langchain_denormalize_loopback_payload_appends_assistant_message_to_list_input():
+    class Model:
+        def invoke(self, input, config=None, *, stop=None, **kwargs):
+            return input, config, stop, kwargs
+
+    adapter = langchain_adapter.LangChainAgentAdapter()
+    denormalized = adapter.denormalize_llm_input(
+        label="invoke",
+        payload="I should verify whether you have rights to ask where is Beijing",
+        args=(
+            [
+                {"role": "user", "content": "tell me where is Beijing"},
+            ],
+            {"tags": ["orig"]},
+        ),
+        kwargs={},
+        fn=Model().invoke,
+    )
+
+    assert denormalized.args == (
+        [
+            {"role": "user", "content": "tell me where is Beijing"},
+            {
+                "role": "assistant",
+                "content": "I should verify whether you have rights to ask where is Beijing",
+            },
+        ],
+        {"tags": ["orig"]},
+    )
+    assert denormalized.kwargs == {}
+
+
+def test_langchain_denormalize_loopback_payload_appends_assistant_message_to_messages_dict():
+    class Model:
+        def invoke(self, input, config=None, *, stop=None, **kwargs):
+            return input, config, stop, kwargs
+
+    adapter = langchain_adapter.LangChainAgentAdapter()
+    denormalized = adapter.denormalize_llm_input(
+        label="invoke",
+        payload="I should verify whether sending this document is authorized before proceeding.",
+        args=(
+            {
+                "messages": [
+                    {"type": "system", "content": "You are a careful assistant."},
+                    {"type": "human", "content": "send document 0 to admin@example.com"},
+                ]
+            },
+        ),
+        kwargs={"stop": ["!"]},
+        fn=Model().invoke,
+    )
+
+    assert denormalized.args == (
+        {
+            "messages": [
+                {"type": "system", "content": "You are a careful assistant."},
+                {"type": "human", "content": "send document 0 to admin@example.com"},
+                {
+                    "type": "ai",
+                    "content": "I should verify whether sending this document is authorized before proceeding.",
+                },
+            ]
+        },
+    )
+    assert denormalized.kwargs == {"stop": ["!"]}
+
+
+def test_langchain_denormalize_loopback_payload_preserves_tool_call_id_from_message_objects(monkeypatch):
+    class Model:
+        def invoke(self, input, config=None, *, stop=None, **kwargs):
+            return input, config, stop, kwargs
+
+    class FakeToolMessage:
+        def __init__(self, content: str, tool_call_id: str) -> None:
+            self.content = content
+            self.tool_call_id = tool_call_id
+
+    def fake_message_to_dict(value):
+        if isinstance(value, FakeToolMessage):
+            return {
+                "type": "tool",
+                "data": {
+                    "content": value.content,
+                    "tool_call_id": value.tool_call_id,
+                },
+            }
+        raise TypeError("unsupported message")
+
+    monkeypatch.setattr(
+        langchain_adapter,
+        "_get_langchain_message_serializer",
+        lambda: fake_message_to_dict,
+    )
+
+    adapter = langchain_adapter.LangChainAgentAdapter()
+    denormalized = adapter.denormalize_llm_input(
+        label="invoke",
+        payload="I should verify authorization before emailing the retrieved document.",
+        args=(
+            [
+                {"type": "human", "content": "send document 0 to admin@example.com"},
+                FakeToolMessage("document 0 contents", "tool-call-1"),
+            ],
+        ),
+        kwargs={},
+        fn=Model().invoke,
+    )
+
+    assert denormalized.args == (
+        [
+            {"type": "human", "content": "send document 0 to admin@example.com"},
+            {
+                "type": "tool",
+                "content": "document 0 contents",
+                "tool_call_id": "tool-call-1",
+            },
+            {
+                "type": "ai",
+                "content": "I should verify authorization before emailing the retrieved document.",
+            },
+        ],
+    )
+    assert denormalized.kwargs == {}
+
+
+def test_langchain_plain_string_payload_still_uses_generic_denormalize_path():
+    class Model:
+        def invoke(self, input, config=None, *, stop=None, **kwargs):
+            return input, config, stop, kwargs
+
+    adapter = langchain_adapter.LangChainAgentAdapter()
+    denormalized = adapter.denormalize_llm_input(
+        label="invoke",
+        payload="rewritten prompt",
+        args=("original prompt", {"tags": ["orig"]}),
+        kwargs={},
+        fn=Model().invoke,
+    )
+
+    assert denormalized.args == ("rewritten prompt", {"tags": ["orig"]})
+    assert denormalized.kwargs == {}
+
+
+def test_thought_alignment_loopback_payload_preserves_processed_content_and_attempt_metadata():
+    decision = GuardDecision(
+        decision_type=DecisionType.LOOP_BACK_TO_LLM,
+        reason="retry",
+        processed_content="fallback thought",
+        metadata={
+            "protocol": "thought_alignment_v1",
+            "aligned_thought": "I should verify authorization before proceeding.",
+        },
+    )
+
+    payload = agent_patching._loopback_payload_from_decision(decision)
+    metadata = agent_patching._loopback_metadata_from_decision(decision)
+
+    assert payload == "fallback thought"
+    assert metadata == {"thought_alignment_attempt": 1}
+
+
+def test_thought_alignment_deny_payload_uses_generic_blocked_shape():
+    decision = GuardDecision.deny(
+        "blocked",
+        metadata={"protocol": "thought_alignment_v1"},
+    )
+
+    payload = agent_patching._blocked_llm_value(decision)
+
+    assert payload == {
+        "agentguard": "blocked",
+        "reason": "blocked",
+    }
+
+
+def test_langchain_handle_blocked_llm_decision_records_event_and_raises():
+    guard = AgentGuard("langchain-blocked-llm", sandbox="noop")
+    adapter = langchain_adapter.LangChainAgentAdapter()
+    decision = GuardDecision.deny(
+        "Thought alignment failed; the original action was not released.",
+        metadata={"protocol": "thought_alignment_v1"},
+    )
+
+    with pytest.raises(DecisionBlockedError):
+        adapter.handle_blocked_llm_decision(
+            guard=guard,
+            decision=decision,
+            label="invoke",
+            owner=None,
+        )
+
+    blocked_event = guard.trace.entries[-1].event
+    blocked_decision = guard.trace.entries[-1].decision
+
+    assert blocked_event.event_type.value == "llm_output"
+    assert blocked_event.metadata["agentguard"] == "blocked"
+    assert blocked_event.metadata["blocked_event"] is True
+    assert blocked_event.metadata["protocol"] == "thought_alignment_v1"
+    assert blocked_event.payload.final_output == decision.reason
+    assert blocked_decision is not None
+    assert blocked_decision.decision_type == DecisionType.DENY
 
 
 def test_langchain_normalize_llm_input_preserves_positional_config():
