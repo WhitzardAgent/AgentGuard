@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 import inspect
+import re
 from typing import Any, Protocol, runtime_checkable
 
 from agentguard.tools.metadata import ToolMetadata
@@ -180,7 +181,7 @@ class _FallbackAgentEventNormalizer:
     ) -> LLMOutputNormalization:
         _ = fn
         return LLMOutputNormalization(
-            payload=self.normalize_value(output),
+            payload=normalize_generic_llm_output_payload(self.normalize_value(output)),
             metadata=self._metadata(label=label, owner=owner),
         )
 
@@ -239,6 +240,147 @@ class _FallbackAgentEventNormalizer:
 
 
 DEFAULT_AGENT_EVENT_NORMALIZER = _FallbackAgentEventNormalizer()
+
+
+@dataclass(frozen=True)
+class ParsedLLMOutput:
+    thought: str | None
+    final_output: str | None
+
+
+_THOUGHT_TAG_RE = re.compile(
+    r"<(?P<tag>think|thought|reason|reasoning|analysis)\b[^>]*>(?P<body>.*?)</(?P=tag)>",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+_FINAL_TAG_RE = re.compile(
+    r"<(?P<tag>answer|final|final_output)\b[^>]*>(?P<body>.*?)</(?P=tag)>",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+_REACT_THOUGHT_RE = re.compile(
+    r"(?:^|\n)\s*(?:Thought|Reasoning|Analysis|思考)\s*:\s*(?P<body>.*?)"
+    r"(?=\n\s*(?:Action(?:\s+Input)?|Observation|Final\s+Answer|Answer|"
+    r"行动|观察|最终答案)\s*:|\Z)",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+_REASONING_KEYS = (
+    "thought",
+    "reasoning_content",
+    "reasoningContent",
+    "reasoning",
+    "thinking",
+    "plan",
+    "analysis",
+)
+
+
+def normalize_generic_llm_output_payload(value: Any) -> Any:
+    if isinstance(value, str):
+        parsed = parse_generic_llm_output_text(value)
+        if parsed.thought is None:
+            return value
+        return {
+            "output": value,
+            "thought": parsed.thought,
+            "final_output": parsed.final_output,
+        }
+
+    if not isinstance(value, dict):
+        return value
+
+    payload = dict(value)
+    content = _first_non_empty_text(payload, "output", "text", "content", "message")
+    explicit_thought = _first_non_empty_text(payload, "thought")
+    nested_thought = _nested_reasoning_value(payload) if explicit_thought is None else None
+    thought = explicit_thought or nested_thought
+    final_output = _first_non_empty_text(payload, "final_output")
+
+    parsed = parse_generic_llm_output_text(content) if content is not None else ParsedLLMOutput(None, None)
+    if thought is None:
+        thought = parsed.thought
+    if final_output is None:
+        final_output = parsed.final_output if parsed.thought is not None else content
+
+    if thought is None and "final_output" not in payload:
+        return value
+
+    if content is not None:
+        payload["output"] = content
+    if thought is not None:
+        payload["thought"] = thought
+    payload["final_output"] = final_output
+    return payload
+
+
+def parse_generic_llm_output_text(output: str) -> ParsedLLMOutput:
+    thought_matches = list(_THOUGHT_TAG_RE.finditer(output))
+    if not thought_matches:
+        react_match = _REACT_THOUGHT_RE.search(output)
+        if react_match is None:
+            return ParsedLLMOutput(thought=None, final_output=output)
+        thought = react_match.group("body").strip() or None
+        remainder = f"{output[:react_match.start()]}{output[react_match.end():]}".strip()
+        final_output = (
+            None
+            if re.match(r"^\s*Action\s*:", remainder, flags=re.IGNORECASE)
+            else remainder
+        )
+        return ParsedLLMOutput(thought=thought, final_output=final_output)
+
+    thought_parts = [match.group("body").strip() for match in thought_matches]
+    thought = "\n\n".join(part for part in thought_parts if part) or None
+    remainder = _THOUGHT_TAG_RE.sub("", output).strip()
+
+    final_matches = list(_FINAL_TAG_RE.finditer(remainder))
+    if final_matches:
+        final_parts = [match.group("body").strip() for match in final_matches]
+        final_output = "\n\n".join(part for part in final_parts if part) or None
+    else:
+        final_output = remainder or None
+    return ParsedLLMOutput(thought=thought, final_output=final_output)
+
+
+def _first_non_empty_text(value: dict[str, Any], *keys: str) -> str | None:
+    for key in keys:
+        item = value.get(key)
+        if isinstance(item, str) and item.strip():
+            return item
+    return None
+
+
+def _nested_reasoning_value(value: Any, depth: int = 0) -> str | None:
+    if depth > 5:
+        return None
+    if isinstance(value, dict):
+        for key in _REASONING_KEYS:
+            text = _reasoning_text(value.get(key))
+            if text:
+                return text
+        for item in value.values():
+            nested = _nested_reasoning_value(item, depth + 1)
+            if nested:
+                return nested
+    elif isinstance(value, list):
+        for item in value:
+            nested = _nested_reasoning_value(item, depth + 1)
+            if nested:
+                return nested
+    return None
+
+
+def _reasoning_text(value: Any) -> str | None:
+    if isinstance(value, str):
+        return value.strip() or None
+    if isinstance(value, list):
+        parts: list[str] = []
+        for item in value:
+            if isinstance(item, str) and item.strip():
+                parts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text") or item.get("content") or item.get("summary")
+                if isinstance(text, str) and text.strip():
+                    parts.append(text)
+        return "\n".join(parts).strip() or None
+    return None
 
 
 def denormalize_llm_input_payload(
@@ -371,7 +513,10 @@ __all__ = [
     "LLMInputDenormalization",
     "LLMInputNormalization",
     "LLMOutputNormalization",
+    "ParsedLLMOutput",
     "ToolInvokeNormalization",
     "ToolResultNormalization",
     "denormalize_llm_input_payload",
+    "normalize_generic_llm_output_payload",
+    "parse_generic_llm_output_text",
 ]

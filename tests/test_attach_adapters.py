@@ -45,6 +45,45 @@ def test_base_agent_adapter_attach_delegates_to_patch_hooks():
     assert adapter.patchLLM(object(), object()) == 3
 
 
+def test_base_agent_adapter_extracts_react_thought_from_string_output():
+    adapter = BaseAgentAdapter()
+    normalized = adapter.normalize_llm_output(
+        label="invoke",
+        output=(
+            "Thought: I should verify the destination first.\n"
+            "Action: send_email\n"
+            'Action Input: {"to": "external@example.com"}'
+        ),
+    ).payload
+
+    event = ev.llm_output(RuntimeContext(session_id="s"), normalized)
+
+    assert normalized["thought"] == "I should verify the destination first."
+    assert normalized["final_output"] is None
+    assert event.payload.thought == "I should verify the destination first."
+    assert event.payload.final_output is None
+
+
+def test_base_agent_adapter_extracts_nested_reasoning_from_dict_output():
+    adapter = BaseAgentAdapter()
+    normalized = adapter.normalize_llm_output(
+        label="invoke",
+        output={
+            "content": "visible answer",
+            "metadata": {"reasoning_content": "hidden reasoning"},
+        },
+    ).payload
+
+    event = ev.llm_output(RuntimeContext(session_id="s"), normalized)
+
+    assert normalized["output"] == "visible answer"
+    assert normalized["thought"] == "hidden reasoning"
+    assert normalized["final_output"] == "visible answer"
+    assert event.payload.output == "visible answer"
+    assert event.payload.thought == "hidden reasoning"
+    assert event.payload.final_output == "visible answer"
+
+
 def test_wrap_agent_is_not_exposed():
     guard = AgentGuard("wrap-disabled", sandbox="noop")
     assert not hasattr(guard, "wrap_agent")
@@ -266,6 +305,24 @@ def test_langchain_output_splits_think_tags_when_reasoning_content_missing():
     assert event.payload.output == content
     assert event.payload.thought == "hidden reasoning"
     assert event.payload.final_output == "visible answer"
+
+
+def test_langchain_output_extracts_plain_react_thought_before_action():
+    adapter = langchain_adapter.LangChainAgentAdapter()
+    content = (
+        "Thought: I should inspect the destination first.\n"
+        "Action: send_email\n"
+        'Action Input: {"to": "external@example.com"}'
+    )
+
+    normalized = adapter.normalize_llm_output(
+        label="invoke",
+        output=content,
+    ).payload
+
+    assert normalized["output"] == content
+    assert normalized["thought"] == "I should inspect the destination first."
+    assert normalized["final_output"] is None
 
 
 def test_langchain_denormalize_llm_input_rebuilds_invoke_arguments():

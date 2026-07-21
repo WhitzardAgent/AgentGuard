@@ -143,7 +143,7 @@ Server plugin spec 从 `config/plugins.json` 或运行时 plugin config 的 `ser
 - `name`：注册后的 plugin 名称。
 - `class` 或 `plugin`：也可以作为 `name` 的替代形式，用来写导入路径。
 - 当前 server runtime 会按 `name` 或导入路径解析 plugin 类。
-- 额外字段会保留在配置中，但当前 server plugin manager 不会把 `env` 或 `kwargs` 注入 server plugin 构造函数。
+- `kwargs` 的值会传给 plugin 构造函数；`env` 可以把构造参数名映射为 `$MY_PLUGIN_API_KEY` 这类环境变量引用，并由 server 进程解析。
 
 ## 输出
 

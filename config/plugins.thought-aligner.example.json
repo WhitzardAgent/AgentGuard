@@ -1,0 +1,42 @@
+{
+  "phases": {
+    "llm_before": {
+      "client": [],
+      "server": []
+    },
+    "llm_after": {
+      "client": [],
+      "server": [
+        {
+          "name": "thought_aligner",
+          "env": {
+            "base_url": "$THOUGHT_ALIGNER_BASE_URL",
+            "api_key": "$THOUGHT_ALIGNER_API_KEY",
+            "model": "$THOUGHT_ALIGNER_MODEL"
+          },
+          "kwargs": {
+            "timeout_s": 30,
+            "failure_mode": "deny",
+            "max_history_items": 8,
+            "max_instruction_chars": 12000,
+            "max_thought_chars": 8000,
+            "max_observation_chars": 12000
+          }
+        }
+      ]
+    },
+    "tool_before": {
+      "client": [],
+      "server": [
+        {
+          "name": "rule_based_plugin",
+          "env": {}
+        }
+      ]
+    },
+    "tool_after": {
+      "client": [],
+      "server": []
+    }
+  }
+}

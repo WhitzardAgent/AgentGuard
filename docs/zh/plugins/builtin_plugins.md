@@ -10,5 +10,6 @@ AgentGuard 提供了一组面向常见运行时防护需求的内置 plugin。�
 
 - [rule_based_plugin](rule_based_plugin.md)：一个仅运行在 server 侧的规则引擎，用于工具调用访问控制和策略评估；它既可以直接返回固定的 `ALLOW` / `DENY`，也可以把命中的情况转入 `HUMAN_CHECK` / `LLM_CHECK`。
 - [jailbreak_check](jailbreak_check.md)：同一个 LLM 输入检测器也可以部署在 AgentGuard Server 侧，用于集中式治理和审计。
+- [Thought-Aligner](thought_aligner.md)：一个按需启用的 `llm_after` 防御，在 server 侧改写可获得的推理，并让兼容的 Python client 在执行前重新生成 Action。
 
 代码库里还有其他工具型 plugin，但这个页面当前聚焦于已经在公开文档中单独展开说明的内置 plugin。

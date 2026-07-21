@@ -13,6 +13,7 @@ from agentguard.adapters.agent.normalization import (
     ToolInvokeNormalization,
     ToolResultNormalization,
     denormalize_llm_input_payload,
+    normalize_generic_llm_output_payload,
 )
 from agentguard.schemas.context import RuntimeContext
 from agentguard.tools.metadata import ToolMetadata
@@ -152,7 +153,7 @@ class BaseAgentAdapter:
     ) -> LLMOutputNormalization:
         _ = fn
         return LLMOutputNormalization(
-            payload=self.normalize_value(output),
+            payload=normalize_generic_llm_output_payload(self.normalize_value(output)),
             metadata=self._metadata(label=label, owner=owner),
         )
 

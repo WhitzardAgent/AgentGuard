@@ -143,7 +143,7 @@ Server plugin specs are read from the `server` list in `config/plugins.json` or 
 - `name`: registered plugin name.
 - `class` or `plugin`: optional import-path alternatives to `name`.
 - The current server runtime resolves plugin classes by `name` or import path.
-- Extra fields may remain in stored config, but the current server plugin manager does not inject `env` or `kwargs` into server plugin constructors.
+- `kwargs` values are passed to the plugin constructor. `env` maps constructor attribute names to environment-variable references such as `$MY_PLUGIN_API_KEY`; references are resolved in the server process.
 
 ## Output
 
