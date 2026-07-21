@@ -148,6 +148,115 @@ def test_rules_page_uses_single_bundle_script():
     assert '/static/common/app.js' not in body
 
 
+def test_security_audit_page_is_available():
+    with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+        status, body = _text_request("GET", preview.url, "/security-audit")
+
+    assert status == 200
+    assert "Agent Security Audit - AgentGuard" in body
+    assert "/static/pages/security-audit/security-audit.js" in body
+    assert 'href="/security-audit.html"' in body
+    assert 'id="security-audit-selected-agent"' in body
+    assert 'id="security-audit-settings-open"' in body
+    assert 'id="security-audit-llm-api-key" type="password"' in body
+    assert "Saved only in this browser" in body
+    assert 'id="security-audit-agent"' not in body
+    assert "Created (Beijing time)" in body
+    assert body.index('href="/mcps.html"') < body.index('href="/security-audit.html"')
+    assert 'href="/security-audit.html" data-agent-required="true" data-admin-required="true"' in body
+
+
+def test_security_audit_page_renders_chinese_when_language_cookie_set():
+    with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+        status, _headers, raw = _raw_request(
+            "GET",
+            preview.url,
+            "/security-audit.html",
+            headers={"Cookie": "agentguard.language=zh"},
+        )
+
+    body = raw.decode("utf-8")
+    assert status == 200
+    assert 'data-agentguard-server-language="zh"' in body
+    assert "智能体安全审计" in body
+    assert "开始新的审计" in body
+    assert "开始审计" in body
+    assert "安全发现" in body
+    assert "创建时间（北京时间）" in body
+
+
+def test_security_audit_javascript_uses_beijing_time_and_verification_labels():
+    with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+        status, body = _text_request(
+            "GET",
+            preview.url,
+            "/static/pages/security-audit/security-audit.js",
+        )
+
+    assert status == 200
+    assert 'timeZone: "Asia/Shanghai"' in body
+    assert "Number(hour) - 8" in body
+    assert 'finding.verification === "confirmed"' in body
+    assert 'agentguard.securityAuditLlmConfig' in body
+    assert 'body.llm_config = llmConfig' in body
+    assert 'elements.auditor.value !== "rule_agent_security"' in body
+
+
+def test_security_audit_proxy_forwards_query_and_payload():
+    observed: dict[str, object] = {}
+
+    class UpstreamHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            observed["get_path"] = self.path
+            body = json.dumps({"runs": []}).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self) -> None:
+            observed["post_path"] = self.path
+            length = int(self.headers.get("Content-Length", "0"))
+            observed["body"] = self.rfile.read(length).decode("utf-8")
+            body = json.dumps({"run_id": "audit-1", "status": "queued"}).encode("utf-8")
+            self.send_response(HTTPStatus.ACCEPTED)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    with _ThreadedServer(UpstreamHandler) as upstream:
+        with patched_proxy_target(upstream.url):
+            with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+                get_status, get_payload = _json_request(
+                    "GET",
+                    preview.url,
+                    "/api/security-audits?agent_id=agent-alpha&limit=10",
+                )
+                post_status, post_payload = _json_request(
+                    "POST",
+                    preview.url,
+                    "/api/security-audits",
+                    {"agent_id": "agent-alpha", "auditor_name": "rule_agent_security"},
+                )
+
+    assert get_status == 200
+    assert get_payload == {"runs": []}
+    assert observed["get_path"] == "/v1/backend/security-audits?agent_id=agent-alpha&limit=10"
+    # The preview proxy intentionally normalizes successful upstream responses to 200.
+    assert post_status == 200
+    assert post_payload == {"run_id": "audit-1", "status": "queued"}
+    assert observed["post_path"] == "/v1/backend/security-audits"
+    assert json.loads(str(observed["body"])) == {
+        "agent_id": "agent-alpha",
+        "auditor_name": "rule_agent_security",
+    }
+
+
 def test_rules_bundle_includes_configured_app_prefix_and_module_sources():
     with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
         status, headers, raw = _raw_request("GET", preview.url, "/static/bundles/rules-page.js")

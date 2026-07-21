@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Security Audit - AgentGuard</title>
+  <script src="/static/common/i18n.js"></script>
+  <script>
+    (function () {
+      try {
+        if (!String(window.localStorage.getItem("agentguard.selectedAgentId") || "").trim()) {
+          window.location.replace("/agents.html");
+        }
+      } catch {
+        window.location.replace("/agents.html");
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/common/styles.css">
+  <link rel="stylesheet" href="/static/pages/security-audit/security-audit.css">
+</head>
+<body>
+  <div class="app-shell">
+{{ shared:sidebar }}
+    <main class="app-main security-audit-main">
+      <section class="page-intro-card skill-hero security-audit-hero">
+        <div class="skill-hero-copy">
+          <p class="page-kicker" data-i18n="Agent Security Audit">Agent Security Audit</p>
+          <h1><span data-i18n="Audit all activity for">Audit all activity for</span> <span id="security-audit-selected-agent">the selected agent</span>.</h1>
+          <p class="subtle skill-hero-description" data-i18n="Review every user's sessions and traces with deterministic rules and evidence-backed LLM analysis.">Review every user's sessions and traces with deterministic rules and evidence-backed LLM analysis.</p>
+        </div>
+        <div class="skill-hero-metrics security-audit-metrics" aria-label="Security audit summary" data-i18n-aria-label="Security audit summary">
+          <div class="skill-metric-tile">
+            <span id="security-audit-latest-status">—</span>
+            <strong data-i18n="Latest status">Latest status</strong>
+          </div>
+          <div class="skill-metric-tile">
+            <span id="security-audit-latest-risk">—</span>
+            <strong data-i18n="Latest risk">Latest risk</strong>
+          </div>
+          <div class="skill-metric-tile">
+            <span id="security-audit-latest-events">0</span>
+            <strong data-i18n="Trace events">Trace events</strong>
+          </div>
+        </div>
+      </section>
+
+      <div id="agentguard-page-context" hidden>
+        <span id="agentguard-page-context-title">Agent Security Audit</span>
+        <span id="agentguard-page-context-description">Review all users, sessions, and traces for the selected agent.</span>
+      </div>
+
+      <section class="card security-audit-control-card">
+        <div class="heading-row">
+          <div>
+            <h3 data-i18n="Start a new audit">Start a new audit</h3>
+            <p class="subtle" data-i18n="Rule audits finish quickly. LLM and hybrid audits may take several minutes.">Rule audits finish quickly. LLM and hybrid audits may take several minutes.</p>
+          </div>
+          <div class="heading-actions">
+            <button class="btn" id="security-audit-settings-open" type="button" data-i18n="LLM Settings">LLM Settings</button>
+            <button class="icon-label" id="security-audit-refresh" type="button" aria-label="Refresh audit runs" title="Refresh audit runs" data-i18n-aria-label="Refresh audit runs" data-i18n-title="Refresh audit runs">
+              <img class="btn-icon-image" src="/assets/refresh.png" alt="">
+            </button>
+          </div>
+        </div>
+        <div class="security-audit-form-grid">
+          <label><span data-i18n="Audit mode">Audit mode</span>
+            <select id="security-audit-auditor"></select>
+          </label>
+          <label><span data-i18n="Start time, Beijing (optional)">Start time, Beijing (optional)</span>
+            <input id="security-audit-start" type="datetime-local">
+          </label>
+          <label><span data-i18n="End time, Beijing (optional)">End time, Beijing (optional)</span>
+            <input id="security-audit-end" type="datetime-local">
+          </label>
+          <div class="security-audit-submit-wrap">
+            <button class="btn primary" id="security-audit-run" type="button" data-i18n="Start Audit">Start Audit</button>
+          </div>
+        </div>
+        <p class="security-audit-message subtle" id="security-audit-message"></p>
+      </section>
+
+      <section class="card security-audit-runs-card">
+        <div class="heading-row">
+          <div>
+            <h3 data-i18n="Audit history">Audit history</h3>
+            <p class="subtle" data-i18n="Select a run to inspect its report and trace evidence.">Select a run to inspect its report and trace evidence.</p>
+          </div>
+        </div>
+        <div class="runtime-table-wrap">
+          <table class="table security-audit-table">
+            <thead><tr>
+              <th data-i18n="Created (Beijing time)">Created (Beijing time)</th>
+              <th data-i18n="Mode">Mode</th>
+              <th data-i18n="Status / Stage">Status / Stage</th>
+              <th data-i18n="Risk">Risk</th>
+              <th data-i18n="Coverage">Coverage</th>
+              <th data-i18n="Duration">Duration</th>
+            </tr></thead>
+            <tbody id="security-audit-runs"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="security-audit-report-grid">
+        <div class="card security-audit-report-card">
+          <div class="runtime-section-head"><h3 data-i18n="Audit report">Audit report</h3></div>
+          <div id="security-audit-report" class="security-audit-report subtle" data-i18n="Select an audit run.">Select an audit run.</div>
+        </div>
+        <div class="card security-audit-findings-card">
+          <div class="runtime-section-head"><h3 data-i18n="Security findings">Security findings</h3></div>
+          <div id="security-audit-findings" class="security-audit-findings"></div>
+        </div>
+      </section>
+    </main>
+    <div class="security-audit-settings-backdrop" id="security-audit-settings-backdrop" hidden>
+      <section class="card security-audit-settings-dialog" role="dialog" aria-modal="true" aria-labelledby="security-audit-settings-title">
+        <div class="heading-row">
+          <div>
+            <h3 id="security-audit-settings-title" data-i18n="Security audit LLM settings">Security audit LLM settings</h3>
+            <p class="subtle" data-i18n="Saved only in this browser and sent only when starting an LLM or hybrid audit. Leave fields blank to use server defaults.">Saved only in this browser and sent only when starting an LLM or hybrid audit. Leave fields blank to use server defaults.</p>
+          </div>
+          <button class="icon-label" id="security-audit-settings-close" type="button" aria-label="Close LLM settings" title="Close LLM settings" data-i18n-aria-label="Close LLM settings" data-i18n-title="Close LLM settings">
+            <img class="btn-icon-image" src="/assets/close.png" alt="">
+          </button>
+        </div>
+        <div class="security-audit-settings-grid">
+          <label><span data-i18n="Model">Model</span>
+            <input id="security-audit-llm-model" type="text" autocomplete="off" placeholder="gpt-4o-mini">
+          </label>
+          <label><span data-i18n="Base URL">Base URL</span>
+            <input id="security-audit-llm-base-url" type="url" autocomplete="off" placeholder="https://api.openai.com/v1">
+          </label>
+          <label><span data-i18n="API Key">API Key</span>
+            <input id="security-audit-llm-api-key" type="password" autocomplete="off" placeholder="sk-...">
+          </label>
+          <label><span data-i18n="Timeout (seconds)">Timeout (seconds)</span>
+            <input id="security-audit-llm-timeout" type="number" min="1" max="600" step="1" placeholder="120">
+          </label>
+          <label><span data-i18n="Events per LLM chunk">Events per LLM chunk</span>
+            <input id="security-audit-llm-chunk-events" type="number" min="1" max="500" step="1" placeholder="40">
+          </label>
+        </div>
+        <div class="security-audit-settings-actions">
+          <span class="subtle" id="security-audit-settings-status"></span>
+          <button class="btn" id="security-audit-settings-cancel" type="button" data-i18n="Cancel">Cancel</button>
+          <button class="btn primary" id="security-audit-settings-save" type="button" data-i18n="Save settings">Save settings</button>
+        </div>
+      </section>
+    </div>
+    <div class="toast" id="toast"></div>
+  </div>
+  <script src="/static/common/messages.js"></script>
+  <script src="/static/common/page-shell.js"></script>
+  <script src="/static/common/app.js"></script>
+  <script src="/static/common/ui-helpers.js"></script>
+  <script src="/static/pages/security-audit/security-audit.js"></script>
+</body>
+</html>

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import json
+import mimetypes
+import os
+import re
 from email.utils import formatdate
 from html import escape as html_escape
 from html.parser import HTMLParser
@@ -7,14 +11,10 @@ from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-import json
-import mimetypes
-import os
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import unquote, urljoin, urlparse
 from urllib.request import Request, urlopen
-import re
 
 # The mock backend is an optional offline-preview helper. Production deployments
 # proxy to a real AgentGuard server and do not require it.
@@ -107,6 +107,8 @@ PAGE_ROUTES = {
     "/rules.html": "rules.html",
     "/runtime": "runtime.html",
     "/runtime.html": "runtime.html",
+    "/security-audit": "security-audit.html",
+    "/security-audit.html": "security-audit.html",
 }
 
 PAGE_TAB_KEYS = {
@@ -120,9 +122,10 @@ PAGE_TAB_KEYS = {
     "labels.html": "labels",
     "rules.html": "rules",
     "runtime.html": "runtime",
+    "security-audit.html": "security_audit",
 }
 
-SIDEBAR_TABS = ("home", "agents", "plugins", "skills", "mcps", "user", "labels", "rules", "runtime")
+SIDEBAR_TABS = ("home", "agents", "plugins", "skills", "mcps", "user", "labels", "rules", "runtime", "security_audit")
 LANGUAGE_COOKIE_NAME = "agentguard.language"
 SERVER_LANGUAGE_ATTRIBUTE = "data-agentguard-server-language"
 _SUPPORTED_TEMPLATE_LANGUAGES = {"en", "zh"}
@@ -423,6 +426,11 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
             self._proxy("v1/user/openclaw-bindings", method="GET", query=query)
             return
 
+        if path == "/api/security-audits" or path.startswith("/api/security-audits/"):
+            upstream_path = path.removeprefix("/api/")
+            self._proxy(upstream_path, method="GET", query=query)
+            return
+
         if path == "/api/agents":
             self._proxy("agents", method="GET", query=query)
             return
@@ -548,6 +556,10 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
 
         if path == "/api/user/dify/bind":
             self._proxy("v1/user/dify/bind", method="POST", query=query)
+            return
+
+        if path == "/api/security-audits":
+            self._proxy("security-audits", method="POST", query=query)
             return
 
         self.send_error(HTTPStatus.NOT_FOUND, "Not Found")

@@ -26,3 +26,4 @@
   * [Custom Client Plugins](plugins/custom_client_plugin.md)
   * [Custom Server Plugins](plugins/custom_server_plugin.md)
 * [Custom Auditors](auditors.md)
+* [Agent Security Audit](security_audit.md)

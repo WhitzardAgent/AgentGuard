@@ -98,6 +98,54 @@ class TraceEventStore:
         entries = [_entry_from_row(row) for row in rows]
         return [entry for entry in entries if entry is not None]
 
+    def agent_snapshot_max_id(
+        self,
+        agent_id: str,
+        *,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+    ) -> int:
+        """Return a stable canonical-agent snapshot boundary for offline audit."""
+        filters = ["agent_id = %s"]
+        params: list[Any] = [str(agent_id)]
+        _append_time_filters(filters, params, start_at=start_at, end_at=end_at)
+        row = self.db.fetchone(
+            f"SELECT MAX(id) AS max_id FROM runtime_trace_events WHERE {' AND '.join(filters)}",
+            tuple(params),
+        ) or {}
+        return int(row.get("max_id") or 0)
+
+    def list_agent_snapshot_page(
+        self,
+        agent_id: str,
+        *,
+        snapshot_max_id: int,
+        after_id: int = 0,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+        limit: int = 500,
+    ) -> tuple[list[AuditTraceEntry], int | None]:
+        """Read one canonical-agent audit page without trusting raw_agent_id."""
+        filters = ["agent_id = %s", "id > %s", "id <= %s"]
+        params: list[Any] = [str(agent_id), int(after_id), int(snapshot_max_id)]
+        _append_time_filters(filters, params, start_at=start_at, end_at=end_at)
+        page_limit = max(1, min(int(limit or 500), 2000))
+        params.append(page_limit)
+        rows = self.db.fetchall(
+            f"""
+            SELECT *
+            FROM runtime_trace_events
+            WHERE {' AND '.join(filters)}
+            ORDER BY id ASC
+            LIMIT %s
+            """,
+            tuple(params),
+        )
+        entries = [_entry_from_row(row, prefer_canonical=True) for row in rows]
+        valid = [entry for entry in entries if entry is not None]
+        next_cursor = int(rows[-1]["id"]) if len(rows) == page_limit else None
+        return valid, next_cursor
+
     def recent_traffic(
         self,
         agent_id: str | None = None,
@@ -213,15 +261,27 @@ def _entry_params(entry: AuditTraceEntry, db: MySQLDatabase) -> tuple[Any, ...]:
     )
 
 
-def _entry_from_row(row: dict[str, Any] | None) -> AuditTraceEntry | None:
+def _entry_from_row(
+    row: dict[str, Any] | None,
+    *,
+    prefer_canonical: bool = False,
+) -> AuditTraceEntry | None:
     if not row:
         return None
     event_dict = _json_value(row.get("event_json"), {})
     decision_dict = _json_value(row.get("decision_json"), None)
     data: dict[str, Any] = {
         "session_id": row.get("session_id") or "unknown",
-        "agent_id": row.get("raw_agent_id") or row.get("agent_id"),
-        "user_id": row.get("raw_user_id") or row.get("user_id"),
+        "agent_id": (
+            row.get("agent_id") or row.get("raw_agent_id")
+            if prefer_canonical
+            else row.get("raw_agent_id") or row.get("agent_id")
+        ),
+        "user_id": (
+            row.get("user_id") or row.get("raw_user_id")
+            if prefer_canonical
+            else row.get("raw_user_id") or row.get("user_id")
+        ),
         "reason": row.get("reason"),
         "event": event_dict,
         "decision": decision_dict,
@@ -467,6 +527,21 @@ def _optional_text(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _append_time_filters(
+    filters: list[str],
+    params: list[Any],
+    *,
+    start_at: datetime | None,
+    end_at: datetime | None,
+) -> None:
+    if start_at is not None:
+        filters.append("event_ts_ms >= %s")
+        params.append(int(start_at.timestamp() * 1000))
+    if end_at is not None:
+        filters.append("event_ts_ms <= %s")
+        params.append(int(end_at.timestamp() * 1000))
 
 
 def _clamp_limit(limit: int) -> int:

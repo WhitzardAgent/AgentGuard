@@ -8,6 +8,7 @@
     selectedAgentId: "",
     selectedPluginName: "",
     currentUserLabel: "",
+    isAdmin: false,
   };
   const SELECTED_AGENT_KEY = "agentguard.selectedAgentId";
   const AGENT_CATALOG_KEY = "agentguard.agentCatalog";
@@ -20,6 +21,7 @@
     "/plugins.html",
     "/skills.html",
     "/mcps.html",
+    "/security-audit.html",
     "/labels.html",
     "/rules.html",
     "/runtime.html",
@@ -187,6 +189,9 @@
       document.querySelectorAll("[data-rule-based-required='true']").forEach((element) => {
         element.hidden = !state.selectedAgentId || state.selectedPluginName !== "rule_based_plugin";
       });
+      document.querySelectorAll("[data-admin-required='true']").forEach((element) => {
+        element.hidden = !state.isAdmin;
+      });
     }
 
     const apiElement = getElement("sidebar-api-status");
@@ -273,6 +278,7 @@
       if (!payload.user) {
         throw new Error("not signed in");
       }
+      state.isAdmin = payload.user.is_admin === true;
       setCurrentUser(payload.user.username || "");
       enforceSelectedAgentAccess();
       return true;

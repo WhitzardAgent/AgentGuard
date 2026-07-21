@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 
+from backend.audit.agent_service import AgentAuditService
 from backend.console.state import ConsoleState
 from backend.runtime.manager import RuntimeManager
 from backend.skill_service.router import SkillServiceRouter
@@ -11,6 +12,7 @@ from shared.rules.loader import load_policy
 _manager: RuntimeManager | None = None
 _console: ConsoleState | None = None
 _skills: SkillServiceRouter | None = None
+_agent_audits: AgentAuditService | None = None
 
 
 def get_manager() -> RuntimeManager:
@@ -40,3 +42,17 @@ def get_skills() -> SkillServiceRouter:
     if _skills is None:
         _skills = SkillServiceRouter()
     return _skills
+
+
+def get_agent_audit_service() -> AgentAuditService:
+    global _agent_audits
+    if _agent_audits is None:
+        _agent_audits = AgentAuditService()
+    return _agent_audits
+
+
+def stop_agent_audit_service() -> None:
+    global _agent_audits
+    if _agent_audits is not None:
+        _agent_audits.shutdown()
+        _agent_audits = None

@@ -1,6 +1,16 @@
 """Server audit subsystem."""
 from __future__ import annotations
 
+from backend.audit.agent_base import BaseAgentAuditor, BaseLLMAgentAuditor
+from backend.audit.agent_manager import AgentAuditorManager
+from backend.audit.agent_models import (
+    AgentAuditContext,
+    AgentAuditResult,
+    AuditEvidence,
+    AuditFinding,
+    SessionAuditResult,
+    SessionTrace,
+)
 from backend.audit.audit_logger import AuditLogger
 from backend.audit.base import AuditLevel, AuditResult, AuditTraceEntry, BaseAuditor
 from backend.audit.manager import (
@@ -20,6 +30,15 @@ from backend.audit.replay import replay_records
 
 __all__ = [
     "AuditLogger",
+    "AgentAuditContext",
+    "AgentAuditResult",
+    "AgentAuditorManager",
+    "AuditEvidence",
+    "AuditFinding",
+    "BaseAgentAuditor",
+    "BaseLLMAgentAuditor",
+    "SessionAuditResult",
+    "SessionTrace",
     "replay_records",
     "BaseAuditor",
     "AuditTraceEntry",

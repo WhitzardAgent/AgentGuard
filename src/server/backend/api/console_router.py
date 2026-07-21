@@ -13,18 +13,20 @@ import urllib.request
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Cookie
+from fastapi import APIRouter, Cookie, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from backend.api.schemas import McpDetectRequest
 from backend.agents.store import AgentRecord, AgentStore, agent_delete_allowed_from_console
+from backend.api.authz import require_admin_user
+from backend.api.schemas import McpDetectRequest
 from backend.app_state import get_console
 from backend.auth.models import RuntimeSessionSummary
 from backend.auth.session_store import get_runtime_session_store
 from backend.database import DatabaseUnavailable
 from backend.user.permissions import is_admin_user
 from backend.user.router import SESSION_COOKIE, get_user_store
+from backend.user.store import User
 
 router = APIRouter()
 
@@ -280,7 +282,10 @@ def global_traffic(n: int = 30, action: str | None = None, tool: str | None = No
 
 
 @router.get("/v1/backend/audit/recent")
-def global_audit(n: int = 20) -> list[dict[str, Any]]:
+def global_audit(
+    n: int = 20,
+    _: User = Depends(require_admin_user),
+) -> list[dict[str, Any]]:
     return get_console().audit_recent(None, n)
 
 
@@ -307,7 +312,11 @@ def agent_approvals(agent_id: str) -> list[dict[str, Any]]:
 
 
 @router.get("/v1/backend/agents/{agent_id}/runtime/audit/recent")
-def agent_audit(agent_id: str, n: int = 20) -> list[dict[str, Any]]:
+def agent_audit(
+    agent_id: str,
+    n: int = 20,
+    _: User = Depends(require_admin_user),
+) -> list[dict[str, Any]]:
     return get_console().audit_recent(agent_id, n)
 
 

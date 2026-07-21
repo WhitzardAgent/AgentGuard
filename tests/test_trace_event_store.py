@@ -6,6 +6,7 @@ from backend.audit import AuditTraceEntry
 from backend.console.state import ConsoleState
 from backend.runtime.manager import RuntimeManager
 from backend.runtime.trace_store import TraceEventStore
+
 from shared.schemas.context import RuntimeContext
 from shared.schemas.decisions import GuardDecision
 from shared.schemas.events import tool_event
@@ -55,6 +56,22 @@ def test_trace_schema_creates_runtime_trace_events_table():
     TraceEventStore(db=db).ensure_schema()  # type: ignore[arg-type]
 
     assert any("CREATE TABLE IF NOT EXISTS runtime_trace_events" in sql for sql, _ in db.executed)
+
+
+def test_agent_snapshot_query_uses_only_canonical_agent_id():
+    class SnapshotDB(FakeTraceDB):
+        def __init__(self):
+            super().__init__()
+            self.last_sql = ""
+
+        def fetchone(self, sql, params=None):
+            self.last_sql = sql
+            return {"max_id": 0}
+
+    snapshot_db = SnapshotDB()
+    TraceEventStore(db=snapshot_db).agent_snapshot_max_id("agent-a")  # type: ignore[arg-type]
+    assert "agent_id = %s" in snapshot_db.last_sql
+    assert "raw_agent_id" not in snapshot_db.last_sql
 
 
 def test_upsert_trace_entry_inserts_and_updates_decision_plugin_data():

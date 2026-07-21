@@ -8,8 +8,9 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from backend.api.authz import require_admin_user
 from backend.api.schemas import (
     AgentPluginAvailableResponse,
     AgentPluginConfigResponse,
@@ -23,6 +24,7 @@ from backend.app_state import get_console, get_manager
 from backend.audit import auditor_descriptions, auditor_manager
 from backend.runtime.plugins.config_utils import merge_plugin_configs
 from backend.runtime.plugins.registry import registered_plugins as registered_server_plugins
+from backend.user.store import User
 from shared.schemas.events import EventType
 from shared.utils.json import safe_dumps, safe_loads
 
@@ -154,7 +156,7 @@ def get_agent_available_plugins(agent_id: str) -> AgentPluginAvailableResponse:
 
 
 @router.get("/v1/backend/auditors")
-def list_auditors() -> dict[str, list[dict[str, str]]]:
+def list_auditors(_: User = Depends(require_admin_user)) -> dict[str, list[dict[str, str]]]:
     return {
         "auditors": [
             {"name": name, "description": description}
@@ -164,7 +166,10 @@ def list_auditors() -> dict[str, list[dict[str, str]]]:
 
 
 @router.post("/v1/backend/audit/custom/run", response_model=TraceAuditResponse)
-def run_custom_trace_audit(req: TraceAuditRequest) -> TraceAuditResponse:
+def run_custom_trace_audit(
+    req: TraceAuditRequest,
+    _: User = Depends(require_admin_user),
+) -> TraceAuditResponse:
     trace = _manager.get_trace_records(
         req.session_id,
         agent_id=req.agent_id,
