@@ -1274,6 +1274,56 @@ test("shared app core derives active plugin names and primary plugin from config
   );
 });
 
+test("shared app core hides internal plugin options from the plugins catalog", async () => {
+  const listeners = {};
+  global.window = {
+    AgentGuardConfig: { apiBase: "http://127.0.0.1:38080" },
+    AgentGuardShell: {
+      setToolStatus() {},
+      setApiStatus() {},
+    },
+    addEventListener(name, handler) {
+      listeners[name] = handler;
+    },
+  };
+  global.localStorage = createStorage();
+  global.document = {
+    getElementById() {
+      return createToastElement();
+    },
+  };
+  global.fetch = async () => ({
+    ok: true,
+    async json() {
+      return {
+        agent_id: "agent-a",
+        local_plugins: [
+          { name: "tool_result", description: "", event_types: ["tool_result"], phases: ["tool_after"] },
+          { name: "client_prompt_guard", description: "", event_types: ["llm_input"], phases: ["llm_before"] },
+        ],
+        remote_plugins: [
+          { name: "demo_tripwire", description: "", event_types: ["tool_invoke"], phases: ["tool_before"] },
+          { name: "llm_output", description: "", event_types: ["llm_output"], phases: ["llm_after"] },
+          { name: "rule_based_plugin", description: "", event_types: [], phases: ["tool_before"] },
+        ],
+      };
+    },
+  });
+  global.setTimeout = (fn) => {
+    fn();
+    return 1;
+  };
+  global.clearTimeout = () => {};
+
+  delete require.cache[require.resolve("../static/common/app.js")];
+  require("../static/common/app.js");
+
+  const catalog = await global.window.AgentGuardData.listAgentAvailablePlugins("agent-a");
+
+  assert.deepEqual(catalog.local_plugins.map((item) => item.name), ["client_prompt_guard"]);
+  assert.deepEqual(catalog.remote_plugins.map((item) => item.name), ["rule_based_plugin"]);
+});
+
 test("shared app core preserves plugin config source from the agent config endpoint", async () => {
   const listeners = {};
   global.window = {

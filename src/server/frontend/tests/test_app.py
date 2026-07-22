@@ -1620,6 +1620,21 @@ def test_user_page_organization_forms_use_organization_schema_fields():
     assert "organization_description:" in body
 
 
+def test_user_page_uses_ticket_style_confirm_modal_for_group_and_organization_delete():
+    with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+        status, body = _text_request("GET", preview.url, "/user.html")
+
+    assert status == 200
+    assert 'id="confirm-modal-backdrop" hidden' in body
+    assert 'class="ticket-modal confirm-modal"' in body
+    assert 'id="confirm-modal-title">Confirm Delete</h3>' in body
+    assert 'id="confirm-modal-button" type="button">Delete</button>' in body
+    assert 'openConfirmModal({' in body
+    assert 'title: t("Delete Organization")' in body
+    assert 'title: t("Delete Group")' in body
+    assert "window.confirm(" not in body
+
+
 def test_runtime_page_renders_chinese_template_copy_when_language_cookie_set():
     with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
         status, _headers, raw = _raw_request(

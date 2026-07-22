@@ -267,6 +267,18 @@
         </div>
       </section>
     </div>
+    <div class="ticket-modal-backdrop" id="confirm-modal-backdrop" hidden>
+      <section class="ticket-modal confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title" aria-describedby="confirm-modal-message">
+        <div class="heading-row">
+          <h3 id="confirm-modal-title">Confirm Delete</h3>
+        </div>
+        <p class="subtle confirm-modal-message" id="confirm-modal-message">Delete this item?</p>
+        <div class="form-grid-actions confirm-modal-actions">
+          <button class="btn" id="cancel-confirm-modal-button" type="button">Cancel</button>
+          <button class="btn danger" id="confirm-modal-button" type="button">Delete</button>
+        </div>
+      </section>
+    </div>
   </div>
 
   <script src="/static/common/messages.js"></script>
@@ -329,10 +341,16 @@
         ticketExpiry: document.getElementById("ticket-expiry"),
         copyTicketButton: document.getElementById("copy-ticket-button"),
         closeTicketModalButton: document.getElementById("close-ticket-modal-button"),
+        confirmModalBackdrop: document.getElementById("confirm-modal-backdrop"),
+        confirmModalTitle: document.getElementById("confirm-modal-title"),
+        confirmModalMessage: document.getElementById("confirm-modal-message"),
+        cancelConfirmModalButton: document.getElementById("cancel-confirm-modal-button"),
+        confirmModalButton: document.getElementById("confirm-modal-button"),
       };
 
       let activeTicket = "";
       let activeCopyMessage = "Ticket copied.";
+      let pendingConfirmResolve = null;
 
       function t(message, variables) {
         return window.AgentGuardI18n?.t?.(message, variables) || String(message || "");
@@ -797,6 +815,34 @@
         nodes.ticketModalBackdrop.hidden = true;
       }
 
+      function closeConfirmModal(result) {
+        const resolve = pendingConfirmResolve;
+        pendingConfirmResolve = null;
+        nodes.confirmModalTitle.textContent = t("Confirm Delete");
+        nodes.confirmModalMessage.textContent = t("Delete this item?");
+        nodes.cancelConfirmModalButton.textContent = t("Cancel");
+        nodes.confirmModalButton.textContent = t("Delete");
+        nodes.confirmModalBackdrop.hidden = true;
+        if (typeof resolve === "function") {
+          resolve(Boolean(result));
+        }
+      }
+
+      function openConfirmModal({ title, message, confirmLabel }) {
+        if (typeof pendingConfirmResolve === "function") {
+          pendingConfirmResolve(false);
+        }
+        nodes.confirmModalTitle.textContent = title || t("Confirm Delete");
+        nodes.confirmModalMessage.textContent = message || t("Delete this item?");
+        nodes.cancelConfirmModalButton.textContent = t("Cancel");
+        nodes.confirmModalButton.textContent = confirmLabel || t("Delete");
+        nodes.confirmModalBackdrop.hidden = false;
+        nodes.cancelConfirmModalButton.focus();
+        return new Promise((resolve) => {
+          pendingConfirmResolve = resolve;
+        });
+      }
+
       async function copyText(value) {
         if (navigator.clipboard && window.isSecureContext) {
           await navigator.clipboard.writeText(value);
@@ -884,7 +930,12 @@
         const deleteButton = event.target.closest("[data-organization-delete]");
         if (deleteButton) {
           const organizationId = deleteButton.dataset.organizationDelete;
-          if (!window.confirm(t("Delete this organization and all of its groups?"))) {
+          const confirmed = await openConfirmModal({
+            title: t("Delete Organization"),
+            message: t("Delete this organization and all of its groups?"),
+            confirmLabel: t("Delete Organization"),
+          });
+          if (!confirmed) {
             return;
           }
           try {
@@ -978,7 +1029,12 @@
         const deleteButton = event.target.closest("[data-group-delete]");
         if (deleteButton) {
           const groupId = deleteButton.dataset.groupDelete;
-          if (!window.confirm(t("Delete this group?"))) {
+          const confirmed = await openConfirmModal({
+            title: t("Delete Group"),
+            message: t("Delete this group?"),
+            confirmLabel: t("Delete Group"),
+          });
+          if (!confirmed) {
             return;
           }
           try {
@@ -1161,13 +1217,24 @@
       });
 
       nodes.closeTicketModalButton.addEventListener("click", closeTicketModal);
+      nodes.cancelConfirmModalButton.addEventListener("click", () => closeConfirmModal(false));
+      nodes.confirmModalButton.addEventListener("click", () => closeConfirmModal(true));
       nodes.ticketModalBackdrop.addEventListener("click", (event) => {
         if (event.target === nodes.ticketModalBackdrop) {
           closeTicketModal();
         }
       });
+      nodes.confirmModalBackdrop.addEventListener("click", (event) => {
+        if (event.target === nodes.confirmModalBackdrop) {
+          closeConfirmModal(false);
+        }
+      });
 
       document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !nodes.confirmModalBackdrop.hidden) {
+          closeConfirmModal(false);
+          return;
+        }
         if (event.key === "Escape" && !nodes.ticketModalBackdrop.hidden) {
           closeTicketModal();
         }
@@ -1586,6 +1653,16 @@
 
     .ticket-field input {
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+
+    .confirm-modal-message {
+      margin: 18px 0 0;
+      line-height: 1.6;
+    }
+
+    .confirm-modal-actions {
+      justify-content: flex-end;
+      margin-top: 20px;
     }
 
     @media (max-width: 920px) {

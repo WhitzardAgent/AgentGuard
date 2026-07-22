@@ -59,10 +59,15 @@
     return toolData.collapsePluginSelection(state.selections[scope] || []);
   }
 
+  function visibleScopeSelection(scope) {
+    const visibleNames = new Set(scopeItems(scope).map((plugin) => plugin.name));
+    return scopeSelection(scope).filter((name) => visibleNames.has(name));
+  }
+
   function activePluginNames() {
     return toolData.collapsePluginSelection([
-      ...scopeSelection("server"),
-      ...scopeSelection("client"),
+      ...visibleScopeSelection("server"),
+      ...visibleScopeSelection("client"),
     ]);
   }
 
@@ -78,7 +83,7 @@
     }
     const scopeCopy = SCOPE_COPY[scope];
     const items = scopeItems(scope);
-    const enabledNames = new Set(scopeSelection(scope));
+    const enabledNames = new Set(visibleScopeSelection(scope));
     container.innerHTML = "";
 
     if (statusNode) {
@@ -150,8 +155,8 @@
   }
 
   function renderStatus() {
-    const serverNames = scopeSelection("server");
-    const clientNames = scopeSelection("client");
+    const serverNames = visibleScopeSelection("server");
+    const clientNames = visibleScopeSelection("client");
     const hasConfig = Boolean(state.config?.plugin_config);
     const configSource = String(state.config?.config_source || "none").trim();
     if (!state.selectedAgentId) {

@@ -28,6 +28,7 @@
   };
   const PLUGIN_PHASE_ORDER = ["llm_before", "llm_after", "tool_before", "tool_after", "global"];
   const PLUGIN_SCOPES = new Set(["client", "server"]);
+  const HIDDEN_PLUGIN_NAMES = new Set(["demo_tripwire", "llm_output", "tool_invoke", "tool_result"]);
 
   function buildQuery(params) {
     const search = new URLSearchParams();
@@ -52,6 +53,10 @@
       event_types: Array.isArray(item?.event_types) ? item.event_types.map(String).filter(Boolean) : [],
       phases: Array.isArray(item?.phases) ? item.phases.map(String).filter(Boolean) : [],
     };
+  }
+
+  function isVisiblePluginOption(item) {
+    return !HIDDEN_PLUGIN_NAMES.has(normalizePluginOption(item).name);
   }
 
   function normalizeAgentPluginConfig(item) {
@@ -1278,8 +1283,12 @@
     const payload = await fetchJson(`/api/agents/${encodeURIComponent(normalizedAgentId)}/plugins/available`);
     return {
       agent_id: String(payload?.agent_id || normalizedAgentId).trim(),
-      local_plugins: Array.isArray(payload?.local_plugins) ? payload.local_plugins.map(normalizePluginOption) : [],
-      remote_plugins: Array.isArray(payload?.remote_plugins) ? payload.remote_plugins.map(normalizePluginOption) : [],
+      local_plugins: Array.isArray(payload?.local_plugins)
+        ? payload.local_plugins.filter(isVisiblePluginOption).map(normalizePluginOption)
+        : [],
+      remote_plugins: Array.isArray(payload?.remote_plugins)
+        ? payload.remote_plugins.filter(isVisiblePluginOption).map(normalizePluginOption)
+        : [],
     };
   }
 
