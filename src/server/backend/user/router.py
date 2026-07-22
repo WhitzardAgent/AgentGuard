@@ -1,6 +1,7 @@
 """User registration, login, and short-lived ticket routes."""
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Any
 
@@ -10,6 +11,18 @@ from pydantic import BaseModel, Field
 from backend.agents.store import AgentStore
 from backend.database import DatabaseUnavailable
 from backend.user.email import EmailDeliveryUnavailable, get_email_sender
+from backend.user.org_store import (
+    GroupNotFound,
+    GroupRecord,
+    InvalidInvitation,
+    InvitationIssue,
+    InvitationRecord,
+    MemberRecord,
+    OrgStore,
+    OrganizationAccessDenied,
+    OrganizationNotFound,
+    OrganizationRecord,
+)
 from backend.user.permissions import is_admin_user
 from backend.user.store import (
     DuplicateEmail,
@@ -60,8 +73,48 @@ class DifyBindRequest(BaseModel):
     metadata_json: str | None = None
 
 
+class ProfileUpdateRequest(BaseModel):
+    username: str | None = Field(default=None, min_length=3, max_length=255)
+    email: str | None = Field(default=None, min_length=3, max_length=255)
+    display_name: str | None = Field(default=None, max_length=255)
+
+
+class OrganizationCreateRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=255)
+    display_name: str | None = Field(default=None, max_length=255)
+    description: str | None = None
+
+
+class OrganizationUpdateRequest(BaseModel):
+    display_name: str | None = Field(default=None, max_length=255)
+    description: str | None = None
+
+
+class GroupCreateRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=255)
+    display_name: str | None = Field(default=None, max_length=255)
+    description: str | None = None
+
+
+class GroupUpdateRequest(BaseModel):
+    display_name: str | None = Field(default=None, max_length=255)
+    description: str | None = None
+
+
+class InvitationCreateRequest(BaseModel):
+    email: str | None = Field(default=None, max_length=255)
+
+
+class InvitationAcceptRequest(BaseModel):
+    token: str = Field(min_length=8, max_length=512)
+
+
 def get_user_store() -> UserStore:
     return UserStore()
+
+
+def get_org_store() -> OrgStore:
+    return OrgStore()
 
 
 @router.post("/v1/user/register")
@@ -142,6 +195,31 @@ def current_user(
 ) -> dict[str, Any]:
     user = _current_user_or_401(agentguard_user_session)
     return {"user": _user_payload(user)}
+
+
+@router.patch("/v1/user/me")
+def update_current_user(
+    req: ProfileUpdateRequest,
+    agentguard_user_session: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    user = _current_user_or_401(agentguard_user_session)
+    display_name = req.display_name
+    if "display_name" in req.model_fields_set and display_name is None:
+        display_name = ""
+    try:
+        updated = _org_store_or_503().update_user_profile(
+            user,
+            username=req.username if "username" in req.model_fields_set else None,
+            email=req.email if "email" in req.model_fields_set else None,
+            display_name=display_name,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        if _is_duplicate_key(exc):
+            raise HTTPException(status_code=409, detail="username or email already exists") from exc
+        raise
+    return {"user": _user_payload(updated)}
 
 
 @router.post("/v1/user/password")
@@ -326,9 +404,299 @@ def delete_openclaw_binding(
     return {"status": "ok", **result}
 
 
+@router.get("/v1/user/organizations")
+def list_organizations(
+    agentguard_user_session: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    user = _current_user_or_401(agentguard_user_session)
+    try:
+        organizations = _org_store_or_503().list_organizations(user)
+    except OrganizationAccessDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return {"organizations": [_organization_payload(item) for item in organizations]}
+
+
+@router.post("/v1/user/organizations")
+def create_organization(
+    req: OrganizationCreateRequest,
+    agentguard_user_session: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    user = _current_user_or_401(agentguard_user_session)
+    try:
+        organization = _org_store_or_503().create_organization(
+            user,
+            name=req.name,
+            display_name=req.display_name,
+            description=req.description,
+        )
+    except ValueError as exc:
+        status_code = 409 if _is_duplicate_key(exc) else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    except Exception as exc:
+        if _is_duplicate_key(exc):
+            raise HTTPException(status_code=409, detail="organization already exists") from exc
+        raise
+    return {"organization": _organization_payload(organization)}
+
+
+@router.get("/v1/user/organizations/{organization_id}")
+def get_organization(
+    organization_id: int,
+    agentguard_user_session: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    user = _current_user_or_401(agentguard_user_session)
+    try:
+        organization = _org_store_or_503().get_organization(user, organization_id)
+    except OrganizationAccessDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    if organization is None:
+        raise HTTPException(status_code=404, detail="organization not found")
+    return {"organization": _organization_payload(organization)}
+
+
+@router.patch("/v1/user/organizations/{organization_id}")
+def update_organization(
+    organization_id: int,
+    req: OrganizationUpdateRequest,
+    agentguard_user_session: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    user = _current_user_or_401(agentguard_user_session)
+    store = _org_store_or_503()
+    try:
+        current = store.get_organization(user, organization_id)
+        if current is None:
+            raise OrganizationNotFound("organization not found")
+        organization = store.update_organization(
+            user,
+            organization_id,
+            display_name=req.display_name if "display_name" in req.model_fields_set else current.display_name,
+            description=req.description if "description" in req.model_fields_set else current.description,
+        )
+    except OrganizationNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except OrganizationAccessDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"organization": _organization_payload(organization)}
+
+
+@router.get("/v1/user/organizations/{organization_id}/groups")
+def list_organization_groups(
+    organization_id: int,
+    agentguard_user_session: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    user = _current_user_or_401(agentguard_user_session)
+    try:
+        groups = _org_store_or_503().list_groups(user, organization_id=organization_id)
+    except OrganizationAccessDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return {"groups": [_group_payload(item) for item in groups]}
+
+
+@router.post("/v1/user/organizations/{organization_id}/groups")
+def create_group(
+    organization_id: int,
+    req: GroupCreateRequest,
+    agentguard_user_session: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    user = _current_user_or_401(agentguard_user_session)
+    try:
+        group = _org_store_or_503().create_group(
+            user,
+            organization_id=organization_id,
+            name=req.name,
+            display_name=req.display_name,
+            description=req.description,
+        )
+    except OrganizationNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except OrganizationAccessDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        status_code = 409 if _is_duplicate_key(exc) else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    except Exception as exc:
+        if _is_duplicate_key(exc):
+            raise HTTPException(status_code=409, detail="group already exists") from exc
+        raise
+    return {"group": _group_payload(group)}
+
+
+@router.get("/v1/user/organizations/{organization_id}/members")
+def list_organization_members(
+    organization_id: int,
+    agentguard_user_session: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    user = _current_user_or_401(agentguard_user_session)
+    try:
+        members = _org_store_or_503().list_organization_members(user, organization_id)
+    except OrganizationNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except OrganizationAccessDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return {"members": [_member_payload(item) for item in members]}
+
+
+@router.post("/v1/user/organizations/{organization_id}/invitations")
+def invite_to_organization(
+    organization_id: int,
+    req: InvitationCreateRequest,
+    agentguard_user_session: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    user = _current_user_or_401(agentguard_user_session)
+    try:
+        invitation = _org_store_or_503().invite_to_organization(
+            user,
+            organization_id=organization_id,
+            email=req.email,
+        )
+    except OrganizationNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except OrganizationAccessDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"invitation": _invitation_issue_payload(invitation)}
+
+
+@router.get("/v1/user/groups")
+def list_groups(
+    organization_id: int | None = None,
+    agentguard_user_session: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    user = _current_user_or_401(agentguard_user_session)
+    try:
+        groups = _org_store_or_503().list_groups(user, organization_id=organization_id)
+    except OrganizationAccessDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return {"groups": [_group_payload(item) for item in groups]}
+
+
+@router.get("/v1/user/groups/{group_id}")
+def get_group(
+    group_id: int,
+    agentguard_user_session: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    user = _current_user_or_401(agentguard_user_session)
+    try:
+        group = _org_store_or_503().get_group(user, group_id)
+    except OrganizationAccessDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    if group is None:
+        raise HTTPException(status_code=404, detail="group not found")
+    return {"group": _group_payload(group)}
+
+
+@router.patch("/v1/user/groups/{group_id}")
+def update_group(
+    group_id: int,
+    req: GroupUpdateRequest,
+    agentguard_user_session: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    user = _current_user_or_401(agentguard_user_session)
+    store = _org_store_or_503()
+    try:
+        current = store.get_group(user, group_id)
+        if current is None:
+            raise GroupNotFound("group not found")
+        group = store.update_group(
+            user,
+            group_id,
+            display_name=req.display_name if "display_name" in req.model_fields_set else current.display_name,
+            description=req.description if "description" in req.model_fields_set else current.description,
+        )
+    except GroupNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except OrganizationAccessDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"group": _group_payload(group)}
+
+
+@router.get("/v1/user/groups/{group_id}/members")
+def list_group_members(
+    group_id: int,
+    agentguard_user_session: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    user = _current_user_or_401(agentguard_user_session)
+    try:
+        members = _org_store_or_503().list_group_members(user, group_id)
+    except GroupNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except OrganizationAccessDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return {"members": [_member_payload(item) for item in members]}
+
+
+@router.post("/v1/user/groups/{group_id}/invitations")
+def invite_to_group(
+    group_id: int,
+    req: InvitationCreateRequest,
+    agentguard_user_session: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    user = _current_user_or_401(agentguard_user_session)
+    try:
+        invitation = _org_store_or_503().invite_to_group(
+            user,
+            group_id=group_id,
+            email=req.email,
+        )
+    except GroupNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except OrganizationAccessDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"invitation": _invitation_issue_payload(invitation)}
+
+
+@router.get("/v1/user/invitations")
+def list_invitations(
+    organization_id: int | None = None,
+    group_id: int | None = None,
+    agentguard_user_session: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    user = _current_user_or_401(agentguard_user_session)
+    try:
+        invitations = _org_store_or_503().list_invitations(
+            user,
+            organization_id=organization_id,
+            group_id=group_id,
+        )
+    except (OrganizationNotFound, GroupNotFound) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except OrganizationAccessDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return {"invitations": [_invitation_payload(item) for item in invitations]}
+
+
+@router.post("/v1/user/invitations/accept")
+def accept_invitation(
+    req: InvitationAcceptRequest,
+    agentguard_user_session: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    user = _current_user_or_401(agentguard_user_session)
+    try:
+        invitation = _org_store_or_503().accept_invitation(user, token=req.token)
+    except InvalidInvitation as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except OrganizationAccessDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return {"invitation": _invitation_payload(invitation)}
+
+
 def _store_or_503() -> UserStore:
     try:
         return get_user_store()
+    except DatabaseUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+def _org_store_or_503() -> OrgStore:
+    try:
+        return get_org_store()
     except DatabaseUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -355,12 +723,14 @@ def _set_session_cookie(response: Response, token: str, expires_at: datetime) ->
 
 
 def _user_payload(user: User) -> dict[str, Any]:
+    profile = _profile_object(user.profile_json)
     return {
         "id": user.id,
         "username": user.username,
         "email": user.email,
         "email_verified": user.email_verified_at is not None,
         "is_admin": is_admin_user(user),
+        "display_name": profile.get("display_name"),
     }
 
 
@@ -386,6 +756,95 @@ def _external_account_payload(item: ExternalAccountMapping) -> dict[str, Any]:
         "created_at": _iso(item.created_at),
         "updated_at": _iso(item.updated_at),
     }
+
+
+def _organization_payload(item: OrganizationRecord) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "name": item.name,
+        "display_name": item.display_name,
+        "description": item.description,
+        "admin_user_id": item.admin_user_id,
+        "created_by_user_id": item.created_by_user_id,
+        "current_user_role": item.current_user_role,
+        "member_count": item.member_count,
+        "created_at": _iso(item.created_at),
+        "updated_at": _iso(item.updated_at),
+    }
+
+
+def _group_payload(item: GroupRecord) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "organization_id": item.organization_id,
+        "name": item.name,
+        "display_name": item.display_name,
+        "description": item.description,
+        "admin_user_id": item.admin_user_id,
+        "created_by_user_id": item.created_by_user_id,
+        "current_user_role": item.current_user_role,
+        "member_count": item.member_count,
+        "created_at": _iso(item.created_at),
+        "updated_at": _iso(item.updated_at),
+    }
+
+
+def _member_payload(item: MemberRecord) -> dict[str, Any]:
+    return {
+        "user_id": item.user_id,
+        "username": item.username,
+        "email": item.email,
+        "role": item.role,
+        "joined_at": _iso(item.joined_at),
+    }
+
+
+def _invitation_issue_payload(item: InvitationIssue) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "token": item.token,
+        "token_prefix": item.token_prefix,
+        "email": item.email,
+        "organization_id": item.organization_id,
+        "group_id": item.group_id,
+        "status": item.status,
+        "expires_at": _iso(item.expires_at),
+        "created_at": _iso(item.created_at),
+    }
+
+
+def _invitation_payload(item: InvitationRecord) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "token_prefix": item.token_prefix,
+        "email": item.email,
+        "organization_id": item.organization_id,
+        "organization_name": item.organization_name,
+        "group_id": item.group_id,
+        "group_name": item.group_name,
+        "invited_by_user_id": item.invited_by_user_id,
+        "status": item.status,
+        "expires_at": _iso(item.expires_at),
+        "accepted_at": _iso(item.accepted_at),
+        "created_at": _iso(item.created_at),
+    }
+
+
+def _profile_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(str(value))
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _is_duplicate_key(exc: Exception) -> bool:
+    code = getattr(exc, "args", [None])[0]
+    return code == 1062
 
 
 def _iso(value: Any) -> str | None:

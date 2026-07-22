@@ -11,93 +11,286 @@
   <div class="app-shell">
 {{ shared:sidebar }}
 
-    <main class="app-main home-main">
-      <section class="page-intro-card home-hero">
-        <div class="home-hero-copy">
+    <main class="app-main user-management-main">
+      <section class="page-intro-card user-management-header">
+        <div>
           <p class="page-kicker">User Studio</p>
           <h1><span class="home-hero-name">User Centre</span></h1>
-          <p class="subtle">
-            Manage your personal information and settings on this page.
-          </p>
+          <p class="subtle" id="user-status">Checking sign-in status...</p>
+        </div>
+        <div class="profile-actions">
+          <button class="btn primary" id="generate-ticket-button" type="button" hidden>Generate Ticket</button>
+          <button class="btn" id="logout-button" type="button" hidden>Logout</button>
         </div>
       </section>
 
       <div id="agentguard-page-context" hidden>
         <span id="agentguard-page-context-title">User Centre</span>
-        <span id="agentguard-page-context-description">Manage frontend user identities and related configuration.</span>
+        <span id="agentguard-page-context-description">Manage frontend user identities, organizations, groups, and invitations.</span>
       </div>
 
-      <section class="grid two">
-        <div class="card" id="profile-card">
-          <div class="heading-row">
-            <h3>Current User</h3>
-            <div class="profile-actions">
-              <button class="btn primary" id="generate-ticket-button" type="button" hidden>Generate Ticket</button>
-              <button class="btn" id="logout-button" type="button" hidden>Logout</button>
+      <section class="user-management-content" id="user-management-shell" hidden>
+        <section class="user-view active" id="profile-view" data-view-panel="profile">
+          <div class="section-heading-row">
+            <div>
+              <h2>Current User</h2>
+              <p class="subtle">Profile information for the signed-in account.</p>
             </div>
           </div>
-          <p class="subtle" id="user-status">Checking sign-in status...</p>
-        </div>
 
-        <div class="card" id="password-card" hidden>
-          <div class="heading-row">
-            <h3>Change Password</h3>
-          </div>
-          <form class="form-grid" id="password-change-form">
-            <label>
-              <span>Current Password</span>
-              <input id="current-password" type="password" autocomplete="current-password" required>
-            </label>
-            <label>
-              <span>New Password</span>
-              <input id="new-password" type="password" autocomplete="new-password" required minlength="8">
-            </label>
-            <label>
-              <span>Confirm New Password</span>
-              <input id="confirm-new-password" type="password" autocomplete="new-password" required minlength="8">
-            </label>
-            <div class="form-grid-actions">
-              <button class="btn primary" type="submit">Update Password</button>
+          <section id="profile-table-panel">
+            <div class="table-card profile-table-card">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="profile-table-body"></tbody>
+              </table>
             </div>
-          </form>
-        </div>
+          </section>
 
-        <div class="card" id="external-account-card" hidden>
-          <div class="heading-row">
-            <h3>External Accounts</h3>
+          <section class="profile-edit-shell" id="profile-edit-panel" hidden>
+            <div class="profile-edit-header">
+              <div>
+                <h3>Edit User</h3>
+                <p class="subtle">Update account identity fields and password.</p>
+              </div>
+              <button class="btn" id="profile-edit-back-button" type="button">Back</button>
+            </div>
+
+            <form class="casdoor-edit-form" id="profile-edit-form">
+              <div class="form-section-title">Basic Information</div>
+              <label class="casdoor-form-row">
+                <span>Name</span>
+                <input id="profile-edit-username" required minlength="3" maxlength="255">
+              </label>
+              <label class="casdoor-form-row">
+                <span>Email</span>
+                <input id="profile-edit-email" type="email" required maxlength="255">
+              </label>
+
+              <div class="form-section-title">Change Password</div>
+              <label class="casdoor-form-row">
+                <span>Current Password</span>
+                <input id="current-password" type="password" autocomplete="current-password">
+              </label>
+              <label class="casdoor-form-row">
+                <span>New Password</span>
+                <input id="new-password" type="password" autocomplete="new-password" minlength="8">
+              </label>
+              <label class="casdoor-form-row">
+                <span>Confirm New Password</span>
+                <input id="confirm-new-password" type="password" autocomplete="new-password" minlength="8">
+              </label>
+
+              <div class="casdoor-form-actions">
+                <button class="btn" id="profile-edit-cancel-button" type="button">Cancel</button>
+                <button class="btn primary" type="submit">Save</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="user-subsection">
+            <div class="heading-row">
+              <h3>External Accounts</h3>
+            </div>
+            <form class="form-grid" id="dify-bind-form">
+              <label>
+                <span>Dify Email</span>
+                <input id="dify-email" type="email" autocomplete="email" required maxlength="255">
+              </label>
+              <div class="form-grid-actions">
+                <button class="btn primary" type="submit">Bind Dify</button>
+              </div>
+            </form>
+            <form class="form-grid external-account-form" id="n8n-bind-form">
+              <label>
+                <span>n8n Email</span>
+                <input id="n8n-email" type="email" autocomplete="email" required maxlength="255">
+              </label>
+              <div class="form-grid-actions">
+                <button class="btn primary" type="submit">Bind n8n</button>
+              </div>
+            </form>
+            <div class="table-card" id="external-account-list-card" hidden>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Provider</th>
+                    <th>Email</th>
+                    <th>Name</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="external-account-list"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section class="user-view" id="organizations-view" data-view-panel="organizations">
+          <div class="section-heading-row">
+            <div>
+              <h2>Organizations</h2>
+              <p class="subtle">Organizations you can manage or access.</p>
+            </div>
           </div>
-          <form class="form-grid" id="dify-bind-form">
+
+          <form class="form-grid compact-form" id="organization-create-form">
             <label>
-              <span>Dify Email</span>
-              <input id="dify-email" type="email" autocomplete="email" required maxlength="255">
+              <span>Name</span>
+              <input id="organization-name" required minlength="2" maxlength="255">
+            </label>
+            <label>
+              <span>Display Name</span>
+              <input id="organization-display-name" maxlength="255">
+            </label>
+            <label class="wide-field">
+              <span>Description</span>
+              <textarea id="organization-description" rows="2"></textarea>
             </label>
             <div class="form-grid-actions">
-              <button class="btn primary" type="submit">Bind Dify</button>
+              <button class="btn primary" type="submit">Create Organization</button>
             </div>
           </form>
-          <form class="form-grid external-account-form" id="n8n-bind-form">
-            <label>
-              <span>n8n Email</span>
-              <input id="n8n-email" type="email" autocomplete="email" required maxlength="255">
-            </label>
-            <div class="form-grid-actions">
-              <button class="btn primary" type="submit">Bind n8n</button>
-            </div>
-          </form>
-          <div class="table-card" id="external-account-list-card" hidden>
+
+          <div class="table-card">
             <table>
               <thead>
                 <tr>
-                  <th>Provider</th>
-                  <th>Email</th>
                   <th>Name</th>
-                  <th></th>
+                  <th>Role</th>
+                  <th>Members</th>
+                  <th>Admin</th>
                 </tr>
               </thead>
-              <tbody id="external-account-list"></tbody>
+              <tbody id="organization-list"></tbody>
             </table>
           </div>
-        </div>
+
+          <form class="form-grid compact-form selected-editor" id="organization-edit-form" hidden>
+            <h3 class="form-heading">Selected Organization</h3>
+            <label>
+              <span>Display Name</span>
+              <input id="selected-organization-display-name" maxlength="255">
+            </label>
+            <label class="wide-field">
+              <span>Description</span>
+              <textarea id="selected-organization-description" rows="2"></textarea>
+            </label>
+            <div class="form-grid-actions">
+              <button class="btn primary" type="submit">Update Organization</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="user-view" id="groups-view" data-view-panel="groups">
+          <div class="section-heading-row">
+            <div>
+              <h2>Groups</h2>
+              <p class="subtle" id="selected-organization-label">Select an organization.</p>
+            </div>
+          </div>
+
+          <form class="form-grid compact-form" id="group-create-form">
+            <label>
+              <span>Name</span>
+              <input id="group-name" required minlength="2" maxlength="255">
+            </label>
+            <label>
+              <span>Display Name</span>
+              <input id="group-display-name" maxlength="255">
+            </label>
+            <label class="wide-field">
+              <span>Description</span>
+              <textarea id="group-description" rows="2"></textarea>
+            </label>
+            <div class="form-grid-actions">
+              <button class="btn primary" type="submit">Create Group</button>
+            </div>
+          </form>
+
+          <div class="table-card">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Role</th>
+                  <th>Members</th>
+                  <th>Admin</th>
+                </tr>
+              </thead>
+              <tbody id="group-list"></tbody>
+            </table>
+          </div>
+
+          <form class="form-grid compact-form selected-editor" id="group-edit-form" hidden>
+            <h3 class="form-heading">Selected Group</h3>
+            <label>
+              <span>Display Name</span>
+              <input id="selected-group-display-name" maxlength="255">
+            </label>
+            <label class="wide-field">
+              <span>Description</span>
+              <textarea id="selected-group-description" rows="2"></textarea>
+            </label>
+            <div class="form-grid-actions">
+              <button class="btn primary" type="submit">Update Group</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="user-view" id="invitations-view" data-view-panel="invitations">
+          <div class="section-heading-row">
+            <div>
+              <h2>Invitations</h2>
+              <p class="subtle" id="invitation-target-label">Admins can invite users into selected organizations or groups.</p>
+            </div>
+          </div>
+          <form class="form-grid compact-form" id="invitation-create-form">
+            <label>
+              <span>Email</span>
+              <input id="invitation-email" type="email" maxlength="255" placeholder="optional">
+            </label>
+            <label>
+              <span>Target</span>
+              <select id="invitation-target">
+                <option value="organization">Selected Organization</option>
+                <option value="group">Selected Group</option>
+              </select>
+            </label>
+            <div class="form-grid-actions">
+              <button class="btn primary" type="submit">Create Invitation</button>
+            </div>
+          </form>
+          <form class="form-grid compact-form" id="invitation-accept-form">
+            <label class="wide-field">
+              <span>Invitation Token</span>
+              <input id="invitation-token" required spellcheck="false">
+            </label>
+            <div class="form-grid-actions">
+              <button class="btn primary" type="submit">Accept Invitation</button>
+            </div>
+          </form>
+          <div class="table-card">
+            <table>
+              <thead>
+                <tr>
+                  <th>Target</th>
+                  <th>Email</th>
+                  <th>Status</th>
+                  <th>Expires</th>
+                  <th>Token</th>
+                </tr>
+              </thead>
+              <tbody id="invitation-list"></tbody>
+            </table>
+          </div>
+        </section>
       </section>
     </main>
 
@@ -124,25 +317,90 @@
   <script src="/static/common/page-shell.js"></script>
   <script>
     (function () {
-      const logoutButton = document.getElementById("logout-button");
-      const generateTicketButton = document.getElementById("generate-ticket-button");
-      const statusNode = document.getElementById("user-status");
-      const passwordCard = document.getElementById("password-card");
-      const passwordChangeForm = document.getElementById("password-change-form");
-      const externalAccountCard = document.getElementById("external-account-card");
-      const difyBindForm = document.getElementById("dify-bind-form");
-      const n8nBindForm = document.getElementById("n8n-bind-form");
-      const externalAccountListCard = document.getElementById("external-account-list-card");
-      const externalAccountList = document.getElementById("external-account-list");
-      const ticketModalBackdrop = document.getElementById("ticket-modal-backdrop");
-      const ticketValue = document.getElementById("ticket-value");
-      const ticketExpiry = document.getElementById("ticket-expiry");
-      const copyTicketButton = document.getElementById("copy-ticket-button");
-      const closeTicketModalButton = document.getElementById("close-ticket-modal-button");
+      const state = {
+        user: null,
+        organizations: [],
+        groups: [],
+        invitations: [],
+        externalAccounts: [],
+        selectedOrganizationId: null,
+        selectedGroupId: null,
+        activeView: viewFromHash(),
+        profileMode: "table",
+      };
+
+      const nodes = {
+        shell: document.getElementById("user-management-shell"),
+        logoutButton: document.getElementById("logout-button"),
+        generateTicketButton: document.getElementById("generate-ticket-button"),
+        status: document.getElementById("user-status"),
+        profileTableBody: document.getElementById("profile-table-body"),
+        profileTablePanel: document.getElementById("profile-table-panel"),
+        profileEditPanel: document.getElementById("profile-edit-panel"),
+        profileEditBackButton: document.getElementById("profile-edit-back-button"),
+        profileEditCancelButton: document.getElementById("profile-edit-cancel-button"),
+        profileEditForm: document.getElementById("profile-edit-form"),
+        profileEditUsername: document.getElementById("profile-edit-username"),
+        profileEditEmail: document.getElementById("profile-edit-email"),
+        organizationList: document.getElementById("organization-list"),
+        groupList: document.getElementById("group-list"),
+        invitationList: document.getElementById("invitation-list"),
+        selectedOrganizationLabel: document.getElementById("selected-organization-label"),
+        invitationTargetLabel: document.getElementById("invitation-target-label"),
+        difyBindForm: document.getElementById("dify-bind-form"),
+        n8nBindForm: document.getElementById("n8n-bind-form"),
+        externalAccountListCard: document.getElementById("external-account-list-card"),
+        externalAccountList: document.getElementById("external-account-list"),
+        organizationCreateForm: document.getElementById("organization-create-form"),
+        organizationEditForm: document.getElementById("organization-edit-form"),
+        selectedOrganizationDisplayName: document.getElementById("selected-organization-display-name"),
+        selectedOrganizationDescription: document.getElementById("selected-organization-description"),
+        groupCreateForm: document.getElementById("group-create-form"),
+        groupEditForm: document.getElementById("group-edit-form"),
+        selectedGroupDisplayName: document.getElementById("selected-group-display-name"),
+        selectedGroupDescription: document.getElementById("selected-group-description"),
+        invitationCreateForm: document.getElementById("invitation-create-form"),
+        invitationAcceptForm: document.getElementById("invitation-accept-form"),
+        ticketModalBackdrop: document.getElementById("ticket-modal-backdrop"),
+        ticketValue: document.getElementById("ticket-value"),
+        ticketExpiry: document.getElementById("ticket-expiry"),
+        copyTicketButton: document.getElementById("copy-ticket-button"),
+        closeTicketModalButton: document.getElementById("close-ticket-modal-button"),
+      };
+
       let activeTicket = "";
 
       function t(message, variables) {
         return window.AgentGuardI18n?.t?.(message, variables) || String(message || "");
+      }
+
+      function viewFromHash() {
+        const value = String(window.location.hash || "").replace("#", "").trim();
+        return ["profile", "organizations", "groups", "invitations"].includes(value) ? value : "profile";
+      }
+
+      function setView(view) {
+        state.activeView = ["profile", "organizations", "groups", "invitations"].includes(view) ? view : "profile";
+        document.querySelectorAll("[data-view-panel]").forEach((panel) => {
+          panel.classList.toggle("active", panel.dataset.viewPanel === state.activeView);
+        });
+        document.querySelectorAll("[data-user-section]").forEach((link) => {
+          link.classList.toggle("active", link.dataset.userSection === state.activeView);
+        });
+      }
+
+      function setProfileMode(mode) {
+        state.profileMode = mode === "edit" ? "edit" : "table";
+        nodes.profileTablePanel.hidden = state.profileMode === "edit";
+        nodes.profileEditPanel.hidden = state.profileMode !== "edit";
+        if (state.profileMode === "edit") {
+          nodes.profileEditUsername.value = state.user?.username || "";
+          nodes.profileEditEmail.value = state.user?.email || "";
+          document.getElementById("current-password").value = "";
+          document.getElementById("new-password").value = "";
+          document.getElementById("confirm-new-password").value = "";
+          nodes.profileEditUsername.focus();
+        }
       }
 
       function showToast(message, tone) {
@@ -168,9 +426,17 @@
         return payload;
       }
 
+      function escapeHtml(value) {
+        return String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
+
       function updateShellUser(user) {
-        const label = user ? user.username : "";
-        window.AgentGuardShell?.setCurrentUser?.(label);
+        window.AgentGuardShell?.setCurrentUser?.(user ? user.username : "");
       }
 
       function clearCatalogCaches() {
@@ -192,46 +458,91 @@
         ].forEach((key) => localStorage.removeItem(key));
       }
 
+      function selectedOrganization() {
+        return state.organizations.find((item) => String(item.id) === String(state.selectedOrganizationId)) || null;
+      }
+
+      function selectedGroup() {
+        return state.groups.find((item) => String(item.id) === String(state.selectedGroupId)) || null;
+      }
+
+      function providerLabel(provider) {
+        const normalized = String(provider || "").toLowerCase();
+        if (normalized === "n8n") {
+          return "n8n";
+        }
+        if (normalized === "dify") {
+          return "Dify";
+        }
+        return provider || t("External");
+      }
+
+      function formatDate(value) {
+        if (!value) {
+          return "-";
+        }
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+          return String(value);
+        }
+        return date.toLocaleString();
+      }
+
+      function renderProfileTable() {
+        if (!state.user) {
+          nodes.profileTableBody.innerHTML = '<tr><td colspan="3" class="subtle">Not signed in.</td></tr>';
+          return;
+        }
+        nodes.profileTableBody.innerHTML = `
+          <tr>
+            <td>
+              <strong>${escapeHtml(state.user.username || "")}</strong>
+            </td>
+            <td>${escapeHtml(state.user.email || "-")}</td>
+            <td>
+              <button class="btn primary" type="button" data-profile-edit="true">Edit</button>
+            </td>
+          </tr>
+        `;
+      }
+
       function renderUser(user) {
+        state.user = user;
         const signedIn = Boolean(user);
         const emailLabel = user?.email
-          ? (user.email_verified
-            ? t("Email: {email}.", { email: user.email })
-            : t("Email: {email} (unverified).", { email: user.email }))
-          : t("Email: not bound.");
-        statusNode.textContent = signedIn
-          ? t("Signed in as {username} (user #{id}). {email_status}", {
-            username: user.username,
-            id: user.id,
-            email_status: emailLabel,
-          })
-          : t("Not signed in.");
-        logoutButton.hidden = !signedIn;
-        generateTicketButton.hidden = !signedIn;
-        passwordCard.hidden = !signedIn;
-        externalAccountCard.hidden = !signedIn;
+          ? (user.email_verified ? `Email: ${user.email}.` : `Email: ${user.email} (unverified).`)
+          : "Email: not bound.";
+        nodes.status.textContent = signedIn
+          ? `Signed in as ${user.username} (user #${user.id}). ${emailLabel}`
+          : "Not signed in.";
+        nodes.logoutButton.hidden = !signedIn;
+        nodes.generateTicketButton.hidden = !signedIn;
+        nodes.shell.hidden = !signedIn;
+        updateShellUser(user);
+        renderProfileTable();
         if (!signedIn) {
-          passwordChangeForm.reset();
-          difyBindForm.reset();
-          n8nBindForm.reset();
-          externalAccountListCard.hidden = true;
-          externalAccountList.innerHTML = "";
+          state.organizations = [];
+          state.groups = [];
+          state.invitations = [];
+          state.externalAccounts = [];
+          nodes.difyBindForm.reset();
+          nodes.n8nBindForm.reset();
           closeTicketModal();
           clearCatalogCaches();
         }
-        updateShellUser(user);
       }
 
       function renderExternalAccounts(accounts) {
+        state.externalAccounts = accounts;
         if (!accounts.length) {
-          externalAccountListCard.hidden = true;
-          externalAccountList.innerHTML = "";
+          nodes.externalAccountListCard.hidden = true;
+          nodes.externalAccountList.innerHTML = "";
           return;
         }
-        externalAccountListCard.hidden = false;
-        externalAccountList.innerHTML = accounts.map((account) => `
+        nodes.externalAccountListCard.hidden = false;
+        nodes.externalAccountList.innerHTML = accounts.map((account) => `
           <tr>
-            <td>${escapeHtml(account.provider || "")}</td>
+            <td>${escapeHtml(providerLabel(account.provider))}</td>
             <td>${escapeHtml(account.account_email || "")}</td>
             <td>${escapeHtml(account.display_name || "-")}</td>
             <td>
@@ -248,24 +559,107 @@
         `).join("");
       }
 
-      function providerLabel(provider) {
-        const normalized = String(provider || "").toLowerCase();
-        if (normalized === "n8n") {
-          return "n8n";
+      function renderOrganizations() {
+        if (!state.organizations.length) {
+          nodes.organizationList.innerHTML = '<tr><td colspan="4" class="subtle">No organizations.</td></tr>';
+        } else {
+          nodes.organizationList.innerHTML = state.organizations.map((organization) => `
+            <tr class="${String(organization.id) === String(state.selectedOrganizationId) ? "selected-row" : ""}" data-select-organization-id="${escapeHtml(organization.id)}">
+              <td>${escapeHtml(organization.display_name || organization.name)}<br><small>${escapeHtml(organization.name)}</small></td>
+              <td>${escapeHtml(organization.current_user_role || "-")}</td>
+              <td>${escapeHtml(organization.member_count ?? "-")}</td>
+              <td>${escapeHtml(organization.admin_user_id)}</td>
+            </tr>
+          `).join("");
         }
-        if (normalized === "dify") {
-          return "Dify";
-        }
-        return provider || t("External");
+        const organization = selectedOrganization();
+        nodes.organizationEditForm.hidden = !organization;
+        nodes.selectedOrganizationDisplayName.value = organization?.display_name || "";
+        nodes.selectedOrganizationDescription.value = organization?.description || "";
       }
 
-      function escapeHtml(value) {
-        return String(value)
-          .replaceAll("&", "&amp;")
-          .replaceAll("<", "&lt;")
-          .replaceAll(">", "&gt;")
-          .replaceAll('"', "&quot;")
-          .replaceAll("'", "&#39;");
+      function renderGroups() {
+        const organization = selectedOrganization();
+        nodes.selectedOrganizationLabel.textContent = organization
+          ? `Organization: ${organization.display_name || organization.name}`
+          : "Select an organization.";
+        nodes.groupCreateForm.hidden = !organization;
+        if (!organization) {
+          nodes.groupList.innerHTML = '<tr><td colspan="4" class="subtle">Select an organization.</td></tr>';
+        } else if (!state.groups.length) {
+          nodes.groupList.innerHTML = '<tr><td colspan="4" class="subtle">No groups.</td></tr>';
+        } else {
+          nodes.groupList.innerHTML = state.groups.map((group) => `
+            <tr class="${String(group.id) === String(state.selectedGroupId) ? "selected-row" : ""}" data-select-group-id="${escapeHtml(group.id)}">
+              <td>${escapeHtml(group.display_name || group.name)}<br><small>${escapeHtml(group.name)}</small></td>
+              <td>${escapeHtml(group.current_user_role || "-")}</td>
+              <td>${escapeHtml(group.member_count ?? "-")}</td>
+              <td>${escapeHtml(group.admin_user_id)}</td>
+            </tr>
+          `).join("");
+        }
+        const group = selectedGroup();
+        nodes.groupEditForm.hidden = !group;
+        nodes.selectedGroupDisplayName.value = group?.display_name || "";
+        nodes.selectedGroupDescription.value = group?.description || "";
+      }
+
+      function renderInvitations() {
+        const organization = selectedOrganization();
+        const group = selectedGroup();
+        nodes.invitationTargetLabel.textContent = group
+          ? `Selected group: ${group.display_name || group.name}`
+          : organization
+            ? `Selected organization: ${organization.display_name || organization.name}`
+            : "Select an organization or group.";
+        if (!state.invitations.length) {
+          nodes.invitationList.innerHTML = '<tr><td colspan="5" class="subtle">No invitations.</td></tr>';
+          return;
+        }
+        nodes.invitationList.innerHTML = state.invitations.map((invitation) => {
+          const target = invitation.group_id
+            ? `${invitation.organization_name || `Org #${invitation.organization_id}`} / ${invitation.group_name || `Group #${invitation.group_id}`}`
+            : (invitation.organization_name || `Org #${invitation.organization_id}`);
+          return `
+            <tr>
+              <td>${escapeHtml(target)}</td>
+              <td>${escapeHtml(invitation.email || "-")}</td>
+              <td>${escapeHtml(invitation.status || "-")}</td>
+              <td>${escapeHtml(formatDate(invitation.expires_at))}</td>
+              <td>${escapeHtml(invitation.token || invitation.token_prefix || "-")}</td>
+            </tr>
+          `;
+        }).join("");
+      }
+
+      async function loadInvitations() {
+        try {
+          const payload = await api("/api/user/invitations");
+          state.invitations = payload.invitations || [];
+        } catch {
+          state.invitations = [];
+        }
+        renderInvitations();
+      }
+
+      async function loadDirectory() {
+        const organizationPayload = await api("/api/user/organizations");
+        state.organizations = organizationPayload.organizations || [];
+        if (!state.selectedOrganizationId || !state.organizations.some((item) => String(item.id) === String(state.selectedOrganizationId))) {
+          state.selectedOrganizationId = state.organizations[0]?.id || null;
+        }
+        if (state.selectedOrganizationId) {
+          const groupPayload = await api(`/api/user/organizations/${encodeURIComponent(state.selectedOrganizationId)}/groups`);
+          state.groups = groupPayload.groups || [];
+        } else {
+          state.groups = [];
+        }
+        if (!state.selectedGroupId || !state.groups.some((item) => String(item.id) === String(state.selectedGroupId))) {
+          state.selectedGroupId = state.groups[0]?.id || null;
+        }
+        renderOrganizations();
+        renderGroups();
+        await loadInvitations();
       }
 
       async function refresh() {
@@ -290,6 +684,7 @@
             })),
             ...openclawAsAccounts,
           ]);
+          await loadDirectory();
         } catch {
           renderUser(null);
           const next = encodeURIComponent(`${window.location.pathname}${window.location.search || ""}`);
@@ -299,20 +694,20 @@
 
       function openTicketModal(payload) {
         activeTicket = String(payload.ticket || "");
-        ticketValue.value = activeTicket;
-        ticketExpiry.textContent = payload.ttl_seconds
+        nodes.ticketValue.value = activeTicket;
+        nodes.ticketExpiry.textContent = payload.ttl_seconds
           ? t("Expires in {seconds} seconds.", { seconds: payload.ttl_seconds })
           : t("This ticket is short-lived.");
-        ticketModalBackdrop.hidden = false;
-        ticketValue.focus();
-        ticketValue.select();
+        nodes.ticketModalBackdrop.hidden = false;
+        nodes.ticketValue.focus();
+        nodes.ticketValue.select();
       }
 
       function closeTicketModal() {
         activeTicket = "";
-        ticketValue.value = "";
-        ticketExpiry.textContent = "";
-        ticketModalBackdrop.hidden = true;
+        nodes.ticketValue.value = "";
+        nodes.ticketExpiry.textContent = "";
+        nodes.ticketModalBackdrop.hidden = true;
       }
 
       async function copyText(value) {
@@ -320,13 +715,222 @@
           await navigator.clipboard.writeText(value);
           return;
         }
-        ticketValue.focus();
-        ticketValue.select();
+        nodes.ticketValue.focus();
+        nodes.ticketValue.select();
         document.execCommand("copy");
       }
 
-      generateTicketButton.addEventListener("click", async () => {
-        generateTicketButton.disabled = true;
+      window.addEventListener("hashchange", () => {
+        setView(viewFromHash());
+      });
+
+      nodes.profileTableBody.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-profile-edit]");
+        if (button) {
+          setProfileMode("edit");
+        }
+      });
+
+      nodes.profileEditBackButton.addEventListener("click", () => setProfileMode("table"));
+      nodes.profileEditCancelButton.addEventListener("click", () => setProfileMode("table"));
+
+      nodes.profileEditForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const username = nodes.profileEditUsername.value.trim();
+        const email = nodes.profileEditEmail.value.trim();
+        const currentPassword = document.getElementById("current-password").value;
+        const newPassword = document.getElementById("new-password").value;
+        const confirmPassword = document.getElementById("confirm-new-password").value;
+        if (newPassword || confirmPassword || currentPassword) {
+          if (!currentPassword || !newPassword) {
+            showToast(t("Current password and new password are required."), "warning");
+            return;
+          }
+          if (newPassword !== confirmPassword) {
+            showToast(t("New passwords do not match."), "warning");
+            return;
+          }
+        }
+        try {
+          const payload = await api("/api/user/me", {
+            method: "PATCH",
+            body: JSON.stringify({ username, email }),
+          });
+          if (newPassword) {
+            await api("/api/user/password", {
+              method: "POST",
+              body: JSON.stringify({
+                current_password: currentPassword,
+                new_password: newPassword,
+              }),
+            });
+          }
+          renderUser(payload.user);
+          setProfileMode("table");
+          showToast(t("Profile updated."), "success");
+        } catch (error) {
+          showToast(error.message || t("Failed to update profile."), "warning");
+        }
+      });
+
+      nodes.organizationList.addEventListener("click", async (event) => {
+        const row = event.target.closest("[data-select-organization-id]");
+        if (!row) {
+          return;
+        }
+        state.selectedOrganizationId = row.dataset.selectOrganizationId;
+        state.selectedGroupId = null;
+        const groupPayload = await api(`/api/user/organizations/${encodeURIComponent(state.selectedOrganizationId)}/groups`);
+        state.groups = groupPayload.groups || [];
+        state.selectedGroupId = state.groups[0]?.id || null;
+        renderOrganizations();
+        renderGroups();
+        await loadInvitations();
+      });
+
+      nodes.groupList.addEventListener("click", async (event) => {
+        const row = event.target.closest("[data-select-group-id]");
+        if (!row) {
+          return;
+        }
+        state.selectedGroupId = row.dataset.selectGroupId;
+        renderGroups();
+        await loadInvitations();
+      });
+
+      nodes.organizationCreateForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        try {
+          const payload = await api("/api/user/organizations", {
+            method: "POST",
+            body: JSON.stringify({
+              name: document.getElementById("organization-name").value.trim(),
+              display_name: document.getElementById("organization-display-name").value.trim() || null,
+              description: document.getElementById("organization-description").value.trim() || null,
+            }),
+          });
+          state.selectedOrganizationId = payload.organization?.id || state.selectedOrganizationId;
+          nodes.organizationCreateForm.reset();
+          await loadDirectory();
+          showToast(t("Organization created."), "success");
+        } catch (error) {
+          showToast(error.message || t("Failed to create organization."), "warning");
+        }
+      });
+
+      nodes.organizationEditForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (!state.selectedOrganizationId) {
+          return;
+        }
+        try {
+          await api(`/api/user/organizations/${encodeURIComponent(state.selectedOrganizationId)}`, {
+            method: "PATCH",
+            body: JSON.stringify({
+              display_name: nodes.selectedOrganizationDisplayName.value.trim() || null,
+              description: nodes.selectedOrganizationDescription.value.trim() || null,
+            }),
+          });
+          await loadDirectory();
+          showToast(t("Organization updated."), "success");
+        } catch (error) {
+          showToast(error.message || t("Failed to update organization."), "warning");
+        }
+      });
+
+      nodes.groupCreateForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (!state.selectedOrganizationId) {
+          showToast(t("Select an organization first."), "warning");
+          return;
+        }
+        try {
+          const payload = await api(`/api/user/organizations/${encodeURIComponent(state.selectedOrganizationId)}/groups`, {
+            method: "POST",
+            body: JSON.stringify({
+              name: document.getElementById("group-name").value.trim(),
+              display_name: document.getElementById("group-display-name").value.trim() || null,
+              description: document.getElementById("group-description").value.trim() || null,
+            }),
+          });
+          state.selectedGroupId = payload.group?.id || state.selectedGroupId;
+          nodes.groupCreateForm.reset();
+          await loadDirectory();
+          showToast(t("Group created."), "success");
+        } catch (error) {
+          showToast(error.message || t("Failed to create group."), "warning");
+        }
+      });
+
+      nodes.groupEditForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (!state.selectedGroupId) {
+          return;
+        }
+        try {
+          await api(`/api/user/groups/${encodeURIComponent(state.selectedGroupId)}`, {
+            method: "PATCH",
+            body: JSON.stringify({
+              display_name: nodes.selectedGroupDisplayName.value.trim() || null,
+              description: nodes.selectedGroupDescription.value.trim() || null,
+            }),
+          });
+          await loadDirectory();
+          showToast(t("Group updated."), "success");
+        } catch (error) {
+          showToast(error.message || t("Failed to update group."), "warning");
+        }
+      });
+
+      nodes.invitationCreateForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const target = document.getElementById("invitation-target").value;
+        const email = document.getElementById("invitation-email").value.trim() || null;
+        const isGroupTarget = target === "group";
+        if (isGroupTarget && !state.selectedGroupId) {
+          showToast(t("Select a group first."), "warning");
+          return;
+        }
+        if (!isGroupTarget && !state.selectedOrganizationId) {
+          showToast(t("Select an organization first."), "warning");
+          return;
+        }
+        const path = isGroupTarget
+          ? `/api/user/groups/${encodeURIComponent(state.selectedGroupId)}/invitations`
+          : `/api/user/organizations/${encodeURIComponent(state.selectedOrganizationId)}/invitations`;
+        try {
+          const payload = await api(path, {
+            method: "POST",
+            body: JSON.stringify({ email }),
+          });
+          nodes.invitationCreateForm.reset();
+          state.invitations.unshift(payload.invitation);
+          renderInvitations();
+          showToast(t("Invitation created."), "success");
+        } catch (error) {
+          showToast(error.message || t("Failed to create invitation."), "warning");
+        }
+      });
+
+      nodes.invitationAcceptForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        try {
+          await api("/api/user/invitations/accept", {
+            method: "POST",
+            body: JSON.stringify({
+              token: document.getElementById("invitation-token").value.trim(),
+            }),
+          });
+          nodes.invitationAcceptForm.reset();
+          await loadDirectory();
+          showToast(t("Invitation accepted."), "success");
+        } catch (error) {
+          showToast(error.message || t("Failed to accept invitation."), "warning");
+        }
+      });
+
+      nodes.generateTicketButton.addEventListener("click", async () => {
+        nodes.generateTicketButton.disabled = true;
         try {
           const payload = await api("/api/user/tickets", {
             method: "POST",
@@ -336,11 +940,11 @@
         } catch (error) {
           showToast(error.message || t("Failed to generate ticket."), "warning");
         } finally {
-          generateTicketButton.disabled = false;
+          nodes.generateTicketButton.disabled = false;
         }
       });
 
-      copyTicketButton.addEventListener("click", async () => {
+      nodes.copyTicketButton.addEventListener("click", async () => {
         if (!activeTicket) {
           closeTicketModal();
           return;
@@ -354,21 +958,20 @@
         }
       });
 
-      closeTicketModalButton.addEventListener("click", closeTicketModal);
-
-      ticketModalBackdrop.addEventListener("click", (event) => {
-        if (event.target === ticketModalBackdrop) {
+      nodes.closeTicketModalButton.addEventListener("click", closeTicketModal);
+      nodes.ticketModalBackdrop.addEventListener("click", (event) => {
+        if (event.target === nodes.ticketModalBackdrop) {
           closeTicketModal();
         }
       });
 
       document.addEventListener("keydown", (event) => {
-        if (event.key === "Escape" && !ticketModalBackdrop.hidden) {
+        if (event.key === "Escape" && !nodes.ticketModalBackdrop.hidden) {
           closeTicketModal();
         }
       });
 
-      logoutButton.addEventListener("click", async () => {
+      nodes.logoutButton.addEventListener("click", async () => {
         try {
           await api("/api/user/logout", { method: "POST", body: "{}" });
         } catch {
@@ -377,30 +980,6 @@
         renderUser(null);
         showToast(t("Signed out."), "success");
         window.setTimeout(() => window.location.replace("/login.html"), 300);
-      });
-
-      passwordChangeForm.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const currentPassword = document.getElementById("current-password").value;
-        const newPassword = document.getElementById("new-password").value;
-        const confirmPassword = document.getElementById("confirm-new-password").value;
-        if (newPassword !== confirmPassword) {
-          showToast(t("New passwords do not match."), "warning");
-          return;
-        }
-        try {
-          await api("/api/user/password", {
-            method: "POST",
-            body: JSON.stringify({
-              current_password: currentPassword,
-              new_password: newPassword,
-            }),
-          });
-          passwordChangeForm.reset();
-          showToast(t("Password updated."), "success");
-        } catch (error) {
-          showToast(error.message || t("Failed to update password."), "warning");
-        }
       });
 
       async function bindExternalAccount(provider, emailInputId, form) {
@@ -421,17 +1000,17 @@
         }
       }
 
-      difyBindForm.addEventListener("submit", async (event) => {
+      nodes.difyBindForm.addEventListener("submit", async (event) => {
         event.preventDefault();
-        await bindExternalAccount("dify", "dify-email", difyBindForm);
+        await bindExternalAccount("dify", "dify-email", nodes.difyBindForm);
       });
 
-      n8nBindForm.addEventListener("submit", async (event) => {
+      nodes.n8nBindForm.addEventListener("submit", async (event) => {
         event.preventDefault();
-        await bindExternalAccount("n8n", "n8n-email", n8nBindForm);
+        await bindExternalAccount("n8n", "n8n-email", nodes.n8nBindForm);
       });
 
-      externalAccountList.addEventListener("click", async (event) => {
+      nodes.externalAccountList.addEventListener("click", async (event) => {
         const button = event.target.closest("[data-external-account-id]");
         if (!button) {
           return;
@@ -466,15 +1045,194 @@
         }
       });
 
+      setProfileMode("table");
+      setView(state.activeView);
       refresh();
     })();
   </script>
   <style>
+    .user-management-main {
+      display: grid;
+      gap: 18px;
+    }
+
+    .user-management-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
     .profile-actions {
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
       justify-content: flex-end;
+    }
+
+    .user-management-content {
+      display: grid;
+      gap: 16px;
+      min-width: 0;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+    }
+
+    .user-view {
+      display: none;
+      gap: 16px;
+    }
+
+    .user-view.active {
+      display: grid;
+    }
+
+    .section-heading-row,
+    .profile-edit-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .section-heading-row h2,
+    .profile-edit-header h3 {
+      margin: 0;
+    }
+
+    .section-heading-row h2 {
+      font-size: 22px;
+    }
+
+    .section-heading-row .subtle,
+    .profile-edit-header .subtle {
+      margin: 4px 0 0;
+    }
+
+    .profile-table-card table {
+      width: 100%;
+      min-width: 560px;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+
+    .profile-table-card th,
+    .profile-table-card td {
+      padding: 12px 20px;
+      text-align: left;
+      vertical-align: middle;
+    }
+
+    .profile-table-card th {
+      border-bottom: 1px solid var(--line);
+      color: var(--text);
+      font-weight: 800;
+    }
+
+    .profile-table-card th:nth-child(1),
+    .profile-table-card td:nth-child(1) {
+      width: 28%;
+    }
+
+    .profile-table-card th:nth-child(2),
+    .profile-table-card td:nth-child(2) {
+      width: 52%;
+    }
+
+    .profile-table-card th:last-child,
+    .profile-table-card td:last-child {
+      width: 20%;
+      text-align: center;
+    }
+
+    .profile-edit-shell,
+    .user-subsection {
+      display: grid;
+      gap: 14px;
+      min-width: 0;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--bg);
+    }
+
+    .profile-edit-shell[hidden] {
+      display: none !important;
+    }
+
+    .casdoor-edit-form {
+      display: grid;
+      gap: 12px;
+      max-width: 760px;
+    }
+
+    .form-section-title {
+      margin-top: 6px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+
+    .casdoor-form-row {
+      display: grid;
+      grid-template-columns: minmax(140px, 190px) minmax(0, 1fr);
+      gap: 14px;
+      align-items: center;
+    }
+
+    .casdoor-form-row > span {
+      color: var(--text);
+      font-weight: 700;
+      text-align: right;
+    }
+
+    .casdoor-form-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      padding-top: 10px;
+    }
+
+    .compact-form {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      align-items: end;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--bg);
+    }
+
+    .wide-field,
+    .form-heading {
+      grid-column: 1 / -1;
+    }
+
+    .form-heading {
+      margin: 0;
+      font-size: 15px;
+    }
+
+    .selected-editor {
+      margin-top: 4px;
+    }
+
+    .external-account-form {
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+    }
+
+    .table-card {
+      overflow-x: auto;
+    }
+
+    .selected-row {
+      background: var(--brand-soft);
     }
 
     .ticket-modal-backdrop {
@@ -511,10 +1269,22 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
     }
 
-    .external-account-form {
-      margin-top: 16px;
-      padding-top: 16px;
-      border-top: 1px solid var(--line);
+    @media (max-width: 920px) {
+      .user-management-header,
+      .section-heading-row,
+      .profile-edit-header {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .compact-form,
+      .casdoor-form-row {
+        grid-template-columns: 1fr;
+      }
+
+      .casdoor-form-row > span {
+        text-align: left;
+      }
     }
   </style>
 </body>

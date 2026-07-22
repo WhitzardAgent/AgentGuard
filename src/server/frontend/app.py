@@ -426,6 +426,24 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
             self._proxy("v1/user/openclaw-bindings", method="GET", query=query)
             return
 
+        if path in {
+            "/api/user/organizations",
+            "/api/user/groups",
+            "/api/user/invitations",
+        }:
+            self._proxy(f"v1/user/{path.removeprefix('/api/user/')}", method="GET", query=query)
+            return
+
+        if (
+            re.fullmatch(r"/api/user/organizations/\d+", path)
+            or re.fullmatch(r"/api/user/organizations/\d+/groups", path)
+            or re.fullmatch(r"/api/user/organizations/\d+/members", path)
+            or re.fullmatch(r"/api/user/groups/\d+", path)
+            or re.fullmatch(r"/api/user/groups/\d+/members", path)
+        ):
+            self._proxy(f"v1/user/{path.removeprefix('/api/user/')}", method="GET", query=query)
+            return
+
         if path == "/api/security-audits" or path.startswith("/api/security-audits/"):
             upstream_path = path.removeprefix("/api/")
             self._proxy(upstream_path, method="GET", query=query)
@@ -558,6 +576,21 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
             self._proxy("v1/user/dify/bind", method="POST", query=query)
             return
 
+        if path in {
+            "/api/user/organizations",
+            "/api/user/invitations/accept",
+        }:
+            self._proxy(f"v1/user/{path.removeprefix('/api/user/')}", method="POST", query=query)
+            return
+
+        if (
+            re.fullmatch(r"/api/user/organizations/\d+/groups", path)
+            or re.fullmatch(r"/api/user/organizations/\d+/invitations", path)
+            or re.fullmatch(r"/api/user/groups/\d+/invitations", path)
+        ):
+            self._proxy(f"v1/user/{path.removeprefix('/api/user/')}", method="POST", query=query)
+            return
+
         if path == "/api/security-audits":
             self._proxy("security-audits", method="POST", query=query)
             return
@@ -621,6 +654,14 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
         if path.startswith("/api/agents/") and path.endswith("/labels"):
             upstream_path = path.removeprefix("/api/")
             self._proxy(upstream_path, method="PATCH", query=query)
+            return
+
+        if (
+            path == "/api/user/me"
+            or re.fullmatch(r"/api/user/organizations/\d+", path)
+            or re.fullmatch(r"/api/user/groups/\d+", path)
+        ):
+            self._proxy(f"v1/user/{path.removeprefix('/api/user/')}", method="PATCH", query=query)
             return
 
         self.send_error(HTTPStatus.NOT_FOUND, "Not Found")

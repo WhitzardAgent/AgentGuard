@@ -32,11 +32,14 @@
           <div class="sidebar-user-stack">
             <a class="sidebar-nav-item{{ user_active }}" href="/user.html">User Centre</a>
 
-            <section class="sidebar-agent-context sidebar-user-context" aria-label="Current user context" id="sidebar-current-user-wrap">
-              <div class="sidebar-agent-chip sidebar-user-chip">
-                <div class="sidebar-agent-name" id="sidebar-current-user">Current User</div>
-              </div>
-            </section>
+            <nav class="sidebar-agent-group sidebar-user-group" aria-label="User Centre sections">
+              <a class="sidebar-nav-item sidebar-nav-item-child" href="/user.html#profile" data-user-section="profile">Profile</a>
+              <a class="sidebar-nav-item sidebar-nav-item-child" href="/user.html#organizations" data-user-section="organizations">Organizations</a>
+              <a class="sidebar-nav-item sidebar-nav-item-child" href="/user.html#groups" data-user-section="groups">Groups</a>
+              <a class="sidebar-nav-item sidebar-nav-item-child" href="/user.html#invitations" data-user-section="invitations">Invitations</a>
+            </nav>
+
+            <span id="sidebar-current-user" hidden></span>
           </div>
         </nav>
       </div>

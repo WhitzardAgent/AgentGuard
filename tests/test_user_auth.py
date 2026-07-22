@@ -265,6 +265,7 @@ def test_user_register_login_me_ticket_and_logout(monkeypatch):
         "email": "alice@example.com",
         "email_verified": True,
         "is_admin": False,
+        "display_name": None,
     }
 
     duplicate = client.post(
@@ -600,6 +601,7 @@ def test_admin_user_payload_and_visibility_are_unrestricted(monkeypatch):
         "email": None,
         "email_verified": False,
         "is_admin": True,
+        "display_name": None,
     }
 
     from backend.api.console_router import _visible_scope

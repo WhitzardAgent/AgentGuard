@@ -511,6 +511,97 @@ def test_user_external_account_proxy_forwards_requests():
     assert observed["delete_path"] == "/v1/user/external-accounts/7"
 
 
+def test_user_organization_group_invitation_proxy_forwards_requests():
+    observed: dict[str, list[str]] = {"get": [], "post": [], "patch": []}
+
+    class UpstreamHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            observed["get"].append(self.path)
+            body = json.dumps({}).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self) -> None:
+            observed["post"].append(self.path)
+            length = int(self.headers.get("Content-Length", "0"))
+            self.rfile.read(length)
+            body = json.dumps({"status": "ok"}).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_PATCH(self) -> None:
+            observed["patch"].append(self.path)
+            length = int(self.headers.get("Content-Length", "0"))
+            self.rfile.read(length)
+            body = json.dumps({"status": "ok"}).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    with _ThreadedServer(UpstreamHandler) as upstream:
+        with patched_proxy_target(upstream.url):
+            with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+                for path in [
+                    "/api/user/organizations?limit=10",
+                    "/api/user/organizations/1",
+                    "/api/user/organizations/1/groups",
+                    "/api/user/organizations/1/members",
+                    "/api/user/groups?organization_id=1",
+                    "/api/user/groups/2",
+                    "/api/user/groups/2/members",
+                    "/api/user/invitations",
+                ]:
+                    assert _json_request("GET", preview.url, path)[0] == 200
+                for path in [
+                    "/api/user/organizations",
+                    "/api/user/organizations/1/groups",
+                    "/api/user/organizations/1/invitations",
+                    "/api/user/groups/2/invitations",
+                    "/api/user/invitations/accept",
+                ]:
+                    assert _json_request("POST", preview.url, path, {"name": "demo"})[0] == 200
+                for path in [
+                    "/api/user/me",
+                    "/api/user/organizations/1",
+                    "/api/user/groups/2",
+                ]:
+                    assert _json_request("PATCH", preview.url, path, {"display_name": "Demo"})[0] == 200
+
+    assert observed["get"] == [
+        "/v1/user/organizations?limit=10",
+        "/v1/user/organizations/1",
+        "/v1/user/organizations/1/groups",
+        "/v1/user/organizations/1/members",
+        "/v1/user/groups?organization_id=1",
+        "/v1/user/groups/2",
+        "/v1/user/groups/2/members",
+        "/v1/user/invitations",
+    ]
+    assert observed["post"] == [
+        "/v1/user/organizations",
+        "/v1/user/organizations/1/groups",
+        "/v1/user/organizations/1/invitations",
+        "/v1/user/groups/2/invitations",
+        "/v1/user/invitations/accept",
+    ]
+    assert observed["patch"] == [
+        "/v1/user/me",
+        "/v1/user/organizations/1",
+        "/v1/user/groups/2",
+    ]
+
+
 def test_user_openclaw_binding_proxy_forwards_requests():
     observed: dict[str, object] = {}
 
@@ -1278,6 +1369,11 @@ def test_runtime_page_renders_shared_sidebar_and_active_nav():
     assert 'href="/agents.html">Agents</a>' in body
     assert 'href="/plugins.html"' in body
     assert 'href="/user.html">User Centre</a>' in body
+    assert 'href="/user.html#profile"' in body
+    assert 'href="/user.html#organizations"' in body
+    assert 'href="/user.html#groups"' in body
+    assert 'href="/user.html#invitations"' in body
+    assert 'data-user-section="users"' not in body
     assert 'href="/runtime.html"' in body
     assert "active" in body
     assert 'href="/labels.html"' in body
@@ -1444,6 +1540,23 @@ def test_user_page_renders_chinese_when_language_cookie_set():
     assert "绑定 n8n" in body
     assert "提供方" in body
     assert "复制凭证" in body
+
+
+def test_user_page_profile_uses_table_and_edit_panel():
+    with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+        status, body = _text_request("GET", preview.url, "/user.html")
+
+    assert status == 200
+    assert 'id="profile-table-body"' in body
+    assert 'data-profile-edit="true"' in body
+    assert 'id="profile-edit-panel" hidden' in body
+    assert 'id="profile-edit-username"' in body
+    assert 'id="profile-edit-email"' in body
+    assert ".profile-edit-shell[hidden]" in body
+    assert "table-layout: fixed;" in body
+    assert ".profile-table-card th," in body
+    assert "text-align: left;" in body
+    assert 'data-view-panel="users"' not in body
 
 
 def test_runtime_page_renders_chinese_template_copy_when_language_cookie_set():
