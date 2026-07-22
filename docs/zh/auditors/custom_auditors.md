@@ -1,6 +1,15 @@
 # 自定义审计器
 
-AgentGuard 支持在后端执行事后审计。与在运行时链路中同步执行的 plugin 不同，自定义审计器面向已经存储完成的完整 trace 工作：它会在 `session_id` / `agent_id` / `user_id` 对应的轨迹上做回溯分析。这类能力适合用于合规复核、事故排查、事后分析，以及为前端生成总结性的风险等级。
+AgentGuard 提供两种扩展接口，请根据所需数据范围选择：
+
+| 接口 | 输入 | 典型场景 | 运行入口 |
+| --- | --- | --- | --- |
+| `BaseAuditor` | 一个指定 Session 的 Trace | 快速摘要、单次调查或自定义前端操作 | `POST /v1/backend/audit/custom/run` |
+| `BaseAgentAuditor` | 一个 Agent 跨用户、跨 Session 的稳定快照 | 管理员安全审计、合规检查和跨 Session 关联分析 | `POST /v1/backend/security-audits` |
+
+两个注册表有意保持独立，因为两种基类的输入和输出协议不兼容。两者都提供名为 `register` 的装饰器，但导入路径会约束正确的审计器类型。
+
+## Trace Auditor
 
 公共 auditor 抽象位于：
 
@@ -230,3 +239,52 @@ def audit(self, trace: list[AuditTraceEntry]) -> AuditResult:
 - 调用 `POST /v1/backend/audit/custom/run`，传入 `session_id`、`agent_id`、`user_id` 和 `auditor_name`，对对应已存储 trace 执行一次审计
 
 如果想看一个内置的具体例子，可参考 `src/server/backend/audit/auditors/trace_risk_summary.py`。
+
+## Agent Auditor
+
+Agent 全量审计的抽象和注册逻辑位于：
+
+```text
+src/server/backend/audit/agent_base.py
+src/server/backend/audit/agent_manager.py
+src/server/backend/audit/agent_registry.py
+```
+
+将实现放在 `src/server/backend/audit/auditors/` 下，并使用 Agent Auditor 注册表：
+
+```python
+from collections.abc import Iterable
+
+from backend.audit.agent_base import BaseAgentAuditor
+from backend.audit.agent_models import AgentAuditContext, AgentAuditResult, SessionTrace
+from backend.audit.agent_registry import register
+
+
+@register(
+    name="my_agent_auditor",
+    description="审计一个 Agent 快照中的全部 Session。",
+)
+class MyAgentAuditor(BaseAgentAuditor):
+    def audit(
+        self,
+        context: AgentAuditContext,
+        sessions: Iterable[SessionTrace],
+    ) -> AgentAuditResult:
+        session_list = list(sessions)
+        return AgentAuditResult(
+            summary=f"已审计 Agent {context.agent_id}。",
+            user_count=len({item.user_id for item in session_list if item.user_id}),
+            session_count=len(session_list),
+            trace_count=sum(len(item.entries) for item in session_list),
+        )
+```
+
+如果构造过程依赖每次请求传入的配置，应覆盖 `from_config()`，不要在 `AgentAuditorManager` 中增加特殊分支：
+
+```python
+@classmethod
+def from_config(cls, config: dict | None = None) -> "MyAgentAuditor":
+    return cls(model=(config or {}).get("model"))
+```
+
+后端会自动发现该模块。注册名称会出现在 `GET /v1/backend/security-audits/auditors` 中，管理员随后可以在创建安全审计任务时选择它。新增实现还应覆盖注册、配置构造、全量快照、证据校验和失败处理测试。

@@ -11,13 +11,16 @@ from backend.audit.agent_models import (
     SessionTrace,
     highest_severity,
 )
+from backend.audit.agent_registry import register
 from backend.audit.finding_utils import semantic_dedupe_findings
 from backend.audit.rules import BaseAuditRule, builtin_audit_rules
 
 
+@register(
+    name="rule_agent_security",
+    description="Deterministic cross-session and cross-user security checks.",
+)
 class RuleBasedAgentSecurityAuditor(BaseAgentAuditor):
-    name = "rule_agent_security"
-    description = "Deterministic cross-session and cross-user security checks."
 
     def __init__(self, rules: list[BaseAuditRule] | None = None) -> None:
         self.rules = list(rules or builtin_audit_rules())

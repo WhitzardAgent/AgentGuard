@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import Any
 
 from backend.audit.agent_base import BaseAgentAuditor
 from backend.audit.agent_models import (
@@ -11,15 +12,18 @@ from backend.audit.agent_models import (
     SessionTrace,
     highest_severity,
 )
+from backend.audit.agent_registry import register
 from backend.audit.auditors.llm_agent_security import LLMAgentSecurityAuditor
 from backend.audit.auditors.rule_agent_security import RuleBasedAgentSecurityAuditor
 from backend.audit.finding_utils import semantic_dedupe_findings
 from backend.audit.llm_client import LLMAuditUnavailable
 
 
+@register(
+    name="hybrid_agent_security",
+    description="Deterministic rules plus evidence-validated LLM analysis.",
+)
 class HybridAgentSecurityAuditor(BaseAgentAuditor):
-    name = "hybrid_agent_security"
-    description = "Deterministic rules plus evidence-validated LLM analysis."
 
     def __init__(
         self,
@@ -28,6 +32,10 @@ class HybridAgentSecurityAuditor(BaseAgentAuditor):
     ) -> None:
         self.rule_auditor = rule_auditor or RuleBasedAgentSecurityAuditor()
         self.llm_auditor = llm_auditor or LLMAgentSecurityAuditor()
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any] | None = None) -> HybridAgentSecurityAuditor:
+        return cls(llm_auditor=LLMAgentSecurityAuditor.from_config(config))
 
     def audit(self, context: AgentAuditContext, sessions: Iterable[SessionTrace]) -> AgentAuditResult:
         session_list = list(sessions)

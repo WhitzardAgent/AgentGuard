@@ -1,10 +1,18 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 
-from backend.audit import AuditTraceEntry
+from backend.audit import AuditTraceEntry, agent_registry
+from backend.audit.agent_base import BaseAgentAuditor
 from backend.audit.agent_manager import AgentAuditorManager
-from backend.audit.agent_models import AgentAuditContext, AuditEvidence, AuditFinding, SessionTrace
+from backend.audit.agent_models import (
+    AgentAuditContext,
+    AgentAuditResult,
+    AuditEvidence,
+    AuditFinding,
+    SessionTrace,
+)
 from backend.audit.agent_store import AgentAuditStore
 from backend.audit.auditors.hybrid_agent_security import HybridAgentSecurityAuditor
 from backend.audit.auditors.llm_agent_security import LLMAgentSecurityAuditor
@@ -372,6 +380,37 @@ def test_agent_auditor_manager_applies_per_run_llm_config() -> None:
     assert auditor.chunk_size == 23
     assert auditor.client.provider.base_url == "https://audit-model.example/v1"
     assert auditor.client.provider.timeout_s == 75
+
+
+def test_agent_auditor_manager_uses_registered_custom_auditor(monkeypatch) -> None:
+    agent_registry.discover_agent_auditors()
+
+    class RegisteredAgentAuditor(BaseAgentAuditor):
+        def audit(
+            self,
+            context: AgentAuditContext,
+            sessions: Iterable[SessionTrace],
+        ) -> AgentAuditResult:
+            return AgentAuditResult(summary=f"Audited {context.agent_id}.")
+
+    monkeypatch.setitem(
+        agent_registry._AGENT_AUDITORS,
+        "registered_test_agent_auditor",
+        RegisteredAgentAuditor,
+    )
+    monkeypatch.setitem(
+        agent_registry._DESCRIPTIONS,
+        "registered_test_agent_auditor",
+        "Test-only registered agent auditor.",
+    )
+
+    auditor = AgentAuditorManager().get("registered_test_agent_auditor")
+
+    assert isinstance(auditor, RegisteredAgentAuditor)
+    assert any(
+        item["name"] == "registered_test_agent_auditor"
+        for item in AgentAuditorManager.descriptions()
+    )
 
 
 def test_security_audit_catalog_is_admin_only_via_dependency_override() -> None:

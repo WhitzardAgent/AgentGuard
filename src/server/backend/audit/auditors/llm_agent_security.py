@@ -17,6 +17,7 @@ from backend.audit.agent_models import (
     SessionTrace,
     highest_severity,
 )
+from backend.audit.agent_registry import register
 from backend.audit.finding_utils import semantic_dedupe_findings
 from backend.audit.llm_client import AuditLLMClient
 from backend.audit.prompts import aggregate_audit_prompt, session_audit_prompt
@@ -25,9 +26,11 @@ from shared.audit.redactor import redact
 _VALID_LEVELS = {"critical", "high", "warning", "ok"}
 
 
+@register(
+    name="llm_agent_security",
+    description="LLM-assisted semantic and cross-session security analysis.",
+)
 class LLMAgentSecurityAuditor(BaseLLMAgentAuditor):
-    name = "llm_agent_security"
-    description = "LLM-assisted semantic and cross-session security analysis."
 
     def __init__(
         self,
@@ -47,6 +50,10 @@ class LLMAgentSecurityAuditor(BaseLLMAgentAuditor):
                 500,
             ),
         )
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any] | None = None) -> LLMAgentSecurityAuditor:
+        return cls(config=config)
 
     def model_name(self) -> str | None:
         return self.client.model

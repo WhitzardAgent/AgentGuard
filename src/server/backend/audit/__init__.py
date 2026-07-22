@@ -11,6 +11,13 @@ from backend.audit.agent_models import (
     SessionAuditResult,
     SessionTrace,
 )
+from backend.audit.agent_registry import (
+    agent_auditor_descriptions,
+    discover_agent_auditors,
+    get_agent_auditor_class,
+    register as register_agent_auditor,
+    registered_agent_auditors,
+)
 from backend.audit.audit_logger import AuditLogger
 from backend.audit.base import AuditLevel, AuditResult, AuditTraceEntry, BaseAuditor
 from backend.audit.manager import (
@@ -33,10 +40,15 @@ __all__ = [
     "AgentAuditContext",
     "AgentAuditResult",
     "AgentAuditorManager",
+    "agent_auditor_descriptions",
     "AuditEvidence",
     "AuditFinding",
     "BaseAgentAuditor",
     "BaseLLMAgentAuditor",
+    "discover_agent_auditors",
+    "get_agent_auditor_class",
+    "register_agent_auditor",
+    "registered_agent_auditors",
     "SessionAuditResult",
     "SessionTrace",
     "replay_records",

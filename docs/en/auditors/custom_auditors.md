@@ -1,6 +1,15 @@
 # Custom Auditors
 
-AgentGuard supports post-hoc auditing on the backend. Unlike plugins, which run inline during the live runtime, custom auditors run on the full stored trace for a `session_id` / `agent_id` / `user_id` tuple after events have already been recorded. This is useful for compliance review, incident triage, retrospective analysis, and generating summarized severity labels for the frontend.
+AgentGuard supports two extension contracts. Choose the contract that matches the data scope you need:
+
+| Contract | Input | Typical use | Runtime entry point |
+| --- | --- | --- | --- |
+| `BaseAuditor` | One selected session trace | Fast trace summary, investigation, or a custom UI action | `POST /v1/backend/audit/custom/run` |
+| `BaseAgentAuditor` | One agent's stable snapshot across users and sessions | Administrator security review, compliance, and cross-session correlation | `POST /v1/backend/security-audits` |
+
+The registries are deliberately separate because the two base classes have incompatible inputs and outputs. Both expose a decorator named `register`, but the import path enforces the correct contract.
+
+## Trace auditors
 
 The shared auditor abstractions live under:
 
@@ -230,3 +239,52 @@ After you add the auditor implementation, the backend discovers it by registered
 - call `POST /v1/backend/audit/custom/run` with `session_id`, `agent_id`, `user_id`, and `auditor_name` to run one auditor on the corresponding stored trace
 
 For a concrete built-in example, see `src/server/backend/audit/auditors/trace_risk_summary.py`.
+
+## Agent auditors
+
+Agent-wide abstractions and registration live in:
+
+```text
+src/server/backend/audit/agent_base.py
+src/server/backend/audit/agent_manager.py
+src/server/backend/audit/agent_registry.py
+```
+
+Place the implementation under `src/server/backend/audit/auditors/` and decorate it with the agent registry:
+
+```python
+from collections.abc import Iterable
+
+from backend.audit.agent_base import BaseAgentAuditor
+from backend.audit.agent_models import AgentAuditContext, AgentAuditResult, SessionTrace
+from backend.audit.agent_registry import register
+
+
+@register(
+    name="my_agent_auditor",
+    description="Review every session in an agent snapshot.",
+)
+class MyAgentAuditor(BaseAgentAuditor):
+    def audit(
+        self,
+        context: AgentAuditContext,
+        sessions: Iterable[SessionTrace],
+    ) -> AgentAuditResult:
+        session_list = list(sessions)
+        return AgentAuditResult(
+            summary=f"Reviewed agent {context.agent_id}.",
+            user_count=len({item.user_id for item in session_list if item.user_id}),
+            session_count=len(session_list),
+            trace_count=sum(len(item.entries) for item in session_list),
+        )
+```
+
+If construction depends on request-scoped configuration, override `from_config()` instead of adding special cases to `AgentAuditorManager`:
+
+```python
+@classmethod
+def from_config(cls, config: dict | None = None) -> "MyAgentAuditor":
+    return cls(model=(config or {}).get("model"))
+```
+
+The backend discovers the module automatically. The registered name appears in `GET /v1/backend/security-audits/auditors`; an administrator can then select it when creating a security-audit run. Add tests for registration, configuration construction, full-snapshot behavior, evidence validation, and failure handling.
