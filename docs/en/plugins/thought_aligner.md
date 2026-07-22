@@ -79,19 +79,21 @@ If you prefer to enable it directly in `config/plugins.json`, add `thought_align
 
 This keeps `thought_aligner` at the same level as other built-in plugins in the plugin config, while ensuring it only runs in the server-side `llm_after` phase.
 
-The Python client needs a server URL and a decision timeout longer than the server plugin's model timeout:
+The Python client needs a runtime-auth session for the server URL, plus a decision timeout longer than the server plugin's model timeout. For LangChain-style usage, prefer `Guard(..., ticket=...)` so AgentGuard can create the runtime session for you:
 
 ```python
-from agentguard import AgentGuard
+from agentguard import Guard, Principal
 
-guard = AgentGuard(
-    "agent-session",
-    server_url="http://127.0.0.1:8000",
+guard = Guard(
+    remote_url="http://127.0.0.1:8000",
+    ticket="<AgentGuard User Ticket>",
     remote_timeout_s=45,
     remote_retries=0,
-)
+).start(principal=Principal(session_id="agent-session"))
 guard.attach_langchain(agent)
 ```
+
+Direct remote `AgentGuard(server_url=...)` construction without a runtime-auth `session_token` is no longer supported.
 
 If a framework passes an opaque prompt and the server cannot reliably recover the original user task, provide it explicitly before the guarded turn:
 

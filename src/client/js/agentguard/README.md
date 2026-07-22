@@ -41,10 +41,12 @@ const guard = new AgentGuard("demo-session", {
 - `user_id`: 调用者 ID
 - `agent_id`: agent 标识
 - `policy`: 策略名或策略文件路径
-- `server_url`: 远端控制面地址；不填时走本地模式
+- `server_url`: 远端控制面地址；不填时走本地模式。配置远端时必须同时使用 runtime-auth（`session_token`、`dpop_proof_factory`、`use_dpop_auth: true`，并关闭 legacy identity headers）
 - `api_key`: 远端服务鉴权
 - `sandbox`: `local` / `noop` / `subprocess`
 - `audit_path`: 审计日志 JSONL 输出路径
+
+不再支持仅依赖 `server_url + session_id/agent_id` 的 legacy 远程注册链路。请先通过 ticket/runtime-auth 创建 runtime session，再把返回的 `session_token` 传给 JS client。
 
 ## 3. 包装普通工具
 

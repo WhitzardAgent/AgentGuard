@@ -100,6 +100,11 @@ class Guard:
         self._ticket_dpop_key: DPoPKey | None = None
 
     def start(self, *, principal: Principal | None = None, goal: str | None = None) -> "Guard":
+        if self._config["server_url"] and not self._config["user_ticket"]:
+            raise ValueError(
+                "ticket or user_ticket is required for remote runtime-auth integration. "
+                "Generate a ticket in AgentGuard User Centre and pass it to Guard(ticket=...)."
+            )
         if principal is None:
             if not self._config["user_ticket"]:
                 raise TypeError("principal is required unless ticket/user_ticket is configured")

@@ -79,19 +79,21 @@ export AGENTGUARD_SERVER_PLUGIN_CONFIG="./config/plugins.thought-aligner.example
 
 这样 `thought_aligner` 就会和其他内置 plugin 一样出现在 plugin config 里，同时只在 server 侧的 `llm_after` 阶段运行。
 
-Python client 需要配置 server 地址，并确保远程决策超时大于 server plugin 的模型超时：
+Python client 需要先为 server 地址拿到 runtime-auth session，并确保远程决策超时大于 server plugin 的模型超时。对于 LangChain 这类接入，推荐优先使用 `Guard(..., ticket=...)`，让 AgentGuard 自动创建 runtime session：
 
 ```python
-from agentguard import AgentGuard
+from agentguard import Guard, Principal
 
-guard = AgentGuard(
-    "agent-session",
-    server_url="http://127.0.0.1:8000",
+guard = Guard(
+    remote_url="http://127.0.0.1:8000",
+    ticket="<AgentGuard User Ticket>",
     remote_timeout_s=45,
     remote_retries=0,
-)
+).start(principal=Principal(session_id="agent-session"))
 guard.attach_langchain(agent)
 ```
+
+不再支持直接使用不带 runtime-auth `session_token` 的 `AgentGuard(server_url=...)` 远程接入。
 
 如果某个框架传入的是不透明 prompt，server 无法稳定还原最初的用户任务，可以在受保护轮次开始前显式设置：
 

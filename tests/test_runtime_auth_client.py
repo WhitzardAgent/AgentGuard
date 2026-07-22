@@ -40,3 +40,14 @@ def test_remote_client_dpop_create_session_uses_bearer_key_without_access_token(
     assert headers["Authorization"] == "Bearer sk-test"
     assert headers["DPoP"] == "proof:POST:http://agentguard.test/v1/server/session/create:None"
     assert "X-AgentGuard-Session-Id" not in headers
+
+
+def test_remote_client_rejects_protected_calls_without_runtime_auth():
+    client = RemoteGuardClient("http://agentguard.test", session_id="legacy-session", agent_id="legacy-agent")
+
+    try:
+        client.fetch_snapshot()
+    except Exception as exc:
+        assert "runtime-auth session_token" in str(exc)
+    else:
+        raise AssertionError("expected protected remote call to require runtime-auth")

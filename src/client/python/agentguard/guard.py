@@ -60,10 +60,17 @@ class AgentGuard:
         auto_register_session: bool = True,
         auto_close_runtime_session: bool = True,
     ) -> None:
+        _validate_remote_runtime_auth(
+            server_url,
+            session_token=session_token,
+            dpop_proof_factory=dpop_proof_factory,
+            use_dpop_auth=use_dpop_auth,
+        )
         plugin_payload = _plugin_config_payload(plugin_config)
         snapshot = self._load_snapshot(policy)
         self.session_key = session_key or _generate_session_key()
         resolved_agent_id = agent_id or session_id
+        effective_legacy_identity_headers = False if server_url else legacy_identity_headers
         self.context = RuntimeContext(
             session_id=session_id,
             user_id=user_id,
@@ -89,7 +96,7 @@ class AgentGuard:
             session_token=session_token,
             dpop_proof_factory=dpop_proof_factory,
             use_dpop_auth=use_dpop_auth,
-            legacy_identity_headers=legacy_identity_headers,
+            legacy_identity_headers=effective_legacy_identity_headers,
             timeout_s=remote_timeout_s,
             retries=remote_retries,
         )
@@ -131,6 +138,9 @@ class AgentGuard:
                 user_id=self.context.user_id,
                 session_key=self.session_key,
                 user_ticket=user_ticket,
+                session_token=session_token,
+                dpop_proof_factory=dpop_proof_factory,
+                use_dpop_auth=use_dpop_auth,
             )
             if server_url
             else None
@@ -413,6 +423,30 @@ class AgentGuard:
 
 def _generate_session_key() -> str:
     return f"sk-{secrets.token_urlsafe(32)}"
+
+
+def _validate_remote_runtime_auth(
+    server_url: str | None,
+    *,
+    session_token: str | None,
+    dpop_proof_factory: Any | None,
+    use_dpop_auth: bool,
+) -> None:
+    if not server_url:
+        return
+    if not use_dpop_auth:
+        raise ValueError(
+            "Remote AgentGuard sessions must use ticket/runtime-auth; "
+            "create a runtime session first and pass session_token + DPoP proof factory."
+        )
+    if not session_token:
+        raise ValueError(
+            "Remote AgentGuard sessions require session_token from the ticket/runtime-auth flow."
+        )
+    if not callable(dpop_proof_factory):
+        raise ValueError(
+            "Remote AgentGuard sessions require a DPoP proof factory from the ticket/runtime-auth flow."
+        )
 
 
 def _plugin_config_payload(

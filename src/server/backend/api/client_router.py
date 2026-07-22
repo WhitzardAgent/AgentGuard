@@ -255,17 +255,14 @@ def report_mcps(req: McpReportRequest, request: Request) -> dict[str, Any]:
 
 @router.post("/v1/server/session/register")
 def register_session(req: SessionRegisterRequest, request: Request) -> dict[str, Any]:
-    context = RuntimeContext.from_dict(req.context)
-    try:
-        record = _manager.register_client_session(
-            context,
-            client_ip=_client_ip(request),
-            client_key=request.headers.get("x-agentguard-session-key"),
-            user_ticket=request.headers.get("x-agentguard-user-ticket"),
-            enforce_key=True,
-        )
-    except PermissionError as exc:
-        raise _session_key_error(exc) from exc
+    auth = _authenticate_runtime(request)
+    context = RuntimeContext.from_dict(apply_auth_context_to_context(req.context, auth))
+    record = _manager.register_client_session(
+        context,
+        client_ip=_client_ip(request),
+        user_ticket=request.headers.get("x-agentguard-user-ticket"),
+        enforce_key=False,
+    )
     return {"status": "ok", "session": record}
 
 
@@ -372,22 +369,14 @@ def skills_run(req: SkillRunRequest, request: Request) -> dict:
 
 @router.post("/v1/server/session/unregister")
 def unregister_session(request: Request) -> dict[str, Any]:
-    session_id = request.headers.get("x-agentguard-session-id")
-    if not session_id:
-        raise _session_key_error(PermissionError("missing client session id"))
-    agent_id = request.headers.get("x-agentguard-agent-id")
-    user_id = request.headers.get("x-agentguard-user-id")
-    try:
-        removed = _manager.session_pool.remove(
-            session_id,
-            agent_id=agent_id,
-            user_id=user_id,
-            client_key=request.headers.get("x-agentguard-session-key"),
-            enforce_key=True,
-        )
-    except PermissionError as exc:
-        raise _session_key_error(exc) from exc
-    return {"status": "ok", "session_id": session_id, "removed": removed}
+    auth = _authenticate_runtime(request)
+    removed = _manager.session_pool.remove(
+        auth.session_id,
+        agent_id=auth.agent_id,
+        user_id=auth.user_id,
+        enforce_key=False,
+    )
+    return {"status": "ok", "session_id": auth.session_id, "removed": removed}
 
 
 def _client_ip(request: Request) -> str | None:
@@ -401,25 +390,24 @@ def _transport_metadata(
     request: Request,
     *,
     enforce_session_key: bool,
-    auth: AuthContext | None = None,
+    auth: AuthContext,
 ) -> dict[str, Any]:
     return {
         "client_ip": _client_ip(request),
-        "client_key": None if auth is not None else request.headers.get("x-agentguard-session-key"),
+        "client_key": None,
         "user_ticket": request.headers.get("x-agentguard-user-ticket"),
-        "agent_id": auth.agent_id if auth is not None else request.headers.get("x-agentguard-agent-id"),
-        "user_id": auth.user_id if auth is not None else request.headers.get("x-agentguard-user-id"),
+        "agent_id": auth.agent_id,
+        "user_id": auth.user_id,
         "enforce_session_key": enforce_session_key,
     }
 
 
-def _authenticate_runtime(request: Request) -> AuthContext | None:
+def _authenticate_runtime(request: Request) -> AuthContext:
     auth = authenticate_dpop_request(request)
     if auth is not None:
         _register_auth_context(auth, request)
         return auth
-    _validate_client_session(request)
-    return None
+    raise HTTPException(status_code=401, detail="missing DPoP access token")
 
 
 def _register_auth_context(auth: AuthContext, request: Request) -> None:

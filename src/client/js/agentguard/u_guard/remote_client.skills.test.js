@@ -19,10 +19,9 @@ test("remote guard client reports skill descriptors with scan metadata", async (
 
   try {
     const client = new RemoteGuardClient("http://server.test", {
-      session_id: "sess-skill-report",
-      agent_id: "agent-skill-report",
-      user_id: "user-skill-report",
-      session_key: "sk-skill-report",
+      session_token: "runtime-token-skill-report",
+      use_dpop_auth: true,
+      dpop_proof_factory: (method, url, token) => `proof:${method}:${url}:${token}`,
     });
 
     await client.report_skills(
@@ -53,10 +52,12 @@ test("remote guard client reports skill descriptors with scan metadata", async (
     assert.equal(body.skills.length, 1);
     assert.equal(body.skills[0].name, "demo-skill");
     assert.equal(body.scan.summary.skill_count, 1);
-    assert.equal(calls[0].options.headers["X-AgentGuard-Session-Id"], "sess-skill-report");
-    assert.equal(calls[0].options.headers["X-AgentGuard-Agent-Id"], "agent-skill-report");
-    assert.equal(calls[0].options.headers["X-AgentGuard-User-Id"], "user-skill-report");
-    assert.equal(calls[0].options.headers["X-AgentGuard-Session-Key"], "sk-skill-report");
+    assert.equal(calls[0].options.headers.Authorization, "DPoP runtime-token-skill-report");
+    assert.equal(calls[0].options.headers.DPoP, "proof:POST:http://server.test/v1/server/skills/report:runtime-token-skill-report");
+    assert.equal(calls[0].options.headers["X-AgentGuard-Session-Id"], undefined);
+    assert.equal(calls[0].options.headers["X-AgentGuard-Agent-Id"], undefined);
+    assert.equal(calls[0].options.headers["X-AgentGuard-User-Id"], undefined);
+    assert.equal(calls[0].options.headers["X-AgentGuard-Session-Key"], undefined);
   } finally {
     global.fetch = originalFetch;
   }

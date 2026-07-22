@@ -75,10 +75,19 @@ class RemoteGuardClient {
     return Boolean(this.server_url);
   }
 
+  requireRuntimeAuth(purpose) {
+    if (!this.use_dpop_auth || !this.session_token || typeof this.dpop_proof_factory !== "function") {
+      throw new RemoteGuardError(
+        `${purpose} requires a runtime-auth session_token and DPoP proof factory; create a runtime session first`,
+      );
+    }
+  }
+
   async decide(event, context, options = {}) {
     if (!this.enabled) {
       throw new RemoteGuardError("no server_url configured");
     }
+    this.requireRuntimeAuth("remote guard decisions");
     if (this.breaker.is_open) {
       throw new RemoteGuardError("circuit breaker open");
     }
@@ -104,14 +113,17 @@ class RemoteGuardClient {
   }
 
   fetch_snapshot() {
+    this.requireRuntimeAuth("remote policy snapshot fetches");
     return this.get(this.snapshot_path);
   }
 
   upload_trace(trace) {
+    this.requireRuntimeAuth("remote trace uploads");
     return this.post(this.trace_path, trace);
   }
 
   report_tool(context, tool) {
+    this.requireRuntimeAuth("remote tool reports");
     return this.post(this.tool_report_path, {
       context: context.toDict(),
       tool,
@@ -119,6 +131,7 @@ class RemoteGuardClient {
   }
 
   sync_tools(context, tools) {
+    this.requireRuntimeAuth("remote tool sync");
     return this.post(this.tool_sync_path, {
       context: context.toDict(),
       tools: Array.isArray(tools) ? tools : [],
@@ -126,6 +139,7 @@ class RemoteGuardClient {
   }
 
   report_skills(context, skills, scan = {}) {
+    this.requireRuntimeAuth("remote skill reports");
     return this.post(this.skill_report_path, {
       context: context.toDict(),
       skills: Array.isArray(skills) ? skills : [],
@@ -134,6 +148,7 @@ class RemoteGuardClient {
   }
 
   report_mcps(context, mcps, scan = {}) {
+    this.requireRuntimeAuth("remote MCP reports");
     return this.post(this.mcp_report_path, {
       context: context.toDict(),
       mcps: Array.isArray(mcps) ? mcps : [],
@@ -142,12 +157,14 @@ class RemoteGuardClient {
   }
 
   register_session(context) {
+    this.requireRuntimeAuth("runtime session sync");
     return this.post(this.register_path, {
       context: context.toDict(),
     });
   }
 
   unregister_session() {
+    this.requireRuntimeAuth("runtime session cleanup");
     return this.post(this.unregister_path, {});
   }
 
@@ -168,10 +185,12 @@ class RemoteGuardClient {
   }
 
   refresh_runtime_session() {
+    this.requireRuntimeAuth("runtime session refresh");
     return this.post(this.runtime_session_refresh_path, {});
   }
 
   close_runtime_session() {
+    this.requireRuntimeAuth("runtime session close");
     return this.post(this.runtime_session_close_path, {});
   }
 

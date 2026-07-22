@@ -114,6 +114,12 @@ class RemoteGuardClient:
     def enabled(self) -> bool:
         return bool(self.server_url)
 
+    def _require_runtime_auth(self, purpose: str) -> None:
+        if not self.use_dpop_auth or not self.session_token or not callable(self.dpop_proof_factory):
+            raise RemoteGuardError(
+                f"{purpose} requires a runtime-auth session_token and DPoP proof factory; create a runtime session first"
+            )
+
     # ---- public API ----------------------------------------------------
     def decide(
         self,
@@ -127,6 +133,7 @@ class RemoteGuardClient:
     ) -> GuardDecision:
         if not self.enabled:
             raise RemoteGuardError("no server_url configured")
+        self._require_runtime_auth("remote guard decisions")
         if self.breaker.is_open:
             raise RemoteGuardError("circuit breaker open")
 
@@ -156,16 +163,19 @@ class RemoteGuardClient:
     def fetch_snapshot(self) -> dict[str, Any]:
         if not self.enabled:
             raise RemoteGuardError("no server_url configured")
+        self._require_runtime_auth("remote policy snapshot fetches")
         return self._get(self.snapshot_path)
 
     def upload_trace(self, trace: dict[str, Any]) -> dict[str, Any]:
         if not self.enabled:
             raise RemoteGuardError("no server_url configured")
+        self._require_runtime_auth("remote trace uploads")
         return self._post(self.trace_path, trace)
 
     def report_tool(self, context: RuntimeContext, tool: dict[str, Any]) -> dict[str, Any]:
         if not self.enabled:
             raise RemoteGuardError("no server_url configured")
+        self._require_runtime_auth("remote tool reports")
         body = {
             "context": context.to_dict(),
             "tool": tool,
@@ -175,6 +185,7 @@ class RemoteGuardClient:
     def report_mcps(self, context: RuntimeContext, mcps: list[dict[str, Any]], scan: dict[str, Any] | None = None) -> dict[str, Any]:
         if not self.enabled:
             raise RemoteGuardError("no server_url configured")
+        self._require_runtime_auth("remote MCP reports")
         body = {
             "context": context.to_dict(),
             "mcps": list(mcps),
@@ -185,6 +196,7 @@ class RemoteGuardClient:
     def sync_tools(self, context: RuntimeContext, tools: list[dict[str, Any]]) -> dict[str, Any]:
         if not self.enabled:
             raise RemoteGuardError("no server_url configured")
+        self._require_runtime_auth("remote tool sync")
         body = {
             "context": context.to_dict(),
             "tools": list(tools),
@@ -204,11 +216,13 @@ class RemoteGuardClient:
     def register_session(self, context: RuntimeContext) -> dict[str, Any]:
         if not self.enabled:
             raise RemoteGuardError("no server_url configured")
+        self._require_runtime_auth("runtime session sync")
         return self._post(self.register_path, {"context": context.to_dict()})
 
     def unregister_session(self) -> dict[str, Any]:
         if not self.enabled:
             raise RemoteGuardError("no server_url configured")
+        self._require_runtime_auth("runtime session cleanup")
         return self._post(self.unregister_path, {})
 
     def create_runtime_session(
@@ -224,11 +238,13 @@ class RemoteGuardClient:
     def refresh_runtime_session(self) -> dict[str, Any]:
         if not self.enabled:
             raise RemoteGuardError("no server_url configured")
+        self._require_runtime_auth("runtime session refresh")
         return self._post(self.runtime_session_refresh_path, {})
 
     def close_runtime_session(self) -> dict[str, Any]:
         if not self.enabled:
             raise RemoteGuardError("no server_url configured")
+        self._require_runtime_auth("runtime session close")
         return self._post(self.runtime_session_close_path, {})
 
     def upload_trace_async(

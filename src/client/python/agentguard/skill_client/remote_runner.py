@@ -20,6 +20,9 @@ class RemoteSkillRunner:
         user_id: str | None = None,
         session_key: str | None = None,
         user_ticket: str | None = None,
+        session_token: str | None = None,
+        dpop_proof_factory: Any | None = None,
+        use_dpop_auth: bool = False,
         timeout_s: float = 10.0,
     ) -> None:
         self.server_url = (server_url or "").rstrip("/")
@@ -29,6 +32,9 @@ class RemoteSkillRunner:
         self.user_id = user_id
         self.session_key = session_key
         self.user_ticket = user_ticket
+        self.session_token = session_token
+        self.dpop_proof_factory = dpop_proof_factory
+        self.use_dpop_auth = use_dpop_auth
         self.timeout_s = timeout_s
 
     @property
@@ -38,22 +44,22 @@ class RemoteSkillRunner:
     def run(self, skill_name: str, input_data: dict[str, Any]) -> dict[str, Any]:
         if not self.enabled:
             raise SkillError("no server_url configured for remote skills")
+        if not self.use_dpop_auth or not self.session_token or not callable(self.dpop_proof_factory):
+            raise SkillError(
+                "remote skills require a runtime-auth session_token and DPoP proof factory"
+            )
         body = safe_dumps({"skill_name": skill_name, "input": input_data}).encode("utf-8")
-        headers = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-        if self.session_id:
-            headers["X-AgentGuard-Session-Id"] = self.session_id
-        if self.agent_id:
-            headers["X-AgentGuard-Agent-Id"] = self.agent_id
-        if self.user_id:
-            headers["X-AgentGuard-User-Id"] = self.user_id
-        if self.session_key:
-            headers["X-AgentGuard-Session-Key"] = self.session_key
+        url = f"{self.server_url}/v1/server/skills/run"
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": f"DPoP {self.session_token}",
+            "DPoP": str(self.dpop_proof_factory("POST", url, self.session_token)),
+        }
         if self.user_ticket:
             headers["X-AgentGuard-User-Ticket"] = self.user_ticket
         req = urllib.request.Request(
-            f"{self.server_url}/v1/server/skills/run", data=body, headers=headers, method="POST"
+            url, data=body, headers=headers, method="POST"
         )
         try:
             with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:

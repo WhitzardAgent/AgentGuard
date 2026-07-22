@@ -67,13 +67,17 @@ def test_python_client_registers_remote_session_once_on_init(monkeypatch):
 
     monkeypatch.setattr(ClientConfigAPIServer, "start", fake_start)
     monkeypatch.setattr(RemoteGuardClient, "register_session", fake_register)
-    monkeypatch.setattr(RemoteGuardClient, "unregister_session", lambda self: {"status": "ok"})
+    monkeypatch.setattr(RemoteGuardClient, "close_runtime_session", lambda self: {"status": "ok"})
 
     guard = AgentGuard(
         "sess-py-1",
         server_url="http://server.test",
         agent_id="agent-py-1",
         user_id="user-py-1",
+        session_token="runtime-token-py-1",
+        dpop_proof_factory=lambda method, url, access_token=None: "proof",
+        use_dpop_auth=True,
+        legacy_identity_headers=False,
     )
     try:
         assert len(calls) == 1
@@ -88,34 +92,21 @@ def test_python_client_registers_remote_session_once_on_init(monkeypatch):
         guard.close()
 
 
-def test_python_client_defaults_agent_id_to_session_id_when_missing(monkeypatch):
-    calls: list[dict] = []
+def test_python_client_defaults_agent_id_to_session_id_when_missing():
+    guard = AgentGuard("sess-py-fallback")
 
-    def fake_start(self: ClientConfigAPIServer) -> str:
-        if self.port == 0:
-            self.port = 43123
-        return self.plugin_config_url
+    assert guard.context.session_id == "sess-py-fallback"
+    assert guard.context.agent_id == "sess-py-fallback"
 
-    def fake_register(self: RemoteGuardClient, context):
-        payload = context.to_dict()
-        calls.append(payload)
-        return {"status": "ok", "session": payload}
 
-    monkeypatch.setattr(ClientConfigAPIServer, "start", fake_start)
-    monkeypatch.setattr(RemoteGuardClient, "register_session", fake_register)
-    monkeypatch.setattr(RemoteGuardClient, "unregister_session", lambda self: {"status": "ok"})
-
-    guard = AgentGuard(
-        "sess-py-fallback",
-        server_url="http://server.test",
-        user_id="user-py-fallback",
-    )
-    try:
-        assert len(calls) == 1
-        assert calls[0]["session_id"] == "sess-py-fallback"
-        assert calls[0]["agent_id"] == "sess-py-fallback"
-    finally:
-        guard.close()
+def test_python_client_rejects_legacy_remote_session_registration():
+    with pytest.raises(ValueError, match="ticket/runtime-auth"):
+        AgentGuard(
+            "sess-py-legacy-remote",
+            server_url="http://server.test",
+            agent_id="agent-py-legacy-remote",
+            user_id="user-py-legacy-remote",
+        )
 
 
 def test_python_client_resyncs_session_when_config_api_url_changes(monkeypatch):
@@ -133,13 +124,17 @@ def test_python_client_resyncs_session_when_config_api_url_changes(monkeypatch):
 
     monkeypatch.setattr(ClientConfigAPIServer, "start", fake_start)
     monkeypatch.setattr(RemoteGuardClient, "register_session", fake_register)
-    monkeypatch.setattr(RemoteGuardClient, "unregister_session", lambda self: {"status": "ok"})
+    monkeypatch.setattr(RemoteGuardClient, "close_runtime_session", lambda self: {"status": "ok"})
 
     guard = AgentGuard(
         "sess-py-2",
         server_url="http://server.test",
         agent_id="agent-py-2",
         user_id="user-py-2",
+        session_token="runtime-token-py-2",
+        dpop_proof_factory=lambda method, url, access_token=None: "proof",
+        use_dpop_auth=True,
+        legacy_identity_headers=False,
     )
     try:
         assert len(calls) == 1
@@ -179,13 +174,17 @@ def test_python_client_replays_registered_tools_after_remote_resync(monkeypatch)
     monkeypatch.setattr(ClientConfigAPIServer, "start", fake_start)
     monkeypatch.setattr(RemoteGuardClient, "register_session", fake_register)
     monkeypatch.setattr(RemoteGuardClient, "report_tool", fake_report)
-    monkeypatch.setattr(RemoteGuardClient, "unregister_session", lambda self: {"status": "ok"})
+    monkeypatch.setattr(RemoteGuardClient, "close_runtime_session", lambda self: {"status": "ok"})
 
     guard = AgentGuard(
         "sess-py-tool-replay",
         server_url="http://server.test",
         agent_id="agent-py-tool-replay",
         user_id="user-py-tool-replay",
+        session_token="runtime-token-py-tool-replay",
+        dpop_proof_factory=lambda method, url, access_token=None: "proof",
+        use_dpop_auth=True,
+        legacy_identity_headers=False,
     )
     try:
         guard.wrap_tool(lambda query: query.upper(), name="lookup", capabilities=["read_file"])
@@ -288,17 +287,13 @@ def test_compat_guard_ticket_creates_langchain_dpop_runtime_session(monkeypatch)
 
 def test_compat_guard_remote_langchain_requires_ticket(monkeypatch):
     monkeypatch.setattr(RemoteGuardClient, "register_session", lambda self, context: {"status": "ok"})
-    monkeypatch.setattr(RemoteGuardClient, "unregister_session", lambda self: {"status": "ok"})
+    monkeypatch.setattr(RemoteGuardClient, "close_runtime_session", lambda self: {"status": "ok"})
 
     guard = Guard(remote_url="http://server.test")
-    guard.start(
-        principal=Principal(
-            session_id="legacy-langchain-session",
-            agent_id="legacy-langchain-agent",
+    with pytest.raises(ValueError, match="ticket or user_ticket is required"):
+        guard.start(
+            principal=Principal(
+                session_id="legacy-langchain-session",
+                agent_id="legacy-langchain-agent",
+            )
         )
-    )
-    try:
-        with pytest.raises(ValueError, match="ticket or user_ticket is required"):
-            guard.attach_langchain(object())
-    finally:
-        guard.close()

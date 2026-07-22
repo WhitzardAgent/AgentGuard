@@ -28,6 +28,8 @@ const { LangChainAgentAdapter } = require("./adapters/agent/langchain");
 
 class AgentGuard {
   constructor(session_id, options = {}) {
+    validateRemoteRuntimeAuth(options.server_url || options.serverUrl || null, options);
+    const effectiveLegacyIdentityHeaders = (options.server_url || options.serverUrl) ? false : (options.legacy_identity_headers ?? options.legacyIdentityHeaders ?? true);
     const pluginPayload = pluginConfigPayload(options.plugin_config || null);
     const snapshot = this.loadSnapshot(options.policy || null);
     this.session_key = options.session_key || options.sessionKey || generateSessionKey();
@@ -55,7 +57,7 @@ class AgentGuard {
       session_token: options.session_token || options.sessionToken || null,
       dpop_proof_factory: options.dpop_proof_factory || options.dpopProofFactory || null,
       use_dpop_auth: Boolean(options.use_dpop_auth || options.useDpopAuth),
-      legacy_identity_headers: options.legacy_identity_headers ?? options.legacyIdentityHeaders ?? true,
+      legacy_identity_headers: effectiveLegacyIdentityHeaders,
       timeout_s: options.remote_timeout_s ?? options.remoteTimeoutS ?? 5.0,
       retries: options.remote_retries ?? options.remoteRetries ?? 2,
     });
@@ -94,6 +96,9 @@ class AgentGuard {
             user_id: this.context.user_id,
             session_key: this.session_key,
             user_ticket: options.user_ticket || options.userTicket || null,
+            session_token: options.session_token || options.sessionToken || null,
+            dpop_proof_factory: options.dpop_proof_factory || options.dpopProofFactory || null,
+            use_dpop_auth: Boolean(options.use_dpop_auth || options.useDpopAuth),
           })
         : null,
     });
@@ -420,6 +425,28 @@ class AgentGuard {
 
 function generateSessionKey() {
   return `sk-${crypto.randomBytes(32).toString("base64url")}`;
+}
+
+function validateRemoteRuntimeAuth(serverUrl, options = {}) {
+  if (!serverUrl) {
+    return;
+  }
+  const useDpopAuth = Boolean(options.use_dpop_auth || options.useDpopAuth);
+  const sessionToken = options.session_token || options.sessionToken || null;
+  const dpopProofFactory = options.dpop_proof_factory || options.dpopProofFactory || null;
+  if (!useDpopAuth) {
+    throw new Error(
+      "Remote AgentGuard sessions must use ticket/runtime-auth; create a runtime session first and pass session_token + DPoP proof factory.",
+    );
+  }
+  if (!sessionToken) {
+    throw new Error("Remote AgentGuard sessions require session_token from the ticket/runtime-auth flow.");
+  }
+  if (typeof dpopProofFactory !== "function") {
+    throw new Error(
+      "Remote AgentGuard sessions require a DPoP proof factory from the ticket/runtime-auth flow.",
+    );
+  }
 }
 
 function pluginConfigPayload(plugin_config) {

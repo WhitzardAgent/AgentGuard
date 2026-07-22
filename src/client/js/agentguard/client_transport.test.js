@@ -1,18 +1,8 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-test("remote guard client sends session identity headers including agent and user", async () => {
+test("remote guard client rejects legacy runtime calls without runtime auth", async () => {
   const { RemoteGuardClient } = require("./u_guard/remote_client");
-  const calls = [];
-  global.fetch = async (url, options = {}) => {
-    calls.push({ url, options });
-    return {
-      ok: true,
-      async json() {
-        return { decision: { decision_type: "allow", reason: "ok", risk_signals: [], metadata: {} }, risk_signals: [] };
-      },
-    };
-  };
 
   const client = new RemoteGuardClient("http://server.test", {
     session_id: "sess-1",
@@ -21,13 +11,10 @@ test("remote guard client sends session identity headers including agent and use
     session_key: "sk-test",
   });
 
-  await client.fetch_snapshot();
-
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].options.headers["X-AgentGuard-Session-Id"], "sess-1");
-  assert.equal(calls[0].options.headers["X-AgentGuard-Agent-Id"], "agent-1");
-  assert.equal(calls[0].options.headers["X-AgentGuard-User-Id"], "user-1");
-  assert.equal(calls[0].options.headers["X-AgentGuard-Session-Key"], "sk-test");
+  assert.throws(
+    () => client.fetch_snapshot(),
+    /runtime-auth session_token and DPoP proof factory/,
+  );
 });
 
 test("remote guard client DPoP mode suppresses legacy identity headers", async () => {
@@ -110,7 +97,7 @@ test("client sync buffer includes agent and user in trace uploads", () => {
   });
 });
 
-test("remote skill runner sends triple identity headers and server input schema", async () => {
+test("remote skill runner sends DPoP runtime auth and server input schema", async () => {
   const { RemoteSkillRunner } = require("./skill_client/remote_runner");
   const calls = [];
   global.fetch = async (url, options = {}) => {
@@ -124,10 +111,9 @@ test("remote skill runner sends triple identity headers and server input schema"
   };
 
   const runner = new RemoteSkillRunner("http://server.test", {
-    session_id: "sess-3",
-    agent_id: "agent-3",
-    user_id: "user-3",
-    session_key: "sk-skill",
+    session_token: "runtime-token-skill",
+    use_dpop_auth: true,
+    dpop_proof_factory: (method, url, token) => `proof:${method}:${url}:${token}`,
   });
 
   await runner.run("rule_linter", { data: { rules: [] } });
@@ -136,10 +122,12 @@ test("remote skill runner sends triple identity headers and server input schema"
   const body = JSON.parse(calls[0].options.body);
   assert.equal(body.skill_name, "rule_linter");
   assert.deepEqual(body.input, { data: { rules: [] } });
-  assert.equal(calls[0].options.headers["X-AgentGuard-Session-Id"], "sess-3");
-  assert.equal(calls[0].options.headers["X-AgentGuard-Agent-Id"], "agent-3");
-  assert.equal(calls[0].options.headers["X-AgentGuard-User-Id"], "user-3");
-  assert.equal(calls[0].options.headers["X-AgentGuard-Session-Key"], "sk-skill");
+  assert.equal(calls[0].options.headers.Authorization, "DPoP runtime-token-skill");
+  assert.equal(calls[0].options.headers.DPoP, "proof:POST:http://server.test/v1/server/skills/run:runtime-token-skill");
+  assert.equal(calls[0].options.headers["X-AgentGuard-Session-Id"], undefined);
+  assert.equal(calls[0].options.headers["X-AgentGuard-Agent-Id"], undefined);
+  assert.equal(calls[0].options.headers["X-AgentGuard-User-Id"], undefined);
+  assert.equal(calls[0].options.headers["X-AgentGuard-Session-Key"], undefined);
 });
 
 test("tool metadata infers destructured object args cleanly", () => {
@@ -173,6 +161,10 @@ test("agentguard auto-registers remote session with plugin config metadata", asy
     server_url: "http://server.test",
     agent_id: "agent-4",
     user_id: "user-4",
+    session_token: "runtime-token-4",
+    use_dpop_auth: true,
+    legacy_identity_headers: false,
+    dpop_proof_factory: (method, url, token) => `proof:${method}:${url}:${token}`,
     plugin_config: {
       phases: {
         tool_before: { client: ["tool_invoke"], server: [] },
@@ -228,6 +220,10 @@ test("agentguard registers advertised client config api urls when configured", a
     server_url: "http://server.test",
     agent_id: "agent-advertised",
     user_id: "user-advertised",
+    session_token: "runtime-token-advertised",
+    use_dpop_auth: true,
+    legacy_identity_headers: false,
+    dpop_proof_factory: (method, url, token) => `proof:${method}:${url}:${token}`,
     client_config_api_host: "0.0.0.0",
     client_config_api_port: 39001,
     client_config_api_advertise_host: "10.10.0.25",
@@ -281,6 +277,10 @@ test("agentguard flushRemoteOperations waits for tool reports", async () => {
     server_url: "http://server.test",
     agent_id: "agent-tool-report",
     user_id: "user-tool-report",
+    session_token: "runtime-token-tool-report",
+    use_dpop_auth: true,
+    legacy_identity_headers: false,
+    dpop_proof_factory: (method, url, token) => `proof:${method}:${url}:${token}`,
   });
 
   guard.wrap_tool(async ({ path }) => `ok:${path}`, {
@@ -337,6 +337,10 @@ test("js langchain tool reports use schema keys for input_params", async () => {
     server_url: "http://server.test",
     agent_id: "agent-langchain-tool-report",
     user_id: "user-langchain-tool-report",
+    session_token: "runtime-token-langchain-tool-report",
+    use_dpop_auth: true,
+    legacy_identity_headers: false,
+    dpop_proof_factory: (method, url, token) => `proof:${method}:${url}:${token}`,
     sandbox: "noop",
   });
 
@@ -411,6 +415,10 @@ test("agentguard client plugin updates resync session without overwriting server
     server_url: "http://server.test",
     agent_id: "agent-5",
     user_id: "user-5",
+    session_token: "runtime-token-5",
+    use_dpop_auth: true,
+    legacy_identity_headers: false,
+    dpop_proof_factory: (method, url, token) => `proof:${method}:${url}:${token}`,
     plugin_config: {
       phases: {
         tool_before: { client: ["tool_invoke"], server: ["rule_based_plugin"] },
@@ -442,6 +450,19 @@ test("agentguard client plugin updates resync session without overwriting server
   });
 
   await guard.close();
+});
+
+test("agentguard rejects legacy remote session registration without runtime auth", () => {
+  const { AgentGuard } = require("./guard");
+
+  assert.throws(
+    () => new AgentGuard("sess-legacy-remote", {
+      server_url: "http://server.test",
+      agent_id: "agent-legacy-remote",
+      user_id: "user-legacy-remote",
+    }),
+    /ticket\/runtime-auth/,
+  );
 });
 
 test("adapters aggregate export skips missing optional agent adapters", () => {
