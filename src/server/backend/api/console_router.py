@@ -13,12 +13,11 @@ import urllib.request
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Cookie, Depends
+from fastapi import APIRouter, Cookie
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from backend.agents.store import AgentRecord, AgentStore, agent_delete_allowed_from_console
-from backend.api.authz import require_admin_user
 from backend.api.schemas import McpDetectRequest
 from backend.app_state import get_console
 from backend.auth.models import RuntimeSessionSummary
@@ -26,7 +25,6 @@ from backend.auth.session_store import get_runtime_session_store
 from backend.database import DatabaseUnavailable
 from backend.user.permissions import is_admin_user
 from backend.user.router import SESSION_COOKIE, get_user_store
-from backend.user.store import User
 
 router = APIRouter()
 
@@ -284,9 +282,10 @@ def global_traffic(n: int = 30, action: str | None = None, tool: str | None = No
 @router.get("/v1/backend/audit/recent")
 def global_audit(
     n: int = 20,
-    _: User = Depends(require_admin_user),
-) -> list[dict[str, Any]]:
-    return get_console().audit_recent(None, n)
+    agentguard_user_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+) -> Any:
+    visible = _visible_scope(agentguard_user_session)
+    return _audit_recent_for_scope(visible, None, n)
 
 
 @router.get("/v1/backend/approvals")
@@ -315,9 +314,10 @@ def agent_approvals(agent_id: str) -> list[dict[str, Any]]:
 def agent_audit(
     agent_id: str,
     n: int = 20,
-    _: User = Depends(require_admin_user),
-) -> list[dict[str, Any]]:
-    return get_console().audit_recent(agent_id, n)
+    agentguard_user_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+) -> Any:
+    visible = _visible_scope(agentguard_user_session)
+    return _audit_recent_for_scope(visible, agent_id, n)
 
 
 @router.get("/v1/backend/agents/{agent_id}/runtime/sessions")
@@ -408,6 +408,33 @@ def _visible_external_accounts(
     return _visible_scope(session_token)["external_accounts"]
 
 
+def _audit_recent_for_scope(
+    visible: dict[str, Any],
+    agent_id: str | None,
+    n: int,
+) -> Any:
+    user_id = visible.get("user_id")
+    if user_id is None:
+        return _err("login required", 401)
+    if agent_id is not None:
+        if not _agent_visible(visible, agent_id):
+            return _err("agent not visible", 403)
+        return get_console().audit_recent(agent_id, n)
+
+    visible_agent_ids = visible.get("agent_ids")
+    if visible_agent_ids is None:
+        return get_console().audit_recent(None, n)
+    if not visible_agent_ids:
+        return []
+
+    limit = max(1, min(int(n), 1000))
+    items: list[dict[str, Any]] = []
+    for bound_agent_id in sorted(str(item) for item in visible_agent_ids):
+        items.extend(get_console().audit_recent(bound_agent_id, limit))
+    items.sort(key=_audit_item_ts_ms, reverse=True)
+    return items[:limit]
+
+
 def _notify_client_runtime_session_closed(session: Any) -> dict[str, Any]:
     metadata = _runtime_session_metadata(session)
     config_url = str(metadata.get("client_config_url") or "").strip()
@@ -491,6 +518,13 @@ def _agent_visible(visible: dict[str, Any], agent_id: str) -> bool:
     if visible_agent_ids is None:
         return True
     return str(agent_id or "").strip() in visible_agent_ids
+
+
+def _audit_item_ts_ms(item: dict[str, Any]) -> int:
+    try:
+        return int((item.get("event") or {}).get("ts_ms") or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _runtime_session_summary_to_item(summary: RuntimeSessionSummary) -> dict[str, Any]:

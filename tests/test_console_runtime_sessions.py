@@ -84,6 +84,36 @@ class FakeRuntimeSessionStore:
         )
 
 
+class FakeConsole:
+    def __init__(self) -> None:
+        self.audit_by_agent = {
+            "ag_1": [
+                {
+                    "event": {"ts_ms": 100, "principal": {"agent_id": "ag_1"}},
+                    "decision": {"action": "allow"},
+                }
+            ],
+            "ag_2": [
+                {
+                    "event": {"ts_ms": 200, "principal": {"agent_id": "ag_2"}},
+                    "decision": {"action": "deny"},
+                }
+            ],
+            "ag_hidden": [
+                {
+                    "event": {"ts_ms": 300, "principal": {"agent_id": "ag_hidden"}},
+                    "decision": {"action": "deny"},
+                }
+            ],
+        }
+
+    def audit_recent(self, agent_id: str | None = None, n: int = 20) -> list[dict[str, object]]:
+        if agent_id is None:
+            items = [item for values in self.audit_by_agent.values() for item in values]
+            return sorted(items, key=lambda item: item["event"]["ts_ms"], reverse=True)[:n]
+        return list(self.audit_by_agent.get(agent_id, []))[:n]
+
+
 def _patch_console_dependencies(monkeypatch, store: FakeRuntimeSessionStore, *, agent_ids: set[str]) -> None:
     monkeypatch.setattr("backend.api.console_router.get_user_store", lambda: FakeUserStore())
     monkeypatch.setattr("backend.api.console_router.AgentStore", lambda: FakeAgentStore(agent_ids))
@@ -159,3 +189,45 @@ def test_admin_runtime_sessions_can_read_and_close_other_user_sessions(monkeypat
 
     assert closed.status_code == 200
     assert closed.json()["session"]["status"] == "closed"
+
+
+def test_bound_user_can_read_agent_audit(monkeypatch):
+    from backend.api.console_router import _audit_recent_for_scope
+
+    monkeypatch.setattr("backend.api.console_router.get_console", lambda: FakeConsole())
+
+    result = _audit_recent_for_scope(
+        {"agent_ids": {"ag_1"}, "user_id": 7, "is_admin": False},
+        "ag_1",
+        20,
+    )
+
+    assert result[0]["event"]["principal"]["agent_id"] == "ag_1"
+
+
+def test_bound_user_global_audit_only_includes_bound_agents(monkeypatch):
+    from backend.api.console_router import _audit_recent_for_scope
+
+    monkeypatch.setattr("backend.api.console_router.get_console", lambda: FakeConsole())
+
+    result = _audit_recent_for_scope(
+        {"agent_ids": {"ag_1", "ag_2"}, "user_id": 7, "is_admin": False},
+        None,
+        2,
+    )
+
+    assert [item["event"]["principal"]["agent_id"] for item in result] == ["ag_2", "ag_1"]
+
+
+def test_bound_user_cannot_read_unbound_agent_audit(monkeypatch):
+    from backend.api.console_router import _audit_recent_for_scope
+
+    monkeypatch.setattr("backend.api.console_router.get_console", lambda: FakeConsole())
+
+    result = _audit_recent_for_scope(
+        {"agent_ids": {"ag_1"}, "user_id": 7, "is_admin": False},
+        "ag_hidden",
+        20,
+    )
+
+    assert result.status_code == 403
