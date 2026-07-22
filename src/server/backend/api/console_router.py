@@ -23,8 +23,9 @@ from backend.app_state import get_console
 from backend.auth.models import RuntimeSessionSummary
 from backend.auth.session_store import get_runtime_session_store
 from backend.database import DatabaseUnavailable
+from backend.user.org_store import GroupNotFound, OrganizationAccessDenied, OrganizationNotFound
 from backend.user.permissions import is_admin_user
-from backend.user.router import SESSION_COOKIE, get_user_store
+from backend.user.router import SESSION_COOKIE, get_org_store, get_user_store
 
 router = APIRouter()
 
@@ -499,18 +500,76 @@ def _visible_scope(session_token: str | None) -> dict[str, Any]:
             (item.provider.lower(), item.account_email.lower())
             for item in store.list_external_accounts(user)
         }
-        try:
-            agent_ids = AgentStore().agent_ids_for_user(user.id)
-        except DatabaseUnavailable:
-            agent_ids = set()
         return {
             "external_accounts": external_accounts,
-            "agent_ids": agent_ids,
+            "agent_ids": _visible_agent_ids_for_user(user),
             "user_id": user.id,
             "is_admin": False,
         }
     except DatabaseUnavailable:
         return {"external_accounts": set(), "agent_ids": set(), "user_id": None, "is_admin": False}
+
+
+def _visible_agent_ids_for_user(user: Any) -> set[str]:
+    try:
+        agent_store = AgentStore()
+    except DatabaseUnavailable:
+        return set()
+
+    user_ids = {int(user.id)}
+    user_ids.update(_admin_scope_user_ids(user))
+    agent_ids: set[str] = set()
+    for user_id in sorted(user_ids):
+        try:
+            agent_ids.update(agent_store.agent_ids_for_user(user_id))
+        except DatabaseUnavailable:
+            return agent_ids
+    return agent_ids
+
+
+def _admin_scope_user_ids(user: Any) -> set[int]:
+    try:
+        org_store = get_org_store()
+    except DatabaseUnavailable:
+        return set()
+
+    scoped_user_ids: set[int] = set()
+    admin_org_ids: set[int] = set()
+    try:
+        organizations = org_store.list_organizations(user)
+    except (DatabaseUnavailable, OrganizationAccessDenied, OrganizationNotFound):
+        organizations = []
+    for organization in organizations:
+        if not _role_is_admin(getattr(organization, "current_user_role", None)):
+            continue
+        org_id = int(getattr(organization, "organization_id"))
+        admin_org_ids.add(org_id)
+        try:
+            members = org_store.list_organization_members(user, org_id)
+        except (DatabaseUnavailable, OrganizationAccessDenied, OrganizationNotFound):
+            continue
+        scoped_user_ids.update(int(member.user_id) for member in members)
+
+    try:
+        groups = org_store.list_groups(user)
+    except (DatabaseUnavailable, GroupNotFound, OrganizationAccessDenied, OrganizationNotFound):
+        groups = []
+    for group in groups:
+        if not _role_is_admin(getattr(group, "current_user_role", None)):
+            continue
+        if int(getattr(group, "organization_id")) in admin_org_ids:
+            continue
+        group_id = int(getattr(group, "group_id"))
+        try:
+            members = org_store.list_group_members(user, group_id)
+        except (DatabaseUnavailable, GroupNotFound, OrganizationAccessDenied, OrganizationNotFound):
+            continue
+        scoped_user_ids.update(int(member.user_id) for member in members)
+    return scoped_user_ids
+
+
+def _role_is_admin(role: Any) -> bool:
+    return str(role or "").strip().lower() == "admin"
 
 
 def _agent_visible(visible: dict[str, Any], agent_id: str) -> bool:

@@ -29,6 +29,14 @@ class FakeAgentStore:
         return set(self.agent_ids) if user_id == 7 else set()
 
 
+class FakeOrgStore:
+    def list_organizations(self, user):
+        return []
+
+    def list_groups(self, user):
+        return []
+
+
 class FakeRuntimeSessionStore:
     def __init__(self, *, user_id: int = 7) -> None:
         self.session = RuntimeSession(
@@ -116,6 +124,7 @@ class FakeConsole:
 
 def _patch_console_dependencies(monkeypatch, store: FakeRuntimeSessionStore, *, agent_ids: set[str]) -> None:
     monkeypatch.setattr("backend.api.console_router.get_user_store", lambda: FakeUserStore())
+    monkeypatch.setattr("backend.api.console_router.get_org_store", lambda: FakeOrgStore())
     monkeypatch.setattr("backend.api.console_router.AgentStore", lambda: FakeAgentStore(agent_ids))
     monkeypatch.setattr("backend.api.console_router.get_runtime_session_store", lambda: store)
 

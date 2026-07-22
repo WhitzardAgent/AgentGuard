@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
@@ -420,6 +421,144 @@ def test_console_visibility_requires_logged_in_user(monkeypatch):
     assert _visible_external_accounts(None) == set()
     assert _visible_external_accounts("missing-session") == set()
     assert _visible_external_accounts(session.token) == {("dify", "alice@example.com")}
+
+
+def test_organization_admin_console_visibility_includes_org_member_agents(monkeypatch):
+    store = FakeUserStore()
+    admin = store.create_user(
+        "alice",
+        "correct horse",
+        email="alice@example.com",
+        verification_code="",
+        require_verified_email=False,
+    )
+    session = store.create_web_session(admin)
+    monkeypatch.setattr("backend.api.console_router.get_user_store", lambda: store)
+
+    class FakeOrgStore:
+        def list_organizations(self, user):
+            return [SimpleNamespace(organization_id=10, current_user_role="admin")]
+
+        def list_organization_members(self, user, organization_id):
+            assert organization_id == 10
+            return [
+                SimpleNamespace(user_id=admin.id),
+                SimpleNamespace(user_id=2),
+                SimpleNamespace(user_id=3),
+            ]
+
+        def list_groups(self, user):
+            return []
+
+    class FakeAgentStore:
+        agent_bindings = {
+            admin.id: {"ag_admin"},
+            2: {"ag_member_one"},
+            3: {"ag_member_two"},
+            4: {"ag_outside"},
+        }
+
+        def agent_ids_for_user(self, user_id: int):
+            return set(self.agent_bindings.get(user_id, set()))
+
+        def list_agents(self, agent_ids=None):
+            return [
+                AgentRecord(
+                    agent_id=agent_id,
+                    agent_identity_code=f"code-{agent_id}",
+                    status="active",
+                )
+                for agent_id in sorted(agent_ids or set())
+            ]
+
+    monkeypatch.setattr("backend.api.console_router.get_org_store", lambda: FakeOrgStore())
+    monkeypatch.setattr("backend.api.console_router.AgentStore", FakeAgentStore)
+
+    from backend.api.console_router import _visible_scope
+
+    visible = _visible_scope(session.token)
+
+    assert visible["agent_ids"] == {"ag_admin", "ag_member_one", "ag_member_two"}
+    client = TestClient(create_app())
+    agents = client.get(
+        "/v1/backend/agents",
+        cookies={"agentguard_user_session": session.token},
+    )
+    assert agents.status_code == 200
+    assert [item["agent_id"] for item in agents.json()] == [
+        "ag_admin",
+        "ag_member_one",
+        "ag_member_two",
+    ]
+
+
+def test_group_admin_console_visibility_includes_only_group_member_agents(monkeypatch):
+    store = FakeUserStore()
+    admin = store.create_user(
+        "alice",
+        "correct horse",
+        email="alice@example.com",
+        verification_code="",
+        require_verified_email=False,
+    )
+    session = store.create_web_session(admin)
+    monkeypatch.setattr("backend.api.console_router.get_user_store", lambda: store)
+
+    class FakeOrgStore:
+        def list_organizations(self, user):
+            return [SimpleNamespace(organization_id=10, current_user_role="member")]
+
+        def list_organization_members(self, user, organization_id):
+            raise AssertionError("group admin should not receive whole-organization visibility")
+
+        def list_groups(self, user):
+            return [SimpleNamespace(group_id=20, organization_id=10, current_user_role="admin")]
+
+        def list_group_members(self, user, group_id):
+            assert group_id == 20
+            return [
+                SimpleNamespace(user_id=admin.id),
+                SimpleNamespace(user_id=2),
+            ]
+
+    class FakeAgentStore:
+        agent_bindings = {
+            admin.id: {"ag_group_admin"},
+            2: {"ag_group_member"},
+            3: {"ag_same_org_not_group"},
+        }
+
+        def agent_ids_for_user(self, user_id: int):
+            return set(self.agent_bindings.get(user_id, set()))
+
+        def list_agents(self, agent_ids=None):
+            return [
+                AgentRecord(
+                    agent_id=agent_id,
+                    agent_identity_code=f"code-{agent_id}",
+                    status="active",
+                )
+                for agent_id in sorted(agent_ids or set())
+            ]
+
+    monkeypatch.setattr("backend.api.console_router.get_org_store", lambda: FakeOrgStore())
+    monkeypatch.setattr("backend.api.console_router.AgentStore", FakeAgentStore)
+
+    from backend.api.console_router import _visible_scope
+
+    visible = _visible_scope(session.token)
+
+    assert visible["agent_ids"] == {"ag_group_admin", "ag_group_member"}
+    client = TestClient(create_app())
+    agents = client.get(
+        "/v1/backend/agents",
+        cookies={"agentguard_user_session": session.token},
+    )
+    assert agents.status_code == 200
+    assert [item["agent_id"] for item in agents.json()] == [
+        "ag_group_admin",
+        "ag_group_member",
+    ]
 
 
 def test_delete_external_account_unbinds_matching_agents(monkeypatch):
