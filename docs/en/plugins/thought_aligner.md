@@ -30,6 +30,55 @@ export AGENTGUARD_SERVER_PLUGIN_CONFIG="./config/plugins.thought-aligner.example
 
 Then start the AgentGuard server normally. The example file enables the plugin only in the server-side `llm_after` phase; the regular `config/plugins.json` remains unchanged, so Thought-Aligner is disabled by default.
 
+If you prefer to enable it directly in `config/plugins.json`, add `thought_aligner` to `phases.llm_after.server`:
+
+```json
+{
+  "phases": {
+    "llm_before": {
+      "client": [],
+      "server": []
+    },
+    "llm_after": {
+      "client": [],
+      "server": [
+        {
+          "name": "thought_aligner",
+          "env": {
+            "base_url": "$THOUGHT_ALIGNER_BASE_URL",
+            "api_key": "$THOUGHT_ALIGNER_API_KEY",
+            "model": "$THOUGHT_ALIGNER_MODEL"
+          },
+          "kwargs": {
+            "timeout_s": 30,
+            "failure_mode": "allow",
+            "max_history_items": 8,
+            "max_instruction_chars": 12000,
+            "max_thought_chars": 8000,
+            "max_observation_chars": 12000
+          }
+        }
+      ]
+    },
+    "tool_before": {
+      "client": [],
+      "server": [
+        {
+          "name": "rule_based_plugin",
+          "env": {}
+        }
+      ]
+    },
+    "tool_after": {
+      "client": [],
+      "server": []
+    }
+  }
+}
+```
+
+This keeps `thought_aligner` at the same level as other built-in plugins in the plugin config, while ensuring it only runs in the server-side `llm_after` phase.
+
 The Python client needs a server URL and a decision timeout longer than the server plugin's model timeout:
 
 ```python

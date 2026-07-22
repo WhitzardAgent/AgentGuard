@@ -87,7 +87,7 @@ if __name__ == "__main__":
     run(agent, "Please retrieve document id=0 and send it to alice@example.com.")
 ```
 
-### 第 2 步：导入 AgentGuard 客户端
+### 第 2 步：AgentGuard Client 适配器
 你需要在前面编写的智能体代码基础上导入我们的访问控制客户端，以便于与中控服务进行通信，传递智能体当前的运行状态，并接受中控服务的访问控制指令。
 
 #### 1. 安装 AgentGuard 的访问控制客户端 SDK
@@ -195,12 +195,12 @@ if __name__ == "__main__":
 * `guard.attach_langchain()`: 用于将访问控制客户端与 LangChain 智能体实例关联起来。对于其他内置平台，请按需改用 `guard.attach_langgraph()`、`guard.attach_llamaindex()`、`guard.attach_autogen()` 或 `guard.attach_openai_agents()`。
 * `guard.close()`: 用于关闭访问控制会话，释放资源。需要在智能体执行完所有任务后调用
 
-### 第 3 步：AgentGuard插件和自定义审计器
+### 第 3 步：AgentGuard插件和审计器
 
 扩展能力请查看独立章节：
 
 - [AgentGuard插件](plugins.md)
-- [自定义审计器](auditors.md)
+- [AgentGuard 审计器](auditors.md)
 
 ### 第 4 步：在中控服务器上编写策略并启动中控服务
 该项目采用 C/S 架构，访问控制的所有管理操作，包括智能体的状态监控、策略配置、策略执行、访问控制指令下发等，都需要在中控服务器上进行。该架构尤其有利于一个组织内部有多套智能体资产时，能够统一管理。

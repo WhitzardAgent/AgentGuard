@@ -156,7 +156,7 @@ A decision is the result of AgentGuard's runtime evaluation. Typical outcomes in
 
 For tool invocations, the decision determines whether the tool actually runs. For LLM input and output events, the decision can be used to block or constrain unsafe content before it continues through the agent workflow.
 
-## Audit and Custom Auditor
+## Audit and Auditors
 
 Audit records capture runtime events, decisions, plugin results, and related metadata so users can understand what happened and why.
 
@@ -167,7 +167,7 @@ Custom auditors are post-hoc analysis units that run over stored traces after ev
 - retrospective risk analysis
 - generating summarized severity labels for the frontend
 
-See [Custom Auditors](auditors.md) for implementation-level details.
+See [Custom Auditors](auditors/custom_auditors.md) for implementation-level details.
 
 ## Provenance and Cross-step Risk
 

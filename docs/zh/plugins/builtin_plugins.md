@@ -5,10 +5,12 @@ AgentGuard 提供了一组面向常见运行时防护需求的内置 plugin。�
 ## 内置 Client Plugins
 
 - [jailbreak_check](jailbreak_check.md)：一个运行在 `llm_before` 阶段的 prompt injection 检测器，可以在智能体本地进程里尽早拦截可疑 prompt。
+- [Qwen3Guard](qwen3guard.md)：一组基于模型的安全分类 plugin，分别以 `qwen3guard_input` 和 `qwen3guard_output` 运行在 `llm_before` 与 `llm_after`，适合在智能体本地筛查 prompt 和模型输出。
 
 ## 内置 Server Plugins
 
 - [rule_based_plugin](rule_based_plugin.md)：一个仅运行在 server 侧的规则引擎，用于工具调用访问控制和策略评估；它既可以直接返回固定的 `ALLOW` / `DENY`，也可以把命中的情况转入 `HUMAN_CHECK` / `LLM_CHECK`。
+- [Qwen3Guard](qwen3guard.md)：同一套 Qwen3Guard 分类 plugin 也可以部署在 AgentGuard Server 侧，用于在 `llm_before` 和 `llm_after` 阶段做集中式治理与审计。
 - [jailbreak_check](jailbreak_check.md)：同一个 LLM 输入检测器也可以部署在 AgentGuard Server 侧，用于集中式治理和审计。
 - [Thought-Aligner](thought_aligner.md)：一个按需启用的 `llm_after` 防御，在 server 侧改写可获得的推理，并让兼容的 Python client 在执行前重新生成 Action。
 

@@ -103,7 +103,7 @@ AgentGuard 提供前端控制台来管理智能体。通过可视化页面，用
 
 ### 自定义审计器扩展
 
-后端同样支持可插拔的自定义审计器，用于对执行后的轨迹进行复核。通用审计器抽象位于 `src/server/backend/audit/`，具体审计器实现位于 `src/server/backend/audit/auditors/`。详情请参考文档中的[自定义审计器章节](https://whitzard.tech/AgentGuard/zh/auditors.html)。
+后端同样支持可插拔的自定义审计器，用于对执行后的轨迹进行复核。通用审计器抽象位于 `src/server/backend/audit/`，具体审计器实现位于 `src/server/backend/audit/auditors/`。详情请参考文档中的[自定义审计器章节](https://whitzard.tech/AgentGuard/zh/auditors/custom_auditors.html)。
 
 ### 4. 集群管理
 
@@ -420,7 +420,7 @@ UI 界面还支持策略可视化配置和动态热更新。
 - **客户端**：通过极少量代码修改，客户端可集成进智能体框架中，并能够在 LLM 调用前后、工具调用前后进行拦截。客户端可以先在本地执行轻量级过滤，再将事件发送到服务端，由服务端根据配置的 plugin 进一步检测。
 - **服务器**：服务器接收来自客户端的信息，并根据配置的 plugin 对智能体动作进行策略评估，生成策略决策并返回给客户端；同时服务器持续监控智能体状态，供管理员进行审计。
 - **Plugin 扩展**：客户端与服务器都支持可插拔 plugin。若需添加自定义 plugin，可参考[客户端 plugin 指南](https://whitzard.tech/AgentGuard/zh/plugins/custom_client_plugin.html)和[服务端 plugin 指南](https://whitzard.tech/AgentGuard/zh/plugins/custom_server_plugin.html)。
-- **Custom Auditor 扩展**：后端也支持面向事后轨迹审计的可插拔 custom auditor。公共抽象位于 `src/server/backend/audit/`，具体 auditor 实现位于 `src/server/backend/audit/auditors/`。详见[自定义 auditor 文档](https://whitzard.tech/AgentGuard/zh/auditors.html)。
+- **Custom Auditor 扩展**：后端也支持面向事后轨迹审计的可插拔 custom auditor。公共抽象位于 `src/server/backend/audit/`，具体 auditor 实现位于 `src/server/backend/audit/auditors/`。详见[自定义 auditor 文档](https://whitzard.tech/AgentGuard/zh/auditors/custom_auditors.html)。
 
 ## 👥 贡献者
 

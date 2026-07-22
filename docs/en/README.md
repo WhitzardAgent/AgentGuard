@@ -91,7 +91,7 @@ if __name__ == "__main__":
     run(agent, "Please retrieve document id=0 and send it to alice@example.com.")
 ```
 
-### Step 2: AgentGuard Client Importing
+### Step 2: AgentGuard Client Adapter
 
 On top of the agent code from Step 1, you next need to import the AgentGuard client SDK. The client communicates with the control server, forwards the agent's runtime state, and receives access-control decisions.
 
@@ -202,12 +202,12 @@ if __name__ == "__main__":
 * `guard.attach_langchain()`: attaches the client to a LangChain agent instance. For other built-in adapters, use `guard.attach_langgraph()`, `guard.attach_llamaindex()`, `guard.attach_autogen()`, or `guard.attach_openai_agents()` as appropriate.
 * `guard.close()`: closes the session and releases resources. Call this after the agent has finished all tasks.
 
-### Step 3: AgentGuard Plugins and Custom Auditors
+### Step 3: AgentGuard Plugins and Auditors
 
 See the standalone extension chapters:
 
 - [AgentGuard Plugins](plugins.md)
-- [Custom Auditors](auditors.md)
+- [AgentGuard Auditor](auditors.md)
 
 ### Step 4: Write a policy and deploy the control server
 

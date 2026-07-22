@@ -30,6 +30,55 @@ export AGENTGUARD_SERVER_PLUGIN_CONFIG="./config/plugins.thought-aligner.example
 
 然后正常启动 AgentGuard server。示例配置只在 server 的 `llm_after` 阶段启用该 plugin；现有 `config/plugins.json` 不变，所以默认行为不会开启 Thought-Aligner。
 
+如果你希望直接在 `config/plugins.json` 里启用它，可以把 `thought_aligner` 加到 `phases.llm_after.server`：
+
+```json
+{
+  "phases": {
+    "llm_before": {
+      "client": [],
+      "server": []
+    },
+    "llm_after": {
+      "client": [],
+      "server": [
+        {
+          "name": "thought_aligner",
+          "env": {
+            "base_url": "$THOUGHT_ALIGNER_BASE_URL",
+            "api_key": "$THOUGHT_ALIGNER_API_KEY",
+            "model": "$THOUGHT_ALIGNER_MODEL"
+          },
+          "kwargs": {
+            "timeout_s": 30,
+            "failure_mode": "allow",
+            "max_history_items": 8,
+            "max_instruction_chars": 12000,
+            "max_thought_chars": 8000,
+            "max_observation_chars": 12000
+          }
+        }
+      ]
+    },
+    "tool_before": {
+      "client": [],
+      "server": [
+        {
+          "name": "rule_based_plugin",
+          "env": {}
+        }
+      ]
+    },
+    "tool_after": {
+      "client": [],
+      "server": []
+    }
+  }
+}
+```
+
+这样 `thought_aligner` 就会和其他内置 plugin 一样出现在 plugin config 里，同时只在 server 侧的 `llm_after` 阶段运行。
+
 Python client 需要配置 server 地址，并确保远程决策超时大于 server plugin 的模型超时：
 
 ```python

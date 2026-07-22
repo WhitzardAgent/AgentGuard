@@ -103,7 +103,7 @@ The runtime dashboard displays agent health, recent traffic, pending approval re
 
 ### Custom Auditor Extensibility
 
-The backend also supports pluggable custom auditors for post-hoc trace review. Shared auditor abstractions live under `src/server/backend/audit/`, while concrete auditors live under `src/server/backend/audit/auditors/`. See the documentation chapter on [custom auditors](https://whitzard.tech/AgentGuard/en/auditors.html).
+The backend also supports pluggable custom auditors for post-hoc trace review. Shared auditor abstractions live under `src/server/backend/audit/`, while concrete auditors live under `src/server/backend/audit/auditors/`. See the documentation chapter on [custom auditors](https://whitzard.tech/AgentGuard/en/auditors/custom_auditors.html).
 
 ### 4. Cluster Management
 
@@ -423,7 +423,7 @@ The high-level architecture of AgentGuard is shown below.
 - **Client**: With minimal code modifications, the AgentGuard client integrates into agent frameworks and can intercept before and after LLM calls, as well as before and after tool invocations. It can perform lightweight local filtering on the client side and forward events to the server for deeper inspection by configured plugins.
 - **Server**: The server receives information from clients, uses configured plugins to evaluate agent actions against policies, produces policy decisions, and sends them back to clients. It also monitors agent status for administrative auditing.
 - **Plugin Extensibility**: Both client and server support pluggable plugins. To add custom plugins, see the [client plugin guide](https://whitzard.tech/AgentGuard/en/plugins/custom_client_plugin.html) and the [server plugin guide](https://whitzard.tech/AgentGuard/en/plugins/custom_server_plugin.html).
-- **Custom Auditor Extensibility**: The backend also supports pluggable custom auditors for post-hoc trace review. Shared auditor abstractions live under `src/server/backend/audit/`, while concrete auditors live under `src/server/backend/audit/auditors/`. See the documentation chapter on [custom auditors](https://whitzard.tech/AgentGuard/en/auditors.html).
+- **Custom Auditor Extensibility**: The backend also supports pluggable custom auditors for post-hoc trace review. Shared auditor abstractions live under `src/server/backend/audit/`, while concrete auditors live under `src/server/backend/audit/auditors/`. See the documentation chapter on [custom auditors](https://whitzard.tech/AgentGuard/en/auditors/custom_auditors.html).
 
 ## 👥 Contributors
 

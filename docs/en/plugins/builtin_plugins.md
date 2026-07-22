@@ -5,10 +5,12 @@ AgentGuard includes built-in plugins for common runtime protection needs. This p
 ## Built-in Client Plugins
 
 - [jailbreak_check](jailbreak_check.md): an `llm_before` prompt-injection detector that can run locally inside the agent process and block suspicious prompts before they reach the model.
+- [Qwen3Guard](qwen3guard.md): model-based safety classifiers exposed as `qwen3guard_input` in `llm_before` and `qwen3guard_output` in `llm_after`, suitable for screening both prompts and model responses inside the agent process.
 
 ## Built-in Server Plugins
 
 - [rule_based_plugin](rule_based_plugin.md): a server-only rule engine for tool-call access control and policy evaluation that can either return fixed `ALLOW` / `DENY` decisions or escalate matched cases to `HUMAN_CHECK` / `LLM_CHECK`.
+- [Qwen3Guard](qwen3guard.md): the same Qwen3Guard-based classifiers can also run on the AgentGuard server when you want centralized governance and audit visibility around both `llm_before` and `llm_after`.
 - [jailbreak_check](jailbreak_check.md): the same LLM-input detector can also run on the AgentGuard server when you want centralized governance and auditing.
 - [Thought-Aligner](thought_aligner.md): an opt-in `llm_after` intervention that rewrites exposed reasoning on the server and makes a compatible Python client regenerate its action before execution.
 

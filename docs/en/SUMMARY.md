@@ -5,7 +5,7 @@
 * [Core Concepts](concepts.md)
 * Runtime Internals
   * [Runtime Session Lifecycle](runtime/session_lifecycle.md)
-* AgentGuard Client Importing
+* AgentGuard Client Adapter
   * [AgentGuard Client](how-to-plugin/agentguard_client.md)
   * [LangChain](how-to-plugin/langchain.md)
   * [LangGraph](how-to-plugin/langgraph.md)
@@ -19,11 +19,14 @@
 * [AgentGuard Plugins](plugins.md)
   * [Builtin Plugins](plugins/builtin_plugins.md)
     * [rule_based_plugin](plugins/rule_based_plugin.md)
-    * [Thought-Aligner](plugins/thought_aligner.md)
       * [Visual Policy Configuration](policies/quick_config.md)
       * [Policy DSL Structure](policies/dsl_basic_structure.md)
+    * [Qwen3Guard](plugins/qwen3guard.md)
+    * [Thought-Aligner](plugins/thought_aligner.md)
     * [jailbreak_check](plugins/jailbreak_check.md)
   * [Custom Client Plugins](plugins/custom_client_plugin.md)
   * [Custom Server Plugins](plugins/custom_server_plugin.md)
-* [Custom Auditors](auditors.md)
-* [Agent Security Audit](security_audit.md)
+* [AgentGuard Auditor](auditors.md)
+  * [Builtin Auditors](auditors/builtin_auditors.md)
+    * [Agent Security Audit](security_audit.md)
+  * [Custom Auditors](auditors/custom_auditors.md)

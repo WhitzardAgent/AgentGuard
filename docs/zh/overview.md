@@ -16,7 +16,7 @@ AgentGuard 不只检查单次工具调用，而是可以贯穿智能体运行过
 
 ### 模块化安全策略
 
-AgentGuard 通过统一的 plugin 架构适配规则型和模型型安全策略。当前版本内置了 `rule_based_plugin` 和 `jailbreak_check` 等 plugin：前者是 server 侧的 DSL 工具访问控制插件，既可以在规则命中时直接返回固定的 `ALLOW` / `DENY`，也可以进入 `HUMAN_CHECK` / `LLM_CHECK`，让人工或 LLM 基于命中的条件和上下文决定最终是 allow 还是 deny；后者用于在 `llm_before` 阶段识别 prompt injection。
+AgentGuard 通过统一的 plugin 架构适配规则型和模型型安全策略。当前版本内置了 `rule_based_plugin`、Qwen3Guard 和 `jailbreak_check` 等 plugin：`rule_based_plugin` 是 server 侧的 DSL 工具访问控制插件，既可以在规则命中时直接返回固定的 `ALLOW` / `DENY`，也可以进入 `HUMAN_CHECK` / `LLM_CHECK`，让人工或 LLM 基于命中的条件和上下文决定最终是 allow 还是 deny；Qwen3Guard 则以 `qwen3guard_input` 和 `qwen3guard_output` 的形式分别覆盖 `llm_before` 与 `llm_after` 阶段；`jailbreak_check` 用于在 `llm_before` 阶段识别 prompt injection。
 
 ### 单工具与跨工具链路保护
 

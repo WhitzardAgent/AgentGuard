@@ -16,7 +16,7 @@ AgentGuard can intervene throughout an agent run instead of only checking a sing
 
 ### Modular security strategies
 
-AgentGuard exposes a unified plugin architecture so rule-based and model-based security strategies can be plugged in behind the same interface. The current release includes built-in plugins such as the server-side `rule_based_plugin`, which can either return fixed `ALLOW` / `DENY` decisions directly or escalate to `HUMAN_CHECK` / `LLM_CHECK` so a human or LLM can decide the final allow-or-deny outcome based on the matched condition and context, and `jailbreak_check` for prompt-injection detection in `llm_before`.
+AgentGuard exposes a unified plugin architecture so rule-based and model-based security strategies can be plugged in behind the same interface. The current release includes built-in plugins such as the server-side `rule_based_plugin`, which can either return fixed `ALLOW` / `DENY` decisions directly or escalate to `HUMAN_CHECK` / `LLM_CHECK` so a human or LLM can decide the final allow-or-deny outcome based on the matched condition and context, the Qwen3Guard classifiers (`qwen3guard_input` for `llm_before` and `qwen3guard_output` for `llm_after`) for model-based LLM safety checks, and `jailbreak_check` for prompt-injection detection in `llm_before`.
 
 ### Single-tool and cross-tool protection
 
