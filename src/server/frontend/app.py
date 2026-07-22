@@ -429,7 +429,6 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
         if path in {
             "/api/user/organizations",
             "/api/user/groups",
-            "/api/user/invitations",
         }:
             self._proxy(f"v1/user/{path.removeprefix('/api/user/')}", method="GET", query=query)
             return
@@ -585,7 +584,6 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
 
         if (
             re.fullmatch(r"/api/user/organizations/\d+/groups", path)
-            or re.fullmatch(r"/api/user/organizations/\d+/invitations", path)
             or re.fullmatch(r"/api/user/groups/\d+/invitations", path)
         ):
             self._proxy(f"v1/user/{path.removeprefix('/api/user/')}", method="POST", query=query)
@@ -630,6 +628,13 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
                 method="DELETE",
                 query=query,
             )
+            return
+
+        if (
+            re.fullmatch(r"/api/user/organizations/\d+", path)
+            or re.fullmatch(r"/api/user/groups/\d+", path)
+        ):
+            self._proxy(f"v1/user/{path.removeprefix('/api/user/')}", method="DELETE", query=query)
             return
 
         if path.startswith("/api/user/openclaw-bindings/"):

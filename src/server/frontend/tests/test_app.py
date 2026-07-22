@@ -512,7 +512,7 @@ def test_user_external_account_proxy_forwards_requests():
 
 
 def test_user_organization_group_invitation_proxy_forwards_requests():
-    observed: dict[str, list[str]] = {"get": [], "post": [], "patch": []}
+    observed: dict[str, list[str]] = {"get": [], "post": [], "patch": [], "delete": []}
 
     class UpstreamHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -546,6 +546,17 @@ def test_user_organization_group_invitation_proxy_forwards_requests():
             self.end_headers()
             self.wfile.write(body)
 
+        def do_DELETE(self) -> None:
+            observed["delete"].append(self.path)
+            length = int(self.headers.get("Content-Length", "0"))
+            self.rfile.read(length)
+            body = json.dumps({"status": "ok"}).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
         def log_message(self, format: str, *args: object) -> None:
             return
 
@@ -560,13 +571,11 @@ def test_user_organization_group_invitation_proxy_forwards_requests():
                     "/api/user/groups?organization_id=1",
                     "/api/user/groups/2",
                     "/api/user/groups/2/members",
-                    "/api/user/invitations",
                 ]:
                     assert _json_request("GET", preview.url, path)[0] == 200
                 for path in [
                     "/api/user/organizations",
                     "/api/user/organizations/1/groups",
-                    "/api/user/organizations/1/invitations",
                     "/api/user/groups/2/invitations",
                     "/api/user/invitations/accept",
                 ]:
@@ -577,6 +586,8 @@ def test_user_organization_group_invitation_proxy_forwards_requests():
                     "/api/user/groups/2",
                 ]:
                     assert _json_request("PATCH", preview.url, path, {"display_name": "Demo"})[0] == 200
+                assert _json_request("DELETE", preview.url, "/api/user/organizations/1")[0] == 200
+                assert _json_request("DELETE", preview.url, "/api/user/groups/2")[0] == 200
 
     assert observed["get"] == [
         "/v1/user/organizations?limit=10",
@@ -586,12 +597,10 @@ def test_user_organization_group_invitation_proxy_forwards_requests():
         "/v1/user/groups?organization_id=1",
         "/v1/user/groups/2",
         "/v1/user/groups/2/members",
-        "/v1/user/invitations",
     ]
     assert observed["post"] == [
         "/v1/user/organizations",
         "/v1/user/organizations/1/groups",
-        "/v1/user/organizations/1/invitations",
         "/v1/user/groups/2/invitations",
         "/v1/user/invitations/accept",
     ]
@@ -600,6 +609,7 @@ def test_user_organization_group_invitation_proxy_forwards_requests():
         "/v1/user/organizations/1",
         "/v1/user/groups/2",
     ]
+    assert observed["delete"] == ["/v1/user/organizations/1", "/v1/user/groups/2"]
 
 
 def test_user_openclaw_binding_proxy_forwards_requests():
@@ -1372,7 +1382,7 @@ def test_runtime_page_renders_shared_sidebar_and_active_nav():
     assert 'href="/user.html#profile"' in body
     assert 'href="/user.html#organizations"' in body
     assert 'href="/user.html#groups"' in body
-    assert 'href="/user.html#invitations"' in body
+    assert 'href="/user.html#invitations"' not in body
     assert 'data-user-section="users"' not in body
     assert 'href="/runtime.html"' in body
     assert "active" in body
@@ -1439,7 +1449,7 @@ def test_rules_page_renders_chinese_explicit_i18n_bindings_when_language_cookie_
     assert 'placeholder="该规则对应的 LLM 审查系统提示词。"' in body
     assert 'id="agentguard-page-context-title">规则构建器</span>' in body
     assert 'id="agentguard-page-context-description">从结构化输入构建规则、预览 DSL 输出，并管理未发布与已发布状态。</span>' in body
-    assert 'id="sidebar-current-user">当前用户</div>' in body
+    assert 'id="sidebar-current-user" hidden' in body
 
 
 
@@ -1557,6 +1567,57 @@ def test_user_page_profile_uses_table_and_edit_panel():
     assert ".profile-table-card th," in body
     assert "text-align: left;" in body
     assert 'data-view-panel="users"' not in body
+
+
+def test_user_page_group_forms_use_group_schema_fields():
+    with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+        status, body = _text_request("GET", preview.url, "/user.html")
+
+    assert status == 200
+    assert 'id="group-add-button"' in body
+    assert 'id="group-join-button"' in body
+    assert 'id="group-create-form" hidden' in body
+    assert 'id="group-organization" required' in body
+    assert 'id="group-name"' in body
+    assert 'id="group-description"' in body
+    assert 'id="selected-group-name"' in body
+    assert 'id="group-display-name"' not in body
+    assert 'id="selected-group-display-name"' not in body
+    assert 'class="group-table"' in body
+    assert 'data-group-invite="' in body
+    assert 'data-group-edit="' in body
+    assert 'data-group-delete="' in body
+    assert 'class="table-action-buttons"' in body
+    assert 'class="group-members-row"' in body
+    assert "<h3>Members</h3>" not in body
+    assert "groupCreateOpen" in body
+    assert 'data-view-panel="invitations"' not in body
+    assert 'id="invitation-create-form"' not in body
+    assert 'id="invitation-accept-form"' not in body
+    assert ".compact-form[hidden]" in body
+    assert "group_name:" in body
+    assert "group_description:" in body
+
+
+def test_user_page_organization_forms_use_organization_schema_fields():
+    with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+        status, body = _text_request("GET", preview.url, "/user.html")
+
+    assert status == 200
+    assert 'id="organization-add-button"' in body
+    assert 'id="organization-create-form" hidden' in body
+    assert 'id="organization-name"' in body
+    assert 'id="organization-description"' in body
+    assert 'id="selected-organization-name"' in body
+    assert 'id="organization-display-name"' not in body
+    assert 'id="selected-organization-display-name"' not in body
+    assert 'class="organization-table"' in body
+    assert 'data-organization-edit="' in body
+    assert 'data-organization-delete="' in body
+    assert 'class="organization-members-row"' in body
+    assert "organizationCreateOpen" in body
+    assert "organization_name:" in body
+    assert "organization_description:" in body
 
 
 def test_runtime_page_renders_chinese_template_copy_when_language_cookie_set():

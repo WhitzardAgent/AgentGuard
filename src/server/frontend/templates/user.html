@@ -26,7 +26,7 @@
 
       <div id="agentguard-page-context" hidden>
         <span id="agentguard-page-context-title">User Centre</span>
-        <span id="agentguard-page-context-description">Manage frontend user identities, organizations, groups, and invitations.</span>
+        <span id="agentguard-page-context-description">Manage frontend user identities, organizations, and groups.</span>
       </div>
 
       <section class="user-management-content" id="user-management-shell" hidden>
@@ -138,16 +138,13 @@
               <h2>Organizations</h2>
               <p class="subtle">Organizations you can manage or access.</p>
             </div>
+            <button class="btn primary" id="organization-add-button" type="button">Add</button>
           </div>
 
-          <form class="form-grid compact-form" id="organization-create-form">
+          <form class="form-grid compact-form" id="organization-create-form" hidden>
             <label>
               <span>Name</span>
               <input id="organization-name" required minlength="2" maxlength="255">
-            </label>
-            <label>
-              <span>Display Name</span>
-              <input id="organization-display-name" maxlength="255">
             </label>
             <label class="wide-field">
               <span>Description</span>
@@ -159,13 +156,14 @@
           </form>
 
           <div class="table-card">
-            <table>
+            <table class="organization-table">
               <thead>
                 <tr>
                   <th>Name</th>
                   <th>Role</th>
                   <th>Members</th>
                   <th>Admin</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody id="organization-list"></tbody>
@@ -175,8 +173,8 @@
           <form class="form-grid compact-form selected-editor" id="organization-edit-form" hidden>
             <h3 class="form-heading">Selected Organization</h3>
             <label>
-              <span>Display Name</span>
-              <input id="selected-organization-display-name" maxlength="255">
+              <span>Name</span>
+              <input id="selected-organization-name" required minlength="2" maxlength="255">
             </label>
             <label class="wide-field">
               <span>Description</span>
@@ -194,16 +192,20 @@
               <h2>Groups</h2>
               <p class="subtle" id="selected-organization-label">Select an organization.</p>
             </div>
+            <div class="profile-actions">
+              <button class="btn primary" id="group-add-button" type="button">Add</button>
+              <button class="btn" id="group-join-button" type="button">Join</button>
+            </div>
           </div>
 
-          <form class="form-grid compact-form" id="group-create-form">
+          <form class="form-grid compact-form" id="group-create-form" hidden>
+            <label>
+              <span>Organization</span>
+              <select id="group-organization" required></select>
+            </label>
             <label>
               <span>Name</span>
               <input id="group-name" required minlength="2" maxlength="255">
-            </label>
-            <label>
-              <span>Display Name</span>
-              <input id="group-display-name" maxlength="255">
             </label>
             <label class="wide-field">
               <span>Description</span>
@@ -215,13 +217,14 @@
           </form>
 
           <div class="table-card">
-            <table>
+            <table class="group-table">
               <thead>
                 <tr>
                   <th>Name</th>
+                  <th>Organization</th>
                   <th>Role</th>
-                  <th>Members</th>
                   <th>Admin</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody id="group-list"></tbody>
@@ -231,8 +234,8 @@
           <form class="form-grid compact-form selected-editor" id="group-edit-form" hidden>
             <h3 class="form-heading">Selected Group</h3>
             <label>
-              <span>Display Name</span>
-              <input id="selected-group-display-name" maxlength="255">
+              <span>Name</span>
+              <input id="selected-group-name" required minlength="2" maxlength="255">
             </label>
             <label class="wide-field">
               <span>Description</span>
@@ -244,53 +247,6 @@
           </form>
         </section>
 
-        <section class="user-view" id="invitations-view" data-view-panel="invitations">
-          <div class="section-heading-row">
-            <div>
-              <h2>Invitations</h2>
-              <p class="subtle" id="invitation-target-label">Admins can invite users into selected organizations or groups.</p>
-            </div>
-          </div>
-          <form class="form-grid compact-form" id="invitation-create-form">
-            <label>
-              <span>Email</span>
-              <input id="invitation-email" type="email" maxlength="255" placeholder="optional">
-            </label>
-            <label>
-              <span>Target</span>
-              <select id="invitation-target">
-                <option value="organization">Selected Organization</option>
-                <option value="group">Selected Group</option>
-              </select>
-            </label>
-            <div class="form-grid-actions">
-              <button class="btn primary" type="submit">Create Invitation</button>
-            </div>
-          </form>
-          <form class="form-grid compact-form" id="invitation-accept-form">
-            <label class="wide-field">
-              <span>Invitation Token</span>
-              <input id="invitation-token" required spellcheck="false">
-            </label>
-            <div class="form-grid-actions">
-              <button class="btn primary" type="submit">Accept Invitation</button>
-            </div>
-          </form>
-          <div class="table-card">
-            <table>
-              <thead>
-                <tr>
-                  <th>Target</th>
-                  <th>Email</th>
-                  <th>Status</th>
-                  <th>Expires</th>
-                  <th>Token</th>
-                </tr>
-              </thead>
-              <tbody id="invitation-list"></tbody>
-            </table>
-          </div>
-        </section>
       </section>
     </main>
 
@@ -302,7 +258,7 @@
           <button class="btn" id="close-ticket-modal-button" type="button">Close</button>
         </div>
         <label class="ticket-field">
-          <span>Ticket</span>
+          <span id="ticket-modal-label">Ticket</span>
           <input id="ticket-value" readonly spellcheck="false">
         </label>
         <p class="subtle" id="ticket-expiry"></p>
@@ -321,10 +277,15 @@
         user: null,
         organizations: [],
         groups: [],
-        invitations: [],
         externalAccounts: [],
+        organizationMembersById: {},
+        groupMembersById: {},
         selectedOrganizationId: null,
         selectedGroupId: null,
+        editingOrganizationId: null,
+        editingGroupId: null,
+        organizationCreateOpen: false,
+        groupCreateOpen: false,
         activeView: viewFromHash(),
         profileMode: "table",
       };
@@ -344,24 +305,26 @@
         profileEditEmail: document.getElementById("profile-edit-email"),
         organizationList: document.getElementById("organization-list"),
         groupList: document.getElementById("group-list"),
-        invitationList: document.getElementById("invitation-list"),
         selectedOrganizationLabel: document.getElementById("selected-organization-label"),
-        invitationTargetLabel: document.getElementById("invitation-target-label"),
         difyBindForm: document.getElementById("dify-bind-form"),
         n8nBindForm: document.getElementById("n8n-bind-form"),
         externalAccountListCard: document.getElementById("external-account-list-card"),
         externalAccountList: document.getElementById("external-account-list"),
+        organizationAddButton: document.getElementById("organization-add-button"),
         organizationCreateForm: document.getElementById("organization-create-form"),
         organizationEditForm: document.getElementById("organization-edit-form"),
-        selectedOrganizationDisplayName: document.getElementById("selected-organization-display-name"),
+        selectedOrganizationName: document.getElementById("selected-organization-name"),
         selectedOrganizationDescription: document.getElementById("selected-organization-description"),
+        groupAddButton: document.getElementById("group-add-button"),
+        groupJoinButton: document.getElementById("group-join-button"),
         groupCreateForm: document.getElementById("group-create-form"),
+        groupOrganizationSelect: document.getElementById("group-organization"),
         groupEditForm: document.getElementById("group-edit-form"),
-        selectedGroupDisplayName: document.getElementById("selected-group-display-name"),
+        selectedGroupName: document.getElementById("selected-group-name"),
         selectedGroupDescription: document.getElementById("selected-group-description"),
-        invitationCreateForm: document.getElementById("invitation-create-form"),
-        invitationAcceptForm: document.getElementById("invitation-accept-form"),
         ticketModalBackdrop: document.getElementById("ticket-modal-backdrop"),
+        ticketModalTitle: document.getElementById("ticket-modal-title"),
+        ticketModalLabel: document.getElementById("ticket-modal-label"),
         ticketValue: document.getElementById("ticket-value"),
         ticketExpiry: document.getElementById("ticket-expiry"),
         copyTicketButton: document.getElementById("copy-ticket-button"),
@@ -369,6 +332,7 @@
       };
 
       let activeTicket = "";
+      let activeCopyMessage = "Ticket copied.";
 
       function t(message, variables) {
         return window.AgentGuardI18n?.t?.(message, variables) || String(message || "");
@@ -376,11 +340,11 @@
 
       function viewFromHash() {
         const value = String(window.location.hash || "").replace("#", "").trim();
-        return ["profile", "organizations", "groups", "invitations"].includes(value) ? value : "profile";
+        return ["profile", "organizations", "groups"].includes(value) ? value : "profile";
       }
 
       function setView(view) {
-        state.activeView = ["profile", "organizations", "groups", "invitations"].includes(view) ? view : "profile";
+        state.activeView = ["profile", "organizations", "groups"].includes(view) ? view : "profile";
         document.querySelectorAll("[data-view-panel]").forEach((panel) => {
           panel.classList.toggle("active", panel.dataset.viewPanel === state.activeView);
         });
@@ -466,6 +430,18 @@
         return state.groups.find((item) => String(item.id) === String(state.selectedGroupId)) || null;
       }
 
+      function groupOrganization(group) {
+        return state.organizations.find((item) => String(item.id) === String(group?.organization_id)) || null;
+      }
+
+      function canManageOrganization(organization) {
+        return String(organization?.current_user_role || "").toLowerCase() === "admin";
+      }
+
+      function canManageGroup(group) {
+        return String(group?.current_user_role || "").toLowerCase() === "admin";
+      }
+
       function providerLabel(provider) {
         const normalized = String(provider || "").toLowerCase();
         if (normalized === "n8n") {
@@ -523,8 +499,15 @@
         if (!signedIn) {
           state.organizations = [];
           state.groups = [];
-          state.invitations = [];
           state.externalAccounts = [];
+          state.organizationMembersById = {};
+          state.groupMembersById = {};
+          state.selectedOrganizationId = null;
+          state.selectedGroupId = null;
+          state.editingOrganizationId = null;
+          state.editingGroupId = null;
+          state.organizationCreateOpen = false;
+          state.groupCreateOpen = false;
           nodes.difyBindForm.reset();
           nodes.n8nBindForm.reset();
           closeTicketModal();
@@ -560,106 +543,179 @@
       }
 
       function renderOrganizations() {
+        nodes.organizationAddButton.disabled = !state.user;
+        nodes.organizationAddButton.textContent = state.organizationCreateOpen ? "Cancel" : "Add";
+        nodes.organizationCreateForm.hidden = !state.organizationCreateOpen;
         if (!state.organizations.length) {
-          nodes.organizationList.innerHTML = '<tr><td colspan="4" class="subtle">No organizations.</td></tr>';
+          nodes.organizationList.innerHTML = '<tr><td colspan="5" class="subtle">No organizations.</td></tr>';
         } else {
-          nodes.organizationList.innerHTML = state.organizations.map((organization) => `
-            <tr class="${String(organization.id) === String(state.selectedOrganizationId) ? "selected-row" : ""}" data-select-organization-id="${escapeHtml(organization.id)}">
-              <td>${escapeHtml(organization.display_name || organization.name)}<br><small>${escapeHtml(organization.name)}</small></td>
-              <td>${escapeHtml(organization.current_user_role || "-")}</td>
-              <td>${escapeHtml(organization.member_count ?? "-")}</td>
-              <td>${escapeHtml(organization.admin_user_id)}</td>
-            </tr>
-          `).join("");
+          nodes.organizationList.innerHTML = state.organizations.map((organization) => {
+            const isSelected = String(organization.id) === String(state.selectedOrganizationId);
+            const members = state.organizationMembersById[String(organization.id)] || [];
+            const memberRows = members.length
+              ? members.map((member) => `
+                <tr>
+                  <td>${escapeHtml(member.username || `User #${member.user_id}`)}</td>
+                  <td>${escapeHtml(member.email || "-")}</td>
+                  <td>${escapeHtml(member.role || "member")}</td>
+                </tr>
+              `).join("")
+              : '<tr><td colspan="3" class="subtle">No members.</td></tr>';
+            const actions = canManageOrganization(organization)
+              ? `
+                <div class="table-action-buttons">
+                  <button class="btn primary" type="button" data-organization-edit="${escapeHtml(organization.id)}">Edit</button>
+                  <button class="btn danger" type="button" data-organization-delete="${escapeHtml(organization.id)}">Delete</button>
+                </div>
+              `
+              : "";
+            return `
+              <tr class="${isSelected ? "selected-row" : ""}" data-select-organization-id="${escapeHtml(organization.id)}">
+                <td><strong>${escapeHtml(organization.organization_name || organization.name)}</strong></td>
+                <td>${escapeHtml(organization.current_user_role || "-")}</td>
+                <td>${escapeHtml(organization.member_count ?? "-")}</td>
+                <td>${escapeHtml(organization.organization_admin_username || organization.admin_username || organization.organization_admin_id || organization.admin_user_id)}</td>
+                <td class="table-actions">${actions}</td>
+              </tr>
+              ${isSelected ? `
+                <tr class="organization-members-row">
+                  <td colspan="5">
+                    <div class="organization-members-panel">
+                      <table class="members-table">
+                        <thead>
+                          <tr>
+                            <th>Name</th>
+                            <th>Email</th>
+                            <th>Role</th>
+                          </tr>
+                        </thead>
+                        <tbody>${memberRows}</tbody>
+                      </table>
+                    </div>
+                  </td>
+                </tr>
+              ` : ""}
+            `;
+          }).join("");
         }
         const organization = selectedOrganization();
-        nodes.organizationEditForm.hidden = !organization;
-        nodes.selectedOrganizationDisplayName.value = organization?.display_name || "";
-        nodes.selectedOrganizationDescription.value = organization?.description || "";
+        nodes.organizationEditForm.hidden = !(organization && canManageOrganization(organization) && String(state.editingOrganizationId) === String(organization.id));
+        nodes.selectedOrganizationName.value = organization?.organization_name || organization?.name || "";
+        nodes.selectedOrganizationDescription.value = organization?.organization_description || organization?.description || "";
       }
 
       function renderGroups() {
         const organization = selectedOrganization();
         nodes.selectedOrganizationLabel.textContent = organization
-          ? `Organization: ${organization.display_name || organization.name}`
-          : "Select an organization.";
-        nodes.groupCreateForm.hidden = !organization;
-        if (!organization) {
-          nodes.groupList.innerHTML = '<tr><td colspan="4" class="subtle">Select an organization.</td></tr>';
-        } else if (!state.groups.length) {
-          nodes.groupList.innerHTML = '<tr><td colspan="4" class="subtle">No groups.</td></tr>';
+          ? `Organization: ${organization.organization_name || organization.name}`
+          : "Groups you belong to.";
+        nodes.groupAddButton.disabled = !state.organizations.length;
+        nodes.groupAddButton.textContent = state.groupCreateOpen ? "Cancel" : "Add";
+        nodes.groupCreateForm.hidden = !state.groupCreateOpen || !state.organizations.length;
+        nodes.groupOrganizationSelect.innerHTML = [
+          '<option value="">Select an organization</option>',
+          ...state.organizations.map((item) => `
+            <option value="${escapeHtml(item.id)}">${escapeHtml(item.organization_name || item.name)}</option>
+          `),
+        ].join("");
+        nodes.groupOrganizationSelect.value = organization ? String(organization.id) : "";
+        if (!state.groups.length) {
+          nodes.groupList.innerHTML = '<tr><td colspan="5" class="subtle">No groups.</td></tr>';
         } else {
-          nodes.groupList.innerHTML = state.groups.map((group) => `
-            <tr class="${String(group.id) === String(state.selectedGroupId) ? "selected-row" : ""}" data-select-group-id="${escapeHtml(group.id)}">
-              <td>${escapeHtml(group.display_name || group.name)}<br><small>${escapeHtml(group.name)}</small></td>
-              <td>${escapeHtml(group.current_user_role || "-")}</td>
-              <td>${escapeHtml(group.member_count ?? "-")}</td>
-              <td>${escapeHtml(group.admin_user_id)}</td>
-            </tr>
-          `).join("");
+          nodes.groupList.innerHTML = state.groups.map((group) => {
+            const isSelected = String(group.id) === String(state.selectedGroupId);
+            const groupOrg = groupOrganization(group);
+            const members = state.groupMembersById[String(group.id)] || [];
+            const memberRows = members.length
+              ? members.map((member) => `
+                <tr>
+                  <td>${escapeHtml(member.username || `User #${member.user_id}`)}</td>
+                  <td>${escapeHtml(member.email || "-")}</td>
+                  <td>${escapeHtml(member.role || "member")}</td>
+                </tr>
+              `).join("")
+              : '<tr><td colspan="3" class="subtle">No members.</td></tr>';
+            const actions = canManageGroup(group)
+              ? `
+                <div class="table-action-buttons">
+                  <button class="btn" type="button" data-group-invite="${escapeHtml(group.id)}">Invite</button>
+                  <button class="btn primary" type="button" data-group-edit="${escapeHtml(group.id)}">Edit</button>
+                  <button class="btn danger" type="button" data-group-delete="${escapeHtml(group.id)}">Delete</button>
+                </div>
+              `
+              : "";
+            return `
+              <tr class="${isSelected ? "selected-row" : ""}" data-select-group-id="${escapeHtml(group.id)}">
+                <td><strong>${escapeHtml(group.group_name || group.name)}</strong></td>
+                <td>${escapeHtml(groupOrg?.organization_name || groupOrg?.name || `Org #${group.organization_id}`)}</td>
+                <td>${escapeHtml(group.current_user_role || "-")}</td>
+                <td>${escapeHtml(group.group_admin_username || group.admin_username || group.group_admin_id || group.admin_user_id)}</td>
+                <td class="table-actions">${actions}</td>
+              </tr>
+              ${isSelected ? `
+                <tr class="group-members-row">
+                  <td colspan="5">
+                    <div class="group-members-panel">
+                      <table class="members-table">
+                        <thead>
+                          <tr>
+                            <th>Name</th>
+                            <th>Email</th>
+                            <th>Role</th>
+                          </tr>
+                        </thead>
+                        <tbody>${memberRows}</tbody>
+                      </table>
+                    </div>
+                  </td>
+                </tr>
+              ` : ""}
+            `;
+          }).join("");
         }
         const group = selectedGroup();
-        nodes.groupEditForm.hidden = !group;
-        nodes.selectedGroupDisplayName.value = group?.display_name || "";
-        nodes.selectedGroupDescription.value = group?.description || "";
+        nodes.groupEditForm.hidden = !(group && canManageGroup(group) && String(state.editingGroupId) === String(group.id));
+        nodes.selectedGroupName.value = group?.group_name || group?.name || "";
+        nodes.selectedGroupDescription.value = group?.group_description || group?.description || "";
       }
 
-      function renderInvitations() {
-        const organization = selectedOrganization();
-        const group = selectedGroup();
-        nodes.invitationTargetLabel.textContent = group
-          ? `Selected group: ${group.display_name || group.name}`
-          : organization
-            ? `Selected organization: ${organization.display_name || organization.name}`
-            : "Select an organization or group.";
-        if (!state.invitations.length) {
-          nodes.invitationList.innerHTML = '<tr><td colspan="5" class="subtle">No invitations.</td></tr>';
+      async function loadSelectedOrganizationGroups() {
+        const groupPayload = state.selectedOrganizationId
+          ? await api(`/api/user/organizations/${encodeURIComponent(state.selectedOrganizationId)}/groups`)
+          : await api("/api/user/groups");
+        state.groups = groupPayload.groups || [];
+        if (!state.selectedGroupId || !state.groups.some((item) => String(item.id) === String(state.selectedGroupId))) {
+          state.selectedGroupId = null;
+          state.editingGroupId = null;
+        }
+      }
+
+      async function loadOrganizationMembers(organizationId) {
+        if (!organizationId) {
           return;
         }
-        nodes.invitationList.innerHTML = state.invitations.map((invitation) => {
-          const target = invitation.group_id
-            ? `${invitation.organization_name || `Org #${invitation.organization_id}`} / ${invitation.group_name || `Group #${invitation.group_id}`}`
-            : (invitation.organization_name || `Org #${invitation.organization_id}`);
-          return `
-            <tr>
-              <td>${escapeHtml(target)}</td>
-              <td>${escapeHtml(invitation.email || "-")}</td>
-              <td>${escapeHtml(invitation.status || "-")}</td>
-              <td>${escapeHtml(formatDate(invitation.expires_at))}</td>
-              <td>${escapeHtml(invitation.token || invitation.token_prefix || "-")}</td>
-            </tr>
-          `;
-        }).join("");
+        const payload = await api(`/api/user/organizations/${encodeURIComponent(organizationId)}/members`);
+        state.organizationMembersById[String(organizationId)] = payload.members || [];
       }
 
-      async function loadInvitations() {
-        try {
-          const payload = await api("/api/user/invitations");
-          state.invitations = payload.invitations || [];
-        } catch {
-          state.invitations = [];
+      async function loadGroupMembers(groupId) {
+        if (!groupId) {
+          return;
         }
-        renderInvitations();
+        const payload = await api(`/api/user/groups/${encodeURIComponent(groupId)}/members`);
+        state.groupMembersById[String(groupId)] = payload.members || [];
       }
 
       async function loadDirectory() {
         const organizationPayload = await api("/api/user/organizations");
         state.organizations = organizationPayload.organizations || [];
         if (!state.selectedOrganizationId || !state.organizations.some((item) => String(item.id) === String(state.selectedOrganizationId))) {
-          state.selectedOrganizationId = state.organizations[0]?.id || null;
+          state.selectedOrganizationId = null;
+          state.editingOrganizationId = null;
         }
-        if (state.selectedOrganizationId) {
-          const groupPayload = await api(`/api/user/organizations/${encodeURIComponent(state.selectedOrganizationId)}/groups`);
-          state.groups = groupPayload.groups || [];
-        } else {
-          state.groups = [];
-        }
-        if (!state.selectedGroupId || !state.groups.some((item) => String(item.id) === String(state.selectedGroupId))) {
-          state.selectedGroupId = state.groups[0]?.id || null;
-        }
+        await loadSelectedOrganizationGroups();
         renderOrganizations();
         renderGroups();
-        await loadInvitations();
       }
 
       async function refresh() {
@@ -692,19 +748,50 @@
         }
       }
 
-      function openTicketModal(payload) {
-        activeTicket = String(payload.ticket || "");
+      function openTokenModal({ title, label, value, expiryText, copyMessage }) {
+        activeTicket = String(value || "");
+        activeCopyMessage = copyMessage || "Token copied.";
+        nodes.ticketModalTitle.textContent = title || "Token";
+        nodes.ticketModalLabel.textContent = label || "Token";
         nodes.ticketValue.value = activeTicket;
-        nodes.ticketExpiry.textContent = payload.ttl_seconds
-          ? t("Expires in {seconds} seconds.", { seconds: payload.ttl_seconds })
-          : t("This ticket is short-lived.");
+        nodes.copyTicketButton.textContent = t("Copy Token");
+        nodes.ticketExpiry.textContent = expiryText || "";
         nodes.ticketModalBackdrop.hidden = false;
         nodes.ticketValue.focus();
         nodes.ticketValue.select();
       }
 
+      function openTicketModal(payload) {
+        openTokenModal({
+          title: t("LangChain Ticket"),
+          label: t("Ticket"),
+          value: payload.ticket || "",
+          expiryText: payload.ttl_seconds
+            ? t("Expires in {seconds} seconds.", { seconds: payload.ttl_seconds })
+            : t("This ticket is short-lived."),
+          copyMessage: t("Ticket copied."),
+        });
+        nodes.copyTicketButton.textContent = t("Copy Ticket");
+      }
+
+      function openInvitationModal(invitation) {
+        openTokenModal({
+          title: t("Group Invitation"),
+          label: t("Invitation Token"),
+          value: invitation?.token || "",
+          expiryText: invitation?.expires_at
+            ? t("Expires at {expires}.", { expires: formatDate(invitation.expires_at) })
+            : t("Expires in 24 hours."),
+          copyMessage: t("Invitation token copied."),
+        });
+      }
+
       function closeTicketModal() {
         activeTicket = "";
+        activeCopyMessage = "Ticket copied.";
+        nodes.ticketModalTitle.textContent = t("LangChain Ticket");
+        nodes.ticketModalLabel.textContent = t("Ticket");
+        nodes.copyTicketButton.textContent = t("Copy Ticket");
         nodes.ticketValue.value = "";
         nodes.ticketExpiry.textContent = "";
         nodes.ticketModalBackdrop.hidden = true;
@@ -773,29 +860,156 @@
         }
       });
 
+      nodes.organizationAddButton.addEventListener("click", () => {
+        state.organizationCreateOpen = !state.organizationCreateOpen;
+        if (!state.organizationCreateOpen) {
+          nodes.organizationCreateForm.reset();
+        }
+        renderOrganizations();
+      });
+
       nodes.organizationList.addEventListener("click", async (event) => {
+        const editButton = event.target.closest("[data-organization-edit]");
+        if (editButton) {
+          state.selectedOrganizationId = editButton.dataset.organizationEdit;
+          state.selectedGroupId = null;
+          state.editingOrganizationId = editButton.dataset.organizationEdit;
+          state.editingGroupId = null;
+          await loadOrganizationMembers(state.selectedOrganizationId);
+          await loadSelectedOrganizationGroups();
+          renderOrganizations();
+          renderGroups();
+          return;
+        }
+        const deleteButton = event.target.closest("[data-organization-delete]");
+        if (deleteButton) {
+          const organizationId = deleteButton.dataset.organizationDelete;
+          if (!window.confirm(t("Delete this organization and all of its groups?"))) {
+            return;
+          }
+          try {
+            await api(`/api/user/organizations/${encodeURIComponent(organizationId)}`, {
+              method: "DELETE",
+            });
+            if (String(state.selectedOrganizationId) === String(organizationId)) {
+              state.selectedOrganizationId = null;
+              state.selectedGroupId = null;
+              state.editingOrganizationId = null;
+              state.editingGroupId = null;
+            }
+            delete state.organizationMembersById[String(organizationId)];
+            Object.keys(state.groupMembersById).forEach((groupId) => {
+              delete state.groupMembersById[groupId];
+            });
+            await loadDirectory();
+            showToast(t("Organization deleted."), "success");
+          } catch (error) {
+            showToast(error.message || t("Failed to delete organization."), "warning");
+          }
+          return;
+        }
         const row = event.target.closest("[data-select-organization-id]");
         if (!row) {
           return;
         }
         state.selectedOrganizationId = row.dataset.selectOrganizationId;
         state.selectedGroupId = null;
-        const groupPayload = await api(`/api/user/organizations/${encodeURIComponent(state.selectedOrganizationId)}/groups`);
-        state.groups = groupPayload.groups || [];
-        state.selectedGroupId = state.groups[0]?.id || null;
+        state.editingOrganizationId = null;
+        state.editingGroupId = null;
+        try {
+          await loadOrganizationMembers(state.selectedOrganizationId);
+        } catch (error) {
+          showToast(error.message || t("Failed to load organization members."), "warning");
+        }
+        await loadSelectedOrganizationGroups();
         renderOrganizations();
         renderGroups();
-        await loadInvitations();
+      });
+
+      nodes.groupOrganizationSelect.addEventListener("change", async () => {
+        state.selectedOrganizationId = nodes.groupOrganizationSelect.value || null;
+        state.selectedGroupId = null;
+        state.editingOrganizationId = null;
+        state.editingGroupId = null;
+        await loadSelectedOrganizationGroups();
+        renderOrganizations();
+        renderGroups();
+      });
+
+      nodes.groupAddButton.addEventListener("click", () => {
+        if (!state.organizations.length) {
+          showToast(t("Create or join an organization first."), "warning");
+          return;
+        }
+        state.groupCreateOpen = !state.groupCreateOpen;
+        if (!state.groupCreateOpen) {
+          nodes.groupCreateForm.reset();
+        }
+        renderGroups();
       });
 
       nodes.groupList.addEventListener("click", async (event) => {
+        const inviteButton = event.target.closest("[data-group-invite]");
+        if (inviteButton) {
+          const groupId = inviteButton.dataset.groupInvite;
+          inviteButton.disabled = true;
+          try {
+            const payload = await api(`/api/user/groups/${encodeURIComponent(groupId)}/invitations`, {
+              method: "POST",
+              body: "{}",
+            });
+            openInvitationModal(payload.invitation);
+            showToast(t("Invitation created."), "success");
+          } catch (error) {
+            showToast(error.message || t("Failed to create invitation."), "warning");
+          } finally {
+            inviteButton.disabled = false;
+          }
+          return;
+        }
+        const editButton = event.target.closest("[data-group-edit]");
+        if (editButton) {
+          state.selectedGroupId = editButton.dataset.groupEdit;
+          state.editingGroupId = editButton.dataset.groupEdit;
+          await loadGroupMembers(state.selectedGroupId);
+          renderGroups();
+          return;
+        }
+        const deleteButton = event.target.closest("[data-group-delete]");
+        if (deleteButton) {
+          const groupId = deleteButton.dataset.groupDelete;
+          if (!window.confirm(t("Delete this group?"))) {
+            return;
+          }
+          try {
+            await api(`/api/user/groups/${encodeURIComponent(groupId)}`, {
+              method: "DELETE",
+            });
+            if (String(state.selectedGroupId) === String(groupId)) {
+              state.selectedGroupId = null;
+              state.editingGroupId = null;
+            }
+            delete state.groupMembersById[String(groupId)];
+            await loadSelectedOrganizationGroups();
+            renderGroups();
+            showToast(t("Group deleted."), "success");
+          } catch (error) {
+            showToast(error.message || t("Failed to delete group."), "warning");
+          }
+          return;
+        }
         const row = event.target.closest("[data-select-group-id]");
         if (!row) {
           return;
         }
         state.selectedGroupId = row.dataset.selectGroupId;
+        state.editingGroupId = null;
+        try {
+          await loadGroupMembers(state.selectedGroupId);
+        } catch (error) {
+          showToast(error.message || t("Failed to load group members."), "warning");
+        }
         renderGroups();
-        await loadInvitations();
       });
 
       nodes.organizationCreateForm.addEventListener("submit", async (event) => {
@@ -804,14 +1018,16 @@
           const payload = await api("/api/user/organizations", {
             method: "POST",
             body: JSON.stringify({
-              name: document.getElementById("organization-name").value.trim(),
-              display_name: document.getElementById("organization-display-name").value.trim() || null,
-              description: document.getElementById("organization-description").value.trim() || null,
+              organization_name: document.getElementById("organization-name").value.trim(),
+              organization_description: document.getElementById("organization-description").value.trim() || null,
             }),
           });
           state.selectedOrganizationId = payload.organization?.id || state.selectedOrganizationId;
           nodes.organizationCreateForm.reset();
+          state.organizationCreateOpen = false;
           await loadDirectory();
+          await loadOrganizationMembers(state.selectedOrganizationId);
+          renderOrganizations();
           showToast(t("Organization created."), "success");
         } catch (error) {
           showToast(error.message || t("Failed to create organization."), "warning");
@@ -827,11 +1043,14 @@
           await api(`/api/user/organizations/${encodeURIComponent(state.selectedOrganizationId)}`, {
             method: "PATCH",
             body: JSON.stringify({
-              display_name: nodes.selectedOrganizationDisplayName.value.trim() || null,
-              description: nodes.selectedOrganizationDescription.value.trim() || null,
+              organization_name: nodes.selectedOrganizationName.value.trim(),
+              organization_description: nodes.selectedOrganizationDescription.value.trim() || null,
             }),
           });
+          state.editingOrganizationId = null;
           await loadDirectory();
+          await loadOrganizationMembers(state.selectedOrganizationId);
+          renderOrganizations();
           showToast(t("Organization updated."), "success");
         } catch (error) {
           showToast(error.message || t("Failed to update organization."), "warning");
@@ -840,22 +1059,27 @@
 
       nodes.groupCreateForm.addEventListener("submit", async (event) => {
         event.preventDefault();
-        if (!state.selectedOrganizationId) {
+        const organizationId = nodes.groupOrganizationSelect.value || state.selectedOrganizationId;
+        if (!organizationId) {
           showToast(t("Select an organization first."), "warning");
           return;
         }
+        state.selectedOrganizationId = organizationId;
+        state.editingOrganizationId = null;
         try {
-          const payload = await api(`/api/user/organizations/${encodeURIComponent(state.selectedOrganizationId)}/groups`, {
+          const payload = await api(`/api/user/organizations/${encodeURIComponent(organizationId)}/groups`, {
             method: "POST",
             body: JSON.stringify({
-              name: document.getElementById("group-name").value.trim(),
-              display_name: document.getElementById("group-display-name").value.trim() || null,
-              description: document.getElementById("group-description").value.trim() || null,
+              group_name: document.getElementById("group-name").value.trim(),
+              group_description: document.getElementById("group-description").value.trim() || null,
             }),
           });
           state.selectedGroupId = payload.group?.id || state.selectedGroupId;
           nodes.groupCreateForm.reset();
+          state.groupCreateOpen = false;
           await loadDirectory();
+          await loadGroupMembers(state.selectedGroupId);
+          renderGroups();
           showToast(t("Group created."), "success");
         } catch (error) {
           showToast(error.message || t("Failed to create group."), "warning");
@@ -871,61 +1095,39 @@
           await api(`/api/user/groups/${encodeURIComponent(state.selectedGroupId)}`, {
             method: "PATCH",
             body: JSON.stringify({
-              display_name: nodes.selectedGroupDisplayName.value.trim() || null,
-              description: nodes.selectedGroupDescription.value.trim() || null,
+              group_name: nodes.selectedGroupName.value.trim(),
+              group_description: nodes.selectedGroupDescription.value.trim() || null,
             }),
           });
+          state.editingGroupId = null;
           await loadDirectory();
+          await loadGroupMembers(state.selectedGroupId);
+          renderGroups();
           showToast(t("Group updated."), "success");
         } catch (error) {
           showToast(error.message || t("Failed to update group."), "warning");
         }
       });
 
-      nodes.invitationCreateForm.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const target = document.getElementById("invitation-target").value;
-        const email = document.getElementById("invitation-email").value.trim() || null;
-        const isGroupTarget = target === "group";
-        if (isGroupTarget && !state.selectedGroupId) {
-          showToast(t("Select a group first."), "warning");
+      nodes.groupJoinButton.addEventListener("click", async () => {
+        const token = window.prompt(t("Invitation token"));
+        if (!token || !token.trim()) {
           return;
         }
-        if (!isGroupTarget && !state.selectedOrganizationId) {
-          showToast(t("Select an organization first."), "warning");
-          return;
-        }
-        const path = isGroupTarget
-          ? `/api/user/groups/${encodeURIComponent(state.selectedGroupId)}/invitations`
-          : `/api/user/organizations/${encodeURIComponent(state.selectedOrganizationId)}/invitations`;
-        try {
-          const payload = await api(path, {
-            method: "POST",
-            body: JSON.stringify({ email }),
-          });
-          nodes.invitationCreateForm.reset();
-          state.invitations.unshift(payload.invitation);
-          renderInvitations();
-          showToast(t("Invitation created."), "success");
-        } catch (error) {
-          showToast(error.message || t("Failed to create invitation."), "warning");
-        }
-      });
-
-      nodes.invitationAcceptForm.addEventListener("submit", async (event) => {
-        event.preventDefault();
+        nodes.groupJoinButton.disabled = true;
         try {
           await api("/api/user/invitations/accept", {
             method: "POST",
             body: JSON.stringify({
-              token: document.getElementById("invitation-token").value.trim(),
+              token: token.trim(),
             }),
           });
-          nodes.invitationAcceptForm.reset();
           await loadDirectory();
           showToast(t("Invitation accepted."), "success");
         } catch (error) {
           showToast(error.message || t("Failed to accept invitation."), "warning");
+        } finally {
+          nodes.groupJoinButton.disabled = false;
         }
       });
 
@@ -952,7 +1154,7 @@
         try {
           await copyText(activeTicket);
           closeTicketModal();
-          showToast(t("Ticket copied."), "success");
+          showToast(t(activeCopyMessage), "success");
         } catch (error) {
           showToast(error.message || t("Failed to copy ticket."), "warning");
         }
@@ -1208,6 +1410,10 @@
       background: var(--bg);
     }
 
+    .compact-form[hidden] {
+      display: none !important;
+    }
+
     .wide-field,
     .form-heading {
       grid-column: 1 / -1;
@@ -1232,7 +1438,120 @@
     }
 
     .selected-row {
-      background: var(--brand-soft);
+      background: color-mix(in srgb, var(--brand-soft) 45%, var(--surface));
+    }
+
+    .table-actions {
+      text-align: center;
+    }
+
+    .table-action-buttons {
+      display: flex;
+      flex-wrap: nowrap;
+      justify-content: center;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn.danger {
+      border-color: color-mix(in srgb, var(--danger) 42%, var(--line));
+      color: var(--danger);
+    }
+
+    .organization-table,
+    .group-table {
+      width: 100%;
+      min-width: 720px;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+
+    .organization-table th,
+    .organization-table td,
+    .group-table th,
+    .group-table td {
+      padding: 12px 20px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .organization-table th,
+    .group-table th {
+      border-bottom: 1px solid var(--line);
+      color: var(--text);
+      font-weight: 800;
+    }
+
+    .organization-table th:nth-child(1),
+    .organization-table td:nth-child(1),
+    .group-table th:nth-child(1),
+    .group-table td:nth-child(1) {
+      width: 24%;
+    }
+
+    .organization-table th:nth-child(2),
+    .organization-table td:nth-child(2),
+    .group-table th:nth-child(2),
+    .group-table td:nth-child(2) {
+      width: 26%;
+    }
+
+    .organization-table th:nth-child(3),
+    .organization-table td:nth-child(3),
+    .group-table th:nth-child(3),
+    .group-table td:nth-child(3) {
+      width: 14%;
+    }
+
+    .organization-table th:nth-child(4),
+    .organization-table td:nth-child(4),
+    .group-table th:nth-child(4),
+    .group-table td:nth-child(4) {
+      width: 16%;
+    }
+
+    .organization-table th:last-child,
+    .organization-table td:last-child,
+    .group-table th:last-child,
+    .group-table td:last-child {
+      width: 20%;
+      text-align: center;
+    }
+
+    .organization-members-row > td,
+    .group-members-row > td {
+      padding: 0 20px 16px;
+      background: color-mix(in srgb, var(--brand-soft) 24%, var(--surface));
+    }
+
+    .organization-members-panel,
+    .group-members-panel {
+      display: grid;
+      gap: 10px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+    }
+
+    .organization-members-panel h3,
+    .group-members-panel h3 {
+      margin: 0;
+      font-size: 15px;
+    }
+
+    .members-table {
+      width: 100%;
+      min-width: 420px;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+
+    .members-table th,
+    .members-table td {
+      padding: 10px 12px;
+      border-top: 1px solid var(--line);
+      text-align: left;
     }
 
     .ticket-modal-backdrop {

@@ -80,25 +80,23 @@ class ProfileUpdateRequest(BaseModel):
 
 
 class OrganizationCreateRequest(BaseModel):
-    name: str = Field(min_length=2, max_length=255)
-    display_name: str | None = Field(default=None, max_length=255)
-    description: str | None = None
+    organization_name: str = Field(min_length=2, max_length=255)
+    organization_description: str | None = None
 
 
 class OrganizationUpdateRequest(BaseModel):
-    display_name: str | None = Field(default=None, max_length=255)
-    description: str | None = None
+    organization_name: str | None = Field(default=None, min_length=2, max_length=255)
+    organization_description: str | None = None
 
 
 class GroupCreateRequest(BaseModel):
-    name: str = Field(min_length=2, max_length=255)
-    display_name: str | None = Field(default=None, max_length=255)
-    description: str | None = None
+    group_name: str = Field(min_length=2, max_length=255)
+    group_description: str | None = None
 
 
 class GroupUpdateRequest(BaseModel):
-    display_name: str | None = Field(default=None, max_length=255)
-    description: str | None = None
+    group_name: str | None = Field(default=None, min_length=2, max_length=255)
+    group_description: str | None = None
 
 
 class InvitationCreateRequest(BaseModel):
@@ -425,9 +423,8 @@ def create_organization(
     try:
         organization = _org_store_or_503().create_organization(
             user,
-            name=req.name,
-            display_name=req.display_name,
-            description=req.description,
+            organization_name=req.organization_name,
+            organization_description=req.organization_description,
         )
     except ValueError as exc:
         status_code = 409 if _is_duplicate_key(exc) else 400
@@ -469,8 +466,16 @@ def update_organization(
         organization = store.update_organization(
             user,
             organization_id,
-            display_name=req.display_name if "display_name" in req.model_fields_set else current.display_name,
-            description=req.description if "description" in req.model_fields_set else current.description,
+            organization_name=(
+                req.organization_name
+                if "organization_name" in req.model_fields_set
+                else current.organization_name
+            ),
+            organization_description=(
+                req.organization_description
+                if "organization_description" in req.model_fields_set
+                else current.organization_description
+            ),
         )
     except OrganizationNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -479,6 +484,21 @@ def update_organization(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"organization": _organization_payload(organization)}
+
+
+@router.delete("/v1/user/organizations/{organization_id}")
+def delete_organization(
+    organization_id: int,
+    agentguard_user_session: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    user = _current_user_or_401(agentguard_user_session)
+    try:
+        deleted = _org_store_or_503().delete_organization(user, organization_id)
+    except OrganizationNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except OrganizationAccessDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return {"status": "ok", "organization_id": organization_id, "deleted": deleted}
 
 
 @router.get("/v1/user/organizations/{organization_id}/groups")
@@ -505,9 +525,8 @@ def create_group(
         group = _org_store_or_503().create_group(
             user,
             organization_id=organization_id,
-            name=req.name,
-            display_name=req.display_name,
-            description=req.description,
+            group_name=req.group_name,
+            group_description=req.group_description,
         )
     except OrganizationNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -536,28 +555,6 @@ def list_organization_members(
     except OrganizationAccessDenied as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     return {"members": [_member_payload(item) for item in members]}
-
-
-@router.post("/v1/user/organizations/{organization_id}/invitations")
-def invite_to_organization(
-    organization_id: int,
-    req: InvitationCreateRequest,
-    agentguard_user_session: str | None = Cookie(default=None),
-) -> dict[str, Any]:
-    user = _current_user_or_401(agentguard_user_session)
-    try:
-        invitation = _org_store_or_503().invite_to_organization(
-            user,
-            organization_id=organization_id,
-            email=req.email,
-        )
-    except OrganizationNotFound as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except OrganizationAccessDenied as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"invitation": _invitation_issue_payload(invitation)}
 
 
 @router.get("/v1/user/groups")
@@ -603,8 +600,12 @@ def update_group(
         group = store.update_group(
             user,
             group_id,
-            display_name=req.display_name if "display_name" in req.model_fields_set else current.display_name,
-            description=req.description if "description" in req.model_fields_set else current.description,
+            group_name=req.group_name if "group_name" in req.model_fields_set else current.group_name,
+            group_description=(
+                req.group_description
+                if "group_description" in req.model_fields_set
+                else current.group_description
+            ),
         )
     except GroupNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -613,6 +614,21 @@ def update_group(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"group": _group_payload(group)}
+
+
+@router.delete("/v1/user/groups/{group_id}")
+def delete_group(
+    group_id: int,
+    agentguard_user_session: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    user = _current_user_or_401(agentguard_user_session)
+    try:
+        deleted = _org_store_or_503().delete_group(user, group_id)
+    except GroupNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except OrganizationAccessDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return {"status": "ok", "group_id": group_id, "deleted": deleted}
 
 
 @router.get("/v1/user/groups/{group_id}/members")
@@ -760,12 +776,17 @@ def _external_account_payload(item: ExternalAccountMapping) -> dict[str, Any]:
 
 def _organization_payload(item: OrganizationRecord) -> dict[str, Any]:
     return {
-        "id": item.id,
-        "name": item.name,
-        "display_name": item.display_name,
-        "description": item.description,
-        "admin_user_id": item.admin_user_id,
-        "created_by_user_id": item.created_by_user_id,
+        "id": item.organization_id,
+        "organization_id": item.organization_id,
+        "name": item.organization_name,
+        "organization_name": item.organization_name,
+        "display_name": item.organization_name,
+        "description": item.organization_description,
+        "organization_description": item.organization_description,
+        "admin_user_id": item.organization_admin_id,
+        "organization_admin_id": item.organization_admin_id,
+        "admin_username": item.organization_admin_username,
+        "organization_admin_username": item.organization_admin_username,
         "current_user_role": item.current_user_role,
         "member_count": item.member_count,
         "created_at": _iso(item.created_at),
@@ -775,13 +796,18 @@ def _organization_payload(item: OrganizationRecord) -> dict[str, Any]:
 
 def _group_payload(item: GroupRecord) -> dict[str, Any]:
     return {
-        "id": item.id,
+        "id": item.group_id,
+        "group_id": item.group_id,
         "organization_id": item.organization_id,
-        "name": item.name,
-        "display_name": item.display_name,
-        "description": item.description,
-        "admin_user_id": item.admin_user_id,
-        "created_by_user_id": item.created_by_user_id,
+        "name": item.group_name,
+        "group_name": item.group_name,
+        "display_name": item.group_name,
+        "description": item.group_description,
+        "group_description": item.group_description,
+        "admin_user_id": item.group_admin_id,
+        "group_admin_id": item.group_admin_id,
+        "admin_username": item.group_admin_username,
+        "group_admin_username": item.group_admin_username,
         "current_user_role": item.current_user_role,
         "member_count": item.member_count,
         "created_at": _iso(item.created_at),
