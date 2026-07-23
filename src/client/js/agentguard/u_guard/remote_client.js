@@ -235,7 +235,7 @@ class RemoteGuardClient {
     if (this.session_key && this.legacy_identity_headers) {
       headers["X-AgentGuard-Session-Key"] = this.session_key;
     }
-    if (this.user_ticket) {
+    if (this.user_ticket && !this.session_token) {
       headers["X-AgentGuard-User-Ticket"] = this.user_ticket;
     }
     return headers;

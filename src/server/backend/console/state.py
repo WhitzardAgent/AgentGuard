@@ -361,9 +361,29 @@ class ConsoleState:
             normalized.append(record)
 
         scan_options = dict(scan or {})
+        sync_inventory = bool(
+            scan_options.get("sync_inventory") or scan_options.get("syncInventory")
+        )
         with self._lock:
             for record in normalized:
+                existing = self._skills.get((agent_id, record.skill_unique_id))
+                if (
+                    existing is not None
+                    and existing.sha256 == record.sha256
+                    and existing.detect_result is not None
+                    and record.detect_result is None
+                ):
+                    record.detect_result = existing.detect_result
                 self._skills[(agent_id, record.skill_unique_id)] = record
+            if sync_inventory:
+                seen_skill_ids = {record.skill_unique_id for record in normalized}
+                stale_keys = [
+                    key
+                    for key in self._skills
+                    if key[0] == agent_id and key[1] not in seen_skill_ids
+                ]
+                for key in stale_keys:
+                    self._skills.pop(key, None)
             self._record_agent_external_accounts(agent_id, external_accounts)
             self._record_agent_display_metadata(agent_id, display_metadata)
             return {
@@ -408,9 +428,29 @@ class ConsoleState:
             normalized.append(record)
 
         scan_options = dict(scan or {})
+        sync_inventory = bool(
+            scan_options.get("sync_inventory") or scan_options.get("syncInventory")
+        )
         with self._lock:
             for record in normalized:
+                existing = self._mcps.get((agent_id, record.mcp_unique_id))
+                if (
+                    existing is not None
+                    and existing.sha256 == record.sha256
+                    and existing.detect_result is not None
+                    and record.detect_result is None
+                ):
+                    record.detect_result = existing.detect_result
                 self._mcps[(agent_id, record.mcp_unique_id)] = record
+            if sync_inventory:
+                seen_mcp_ids = {record.mcp_unique_id for record in normalized}
+                stale_keys = [
+                    key
+                    for key in self._mcps
+                    if key[0] == agent_id and key[1] not in seen_mcp_ids
+                ]
+                for key in stale_keys:
+                    self._mcps.pop(key, None)
             self._record_agent_external_accounts(agent_id, external_accounts)
             self._record_agent_display_metadata(agent_id, display_metadata)
             return {

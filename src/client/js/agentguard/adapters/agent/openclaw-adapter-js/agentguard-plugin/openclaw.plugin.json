@@ -1,7 +1,16 @@
 {
   "id": "agentguard",
+  "name": "AgentGuard OpenClaw Plugin",
+  "description": "Maps OpenClaw hooks onto AgentGuard llm/tool policy phases.",
+  "version": "0.1.0",
   "activation": {
     "onStartup": true
+  },
+  "contracts": {
+    "tools": [
+      "retrieve_doc",
+      "send_email_to"
+    ]
   },
   "uiHints": {
     "configPath": {

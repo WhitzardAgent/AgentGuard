@@ -1,8 +1,31 @@
 {
-  "serverUrl": "http://127.0.0.1:38080",
+  "serverUrl": "http://127.0.0.1:38081",
   "apiKeyEnvVar": "AGENTGUARD_API_KEY",
   "userTicketEnvVar": "AGENTGUARD_USER_TICKET",
   "policy": "builtin",
+  "phases": {
+    "llm_before": {
+      "client": [],
+      "server": []
+    },
+    "llm_after": {
+      "client": [],
+      "server": []
+    },
+    "tool_before": {
+      "client": [],
+      "server": [
+        {
+          "name": "rule_based_plugin",
+          "env": {}
+        }
+      ]
+    },
+    "tool_after": {
+      "client": [],
+      "server": []
+    }
+  },
   "identity": {
     "role": "default",
     "trustLevel": 1
@@ -12,6 +35,17 @@
   "remoteUnavailableMode": "fail_closed",
   "skillScan": {
     "enabled": false,
-    "roots": []
+    "roots": [],
+    "monitor": true,
+    "monitorDebounceMs": 750,
+    "monitorPollIntervalMs": 5000
+  },
+  "mcpScan": {
+    "enabled": false,
+    "roots": [],
+    "configPaths": [],
+    "monitor": true,
+    "monitorDebounceMs": 750,
+    "monitorPollIntervalMs": 5000
   }
 }

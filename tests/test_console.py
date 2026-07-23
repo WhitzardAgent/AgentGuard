@@ -427,6 +427,90 @@ def test_register_skills_stores_skill_record_resource_and_detection_state():
     assert "skill-agent" in con.agents()
 
 
+def test_register_skills_sync_inventory_removes_stale_records_and_preserves_detection():
+    con = _console()
+    first = con.register_skills(
+        {"agent_id": "skill-agent", "user_id": "skill-user", "session_id": "session-a"},
+        [
+            {
+                "name": "keep-skill",
+                "sha256": "a" * 64,
+                "detect_result": {
+                    "risk_level": "high",
+                    "label": "malicious",
+                    "reason": "previous scan result",
+                },
+            },
+            {
+                "name": "stale-skill",
+                "sha256": "b" * 64,
+            },
+        ],
+    )
+    assert first is not None
+    assert first["skill_count"] == 2
+
+    second = con.register_skills(
+        {"agent_id": "skill-agent", "user_id": "skill-user", "session_id": "session-b"},
+        [
+            {
+                "name": "keep-skill",
+                "sha256": "a" * 64,
+            }
+        ],
+        scan={"sync_inventory": True},
+    )
+
+    assert second is not None
+    scoped = con.skills("skill-agent")
+    assert [item["name"] for item in scoped] == ["keep-skill"]
+    assert scoped[0]["session_id"] == "session-b"
+    assert scoped[0]["detect_result"]["risk_level"] == "high"
+    assert scoped[0]["detect_result"]["label"] == "malicious"
+
+
+def test_register_mcps_sync_inventory_removes_stale_records_and_preserves_detection():
+    con = _console()
+    first = con.register_mcps(
+        {"agent_id": "mcp-agent", "user_id": "mcp-user", "session_id": "session-a"},
+        [
+            {
+                "name": "keep-mcp",
+                "sha256": "a" * 64,
+                "detect_result": {
+                    "risk_level": "medium",
+                    "label": "suspicious",
+                    "reason": "previous scan result",
+                },
+            },
+            {
+                "name": "stale-mcp",
+                "sha256": "b" * 64,
+            },
+        ],
+    )
+    assert first is not None
+    assert first["mcp_count"] == 2
+
+    second = con.register_mcps(
+        {"agent_id": "mcp-agent", "user_id": "mcp-user", "session_id": "session-b"},
+        [
+            {
+                "name": "keep-mcp",
+                "sha256": "a" * 64,
+            }
+        ],
+        scan={"sync_inventory": True},
+    )
+
+    assert second is not None
+    scoped = con.mcps("mcp-agent")
+    assert [item["name"] for item in scoped] == ["keep-mcp"]
+    assert scoped[0]["session_id"] == "session-b"
+    assert scoped[0]["detect_result"]["risk_level"] == "medium"
+    assert scoped[0]["detect_result"]["label"] == "suspicious"
+
+
 def test_generate_rule_uses_agent_context_and_returns_candidate(monkeypatch):
     con = _console()
     con.register_tool(

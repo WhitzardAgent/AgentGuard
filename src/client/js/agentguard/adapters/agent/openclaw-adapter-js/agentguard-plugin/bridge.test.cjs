@@ -53,6 +53,78 @@ function writeFile(filePath, content) {
   fs.writeFileSync(filePath, content);
 }
 
+function canonicalAgentId(externalAgentId) {
+  return `ag_${String(externalAgentId || "agent").replace(/[^A-Za-z0-9]+/g, "_")}`;
+}
+
+function installRuntimeAuthFetchMock(calls, { userId = "user-7", refreshToken = "runtime-token-refreshed" } = {}) {
+  globalThis.fetch = async (url, options = {}) => {
+    const body = options.body ? JSON.parse(options.body) : null;
+    calls.push({
+      url: String(url),
+      headers: { ...(options.headers || {}) },
+      body,
+    });
+    if (String(url).endsWith("/v1/server/agents/bootstrap")) {
+      return {
+        ok: true,
+        async json() {
+          return {
+            status: "ok",
+            provider: "openclaw",
+            user_id: userId,
+            ticket_prefix: "agt-ticket",
+            agents: (body.agents || []).map((agent) => {
+              const externalAgentId = agent.external_agent_id;
+              const safeId = canonicalAgentId(externalAgentId);
+              return {
+                external_agent_id: externalAgentId,
+                agent_id: safeId,
+                agent_identity_code: `agic_${safeId}`,
+                public_key_thumbprint: `thumb_${safeId}`,
+                user_bound: true,
+              };
+            }),
+          };
+        },
+      };
+    }
+    if (String(url).endsWith("/v1/server/session/refresh")) {
+      return {
+        ok: true,
+        async json() {
+          return {
+            status: "ok",
+            session_token: refreshToken,
+            expires_at: Math.floor(Date.now() / 1000) + 600,
+          };
+        },
+      };
+    }
+    if (String(url).endsWith("/v1/server/session/create")) {
+      return {
+        ok: true,
+        async json() {
+          return {
+            status: "ok",
+            session_id: `ags_${canonicalAgentId(body.agent_id)}`,
+            agent_id: body.agent_id,
+            user_id: userId,
+            session_token: `runtime-token-${body.agent_id}`,
+            expires_at: Math.floor(Date.now() / 1000) + 600,
+          };
+        },
+      };
+    }
+    return {
+      ok: true,
+      async json() {
+        return {};
+      },
+    };
+  };
+}
+
 test("configPath loads AgentGuard config from an external JSON file", async () => {
   const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-openclaw-"));
   const configPath = path.join(configDir, "agentguard-config.json");
@@ -82,6 +154,7 @@ test("configPath loads AgentGuard config from an external JSON file", async () =
 
   const bridge = new AgentGuardOpenClawBridge({
     pluginConfig: { configPath },
+    startMcpMonitor: false,
   });
 
   const result = await bridge.runBeforeToolCall({
@@ -151,6 +224,7 @@ test("skillScan config scans configured skill roots into bridge state", () => {
 
   const bridge = new AgentGuardOpenClawBridge({
     pluginConfig: { configPath },
+    startMcpMonitor: false,
   });
   const state = bridge.getState(buildToolContext());
   const descriptor = state.skillScan.skills[0];
@@ -256,6 +330,7 @@ test("mcpScan config scans configured MCP servers into bridge state", () => {
 
   const bridge = new AgentGuardOpenClawBridge({
     pluginConfig: { configPath },
+    startMcpMonitor: false,
   });
   const state = bridge.getState(buildToolContext());
   const byName = Object.fromEntries(state.mcpScan.mcps.map((mcp) => [mcp.name, mcp]));
@@ -296,7 +371,7 @@ test("mcpScan can be enabled without sources and reports a local diagnostic", ()
   assert.equal(state.context.metadata.mcp_scan.diagnostic_count, 1);
 });
 
-test("remote-enabled sessions auto-register and report default OpenClaw tools", async () => {
+test("remote-enabled sessions without a ticket skip runtime-auth reports", async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];
   let bridge = null;
@@ -321,53 +396,11 @@ test("remote-enabled sessions auto-register and report default OpenClaw tools", 
       },
     });
 
-    const state = bridge.getState(buildToolContext());
-    await bridge.ensureDefaultToolReports(state);
+    const state = bridge.getState(buildToolContext({ skipAutoReports: true }));
+    const reported = await bridge.ensureDefaultToolReports(state);
 
-    const registerCalls = calls.filter((call) => call.url.endsWith("/v1/server/session/register"));
-    const toolCalls = calls.filter((call) => call.url.endsWith("/v1/server/tools/report"));
-
-    assert.equal(registerCalls.length, 1);
-    assert.ok(String(registerCalls[0].body.context.metadata.client_config_url || "").endsWith("/v1/client/plugins/config"));
-    assert.ok(String(registerCalls[0].body.context.metadata.client_plugin_list_url || "").endsWith("/v1/client/plugins/list"));
-    assert.ok(String(registerCalls[0].body.context.metadata.client_health_url || "").endsWith("/v1/client/health"));
-    assert.deepEqual(registerCalls[0].body.context.metadata.client_plugin_config, {
-      phases: buildPhases(),
-    });
-    assert.deepEqual(registerCalls[0].body.context.metadata.remote_plugin_config, {
-      phases: buildPhases(),
-    });
-    assert.equal(toolCalls.length >= 10, true);
-    const byName = Object.fromEntries(toolCalls.map((call) => [call.body.tool.name, call.body.tool]));
-    assert.deepEqual(byName.read.input_params, ["path", "offset", "limit"]);
-    assert.deepEqual(byName.exec.input_params, [
-      "command",
-      "workdir",
-      "env",
-      "yieldMs",
-      "background",
-      "timeout",
-      "pty",
-      "elevated",
-      "host",
-      "security",
-      "ask",
-      "node",
-    ]);
-    assert.deepEqual(byName.web_search.input_params, [
-      "query",
-      "count",
-      "country",
-      "language",
-      "freshness",
-      "date_after",
-      "date_before",
-      "search_lang",
-      "ui_lang",
-      "domain_filter",
-      "max_tokens",
-      "max_tokens_per_page",
-    ]);
+    assert.equal(reported, false);
+    assert.deepEqual(calls, []);
   } finally {
     bridge?.clearAll();
     globalThis.fetch = originalFetch;
@@ -443,7 +476,7 @@ test("ticket-enabled sessions create OpenClaw runtime auth and skip legacy regis
       },
     });
 
-    const state = bridge.getState(buildToolContext());
+    const state = bridge.getState(buildToolContext({ skipAutoReports: true }));
     await bridge.ensureDefaultToolReports(state);
 
     const bootstrapCalls = calls.filter((call) => call.url.endsWith("/v1/server/agents/bootstrap"));
@@ -473,6 +506,7 @@ test("ticket-enabled sessions create OpenClaw runtime auth and skip legacy regis
     assert.equal(toolCalls.length >= 10, true);
     assert.equal(toolCalls[0].headers.Authorization, "DPoP runtime-token-openclaw");
     assert.ok(toolCalls[0].headers.DPoP);
+    assert.equal(toolCalls[0].headers["X-AgentGuard-User-Ticket"], undefined);
     assert.equal(toolCalls[0].headers["X-AgentGuard-Session-Id"], undefined);
     assert.equal(toolCalls[0].body.context.session_id, "ags_openclaw_1");
     assert.equal(toolCalls[0].body.context.agent_id, "ag_openclaw_1");
@@ -480,6 +514,111 @@ test("ticket-enabled sessions create OpenClaw runtime auth and skip legacy regis
     assert.equal(toolCalls[0].body.context.metadata.agentguard_session_id, "ags_openclaw_1");
   } finally {
     bridge?.clearAll();
+    globalThis.fetch = originalFetch;
+    if (originalAgentKeyDir === undefined) {
+      delete process.env.AGENTGUARD_AGENT_KEY_DIR;
+    } else {
+      process.env.AGENTGUARD_AGENT_KEY_DIR = originalAgentKeyDir;
+    }
+  }
+});
+
+test("ticket-enabled sessions reuse cached OpenClaw bootstrap registrations across bridge instances", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalAgentKeyDir = process.env.AGENTGUARD_AGENT_KEY_DIR;
+  const keyDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-openclaw-keys-"));
+  process.env.AGENTGUARD_AGENT_KEY_DIR = keyDir;
+  const calls = [];
+  let bootstrapCount = 0;
+  globalThis.fetch = async (url, options = {}) => {
+    const body = options.body ? JSON.parse(options.body) : null;
+    calls.push({ url: String(url), headers: { ...(options.headers || {}) }, body });
+    if (String(url).endsWith("/v1/server/agents/bootstrap")) {
+      bootstrapCount += 1;
+      if (bootstrapCount > 1) {
+        return {
+          ok: false,
+          status: 401,
+          async json() {
+            return { detail: "invalid or expired user ticket" };
+          },
+          async text() {
+            return "invalid or expired user ticket";
+          },
+        };
+      }
+      return {
+        ok: true,
+        async json() {
+          return {
+            status: "ok",
+            provider: "openclaw",
+            user_id: "user-7",
+            agents: [
+              {
+                external_agent_id: "agent-main",
+                agent_id: "ag_openclaw_cached",
+                agent_identity_code: "agic_openclaw_cached",
+                public_key_thumbprint: "thumb-openclaw-cached",
+                user_bound: true,
+              },
+            ],
+          };
+        },
+      };
+    }
+    if (String(url).endsWith("/v1/server/session/create")) {
+      return {
+        ok: true,
+        async json() {
+          return {
+            status: "ok",
+            session_id: `ags_${body.external_session_id}`,
+            agent_id: body.agent_id,
+            user_id: "user-7",
+            session_token: `runtime-token-${body.external_session_id}`,
+            expires_at: Math.floor(Date.now() / 1000) + 600,
+          };
+        },
+      };
+    }
+    return { ok: true, async json() { return {}; } };
+  };
+
+  let first = null;
+  let second = null;
+  try {
+    const pluginConfig = {
+      serverUrl: "http://server.test",
+      userTicket: "agt-ticket-openclaw",
+      openclawConfigPath: path.join(keyDir, "missing-openclaw.json"),
+      phases: buildPhases(),
+    };
+    first = new AgentGuardOpenClawBridge({ pluginConfig });
+    await first.ensureDefaultToolReports(first.getState(buildToolContext({
+      sessionId: "session-1",
+      sessionKey: "agent:agent-main:session-1",
+    })));
+    first.clearAll();
+    first = null;
+
+    second = new AgentGuardOpenClawBridge({ pluginConfig });
+    await second.ensureDefaultToolReports(second.getState(buildToolContext({
+      sessionId: "session-2",
+      sessionKey: "agent:agent-main:session-2",
+    })));
+
+    const bootstrapCalls = calls.filter((call) => call.url.endsWith("/v1/server/agents/bootstrap"));
+    const createCalls = calls.filter((call) => call.url.endsWith("/v1/server/session/create"));
+    assert.equal(bootstrapCalls.length, 1);
+    assert.equal(createCalls.length, 2);
+    assert.equal(createCalls[0].body.agent_id, "ag_openclaw_cached");
+    assert.equal(createCalls[1].body.agent_id, "ag_openclaw_cached");
+    assert.equal(createCalls[1].body.user_ticket, undefined);
+    assert.ok(createCalls[1].headers["X-AgentGuard-Agent-Proof"]);
+  } finally {
+    first?.clearAll();
+    second?.clearAll();
     globalThis.fetch = originalFetch;
     if (originalAgentKeyDir === undefined) {
       delete process.env.AGENTGUARD_AGENT_KEY_DIR;
@@ -1046,7 +1185,7 @@ test("ticket-enabled sessions recover from stale closed runtime auth sessions", 
         phases: buildPhases(),
       },
     });
-    const state = bridge.getState(buildToolContext());
+    const state = bridge.getState(buildToolContext({ skipAutoReports: true }));
     state.runtimeAuth.session_id = "ags_openclaw_old_closed";
     state.runtimeAuth.agent_id = "ag_old_runtime_agent";
     state.runtimeAuth.user_id = "user-7";
@@ -1080,6 +1219,7 @@ test("ticket-enabled sessions recover from stale closed runtime auth sessions", 
 test("remote-enabled sessions report configured skill descriptors", async () => {
   const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-openclaw-skill-report-"));
   const skillDir = path.join(configDir, "skills", "demo-skill");
+  const keyDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-openclaw-keys-"));
   writeFile(
     path.join(skillDir, "SKILL.md"),
     [
@@ -1091,40 +1231,34 @@ test("remote-enabled sessions report configured skill descriptors", async () => 
     ].join("\n"),
   );
   const originalFetch = globalThis.fetch;
+  const originalAgentKeyDir = process.env.AGENTGUARD_AGENT_KEY_DIR;
+  process.env.AGENTGUARD_AGENT_KEY_DIR = keyDir;
   const calls = [];
-  globalThis.fetch = async (url, options = {}) => {
-    calls.push({
-      url: String(url),
-      body: options.body ? JSON.parse(options.body) : null,
-    });
-    return {
-      ok: true,
-      async json() {
-        return {};
-      },
-    };
-  };
+  installRuntimeAuthFetchMock(calls);
 
   let bridge = null;
   try {
     bridge = new AgentGuardOpenClawBridge({
       pluginConfig: {
         serverUrl: "http://server.test",
+        userTicket: "agt-ticket-openclaw",
+        openclawConfigPath: path.join(keyDir, "missing-openclaw.json"),
         phases: buildPhases(),
         skillScan: {
           enabled: true,
           roots: [path.join(configDir, "skills")],
+          monitor: false,
         },
       },
     });
 
-    const state = bridge.getState(buildToolContext());
+    const state = bridge.getState(buildToolContext({ skipAutoReports: true }));
     await bridge.ensureSkillReports(state);
     await new Promise((resolve) => setImmediate(resolve));
 
     const skillCalls = calls.filter((call) => call.url.endsWith("/v1/server/skills/report"));
     assert.equal(skillCalls.length, 1);
-    assert.equal(skillCalls[0].body.context.agent_id, "agent-main");
+    assert.equal(skillCalls[0].body.context.agent_id, canonicalAgentId("agent-main"));
     assert.equal(skillCalls[0].body.skills.length, 1);
     assert.equal(skillCalls[0].body.skills[0].name, "demo-skill");
     assert.match(skillCalls[0].body.skills[0].skill_markdown.content, /Demo Skill/);
@@ -1132,12 +1266,283 @@ test("remote-enabled sessions report configured skill descriptors", async () => 
   } finally {
     bridge?.clearAll();
     globalThis.fetch = originalFetch;
+    if (originalAgentKeyDir === undefined) {
+      delete process.env.AGENTGUARD_AGENT_KEY_DIR;
+    } else {
+      process.env.AGENTGUARD_AGENT_KEY_DIR = originalAgentKeyDir;
+    }
+  }
+});
+
+test("skill monitor refresh reports newly added workspace skills", async () => {
+  const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-openclaw-skill-monitor-"));
+  const skillsRoot = path.join(configDir, "skills");
+  const keyDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-openclaw-keys-"));
+  fs.mkdirSync(skillsRoot, { recursive: true });
+  const originalFetch = globalThis.fetch;
+  const originalAgentKeyDir = process.env.AGENTGUARD_AGENT_KEY_DIR;
+  process.env.AGENTGUARD_AGENT_KEY_DIR = keyDir;
+  const calls = [];
+  installRuntimeAuthFetchMock(calls);
+
+  let bridge = null;
+  try {
+    bridge = new AgentGuardOpenClawBridge({
+      pluginConfig: {
+        serverUrl: "http://server.test",
+        userTicket: "agt-ticket-openclaw",
+        openclawConfigPath: path.join(keyDir, "missing-openclaw.json"),
+        phases: buildPhases(),
+        skillScan: {
+          enabled: true,
+          roots: [skillsRoot],
+          monitor: false,
+        },
+      },
+      openclawRuntime: {
+        listAgents() {
+          return [
+            {
+              id: "demo-agent",
+              workspace: configDir,
+            },
+          ];
+        },
+      },
+    });
+
+    assert.equal(bridge.getSkillScanResult().summary.skill_count, 0);
+    writeFile(
+      path.join(skillsRoot, "new-skill", "SKILL.md"),
+      [
+        "---",
+        "name: new-skill",
+        "description: Added after bridge startup.",
+        "---",
+        "# New Skill",
+      ].join("\n"),
+    );
+
+    const result = await bridge.refreshSkillScanAndReport("test_refresh", { forceReport: true });
+    assert.equal(result.changed, true);
+    assert.equal(result.skillScan.summary.skill_count, 1);
+
+    const skillCalls = calls.filter((call) => call.url.endsWith("/v1/server/skills/report"));
+    assert.equal(skillCalls.length, 1);
+    assert.equal(skillCalls[0].body.context.agent_id, canonicalAgentId("demo-agent"));
+    assert.equal(skillCalls[0].body.skills.length, 1);
+    assert.equal(skillCalls[0].body.skills[0].name, "new-skill");
+    assert.equal(skillCalls[0].body.scan.sync_inventory, true);
+    assert.equal(skillCalls[0].body.scan.report_reason, "test_refresh");
+  } finally {
+    bridge?.clearAll();
+    globalThis.fetch = originalFetch;
+    if (originalAgentKeyDir === undefined) {
+      delete process.env.AGENTGUARD_AGENT_KEY_DIR;
+    } else {
+      process.env.AGENTGUARD_AGENT_KEY_DIR = originalAgentKeyDir;
+    }
+  }
+});
+
+test("skill monitor refresh renews stale runtime auth before reporting", async () => {
+  const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-openclaw-skill-stale-auth-"));
+  const skillsRoot = path.join(configDir, "skills");
+  const keyDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-openclaw-keys-"));
+  writeFile(
+    path.join(skillsRoot, "first-skill", "SKILL.md"),
+    [
+      "---",
+      "name: first-skill",
+      "description: First skill.",
+      "---",
+      "# First Skill",
+    ].join("\n"),
+  );
+  const originalFetch = globalThis.fetch;
+  const originalAgentKeyDir = process.env.AGENTGUARD_AGENT_KEY_DIR;
+  process.env.AGENTGUARD_AGENT_KEY_DIR = keyDir;
+  const calls = [];
+  installRuntimeAuthFetchMock(calls, { refreshToken: "runtime-token-skill-refreshed" });
+
+  let bridge = null;
+  try {
+    bridge = new AgentGuardOpenClawBridge({
+      pluginConfig: {
+        serverUrl: "http://server.test",
+        userTicket: "agt-ticket-openclaw",
+        openclawConfigPath: path.join(keyDir, "missing-openclaw.json"),
+        phases: buildPhases(),
+        skillScan: {
+          enabled: true,
+          roots: [skillsRoot],
+          monitor: false,
+        },
+      },
+    });
+
+    const state = bridge.getState(buildToolContext({ skipAutoReports: true }));
+    await bridge.ensureSkillReports(state);
+    state.runtimeAuth.session_token = "runtime-token-stale";
+    state.runtimeAuth.expires_at = 1;
+    state.enforcer.remote.session_token = "runtime-token-stale";
+    writeFile(
+      path.join(skillsRoot, "second-skill", "SKILL.md"),
+      [
+        "---",
+        "name: second-skill",
+        "description: Added after token expiry.",
+        "---",
+        "# Second Skill",
+      ].join("\n"),
+    );
+
+    const result = await bridge.refreshSkillScanAndReport("stale_auth_refresh", { forceReport: true });
+    assert.equal(result.changed, true);
+
+    const refreshCalls = calls.filter((call) => call.url.endsWith("/v1/server/session/refresh"));
+    const skillCalls = calls.filter((call) => call.url.endsWith("/v1/server/skills/report"));
+    assert.equal(refreshCalls.length, 1);
+    assert.equal(refreshCalls[0].headers.Authorization, "DPoP runtime-token-stale");
+    const refreshedReport = skillCalls.find((call) =>
+      call.headers.Authorization === "DPoP runtime-token-skill-refreshed" &&
+      call.body.scan.report_reason === "stale_auth_refresh"
+    );
+    assert.ok(refreshedReport);
+    assert.equal(refreshedReport.body.skills.length, 2);
+  } finally {
+    bridge?.clearAll();
+    globalThis.fetch = originalFetch;
+    if (originalAgentKeyDir === undefined) {
+      delete process.env.AGENTGUARD_AGENT_KEY_DIR;
+    } else {
+      process.env.AGENTGUARD_AGENT_KEY_DIR = originalAgentKeyDir;
+    }
+  }
+});
+
+test("skill reports recover once when server rejects a stale runtime token", async () => {
+  const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-openclaw-skill-report-401-"));
+  const skillsRoot = path.join(configDir, "skills");
+  const keyDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-openclaw-keys-"));
+  writeFile(
+    path.join(skillsRoot, "demo-skill", "SKILL.md"),
+    [
+      "---",
+      "name: demo-skill",
+      "description: Demo skill.",
+      "---",
+      "# Demo Skill",
+    ].join("\n"),
+  );
+  const originalFetch = globalThis.fetch;
+  const originalAgentKeyDir = process.env.AGENTGUARD_AGENT_KEY_DIR;
+  process.env.AGENTGUARD_AGENT_KEY_DIR = keyDir;
+  const calls = [];
+  let createCount = 0;
+  let skillReportCount = 0;
+  globalThis.fetch = async (url, options = {}) => {
+    const body = options.body ? JSON.parse(options.body) : null;
+    calls.push({ url: String(url), headers: { ...(options.headers || {}) }, body });
+    if (String(url).endsWith("/v1/server/agents/bootstrap")) {
+      return {
+        ok: true,
+        async json() {
+          return {
+            status: "ok",
+            provider: "openclaw",
+            user_id: "user-7",
+            agents: [
+              {
+                external_agent_id: "agent-main",
+                agent_id: "ag_openclaw_retry",
+                agent_identity_code: "agic_openclaw_retry",
+                public_key_thumbprint: "thumb-openclaw-retry",
+                user_bound: true,
+              },
+            ],
+          };
+        },
+      };
+    }
+    if (String(url).endsWith("/v1/server/session/create")) {
+      createCount += 1;
+      return {
+        ok: true,
+        async json() {
+          return {
+            status: "ok",
+            session_id: `ags_openclaw_retry_${createCount}`,
+            agent_id: "ag_openclaw_retry",
+            user_id: "user-7",
+            session_token: `runtime-token-retry-${createCount}`,
+            expires_at: Math.floor(Date.now() / 1000) + 600,
+          };
+        },
+      };
+    }
+    if (String(url).endsWith("/v1/server/skills/report")) {
+      skillReportCount += 1;
+      if (options.headers && options.headers.Authorization === "DPoP runtime-token-retry-1") {
+        return {
+          ok: false,
+          status: 401,
+          async text() {
+            return JSON.stringify({ detail: "runtime token expired" });
+          },
+        };
+      }
+    }
+    return { ok: true, async json() { return {}; } };
+  };
+
+  let bridge = null;
+  try {
+    bridge = new AgentGuardOpenClawBridge({
+      pluginConfig: {
+        serverUrl: "http://server.test",
+        userTicket: "agt-ticket-openclaw",
+        openclawConfigPath: path.join(keyDir, "missing-openclaw.json"),
+        phases: buildPhases(),
+        skillScan: {
+          enabled: true,
+          roots: [skillsRoot],
+          monitor: false,
+        },
+      },
+    });
+
+    const state = bridge.getState(buildToolContext({ skipAutoReports: true }));
+    const reported = await bridge.ensureSkillReports(state);
+
+    const bootstrapCalls = calls.filter((call) => call.url.endsWith("/v1/server/agents/bootstrap"));
+    const createCalls = calls.filter((call) => call.url.endsWith("/v1/server/session/create"));
+    const skillCalls = calls.filter((call) => call.url.endsWith("/v1/server/skills/report"));
+    assert.equal(reported, true);
+    assert.equal(bootstrapCalls.length, 1);
+    assert.equal(createCalls.length, 2);
+    assert.equal(skillCalls.filter((call) => call.headers.Authorization === "DPoP runtime-token-retry-1").length, 3);
+    const recoveredReport = skillCalls.find((call) =>
+      call.headers.Authorization === "DPoP runtime-token-retry-2"
+    );
+    assert.ok(recoveredReport);
+    assert.equal(recoveredReport.body.context.session_id, "ags_openclaw_retry_2");
+    assert.equal(recoveredReport.body.context.agent_id, "ag_openclaw_retry");
+  } finally {
+    bridge?.clearAll();
+    globalThis.fetch = originalFetch;
+    if (originalAgentKeyDir === undefined) {
+      delete process.env.AGENTGUARD_AGENT_KEY_DIR;
+    } else {
+      process.env.AGENTGUARD_AGENT_KEY_DIR = originalAgentKeyDir;
+    }
   }
 });
 
 test("remote-enabled sessions report configured MCP descriptors", async () => {
   const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-openclaw-mcp-report-"));
   const serverDir = path.join(configDir, "mcp-server");
+  const keyDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-openclaw-keys-"));
   writeFile(
     path.join(serverDir, "package.json"),
     JSON.stringify({
@@ -1174,48 +1579,267 @@ test("remote-enabled sessions report configured MCP descriptors", async () => {
   );
 
   const originalFetch = globalThis.fetch;
+  const originalAgentKeyDir = process.env.AGENTGUARD_AGENT_KEY_DIR;
+  process.env.AGENTGUARD_AGENT_KEY_DIR = keyDir;
   const calls = [];
-  globalThis.fetch = async (url, options = {}) => {
-    calls.push({
-      url: String(url),
-      body: options.body ? JSON.parse(options.body) : null,
-    });
-    return {
-      ok: true,
-      async json() {
-        return {};
-      },
-    };
-  };
+  installRuntimeAuthFetchMock(calls);
 
   let bridge = null;
   try {
     bridge = new AgentGuardOpenClawBridge({
       pluginConfig: {
         serverUrl: "http://server.test",
+        userTicket: "agt-ticket-openclaw",
+        openclawConfigPath: path.join(keyDir, "missing-openclaw.json"),
         phases: buildPhases(),
         mcpScan: {
           enabled: true,
           roots: [configDir],
         },
       },
+      startMcpMonitor: false,
     });
 
-    const state = bridge.getState(buildToolContext());
+    const state = bridge.getState(buildToolContext({ skipAutoReports: true }));
     await bridge.ensureMcpReports(state);
     await new Promise((resolve) => setImmediate(resolve));
 
     const mcpCalls = calls.filter((call) => call.url.endsWith("/v1/server/mcps/report"));
     assert.equal(mcpCalls.length, 1);
-    assert.equal(mcpCalls[0].body.context.agent_id, "agent-main");
+    assert.equal(mcpCalls[0].body.context.agent_id, canonicalAgentId("agent-main"));
     assert.equal(mcpCalls[0].body.mcps.length, 1);
     assert.equal(mcpCalls[0].body.mcps[0].name, "local_mcp");
     assert.equal(mcpCalls[0].body.mcps[0].source_status, "source_recovered");
     assert.equal(mcpCalls[0].body.mcps[0].files.some((file) => file.relative_path === "server.js"), true);
     assert.equal(mcpCalls[0].body.scan.summary.mcp_count, 1);
+    assert.equal(mcpCalls[0].body.scan.sync_inventory, true);
   } finally {
     bridge?.clearAll();
     globalThis.fetch = originalFetch;
+    if (originalAgentKeyDir === undefined) {
+      delete process.env.AGENTGUARD_AGENT_KEY_DIR;
+    } else {
+      process.env.AGENTGUARD_AGENT_KEY_DIR = originalAgentKeyDir;
+    }
+  }
+});
+
+test("MCP monitor refresh reports added and removed workspace MCPs", async () => {
+  const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-openclaw-mcp-monitor-"));
+  const serverDir = path.join(configDir, "mcp-server");
+  const mcpConfigPath = path.join(configDir, ".cursor", "mcp.json");
+  const keyDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-openclaw-keys-"));
+  writeFile(
+    path.join(serverDir, "package.json"),
+    JSON.stringify({
+      name: "demo-mcp-server",
+      type: "module",
+    }),
+  );
+  writeFile(
+    path.join(serverDir, "server.js"),
+    [
+      "import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';",
+      "const server = new McpServer({ name: 'demo', version: '1.0.0' });",
+      "server.tool('read_file', 'Read files', {}, async () => ({}));",
+    ].join("\n"),
+  );
+  writeFile(mcpConfigPath, JSON.stringify({ mcpServers: {} }));
+
+  const originalFetch = globalThis.fetch;
+  const originalAgentKeyDir = process.env.AGENTGUARD_AGENT_KEY_DIR;
+  process.env.AGENTGUARD_AGENT_KEY_DIR = keyDir;
+  const calls = [];
+  installRuntimeAuthFetchMock(calls);
+
+  let bridge = null;
+  try {
+    bridge = new AgentGuardOpenClawBridge({
+      pluginConfig: {
+        serverUrl: "http://server.test",
+        userTicket: "agt-ticket-openclaw",
+        openclawConfigPath: path.join(keyDir, "missing-openclaw.json"),
+        phases: buildPhases(),
+        mcpScan: {
+          enabled: true,
+          roots: [configDir],
+          configPaths: [mcpConfigPath],
+          monitor: false,
+        },
+      },
+      openclawRuntime: {
+        listAgents() {
+          return [
+            {
+              id: "demo-agent",
+              workspace: configDir,
+            },
+          ];
+        },
+      },
+    });
+
+    assert.equal(bridge.getMcpScanResult().summary.mcp_count, 0);
+    writeFile(
+      mcpConfigPath,
+      JSON.stringify({
+        mcpServers: {
+          local_mcp: {
+            command: "node",
+            args: ["server.js"],
+            cwd: "./mcp-server",
+            tools: [
+              {
+                name: "read_file",
+                description: "Read files",
+                inputSchema: { type: "object" },
+              },
+            ],
+          },
+        },
+      }),
+    );
+
+    const added = await bridge.refreshMcpScanAndReport("test_refresh", { forceReport: true });
+    assert.equal(added.changed, true);
+    assert.equal(added.mcpScan.summary.mcp_count, 1);
+
+    writeFile(mcpConfigPath, JSON.stringify({ mcpServers: {} }));
+    const removed = await bridge.refreshMcpScanAndReport("test_delete", { forceReport: true });
+    assert.equal(removed.changed, true);
+    assert.equal(removed.mcpScan.summary.mcp_count, 0);
+
+    const mcpCalls = calls.filter((call) => call.url.endsWith("/v1/server/mcps/report"));
+    assert.equal(mcpCalls.length, 2);
+    assert.equal(mcpCalls[0].body.context.agent_id, canonicalAgentId("demo-agent"));
+    assert.equal(mcpCalls[0].body.mcps.length, 1);
+    assert.equal(mcpCalls[0].body.mcps[0].name, "local_mcp");
+    assert.equal(mcpCalls[0].body.scan.sync_inventory, true);
+    assert.equal(mcpCalls[0].body.scan.report_reason, "test_refresh");
+    assert.equal(mcpCalls[1].body.context.agent_id, canonicalAgentId("demo-agent"));
+    assert.equal(mcpCalls[1].body.mcps.length, 0);
+    assert.equal(mcpCalls[1].body.scan.sync_inventory, true);
+    assert.equal(mcpCalls[1].body.scan.report_reason, "test_delete");
+  } finally {
+    bridge?.clearAll();
+    globalThis.fetch = originalFetch;
+    if (originalAgentKeyDir === undefined) {
+      delete process.env.AGENTGUARD_AGENT_KEY_DIR;
+    } else {
+      process.env.AGENTGUARD_AGENT_KEY_DIR = originalAgentKeyDir;
+    }
+  }
+});
+
+test("MCP monitor refresh renews stale runtime auth before reporting", async () => {
+  const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-openclaw-mcp-stale-auth-"));
+  const serverDir = path.join(configDir, "mcp-server");
+  const mcpConfigPath = path.join(configDir, ".cursor", "mcp.json");
+  const keyDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-openclaw-keys-"));
+  writeFile(
+    path.join(serverDir, "package.json"),
+    JSON.stringify({
+      name: "demo-mcp-server",
+      type: "module",
+    }),
+  );
+  writeFile(
+    path.join(serverDir, "server.js"),
+    [
+      "import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';",
+      "const server = new McpServer({ name: 'demo', version: '1.0.0' });",
+      "server.tool('read_file', 'Read files', {}, async () => ({}));",
+    ].join("\n"),
+  );
+  const oneMcpConfig = {
+    mcpServers: {
+      local_mcp: {
+        command: "node",
+        args: ["server.js"],
+        cwd: "./mcp-server",
+        tools: [
+          {
+            name: "read_file",
+            description: "Read files",
+            inputSchema: { type: "object" },
+          },
+        ],
+      },
+    },
+  };
+  writeFile(mcpConfigPath, JSON.stringify(oneMcpConfig));
+
+  const originalFetch = globalThis.fetch;
+  const originalAgentKeyDir = process.env.AGENTGUARD_AGENT_KEY_DIR;
+  process.env.AGENTGUARD_AGENT_KEY_DIR = keyDir;
+  const calls = [];
+  installRuntimeAuthFetchMock(calls, { refreshToken: "runtime-token-mcp-refreshed" });
+
+  let bridge = null;
+  try {
+    bridge = new AgentGuardOpenClawBridge({
+      pluginConfig: {
+        serverUrl: "http://server.test",
+        userTicket: "agt-ticket-openclaw",
+        openclawConfigPath: path.join(keyDir, "missing-openclaw.json"),
+        phases: buildPhases(),
+        mcpScan: {
+          enabled: true,
+          roots: [configDir],
+          configPaths: [mcpConfigPath],
+          monitor: false,
+        },
+      },
+      startMcpMonitor: false,
+    });
+
+    const state = bridge.getState(buildToolContext({ skipAutoReports: true }));
+    await bridge.ensureMcpReports(state);
+    state.runtimeAuth.session_token = "runtime-token-stale";
+    state.runtimeAuth.expires_at = 1;
+    state.enforcer.remote.session_token = "runtime-token-stale";
+    writeFile(
+      mcpConfigPath,
+      JSON.stringify({
+        mcpServers: {
+          ...oneMcpConfig.mcpServers,
+          second_mcp: {
+            command: "node",
+            args: ["server.js"],
+            cwd: "./mcp-server",
+            tools: [
+              {
+                name: "read_file",
+                description: "Read files",
+                inputSchema: { type: "object" },
+              },
+            ],
+          },
+        },
+      }),
+    );
+
+    const result = await bridge.refreshMcpScanAndReport("stale_auth_refresh", { forceReport: true });
+    assert.equal(result.changed, true);
+
+    const refreshCalls = calls.filter((call) => call.url.endsWith("/v1/server/session/refresh"));
+    const mcpCalls = calls.filter((call) => call.url.endsWith("/v1/server/mcps/report"));
+    assert.equal(refreshCalls.length, 1);
+    assert.equal(refreshCalls[0].headers.Authorization, "DPoP runtime-token-stale");
+    const refreshedReport = mcpCalls.find((call) =>
+      call.headers.Authorization === "DPoP runtime-token-mcp-refreshed" &&
+      call.body.scan.report_reason === "stale_auth_refresh"
+    );
+    assert.ok(refreshedReport);
+    assert.equal(refreshedReport.body.mcps.length, 2);
+  } finally {
+    bridge?.clearAll();
+    globalThis.fetch = originalFetch;
+    if (originalAgentKeyDir === undefined) {
+      delete process.env.AGENTGUARD_AGENT_KEY_DIR;
+    } else {
+      process.env.AGENTGUARD_AGENT_KEY_DIR = originalAgentKeyDir;
+    }
   }
 });
 
@@ -1297,6 +1921,7 @@ test("MCP runtime tool calls carry scanned MCP metadata through existing tool ho
         roots: [configDir],
       },
     },
+    startMcpMonitor: false,
   });
 
   await bridge.runBeforeToolCall({

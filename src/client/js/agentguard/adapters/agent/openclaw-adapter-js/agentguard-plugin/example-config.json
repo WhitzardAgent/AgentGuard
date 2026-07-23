@@ -7,11 +7,17 @@
   "remoteUnavailableMode": "fail_closed",
   "skillScan": {
     "enabled": false,
-    "roots": []
+    "roots": [],
+    "monitor": true,
+    "monitorDebounceMs": 750,
+    "monitorPollIntervalMs": 5000
   },
   "mcpScan": {
     "enabled": false,
     "roots": [],
-    "configPaths": []
+    "configPaths": [],
+    "monitor": true,
+    "monitorDebounceMs": 750,
+    "monitorPollIntervalMs": 5000
   }
 }

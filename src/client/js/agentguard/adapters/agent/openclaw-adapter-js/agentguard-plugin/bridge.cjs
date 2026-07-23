@@ -1,6 +1,7 @@
 "use strict";
 
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 
 const {
@@ -50,6 +51,11 @@ const DEFAULT_TOOL_CATALOG_PATH = path.resolve(
   "../../../../../../../../config/openclaw-default-tools.json",
 );
 const LLM_OUTPUT_DEDUP_WINDOW_MS = 2 * 60 * 1000;
+const DEFAULT_SKILL_SCAN_MONITOR_DEBOUNCE_MS = 750;
+const DEFAULT_SKILL_SCAN_MONITOR_POLL_INTERVAL_MS = 5000;
+const DEFAULT_MCP_SCAN_MONITOR_DEBOUNCE_MS = 750;
+const DEFAULT_MCP_SCAN_MONITOR_POLL_INTERVAL_MS = 5000;
+const AGENT_REGISTRATION_CACHE_FILE = "openclaw-agent-registrations.json";
 
 const PRE_GUARD_PHASES = new Set(["tool_before", "llm_before"]);
 
@@ -218,9 +224,13 @@ function resolveDefaultTools(config, configDir) {
 function normalizeSkillScanConfig(value, configDir) {
   const input = value && typeof value === "object" && !Array.isArray(value) ? value : {};
   const baseDir = configDir || process.cwd();
+  const monitorInput = input.monitor && typeof input.monitor === "object" && !Array.isArray(input.monitor)
+    ? input.monitor
+    : {};
   return {
     enabled: input.enabled === true,
     roots: normalizeStringArray(input.roots).map((item) => resolveScanPath(item, baseDir)),
+    agentIds: normalizeStringArray(input.agentIds || input.agents),
     baseDir,
     maxFileBytes: asPositiveInteger(input.maxFileBytes, DEFAULT_SKILL_SCAN_OPTIONS.maxFileBytes),
     maxTotalBytesPerSkill: asPositiveInteger(
@@ -238,17 +248,30 @@ function normalizeSkillScanConfig(value, configDir) {
       DEFAULT_SKILL_SCAN_OPTIONS.textExtensions,
     ),
     followSymlinks: input.followSymlinks === true,
+    monitor: input.monitor === false ? false : monitorInput.enabled !== false,
+    monitorDebounceMs: asPositiveInteger(
+      input.monitorDebounceMs ?? input.debounceMs ?? monitorInput.debounceMs,
+      DEFAULT_SKILL_SCAN_MONITOR_DEBOUNCE_MS,
+    ),
+    monitorPollIntervalMs: asPositiveInteger(
+      input.monitorPollIntervalMs ?? input.pollIntervalMs ?? monitorInput.pollIntervalMs,
+      DEFAULT_SKILL_SCAN_MONITOR_POLL_INTERVAL_MS,
+    ),
   };
 }
 
 function normalizeMcpScanConfig(value, configDir) {
   const input = value && typeof value === "object" && !Array.isArray(value) ? value : {};
   const baseDir = configDir || process.cwd();
+  const monitorInput = input.monitor && typeof input.monitor === "object" && !Array.isArray(input.monitor)
+    ? input.monitor
+    : {};
   return {
     enabled: input.enabled === true,
     roots: normalizeStringArray(input.roots).map((item) => resolveScanPath(item, baseDir)),
     configPaths: normalizeStringArray(input.configPaths).map((item) => resolveScanPath(item, baseDir)),
     configNames: normalizeStringArray(input.configNames, DEFAULT_MCP_SCAN_OPTIONS.configNames),
+    agentIds: normalizeStringArray(input.agentIds || input.agents),
     baseDir,
     maxFileBytes: asPositiveInteger(input.maxFileBytes, DEFAULT_MCP_SCAN_OPTIONS.maxFileBytes),
     maxTotalBytesPerServer: asPositiveInteger(
@@ -266,6 +289,15 @@ function normalizeMcpScanConfig(value, configDir) {
       DEFAULT_MCP_SCAN_OPTIONS.textExtensions,
     ),
     followSymlinks: input.followSymlinks === true,
+    monitor: input.monitor === false ? false : monitorInput.enabled !== false,
+    monitorDebounceMs: asPositiveInteger(
+      input.monitorDebounceMs ?? input.debounceMs ?? monitorInput.debounceMs,
+      DEFAULT_MCP_SCAN_MONITOR_DEBOUNCE_MS,
+    ),
+    monitorPollIntervalMs: asPositiveInteger(
+      input.monitorPollIntervalMs ?? input.pollIntervalMs ?? monitorInput.pollIntervalMs,
+      DEFAULT_MCP_SCAN_MONITOR_POLL_INTERVAL_MS,
+    ),
   };
 }
 
@@ -929,6 +961,58 @@ function scanConfiguredSkills(config, logger = console) {
   }
 }
 
+function skillScanSignature(skillScan) {
+  const skills = Array.isArray(skillScan && skillScan.skills)
+    ? skillScan.skills
+      .map((skill) => ({
+        name: asNonEmptyString(skill.name) || "",
+        root_path: asNonEmptyString(skill.root_path) || "",
+        entry_file: asNonEmptyString(skill.entry_file) || "",
+        sha256: asNonEmptyString(skill.sha256) || "",
+        file_count: Number.isFinite(skill.file_count) ? skill.file_count : 0,
+        total_size: Number.isFinite(skill.total_size) ? skill.total_size : 0,
+      }))
+      .sort((a, b) => `${a.root_path}\x1f${a.name}`.localeCompare(`${b.root_path}\x1f${b.name}`))
+    : [];
+  const diagnostics = Array.isArray(skillScan && skillScan.diagnostics)
+    ? skillScan.diagnostics
+      .map((item) => ({
+        level: asNonEmptyString(item && item.level) || "",
+        path: asNonEmptyString(item && item.path) || "",
+        reason: asNonEmptyString(item && item.reason) || "",
+        message: asNonEmptyString(item && item.message) || "",
+      }))
+      .sort((a, b) => `${a.path}\x1f${a.reason}`.localeCompare(`${b.path}\x1f${b.reason}`))
+    : [];
+  const summary = skillScan && skillScan.summary && typeof skillScan.summary === "object"
+    ? skillScan.summary
+    : {};
+  return JSON.stringify({
+    enabled: Boolean(skillScan && skillScan.enabled),
+    roots: Array.isArray(summary.roots) ? [...summary.roots].sort() : [],
+    skills,
+    diagnostics,
+  });
+}
+
+function pathContains(parentPath, childPath) {
+  const parent = asNonEmptyString(parentPath);
+  const child = asNonEmptyString(childPath);
+  if (!parent || !child) {
+    return false;
+  }
+  const relative = path.relative(path.resolve(parent), path.resolve(child));
+  return relative === "" || (relative && !relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function rootMatchesAgentWorkspace(rootPath, agent) {
+  const workspace = asNonEmptyString(agent && agent.workspace);
+  if (!workspace) {
+    return false;
+  }
+  return pathContains(workspace, rootPath) || pathContains(rootPath, workspace);
+}
+
 function scanConfiguredMcps(config, logger = console) {
   if (!config || !config.enabled) {
     return emptyMcpScanResult(config);
@@ -973,6 +1057,44 @@ function scanConfiguredMcps(config, logger = console) {
       },
     ]);
   }
+}
+
+function mcpScanSignature(mcpScan) {
+  const mcps = Array.isArray(mcpScan && mcpScan.mcps)
+    ? mcpScan.mcps
+      .map((mcp) => ({
+        name: asNonEmptyString(mcp.name) || "",
+        transport: asNonEmptyString(mcp.transport) || "",
+        root_path: asNonEmptyString(mcp.root_path) || "",
+        entry_file: asNonEmptyString(mcp.entry_file) || "",
+        url: asNonEmptyString(mcp.url) || "",
+        sha256: asNonEmptyString(mcp.sha256) || "",
+        tool_count: Number.isFinite(mcp.tool_count) ? mcp.tool_count : 0,
+        file_count: Number.isFinite(mcp.file_count) ? mcp.file_count : 0,
+        total_size: Number.isFinite(mcp.total_size) ? mcp.total_size : 0,
+      }))
+      .sort((a, b) => `${a.root_path}\x1f${a.name}`.localeCompare(`${b.root_path}\x1f${b.name}`))
+    : [];
+  const diagnostics = Array.isArray(mcpScan && mcpScan.diagnostics)
+    ? mcpScan.diagnostics
+      .map((item) => ({
+        level: asNonEmptyString(item && item.level) || "",
+        path: asNonEmptyString(item && item.path) || "",
+        reason: asNonEmptyString(item && item.reason) || "",
+        message: asNonEmptyString(item && item.message) || "",
+      }))
+      .sort((a, b) => `${a.path}\x1f${a.reason}`.localeCompare(`${b.path}\x1f${b.reason}`))
+    : [];
+  const summary = mcpScan && mcpScan.summary && typeof mcpScan.summary === "object"
+    ? mcpScan.summary
+    : {};
+  return JSON.stringify({
+    enabled: Boolean(mcpScan && mcpScan.enabled),
+    roots: Array.isArray(summary.roots) ? [...summary.roots].sort() : [],
+    config_paths: Array.isArray(summary.config_paths) ? [...summary.config_paths].sort() : [],
+    mcps,
+    diagnostics,
+  });
 }
 
 function buildSkillScanMetadata(skillScan) {
@@ -1472,6 +1594,16 @@ function isOpenClawExternalSessionClosedError(error) {
   );
 }
 
+function isRuntimeAuthUnavailableError(error) {
+  const message = String(error && error.message ? error.message : error || "");
+  return (
+    /remote guard call failed:\s*HTTP 401/i.test(message) ||
+    /runtime token expired/i.test(message) ||
+    /runtime token is not active/i.test(message) ||
+    /runtime session is not active/i.test(message)
+  );
+}
+
 function resolveOpenClawCloseSessionKey(state, body = {}) {
   return (
     asNonEmptyString(body.openclaw_session_key) ||
@@ -1634,6 +1766,99 @@ function registrationMapFromBootstrap(response, registrations) {
   return byExternalId;
 }
 
+function agentRegistrationCacheKey(config, externalAgentId) {
+  const providerInstanceId = asNonEmptyString(config && config.providerInstanceId) || "openclaw-local";
+  return `${providerInstanceId}\x1f${asNonEmptyString(externalAgentId) || ""}`;
+}
+
+function agentRegistrationCachePath() {
+  const rawDir = String(
+    process.env.AGENTGUARD_AGENT_KEY_DIR || path.join(os.homedir(), ".agentguard", "agent_keys"),
+  ).replace(/^~(?=$|\/)/, os.homedir());
+  return path.join(path.resolve(rawDir), AGENT_REGISTRATION_CACHE_FILE);
+}
+
+function normalizeCachedAgentRegistration(item) {
+  if (!item || typeof item !== "object" || Array.isArray(item)) {
+    return null;
+  }
+  const externalAgentId = asNonEmptyString(item.external_agent_id || item.externalAgentId);
+  const agentId = asNonEmptyString(item.agent_id || item.agentId);
+  if (!externalAgentId || !agentId) {
+    return null;
+  }
+  return {
+    external_agent_id: externalAgentId,
+    agent_id: agentId,
+    agent_identity_code: asNonEmptyString(item.agent_identity_code || item.agentIdentityCode),
+    public_key_thumbprint: asNonEmptyString(item.public_key_thumbprint || item.publicKeyThumbprint),
+    agent_identity_key_id: asNonEmptyString(item.agent_identity_key_id || item.agentIdentityKeyId)
+      || agentIdentityKeyId({
+        provider: "openclaw",
+        provider_instance_id: asNonEmptyString(item.provider_instance_id || item.providerInstanceId) || "openclaw-local",
+        tenant_id: null,
+        external_agent_id: externalAgentId,
+        agent_type: "agent",
+      }),
+    user_bound: item.user_bound !== false && item.userBound !== false,
+  };
+}
+
+function loadPersistedAgentRegistrations(config, logger = console) {
+  const registrations = new Map();
+  const cachePath = agentRegistrationCachePath();
+  if (!fs.existsSync(cachePath)) {
+    return registrations;
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(cachePath, "utf8"));
+    const items = Array.isArray(parsed && parsed.registrations) ? parsed.registrations : [];
+    for (const item of items) {
+      const registration = normalizeCachedAgentRegistration(item);
+      if (!registration) {
+        continue;
+      }
+      registrations.set(agentRegistrationCacheKey(config, registration.external_agent_id), registration);
+    }
+  } catch (error) {
+    logger.warn?.("AgentGuard OpenClaw plugin failed to read cached agent registrations.", error);
+  }
+  return registrations;
+}
+
+function persistAgentRegistrations(config, registrations, logger = console) {
+  const cachePath = agentRegistrationCachePath();
+  const merged = loadPersistedAgentRegistrations(config, logger);
+  for (const registration of registrations instanceof Map ? registrations.values() : []) {
+    const normalized = normalizeCachedAgentRegistration({
+      ...registration,
+      provider_instance_id: asNonEmptyString(config && config.providerInstanceId) || "openclaw-local",
+    });
+    if (!normalized) {
+      continue;
+    }
+    merged.set(agentRegistrationCacheKey(config, normalized.external_agent_id), normalized);
+  }
+  const payload = {
+    version: 1,
+    registrations: [...merged.values()].sort((a, b) =>
+      String(a.external_agent_id).localeCompare(String(b.external_agent_id))),
+  };
+  try {
+    fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+    const tmpPath = `${cachePath}.${process.pid}.tmp`;
+    fs.writeFileSync(tmpPath, `${JSON.stringify(payload, null, 2)}\n`, { mode: 0o600 });
+    fs.renameSync(tmpPath, cachePath);
+    try {
+      fs.chmodSync(cachePath, 0o600);
+    } catch (_) {
+      // Best effort on platforms that do not support chmod.
+    }
+  } catch (error) {
+    logger.warn?.("AgentGuard OpenClaw plugin failed to persist cached agent registrations.", error);
+  }
+}
+
 function mergeDefaultToolCapabilities(tool, capabilityMap) {
   const configuredCapabilities = capabilityMap?.[tool.name];
   if (Array.isArray(tool.capabilities) && tool.capabilities.length) {
@@ -1656,19 +1881,408 @@ class AgentGuardOpenClawBridge {
     this.openclawRuntime = options.openclawRuntime || null;
     this.openclawAgents = discoverOpenClawAgents(this.config, this.openclawRuntime, this.logger);
     this.agentBootstrap = null;
-    this.agentRegistrations = new Map();
+    this.agentRegistrations = loadPersistedAgentRegistrations(this.config, this.logger);
     this.agentRegistrationPayloads = new Map();
     this.skillScan = scanConfiguredSkills(this.config.skillScan, this.logger);
+    this.skillScanSignature = skillScanSignature(this.skillScan);
     this.mcpScan = scanConfiguredMcps(this.config.mcpScan, this.logger);
+    this.mcpScanSignature = mcpScanSignature(this.mcpScan);
     this.sessions = new Map();
+    this.skillMonitor = {
+      started: false,
+      watchers: [],
+      debounceTimer: null,
+      pollTimer: null,
+      pendingForceReport: false,
+      pendingReason: "",
+    };
+    this.mcpMonitor = {
+      started: false,
+      watchers: [],
+      debounceTimer: null,
+      pollTimer: null,
+      pendingForceReport: false,
+      pendingReason: "",
+    };
+    if (options.startSkillMonitor !== false) {
+      this.startSkillMonitor();
+    }
+    if (options.startMcpMonitor !== false) {
+      this.startMcpMonitor();
+    }
   }
 
   getSkillScanResult() {
     return this.skillScan;
   }
 
+  startSkillMonitor() {
+    const config = this.config.skillScan;
+    if (
+      !config ||
+      !config.enabled ||
+      !config.monitor ||
+      this.skillMonitor.started ||
+      !Array.isArray(config.roots) ||
+      config.roots.length === 0
+    ) {
+      return false;
+    }
+    this.skillMonitor.started = true;
+    for (const root of config.roots) {
+      try {
+        const watcher = fs.watch(root, { persistent: false }, () => {
+          this.scheduleSkillMonitorScan("fs_watch");
+        });
+        watcher.on?.("error", (error) => {
+          this.logger.warn?.("AgentGuard OpenClaw skill monitor watcher failed.", error);
+        });
+        watcher.unref?.();
+        this.skillMonitor.watchers.push(watcher);
+      } catch (error) {
+        this.logger.warn?.("AgentGuard OpenClaw skill monitor could not watch skill root.", {
+          root,
+          error: String(error && error.message ? error.message : error),
+        });
+      }
+    }
+    this.scheduleSkillMonitorScan("monitor_startup", 0, { forceReport: true });
+    const pollIntervalMs = asPositiveInteger(
+      config.monitorPollIntervalMs,
+      DEFAULT_SKILL_SCAN_MONITOR_POLL_INTERVAL_MS,
+    );
+    if (pollIntervalMs > 0) {
+      this.skillMonitor.pollTimer = setInterval(() => {
+        this.scheduleSkillMonitorScan("poll");
+      }, pollIntervalMs);
+      this.skillMonitor.pollTimer.unref?.();
+    }
+    return true;
+  }
+
+  stopSkillMonitor() {
+    if (this.skillMonitor.debounceTimer) {
+      clearTimeout(this.skillMonitor.debounceTimer);
+      this.skillMonitor.debounceTimer = null;
+    }
+    if (this.skillMonitor.pollTimer) {
+      clearInterval(this.skillMonitor.pollTimer);
+      this.skillMonitor.pollTimer = null;
+    }
+    for (const watcher of this.skillMonitor.watchers) {
+      try {
+        watcher.close();
+      } catch (_) {
+        // Ignore watcher shutdown races.
+      }
+    }
+    this.skillMonitor.watchers = [];
+    this.skillMonitor.started = false;
+    this.skillMonitor.pendingForceReport = false;
+    this.skillMonitor.pendingReason = "";
+  }
+
+  scheduleSkillMonitorScan(reason = "change", delayMs = this.config.skillScan.monitorDebounceMs, options = {}) {
+    this.skillMonitor.pendingForceReport = Boolean(
+      this.skillMonitor.pendingForceReport || options.forceReport,
+    );
+    this.skillMonitor.pendingReason = asNonEmptyString(reason) || this.skillMonitor.pendingReason || "change";
+    if (this.skillMonitor.debounceTimer) {
+      clearTimeout(this.skillMonitor.debounceTimer);
+    }
+    const waitMs = Math.max(0, Number.isFinite(Number(delayMs)) ? Number(delayMs) : 0);
+    this.skillMonitor.debounceTimer = setTimeout(() => {
+      const forceReport = this.skillMonitor.pendingForceReport;
+      const pendingReason = this.skillMonitor.pendingReason || "change";
+      this.skillMonitor.debounceTimer = null;
+      this.skillMonitor.pendingForceReport = false;
+      this.skillMonitor.pendingReason = "";
+      this.refreshSkillScanAndReport(pendingReason, { forceReport }).catch((error) => {
+        this.logger.warn?.("AgentGuard OpenClaw skill monitor failed to refresh skills.", error);
+      });
+    }, waitMs);
+    this.skillMonitor.debounceTimer.unref?.();
+  }
+
+  async refreshSkillScanAndReport(reason = "manual", { forceReport = false } = {}) {
+    const nextSkillScan = scanConfiguredSkills(this.config.skillScan, this.logger);
+    const nextSignature = skillScanSignature(nextSkillScan);
+    const changed = nextSignature !== this.skillScanSignature;
+    if (!changed && !forceReport) {
+      return { changed: false, skillScan: this.skillScan };
+    }
+    this.skillScan = nextSkillScan;
+    this.skillScanSignature = nextSignature;
+    this.updateSkillScanForStates(nextSkillScan, { resetReporting: changed || forceReport });
+    await this.reportSkillScanToMonitorTargets(reason, {
+      force: changed || forceReport,
+      allowEmpty: true,
+    });
+    return { changed, skillScan: nextSkillScan };
+  }
+
+  updateSkillScanForStates(skillScan, { resetReporting = false } = {}) {
+    for (const state of this.sessions.values()) {
+      state.skillScan = skillScan;
+      if (resetReporting) {
+        state.skillReporting = null;
+        state.skillReportingSignature = null;
+        state.lastSkillReportSignature = null;
+      }
+      this.syncContextMetadata(state);
+    }
+  }
+
+  skillMonitorAgents() {
+    const configuredAgentIds = new Set(this.config.skillScan.agentIds || []);
+    const catalog = normalizeOpenClawAgentCatalog(this.openclawAgents);
+    if (configuredAgentIds.size) {
+      const byId = new Map(catalog.map((agent) => [agent.id, agent]));
+      return [...configuredAgentIds].map((id) => byId.get(id) || {
+        id,
+        name: id,
+        description: `OpenClaw agent: ${id}`,
+      });
+    }
+    const roots = Array.isArray(this.config.skillScan.roots) ? this.config.skillScan.roots : [];
+    const workspaceMatches = catalog.filter((agent) =>
+      roots.some((root) => rootMatchesAgentWorkspace(root, agent)),
+    );
+    if (workspaceMatches.length) {
+      return workspaceMatches;
+    }
+    if (catalog.length === 1) {
+      return catalog;
+    }
+    return [];
+  }
+
+  ensureMonitorStateForAgent(agent) {
+    const agentId = asNonEmptyString(agent && agent.id);
+    if (!agentId) {
+      return null;
+    }
+    return this.getState({
+      agentId,
+      sessionId: `agentguard-skill-monitor:${this.config.providerInstanceId}:${agentId}`,
+      sessionKey: `agent:${agentId}:agentguard-skill-monitor`,
+      channelId: "agentguard-skill-monitor",
+      skipAutoReports: true,
+    });
+  }
+
+  async reportSkillScanToMonitorTargets(reason = "monitor", { force = false, allowEmpty = true } = {}) {
+    const states = new Set();
+    for (const state of this.sessions.values()) {
+      if (state && !state.openclawSessionClosed) {
+        states.add(state);
+      }
+    }
+    for (const agent of this.skillMonitorAgents()) {
+      const state = this.ensureMonitorStateForAgent(agent);
+      if (state && !state.openclawSessionClosed) {
+        states.add(state);
+      }
+    }
+    if (!states.size) {
+      this.logger.debug?.("AgentGuard OpenClaw skill monitor has no report target.");
+      return false;
+    }
+    const reports = [];
+    for (const state of states) {
+      state.skillScan = this.skillScan;
+      this.syncContextMetadata(state);
+      reports.push(this.ensureSkillReports(state, { force, allowEmpty, reason }));
+    }
+    const results = await Promise.all(reports);
+    return results.some(Boolean);
+  }
+
   getMcpScanResult() {
     return this.mcpScan;
+  }
+
+  startMcpMonitor() {
+    const config = this.config.mcpScan;
+    const watchPaths = [
+      ...(Array.isArray(config && config.roots) ? config.roots : []),
+      ...(Array.isArray(config && config.configPaths) ? config.configPaths : []),
+    ].filter((item, index, items) => item && items.indexOf(item) === index);
+    if (
+      !config ||
+      !config.enabled ||
+      !config.monitor ||
+      this.mcpMonitor.started ||
+      watchPaths.length === 0
+    ) {
+      return false;
+    }
+    this.mcpMonitor.started = true;
+    for (const watchPath of watchPaths) {
+      try {
+        const watcher = fs.watch(watchPath, { persistent: false }, () => {
+          this.scheduleMcpMonitorScan("fs_watch");
+        });
+        watcher.on?.("error", (error) => {
+          this.logger.warn?.("AgentGuard OpenClaw MCP monitor watcher failed.", error);
+        });
+        watcher.unref?.();
+        this.mcpMonitor.watchers.push(watcher);
+      } catch (error) {
+        this.logger.warn?.("AgentGuard OpenClaw MCP monitor could not watch scan source.", {
+          path: watchPath,
+          error: String(error && error.message ? error.message : error),
+        });
+      }
+    }
+    this.scheduleMcpMonitorScan("monitor_startup", 0, { forceReport: true });
+    const pollIntervalMs = asPositiveInteger(
+      config.monitorPollIntervalMs,
+      DEFAULT_MCP_SCAN_MONITOR_POLL_INTERVAL_MS,
+    );
+    if (pollIntervalMs > 0) {
+      this.mcpMonitor.pollTimer = setInterval(() => {
+        this.scheduleMcpMonitorScan("poll");
+      }, pollIntervalMs);
+      this.mcpMonitor.pollTimer.unref?.();
+    }
+    return true;
+  }
+
+  stopMcpMonitor() {
+    if (this.mcpMonitor.debounceTimer) {
+      clearTimeout(this.mcpMonitor.debounceTimer);
+      this.mcpMonitor.debounceTimer = null;
+    }
+    if (this.mcpMonitor.pollTimer) {
+      clearInterval(this.mcpMonitor.pollTimer);
+      this.mcpMonitor.pollTimer = null;
+    }
+    for (const watcher of this.mcpMonitor.watchers) {
+      try {
+        watcher.close();
+      } catch (_) {
+        // Ignore watcher shutdown races.
+      }
+    }
+    this.mcpMonitor.watchers = [];
+    this.mcpMonitor.started = false;
+    this.mcpMonitor.pendingForceReport = false;
+    this.mcpMonitor.pendingReason = "";
+  }
+
+  scheduleMcpMonitorScan(reason = "change", delayMs = this.config.mcpScan.monitorDebounceMs, options = {}) {
+    this.mcpMonitor.pendingForceReport = Boolean(
+      this.mcpMonitor.pendingForceReport || options.forceReport,
+    );
+    this.mcpMonitor.pendingReason = asNonEmptyString(reason) || this.mcpMonitor.pendingReason || "change";
+    if (this.mcpMonitor.debounceTimer) {
+      clearTimeout(this.mcpMonitor.debounceTimer);
+    }
+    const waitMs = Math.max(0, Number.isFinite(Number(delayMs)) ? Number(delayMs) : 0);
+    this.mcpMonitor.debounceTimer = setTimeout(() => {
+      const forceReport = this.mcpMonitor.pendingForceReport;
+      const pendingReason = this.mcpMonitor.pendingReason || "change";
+      this.mcpMonitor.debounceTimer = null;
+      this.mcpMonitor.pendingForceReport = false;
+      this.mcpMonitor.pendingReason = "";
+      this.refreshMcpScanAndReport(pendingReason, { forceReport }).catch((error) => {
+        this.logger.warn?.("AgentGuard OpenClaw MCP monitor failed to refresh MCPs.", error);
+      });
+    }, waitMs);
+    this.mcpMonitor.debounceTimer.unref?.();
+  }
+
+  async refreshMcpScanAndReport(reason = "manual", { forceReport = false } = {}) {
+    const nextMcpScan = scanConfiguredMcps(this.config.mcpScan, this.logger);
+    const nextSignature = mcpScanSignature(nextMcpScan);
+    const changed = nextSignature !== this.mcpScanSignature;
+    if (!changed && !forceReport) {
+      return { changed: false, mcpScan: this.mcpScan };
+    }
+    this.mcpScan = nextMcpScan;
+    this.mcpScanSignature = nextSignature;
+    this.updateMcpScanForStates(nextMcpScan, { resetReporting: changed || forceReport });
+    await this.reportMcpScanToMonitorTargets(reason, {
+      force: changed || forceReport,
+      allowEmpty: true,
+    });
+    return { changed, mcpScan: nextMcpScan };
+  }
+
+  updateMcpScanForStates(mcpScan, { resetReporting = false } = {}) {
+    for (const state of this.sessions.values()) {
+      state.mcpScan = mcpScan;
+      if (resetReporting) {
+        state.mcpReporting = null;
+      }
+      this.syncContextMetadata(state);
+    }
+  }
+
+  mcpMonitorAgents() {
+    const configuredAgentIds = new Set(this.config.mcpScan.agentIds || []);
+    const catalog = normalizeOpenClawAgentCatalog(this.openclawAgents);
+    if (configuredAgentIds.size) {
+      const byId = new Map(catalog.map((agent) => [agent.id, agent]));
+      return [...configuredAgentIds].map((id) => byId.get(id) || {
+        id,
+        name: id,
+        description: `OpenClaw agent: ${id}`,
+      });
+    }
+    const roots = Array.isArray(this.config.mcpScan.roots) ? this.config.mcpScan.roots : [];
+    const workspaceMatches = catalog.filter((agent) =>
+      roots.some((root) => rootMatchesAgentWorkspace(root, agent)),
+    );
+    if (workspaceMatches.length) {
+      return workspaceMatches;
+    }
+    if (catalog.length === 1) {
+      return catalog;
+    }
+    return [];
+  }
+
+  ensureMcpMonitorStateForAgent(agent) {
+    const agentId = asNonEmptyString(agent && agent.id);
+    if (!agentId) {
+      return null;
+    }
+    return this.getState({
+      agentId,
+      sessionId: `agentguard-mcp-monitor:${this.config.providerInstanceId}:${agentId}`,
+      sessionKey: `agent:${agentId}:agentguard-mcp-monitor`,
+      channelId: "agentguard-mcp-monitor",
+      skipAutoReports: true,
+    });
+  }
+
+  async reportMcpScanToMonitorTargets(reason = "monitor", { force = false, allowEmpty = true } = {}) {
+    const states = new Set();
+    for (const state of this.sessions.values()) {
+      if (state && !state.openclawSessionClosed) {
+        states.add(state);
+      }
+    }
+    for (const agent of this.mcpMonitorAgents()) {
+      const state = this.ensureMcpMonitorStateForAgent(agent);
+      if (state && !state.openclawSessionClosed) {
+        states.add(state);
+      }
+    }
+    if (!states.size) {
+      this.logger.debug?.("AgentGuard OpenClaw MCP monitor has no report target.");
+      return false;
+    }
+    const reports = [];
+    for (const state of states) {
+      state.mcpScan = this.mcpScan;
+      this.syncContextMetadata(state);
+      reports.push(this.ensureMcpReports(state, { force, allowEmpty, reason }));
+    }
+    const results = await Promise.all(reports);
+    return results.some(Boolean);
   }
 
   resolveIdentityContext(identityContext = {}) {
@@ -1687,10 +2301,13 @@ class AgentGuardOpenClawBridge {
 
   getState(identityContext) {
     const resolvedIdentityContext = this.resolveIdentityContext(identityContext);
+    const skipAutoReports = resolvedIdentityContext.skipAutoReports === true;
     const context = buildRuntimeContext(this.config, resolvedIdentityContext);
     const sessionKey = context.metadata.client_session_key || context.session_id;
     const openclawSessionId = context.metadata.openclaw && context.metadata.openclaw.sessionId;
-    const openclawSessionClosure = this.reconcileOpenClawSessionClosure(sessionKey, openclawSessionId);
+    const openclawSessionClosure = skipAutoReports
+      ? { closed: false, cleared: false }
+      : this.reconcileOpenClawSessionClosure(sessionKey, openclawSessionId);
     const openclawSessionClosed = openclawSessionClosure.closed;
     let state = this.sessions.get(sessionKey);
     if (state) {
@@ -1723,6 +2340,8 @@ class AgentGuardOpenClawBridge {
       }
       state.context = context;
       state.openclawSessionClosed = openclawSessionClosed;
+      state.skillScan = this.skillScan;
+      state.mcpScan = this.mcpScan;
       if (state.openclawSessionClosed) {
         this.resetRuntimeStateAfterOpenClawSessionClosed(state);
       }
@@ -1779,6 +2398,8 @@ class AgentGuardOpenClawBridge {
       defaultToolReporting: null,
       recentLlmOutputs: new Map(),
       skillReporting: null,
+      skillReportingSignature: null,
+      lastSkillReportSignature: null,
       mcpReporting: null,
       openclawSessionClosed,
     };
@@ -1787,7 +2408,7 @@ class AgentGuardOpenClawBridge {
     }
     this.syncContextMetadata(state);
     this.sessions.set(sessionKey, state);
-    if (!state.openclawSessionClosed) {
+    if (!state.openclawSessionClosed && !skipAutoReports) {
       this.ensureDefaultToolReports(state);
       this.ensureSkillReports(state);
       this.ensureMcpReports(state);
@@ -1817,6 +2438,8 @@ class AgentGuardOpenClawBridge {
     state.remoteSessionRegistration = null;
     state.defaultToolReporting = null;
     state.skillReporting = null;
+    state.skillReportingSignature = null;
+    state.lastSkillReportSignature = null;
     state.mcpReporting = null;
     const remote = state.enforcer && state.enforcer.remote;
     if (remote) {
@@ -1867,6 +2490,8 @@ class AgentGuardOpenClawBridge {
     state.remoteSessionRegistration = null;
     state.defaultToolReporting = null;
     state.skillReporting = null;
+    state.skillReportingSignature = null;
+    state.lastSkillReportSignature = null;
     state.mcpReporting = null;
     state.recentLlmOutputs = new Map();
     state.audit = new AuditRecorder(
@@ -1890,6 +2515,8 @@ class AgentGuardOpenClawBridge {
   }
 
   clearAll() {
+    this.stopSkillMonitor();
+    this.stopMcpMonitor();
     for (const state of this.sessions.values()) {
       this.stopClientConfigApi(state);
     }
@@ -1920,14 +2547,15 @@ class AgentGuardOpenClawBridge {
         state.context.metadata.openclaw &&
         state.context.metadata.openclaw.agentId,
     ) || asNonEmptyString(state.context.agent_id);
-    const existing = externalAgentId ? this.agentRegistrations.get(externalAgentId) : null;
+    const registrationKey = externalAgentId ? agentRegistrationCacheKey(this.config, externalAgentId) : null;
+    const existing = registrationKey ? this.agentRegistrations.get(registrationKey) : null;
     if (existing) {
       this.applyCanonicalAgentRegistration(state, existing);
       return existing;
     }
     if (this.agentBootstrap) {
       await this.agentBootstrap;
-      const registered = externalAgentId ? this.agentRegistrations.get(externalAgentId) : null;
+      const registered = registrationKey ? this.agentRegistrations.get(registrationKey) : null;
       if (registered) {
         this.applyCanonicalAgentRegistration(state, registered);
       }
@@ -1964,8 +2592,9 @@ class AgentGuardOpenClawBridge {
       .then((response) => {
         const mapped = registrationMapFromBootstrap(response, registrations);
         for (const [key, value] of mapped.entries()) {
-          this.agentRegistrations.set(key, value);
+          this.agentRegistrations.set(agentRegistrationCacheKey(this.config, key), value);
         }
+        persistAgentRegistrations(this.config, this.agentRegistrations, this.logger);
         return mapped;
       })
       .catch((error) => {
@@ -1976,7 +2605,7 @@ class AgentGuardOpenClawBridge {
         this.agentBootstrap = null;
       });
     await this.agentBootstrap;
-    const registered = externalAgentId ? this.agentRegistrations.get(externalAgentId) : null;
+    const registered = registrationKey ? this.agentRegistrations.get(registrationKey) : null;
     if (registered) {
       this.applyCanonicalAgentRegistration(state, registered);
     }
@@ -2062,6 +2691,8 @@ class AgentGuardOpenClawBridge {
       state.remoteSessionRegistration = null;
       state.defaultToolReporting = null;
       state.skillReporting = null;
+      state.skillReportingSignature = null;
+      state.lastSkillReportSignature = null;
       state.mcpReporting = null;
       const remote = state.enforcer && state.enforcer.remote;
       if (remote) {
@@ -2269,6 +2900,8 @@ class AgentGuardOpenClawBridge {
       state.remoteSessionRegistration = null;
       state.defaultToolReporting = null;
       state.skillReporting = null;
+      state.skillReportingSignature = null;
+      state.lastSkillReportSignature = null;
       state.mcpReporting = null;
     }
     if (remote) {
@@ -2287,24 +2920,66 @@ class AgentGuardOpenClawBridge {
     if (!remote || !remote.enabled) {
       return Promise.resolve(false);
     }
+    if (!state.runtimeAuth) {
+      return Promise.resolve(false);
+    }
     if (state.remoteSessionRegistration) {
-      return state.remoteSessionRegistration;
+      return state.remoteSessionRegistration.then(async (registered) => {
+        if (!registered) {
+          state.remoteSessionRegistration = null;
+          return false;
+        }
+        return Boolean(await this.ensureRuntimeAuth(state));
+      });
     }
     state.remoteSessionRegistration = Promise.resolve()
       .then(() => this.ensureClientConfigApi(state))
       .then(() => {
         this.syncContextMetadata(state);
-        if (state.runtimeAuth) {
-          return this.ensureRuntimeAuth(state);
-        }
-        return remote.register_session(state.context);
+        return this.ensureRuntimeAuth(state);
       })
       .then(() => true)
       .catch((error) => {
         this.logger.warn?.("AgentGuard OpenClaw plugin failed to register remote session.", error);
+        state.remoteSessionRegistration = null;
         return false;
       });
     return state.remoteSessionRegistration;
+  }
+
+  resetRuntimeAuthAfterReportAuthFailure(state) {
+    if (!state || !state.runtimeAuth) {
+      return;
+    }
+    clearRuntimeAuthSession(state.runtimeAuth);
+    state.runtimeAuthStartup = null;
+    state.remoteSessionRegistration = null;
+    const remote = state.enforcer && state.enforcer.remote;
+    if (remote) {
+      remote.session_token = null;
+    }
+  }
+
+  async reportWithRuntimeAuthRetry(state, reportFn) {
+    const registered = await this.ensureRemoteSessionRegistered(state);
+    if (!registered) {
+      return false;
+    }
+    try {
+      await reportFn();
+      return true;
+    } catch (error) {
+      if (!isRuntimeAuthUnavailableError(error) || !state.runtimeAuth) {
+        throw error;
+      }
+      this.resetRuntimeAuthAfterReportAuthFailure(state);
+      const recovered = await this.ensureRemoteSessionRegistered(state);
+      if (!recovered) {
+        return false;
+      }
+      await reportFn();
+      return true;
+    }
   }
 
   ensureDefaultToolReports(state) {
@@ -2338,7 +3013,7 @@ class AgentGuardOpenClawBridge {
     return state.defaultToolReporting;
   }
 
-  ensureSkillReports(state) {
+  ensureSkillReports(state, { force = false, allowEmpty = false, reason = "session_start" } = {}) {
     const remote = state.enforcer.remote;
     if (!remote || !remote.enabled) {
       return Promise.resolve(false);
@@ -2346,35 +3021,51 @@ class AgentGuardOpenClawBridge {
     const skills = Array.isArray(state.skillScan && state.skillScan.skills)
       ? state.skillScan.skills
       : [];
-    if (!state.skillScan || !state.skillScan.enabled || skills.length === 0) {
+    if (!state.skillScan || !state.skillScan.enabled || (!allowEmpty && skills.length === 0)) {
       return Promise.resolve(false);
     }
-    if (state.skillReporting) {
+    const signature = skillScanSignature(state.skillScan);
+    if (state.skillReporting && state.skillReportingSignature === signature) {
       return state.skillReporting;
     }
-    state.skillReporting = this.ensureRemoteSessionRegistered(state)
-      .then((registered) => {
-        if (!registered) {
-          return false;
+    if (!force && state.lastSkillReportSignature === signature) {
+      return Promise.resolve(true);
+    }
+    state.skillReportingSignature = signature;
+    state.skillReporting = this.reportWithRuntimeAuthRetry(
+      state,
+      () => remote.report_skills(
+        state.context,
+        skills,
+        {
+          source_framework: "openclaw_compatible",
+          summary: state.skillScan.summary || {},
+          diagnostics: state.skillScan.diagnostics || [],
+          sync_inventory: true,
+          report_reason: reason,
+        },
+      ),
+    )
+      .then((reported) => {
+        if (reported) {
+          state.lastSkillReportSignature = signature;
         }
-        return remote.report_skills(
-          state.context,
-          skills,
-          {
-            source_framework: "openclaw_compatible",
-            summary: state.skillScan.summary || {},
-            diagnostics: state.skillScan.diagnostics || [],
-          },
-        ).then(() => true);
+        return reported;
       })
       .catch((error) => {
         this.logger.warn?.("AgentGuard OpenClaw plugin failed to report skills.", error);
         return false;
+      })
+      .finally(() => {
+        if (state.skillReportingSignature === signature) {
+          state.skillReporting = null;
+          state.skillReportingSignature = null;
+        }
       });
     return state.skillReporting;
   }
 
-  ensureMcpReports(state) {
+  ensureMcpReports(state, { force = false, allowEmpty = false, reason = "session_start" } = {}) {
     const remote = state.enforcer.remote;
     if (!remote || !remote.enabled) {
       return Promise.resolve(false);
@@ -2382,27 +3073,26 @@ class AgentGuardOpenClawBridge {
     const mcps = Array.isArray(state.mcpScan && state.mcpScan.mcps)
       ? state.mcpScan.mcps
       : [];
-    if (!state.mcpScan || !state.mcpScan.enabled || mcps.length === 0) {
+    if (!state.mcpScan || !state.mcpScan.enabled || (!allowEmpty && mcps.length === 0)) {
       return Promise.resolve(false);
     }
-    if (state.mcpReporting) {
+    if (state.mcpReporting && !force) {
       return state.mcpReporting;
     }
-    state.mcpReporting = this.ensureRemoteSessionRegistered(state)
-      .then((registered) => {
-        if (!registered) {
-          return false;
-        }
-        return remote.report_mcps(
-          state.context,
-          mcps,
-          {
-            source_framework: "mcp_native",
-            summary: state.mcpScan.summary || {},
-            diagnostics: state.mcpScan.diagnostics || [],
-          },
-        ).then(() => true);
-      })
+    state.mcpReporting = this.reportWithRuntimeAuthRetry(
+      state,
+      () => remote.report_mcps(
+        state.context,
+        mcps,
+        {
+          source_framework: "mcp_native",
+          summary: state.mcpScan.summary || {},
+          diagnostics: state.mcpScan.diagnostics || [],
+          sync_inventory: true,
+          report_reason: reason,
+        },
+      ),
+    )
       .catch((error) => {
         this.logger.warn?.("AgentGuard OpenClaw plugin failed to report MCPs.", error);
         return false;

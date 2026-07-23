@@ -45,7 +45,18 @@ Example AgentGuard config:
   "remoteUnavailableMode": "fail_closed",
   "skillScan": {
     "enabled": false,
-    "roots": []
+    "roots": [],
+    "monitor": true,
+    "monitorDebounceMs": 750,
+    "monitorPollIntervalMs": 5000
+  },
+  "mcpScan": {
+    "enabled": false,
+    "roots": [],
+    "configPaths": [],
+    "monitor": true,
+    "monitorDebounceMs": 750,
+    "monitorPollIntervalMs": 5000
   }
 }
 ```
@@ -91,8 +102,32 @@ OpenClaw defaults.
 `true` and provide local `skillScan.roots` to scan OpenClaw-compatible skill
 directories containing `SKILL.md`; relative roots are resolved against the
 AgentGuard config file directory. The adapter keeps the full skill descriptors
-locally in bridge state for later reporting/scanning integration, while session
+locally in bridge state and reports them to the AgentGuard server, while session
 metadata only includes a compact scan summary.
+
+When `skillScan.enabled` is true, `skillScan.monitor` is enabled by default.
+The monitor runs inside the OpenClaw plugin/client process, watches configured
+skill roots, periodically rescans them, and reports changed skill inventories to
+AgentGuard without waiting for another agent turn. `monitorDebounceMs` controls
+how long filesystem events are coalesced before a rescan, and
+`monitorPollIntervalMs` provides a polling fallback for filesystems where
+`fs.watch` misses nested edits. If several OpenClaw agents are configured,
+`skillScan.agentIds` can restrict which agent IDs receive the reported skill
+inventory; otherwise the adapter infers targets from OpenClaw workspace paths
+when possible. A running OpenClaw plugin/client process is still required for
+the monitor to execute.
+
+`mcpScan` is optional and disabled by default. Set `mcpScan.enabled` to `true`
+and provide either `mcpScan.roots` or explicit `mcpScan.configPaths` to scan MCP
+server configs such as `.cursor/mcp.json` or OpenClaw MCP config entries. When
+enabled, `mcpScan.monitor` is enabled by default. The monitor watches configured
+MCP roots and config files, periodically rescans them, and reports changed MCP
+inventories to AgentGuard without waiting for another agent turn. Empty
+inventories are reported with `sync_inventory=true`, so deleting an MCP from the
+client side removes the stale MCP from AgentGuard after the next monitor refresh.
+`mcpScan.agentIds` can restrict which OpenClaw agent IDs receive the reported MCP
+inventory; otherwise the adapter infers targets from OpenClaw workspace paths
+when possible.
 
 When a remote AgentGuard server is configured, the adapter auto-registers each
 new session unless `userTicket` or `userTicketEnvVar` is configured. With a user
