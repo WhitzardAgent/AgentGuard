@@ -439,3 +439,25 @@ test("i18n skips boot hiding when the server already rendered Chinese", () => {
   assert.equal(title.textContent, "首页");
   assert.equal(button.textContent, "English");
 });
+
+test("i18n still translates leftover English when server language is already Chinese", () => {
+  const body = new FakeElement("body");
+  const button = new FakeButtonElement("button", { id: "sidebar-language-toggle", textContent: "English" });
+  const role = new FakeElement("th");
+  role.appendChild(new FakeTextNode("Role"));
+  const members = new FakeElement("th");
+  members.appendChild(new FakeTextNode("Members"));
+  const organization = new FakeElement("th");
+  organization.appendChild(new FakeTextNode("Organization"));
+  body.appendChild(button);
+  body.appendChild(role);
+  body.appendChild(members);
+  body.appendChild(organization);
+
+  loadI18n({ body, cookie: "agentguard.language=zh", serverLanguage: "zh", title: "AgentGuard 前端预览" });
+
+  assert.equal(role.textContent, "身份");
+  assert.equal(members.textContent, "成员");
+  assert.equal(organization.textContent, "公司");
+  assert.equal(button.textContent, "English");
+});

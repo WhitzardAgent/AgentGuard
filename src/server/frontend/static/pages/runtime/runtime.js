@@ -234,6 +234,24 @@
     }
   }
 
+  function isInlineTextFragment(value) {
+    if (typeof value === "string" || typeof value === "number") {
+      return true;
+    }
+    if (!value || typeof value !== "object") {
+      return false;
+    }
+    const type = String(value.type || "").trim().toLowerCase();
+    return (
+      type === "text"
+      || type === "input_text"
+      || type === "output_text"
+      || type === "text_delta"
+      || type === "output_text_delta"
+      || Object.prototype.hasOwnProperty.call(value, "text")
+    );
+  }
+
   function extractMessageContent(value) {
     if (value === undefined || value === null) {
       return "";
@@ -242,10 +260,11 @@
       return value.trim();
     }
     if (Array.isArray(value)) {
+      const separator = value.every(isInlineTextFragment) ? "" : "\n";
       return value
         .map(extractMessageContent)
         .filter(Boolean)
-        .join("\n");
+        .join(separator);
     }
     if (typeof value === "object") {
       const role = String(value.role || value.type || "").trim().toLowerCase();

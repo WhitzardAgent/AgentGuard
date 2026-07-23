@@ -128,6 +128,16 @@ def test_static_assets_include_cache_headers():
     assert "last-modified" in headers
 
 
+def test_i18n_script_disables_stale_caching():
+    with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+        status, headers, body = _raw_request("GET", preview.url, "/static/common/i18n.js")
+
+    assert status == 200
+    assert body
+    assert headers.get("cache-control") == ["no-cache, must-revalidate"]
+    assert "last-modified" in headers
+
+
 def test_html_pages_disable_stale_caching():
     with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
         status, headers, body = _raw_request("GET", preview.url, "/runtime")
@@ -1557,6 +1567,7 @@ def test_user_page_renders_chinese_when_language_cookie_set():
     assert "当前密码" in body
     assert "确认新密码" in body
     assert "外部账号" in body
+    assert "身份" in body
     assert "绑定 Dify" in body
     assert "绑定 n8n" in body
     assert "提供方" in body

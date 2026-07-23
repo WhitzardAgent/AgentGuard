@@ -135,6 +135,8 @@ _EXPLICIT_ATTRIBUTE_TRANSLATIONS = {
     "data-i18n-title": "title",
     "data-i18n-aria-label": "aria-label",
 }
+_ZH_TRANSLATION_CACHE_MTIME_NS = -1
+_ZH_TRANSLATION_CACHE: dict[str, str] = {}
 
 
 def _normalize_template_language(language: str | None) -> str:
@@ -184,7 +186,19 @@ def _extract_zh_translations() -> dict[str, str]:
     return translations
 
 
-EXACT_ZH_TEMPLATE_TRANSLATIONS = _extract_zh_translations()
+def _zh_template_translations() -> dict[str, str]:
+    global _ZH_TRANSLATION_CACHE_MTIME_NS, _ZH_TRANSLATION_CACHE
+    path = STATIC_DIR / "common" / "i18n.js"
+    try:
+        stat = path.stat()
+    except OSError:
+        _ZH_TRANSLATION_CACHE_MTIME_NS = -1
+        _ZH_TRANSLATION_CACHE = {}
+        return _ZH_TRANSLATION_CACHE
+    if stat.st_mtime_ns != _ZH_TRANSLATION_CACHE_MTIME_NS:
+        _ZH_TRANSLATION_CACHE = _extract_zh_translations()
+        _ZH_TRANSLATION_CACHE_MTIME_NS = stat.st_mtime_ns
+    return _ZH_TRANSLATION_CACHE
 
 
 def _translate_template_key(key: str, language: str) -> str:
@@ -193,7 +207,7 @@ def _translate_template_key(key: str, language: str) -> str:
     normalized = _normalize_template_whitespace(key)
     if not normalized:
         return key
-    return EXACT_ZH_TEMPLATE_TRANSLATIONS.get(normalized, key)
+    return _zh_template_translations().get(normalized, key)
 
 
 def _translate_template_value(value: str, language: str) -> str:
@@ -202,7 +216,7 @@ def _translate_template_value(value: str, language: str) -> str:
     normalized = _normalize_template_whitespace(value)
     if not normalized:
         return value
-    translated = EXACT_ZH_TEMPLATE_TRANSLATIONS.get(normalized)
+    translated = _zh_template_translations().get(normalized)
     if not translated:
         return value
     leading_match = re.match(r"^\s*", value)
@@ -709,6 +723,17 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
                 "Cache-Control",
                 f"public, max-age={DYNAMIC_CACHE_SECONDS}, must-revalidate",
             )
+            self.send_header("Last-Modified", last_modified)
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if relative_path == "common/i18n.js":
+            body = file_path.read_bytes()
+            last_modified = self._http_date(file_path.stat().st_mtime)
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/javascript; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-cache, must-revalidate")
             self.send_header("Last-Modified", last_modified)
             self.end_headers()
             self.wfile.write(body)

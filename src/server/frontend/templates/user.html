@@ -16,7 +16,6 @@
         <div>
           <p class="page-kicker">User Studio</p>
           <h1><span class="home-hero-name">User Centre</span></h1>
-          <p class="subtle" id="user-status">Checking sign-in status...</p>
         </div>
         <div class="profile-actions">
           <button class="btn primary" id="generate-ticket-button" type="button" hidden>Generate Ticket</button>
@@ -34,7 +33,6 @@
           <div class="section-heading-row">
             <div>
               <h2>Current User</h2>
-              <p class="subtle">Profile information for the signed-in account.</p>
             </div>
           </div>
 
@@ -136,9 +134,8 @@
           <div class="section-heading-row">
             <div>
               <h2>Organizations</h2>
-              <p class="subtle">Organizations you can manage or access.</p>
             </div>
-            <button class="btn primary" id="organization-add-button" type="button">Add</button>
+            <button class="btn primary" id="organization-add-button" type="button" data-i18n="Add">Add</button>
           </div>
 
           <form class="form-grid compact-form" id="organization-create-form" hidden>
@@ -151,7 +148,7 @@
               <textarea id="organization-description" rows="2"></textarea>
             </label>
             <div class="form-grid-actions">
-              <button class="btn primary" type="submit">Create Organization</button>
+              <button class="btn primary" type="submit" data-i18n="Create Organization">Create Organization</button>
             </div>
           </form>
 
@@ -160,10 +157,9 @@
               <thead>
                 <tr>
                   <th>Name</th>
-                  <th>Role</th>
-                  <th>Members</th>
-                  <th>Admin</th>
-                  <th>Action</th>
+                  <th data-i18n="Role">Role</th>
+                  <th data-i18n="Members">Members</th>
+                  <th data-i18n="Action">Action</th>
                 </tr>
               </thead>
               <tbody id="organization-list"></tbody>
@@ -181,7 +177,7 @@
               <textarea id="selected-organization-description" rows="2"></textarea>
             </label>
             <div class="form-grid-actions">
-              <button class="btn primary" type="submit">Update Organization</button>
+              <button class="btn primary" type="submit" data-i18n="Update Organization">Update Organization</button>
             </div>
           </form>
         </section>
@@ -190,11 +186,10 @@
           <div class="section-heading-row">
             <div>
               <h2>Groups</h2>
-              <p class="subtle" id="selected-organization-label">Select an organization.</p>
             </div>
             <div class="profile-actions">
-              <button class="btn primary" id="group-add-button" type="button">Add</button>
-              <button class="btn" id="group-join-button" type="button">Join</button>
+              <button class="btn primary" id="group-add-button" type="button" data-i18n="Add">Add</button>
+              <button class="btn" id="group-join-button" type="button" data-i18n="Join">Join</button>
             </div>
           </div>
 
@@ -212,7 +207,7 @@
               <textarea id="group-description" rows="2"></textarea>
             </label>
             <div class="form-grid-actions">
-              <button class="btn primary" type="submit">Create Group</button>
+              <button class="btn primary" type="submit" data-i18n="Create Group">Create Group</button>
             </div>
           </form>
 
@@ -221,10 +216,9 @@
               <thead>
                 <tr>
                   <th>Name</th>
-                  <th>Organization</th>
-                  <th>Role</th>
-                  <th>Admin</th>
-                  <th>Action</th>
+                  <th data-i18n="Organization">Organization</th>
+                  <th data-i18n="Role">Role</th>
+                  <th data-i18n="Action">Action</th>
                 </tr>
               </thead>
               <tbody id="group-list"></tbody>
@@ -242,7 +236,7 @@
               <textarea id="selected-group-description" rows="2"></textarea>
             </label>
             <div class="form-grid-actions">
-              <button class="btn primary" type="submit">Update Group</button>
+              <button class="btn primary" type="submit" data-i18n="Update Group">Update Group</button>
             </div>
           </form>
         </section>
@@ -280,7 +274,7 @@
           <p class="subtle" id="join-modal-help">Paste the invitation token to join the group.</p>
           <div class="form-grid-actions confirm-modal-actions">
             <button class="btn" id="cancel-join-modal-button" type="button">Cancel</button>
-            <button class="btn primary" id="submit-join-modal-button" type="submit">Join</button>
+            <button class="btn primary" id="submit-join-modal-button" type="submit" data-i18n="Join">Join</button>
           </div>
         </form>
       </section>
@@ -324,7 +318,6 @@
         shell: document.getElementById("user-management-shell"),
         logoutButton: document.getElementById("logout-button"),
         generateTicketButton: document.getElementById("generate-ticket-button"),
-        status: document.getElementById("user-status"),
         profileTableBody: document.getElementById("profile-table-body"),
         profileTablePanel: document.getElementById("profile-table-panel"),
         profileEditPanel: document.getElementById("profile-edit-panel"),
@@ -335,7 +328,6 @@
         profileEditEmail: document.getElementById("profile-edit-email"),
         organizationList: document.getElementById("organization-list"),
         groupList: document.getElementById("group-list"),
-        selectedOrganizationLabel: document.getElementById("selected-organization-label"),
         difyBindForm: document.getElementById("dify-bind-form"),
         n8nBindForm: document.getElementById("n8n-bind-form"),
         externalAccountListCard: document.getElementById("external-account-list-card"),
@@ -686,12 +678,6 @@
       function renderUser(user) {
         state.user = user;
         const signedIn = Boolean(user);
-        const emailLabel = user?.email
-          ? (user.email_verified ? `Email: ${user.email}.` : `Email: ${user.email} (unverified).`)
-          : "Email: not bound.";
-        nodes.status.textContent = signedIn
-          ? `Signed in as ${user.username}${user.is_super_admin ? " [superAdmin]" : ""} (user #${user.id}). ${emailLabel}`
-          : "Not signed in.";
         nodes.logoutButton.hidden = !signedIn;
         nodes.generateTicketButton.hidden = !signedIn;
         nodes.shell.hidden = !signedIn;
@@ -745,10 +731,10 @@
 
       function renderOrganizations() {
         nodes.organizationAddButton.disabled = !canCreateOrganization();
-        nodes.organizationAddButton.textContent = state.organizationCreateOpen ? "Cancel" : "Add";
+        nodes.organizationAddButton.textContent = state.organizationCreateOpen ? t("Cancel") : t("Add");
         nodes.organizationCreateForm.hidden = !state.organizationCreateOpen;
         if (!state.organizations.length) {
-          nodes.organizationList.innerHTML = '<tr><td colspan="5" class="subtle">No organizations.</td></tr>';
+          nodes.organizationList.innerHTML = '<tr><td colspan="4" class="subtle">No organizations.</td></tr>';
         } else {
           nodes.organizationList.innerHTML = state.organizations.map((organization) => {
             const isSelected = String(organization.id) === String(state.selectedOrganizationId);
@@ -767,7 +753,7 @@
             const actions = canManageOrganization(organization)
               ? `
                 <div class="table-action-buttons">
-                  <button class="btn primary" type="button" data-organization-edit="${escapeHtml(organization.id)}">Edit</button>
+                  <button class="btn primary" type="button" data-organization-edit="${escapeHtml(organization.id)}">${escapeHtml(t("Edit"))}</button>
                   ${canDeleteOrganization()
                     ? `<button class="btn danger" type="button" data-organization-delete="${escapeHtml(organization.id)}">Delete</button>`
                     : ""
@@ -780,20 +766,19 @@
                 <td><strong>${escapeHtml(organization.organization_name || organization.name)}</strong></td>
                 <td>${escapeHtml(organization.current_user_role || "-")}</td>
                 <td>${escapeHtml(organization.member_count ?? "-")}</td>
-                <td>${escapeHtml(adminDisplay(organization.admins))}</td>
                 <td class="table-actions">${actions}</td>
               </tr>
               ${isSelected ? `
                 <tr class="organization-members-row">
-                  <td colspan="5">
+                  <td colspan="4">
                     <div class="organization-members-panel">
                       <table class="members-table">
                         <thead>
                           <tr>
                             <th>Name</th>
                             <th>Email</th>
-                            <th>Role</th>
-                            <th>Action</th>
+                            <th data-i18n="Role">Role</th>
+                            <th data-i18n="Action">Action</th>
                           </tr>
                         </thead>
                         <tbody>${memberRows}</tbody>
@@ -814,11 +799,9 @@
       function renderGroups() {
         const organization = selectedOrganization();
         const creatableOrgs = creatableOrganizations();
-        nodes.selectedOrganizationLabel.textContent = organization
-          ? `Organization: ${organization.organization_name || organization.name}`
-          : "Groups you belong to.";
         nodes.groupAddButton.disabled = !creatableOrgs.length;
-        nodes.groupAddButton.textContent = state.groupCreateOpen ? "Cancel" : "Add";
+        nodes.groupAddButton.textContent = state.groupCreateOpen ? t("Cancel") : t("Add");
+        nodes.groupJoinButton.textContent = t("Join");
         nodes.groupCreateForm.hidden = !state.groupCreateOpen || !creatableOrgs.length;
         nodes.groupOrganizationSelect.innerHTML = [
           '<option value="">Select an organization</option>',
@@ -828,7 +811,7 @@
         ].join("");
         nodes.groupOrganizationSelect.value = organization && canCreateGroupInOrganization(organization) ? String(organization.id) : "";
         if (!state.groups.length) {
-          nodes.groupList.innerHTML = '<tr><td colspan="5" class="subtle">No groups.</td></tr>';
+          nodes.groupList.innerHTML = '<tr><td colspan="4" class="subtle">No groups.</td></tr>';
         } else {
           nodes.groupList.innerHTML = state.groups.map((group) => {
             const isSelected = String(group.id) === String(state.selectedGroupId);
@@ -848,8 +831,8 @@
             const actions = canManageGroup(group)
               ? `
                 <div class="table-action-buttons">
-                  <button class="btn" type="button" data-group-invite="${escapeHtml(group.id)}">Invite</button>
-                  <button class="btn primary" type="button" data-group-edit="${escapeHtml(group.id)}">Edit</button>
+                  <button class="btn" type="button" data-group-invite="${escapeHtml(group.id)}">${escapeHtml(t("Invite"))}</button>
+                  <button class="btn primary" type="button" data-group-edit="${escapeHtml(group.id)}">${escapeHtml(t("Edit"))}</button>
                   ${canDeleteGroup(group)
                     ? `<button class="btn danger" type="button" data-group-delete="${escapeHtml(group.id)}">Delete</button>`
                     : ""
@@ -862,20 +845,19 @@
                 <td><strong>${escapeHtml(group.group_name || group.name)}</strong></td>
                 <td>${escapeHtml(groupOrg?.organization_name || groupOrg?.name || `Org #${group.organization_id}`)}</td>
                 <td>${escapeHtml(group.current_user_role || "-")}</td>
-                <td>${escapeHtml(adminDisplay(group.admins))}</td>
                 <td class="table-actions">${actions}</td>
               </tr>
               ${isSelected ? `
                 <tr class="group-members-row">
-                  <td colspan="5">
+                  <td colspan="4">
                     <div class="group-members-panel">
                       <table class="members-table">
                         <thead>
                           <tr>
                             <th>Name</th>
                             <th>Email</th>
-                            <th>Role</th>
-                            <th>Action</th>
+                            <th data-i18n="Role">Role</th>
+                            <th data-i18n="Action">Action</th>
                           </tr>
                         </thead>
                         <tbody>${memberRows}</tbody>
@@ -936,6 +918,9 @@
         try {
           const payload = await api("/api/user/me");
           renderUser(payload.user);
+          nodes.organizationAddButton.textContent = state.organizationCreateOpen ? t("Cancel") : t("Add");
+          nodes.groupAddButton.textContent = state.groupCreateOpen ? t("Cancel") : t("Add");
+          nodes.groupJoinButton.textContent = t("Join");
           const [externalPayload, openclawPayload] = await Promise.all([
             api("/api/user/external-accounts"),
             api("/api/user/openclaw-bindings"),

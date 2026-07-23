@@ -143,6 +143,24 @@ test("runtime audit expansion formats each event type", () => {
   assert.deepEqual(
     auditExpansionContent({
       runtimeState: {
+        event_type: "llm_output",
+        payload: {
+          output: JSON.stringify({
+            content: [
+              { type: "output_text", text: "202" },
+              { type: "output_text", text: "6年" },
+              { type: "output_text", text: "世界杯冠军是西班牙。" },
+            ],
+          }),
+        },
+      },
+    }),
+    { label: "LLM Output", body: "2026年世界杯冠军是西班牙。" },
+  );
+
+  assert.deepEqual(
+    auditExpansionContent({
+      runtimeState: {
         event_type: "tool_invoke",
         arguments: { path: "/tmp/report.txt" },
         payload: {},

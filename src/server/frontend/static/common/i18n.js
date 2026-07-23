@@ -53,6 +53,22 @@
       GitHub: "GitHub",
       DashBoard: "仪表盘",
       "Current User": "当前用户",
+      Profile: "个人资料",
+      Organization: "公司",
+      Organizations: "公司",
+      Groups: "部门",
+      Role: "身份",
+      Members: "成员",
+      Add: "添加",
+      Join: "加入",
+      Invite: "邀请",
+      Edit: "编辑",
+      "Set Admin": "设为管理员",
+      Demote: "降为成员",
+      "Create Organization": "创建公司",
+      "Update Organization": "更新公司",
+      "Create Group": "创建部门",
+      "Update Group": "更新部门",
       "Generate Ticket": "生成凭证",
       Logout: "退出登录",
       "Checking sign-in status...": "正在检查登录状态…",
@@ -1122,14 +1138,13 @@
       return;
     }
     const language = currentLanguage();
-    const serverLanguage = currentServerLanguage();
     if (document.documentElement) {
       document.documentElement.lang = language === "zh" ? "zh-CN" : "en";
     }
     if (document.title) {
       document.title = translateValue(document.title);
     }
-    if (document.body && serverLanguage !== language) {
+    if (document.body) {
       applyToElement(document.body);
     }
     renderLanguageToggle();
