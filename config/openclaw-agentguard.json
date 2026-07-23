@@ -1,5 +1,5 @@
 {
-  "serverUrl": "http://127.0.0.1:38081",
+  "serverUrl": "http://127.0.0.1:38080",
   "apiKeyEnvVar": "AGENTGUARD_API_KEY",
   "userTicketEnvVar": "AGENTGUARD_USER_TICKET",
   "policy": "builtin",
