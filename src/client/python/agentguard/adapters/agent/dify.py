@@ -1,7 +1,7 @@
-"""Dify Agent node runtime adapter.
+"""Dify workflow and legacy agent runtime adapter.
 
-This adapter is intentionally installed at process start inside the Dify
-``dify-agent`` service. Dify creates the pydantic-ai agent, model, and tools
+This adapter is installed at process start inside Dify ``api`` / ``worker``
+processes. Dify creates workflow nodes, legacy agents, models, and tools
 internally, so there is no user-owned agent object to pass to ``attach_*``.
 """
 from __future__ import annotations
@@ -16,11 +16,16 @@ import secrets
 import sys
 import threading
 import time
-from collections.abc import AsyncIterator, Generator, Iterable
-from contextlib import asynccontextmanager
+from collections.abc import Generator, Iterable
 from dataclasses import dataclass
 from typing import Any
 
+from agentguard.adapters.agent.dify_legacy_llm import (
+    DifyLegacyLLMCall,
+    DifyLegacyLLMNormalizer,
+    parse_tagged_llm_output,
+    run_dify_legacy_llm_call,
+)
 from agentguard.adapters.agent.dify_flask import (
     get_dify_flask_app,
     on_dify_flask_app_ready,
@@ -62,6 +67,11 @@ _catalog_fingerprints: dict[str, str] = {}
 _catalog_fingerprints_lock = threading.Lock()
 _runtime_agent_registrations: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
 _runtime_agent_registrations_lock = threading.Lock()
+_LEGACY_LLM_NORMALIZER = DifyLegacyLLMNormalizer(
+    content_list_joiner="\n",
+    stream_text_joiner="\n",
+    object_parts_payload=True,
+)
 
 _LEGACY_LLM_ARG_NAMES = ("prompt_messages", "model_parameters", "tools", "stop", "stream", "callbacks")
 _LEGACY_TOOL_ARG_NAMES = (
@@ -109,7 +119,6 @@ def install_dify_adapter() -> dict[str, Any]:
 
     workflow_status = _install_workflow_api_hooks()
     legacy_status = _install_legacy_api_hooks()
-    v2_status = _install_agent_v2_hooks()
     publish_status = _install_publish_catalog_hooks()
     generate_status = _install_app_generate_hooks()
     catalog_sync = start_dify_workflow_catalog_sync()
@@ -118,12 +127,10 @@ def install_dify_adapter() -> dict[str, Any]:
         "patched": bool(
             workflow_status.get("patched")
             or legacy_status.get("patched")
-            or v2_status.get("patched")
         ),
         "details": {
             "workflow_api": workflow_status,
             "legacy_api": legacy_status,
-            "agent_v2": v2_status,
             "publish_catalog": publish_status,
             "app_generate": generate_status,
         },
@@ -193,30 +200,6 @@ def _patch_workflow_publish_service(service_cls: Any) -> bool:
     _mark_patched(wrapper, original)
     service_cls.publish_workflow = wrapper
     return True
-
-
-def _install_agent_v2_hooks() -> dict[str, Any]:
-    try:
-        from dify_agent.adapters.llm.model import DifyLLMAdapterModel  # type: ignore
-        from dify_agent.layers.dify_plugin import tools_layer  # type: ignore
-        from dify_agent.runtime.runner import AgentRunRunner  # type: ignore
-    except Exception as exc:
-        return {
-            "patched": False,
-            "reason": "dify_import_failed",
-            "error": str(exc),
-        }
-
-    patched: dict[str, bool] = {
-        "runner": _patch_runner(AgentRunRunner),
-        "llm_request": _patch_llm_request(DifyLLMAdapterModel),
-        "llm_request_stream": _patch_llm_request_stream(DifyLLMAdapterModel),
-        "tools": _patch_tool_builder(tools_layer),
-    }
-    return {
-        "patched": any(patched.values()),
-        "details": patched,
-    }
 
 
 def _install_legacy_api_hooks() -> dict[str, Any]:
@@ -309,29 +292,6 @@ def _patch_app_generate_service(service_cls: Any) -> bool:
 
     _mark_patched(wrapper, original)
     setattr(service_cls, "generate", _restore_descriptor(descriptor, wrapper))
-    return True
-
-
-def _patch_runner(runner_cls: Any) -> bool:
-    original = getattr(runner_cls, "_run_agent", None)
-    if not callable(original) or _is_patched(original):
-        return False
-
-    @functools.wraps(original)
-    async def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
-        metadata = _metadata_from_runner(self)
-        guard = _make_guard(metadata)
-        token_guard = _current_guard.set(guard)
-        token_meta = _current_metadata.set(metadata)
-        try:
-            return await original(self, *args, **kwargs)
-        finally:
-            _flush_guard(guard, reason="dify_run_complete")
-            _current_metadata.reset(token_meta)
-            _current_guard.reset(token_guard)
-
-    _mark_patched(wrapper, original)
-    runner_cls._run_agent = wrapper
     return True
 
 
@@ -484,7 +444,7 @@ def _run_legacy_llm_with_runtime_guard(
     model: Any,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
-    call: dict[str, Any],
+    call: DifyLegacyLLMCall,
     original: Any,
 ) -> Any:
     metadata = dict(_current_metadata.get({}) or {})
@@ -518,37 +478,21 @@ def _run_legacy_llm_call(
     model: Any,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
-    call: dict[str, Any],
+    call: DifyLegacyLLMCall,
     original: Any,
 ) -> Any:
-    decision = _guard_legacy_llm_input(model, call)
-    current_args = tuple(args)
-    current_kwargs = dict(kwargs)
-    if decision.decision_type == DecisionType.MODIFY_LLM_INPUT:
-        current_args, current_kwargs = _replace_named_argument(
-            current_args,
-            current_kwargs,
-            _LEGACY_LLM_ARG_NAMES,
-            "prompt_messages",
-            _decision_payload(decision),
-        )
-    blocked = _blocked_llm_value(decision)
-    if blocked is not None:
-        raise AdapterError(blocked)
-    try:
-        result = original(model, *current_args, **current_kwargs)
-    except Exception as exc:
-        _guard_legacy_llm_output(model, {"error": str(exc)}, call, error=str(exc))
-        raise
-    if _is_generator_like(result):
-        return _wrap_legacy_llm_generator(model, result, call)
-    decision = _guard_legacy_llm_output(model, result, call)
-    if decision.decision_type == DecisionType.MODIFY_LLM_OUTPUT:
-        result = _modified_llm_output_value(_decision_payload(decision), result)
-    blocked = _blocked_llm_value(decision)
-    if blocked is not None:
-        raise AdapterError(blocked)
-    return result
+    _ = call
+    return run_dify_legacy_llm_call(
+        model=model,
+        args=tuple(args),
+        kwargs=dict(kwargs),
+        arg_names=_LEGACY_LLM_ARG_NAMES,
+        execute=lambda current_args, current_kwargs: original(model, *current_args, **current_kwargs),
+        guard_input=_guard_legacy_llm_input,
+        guard_output=_guard_legacy_llm_output,
+        blocked_value=_blocked_llm_value,
+        normalizer=_LEGACY_LLM_NORMALIZER,
+    )
 
 
 def _should_replace_legacy_guard_for_dpop(metadata: dict[str, Any]) -> bool:
@@ -726,203 +670,11 @@ def _patch_legacy_plugin_backwards_tool(invocation_cls: Any) -> bool:
     return True
 
 
-def _patch_llm_request(model_cls: Any) -> bool:
-    original = getattr(model_cls, "request", None)
-    if not callable(original) or _is_patched(original):
-        return False
-
-    @functools.wraps(original)
-    async def wrapper(
-        self: Any,
-        messages: list[Any],
-        model_settings: Any,
-        model_request_parameters: Any,
-    ) -> Any:
-        request_input = _build_dify_request_input(self, messages, model_settings, model_request_parameters)
-        decision = _guard_llm_input(self, request_input, stream=False)
-        current_messages = messages
-        blocked = _blocked_llm_value(decision)
-        if decision.decision_type == DecisionType.MODIFY_LLM_INPUT:
-            payload = _decision_payload(decision)
-            current_messages = payload if isinstance(payload, list) else [payload]
-        if blocked is not None:
-            raise AdapterError(blocked)
-        try:
-            response = await original(self, current_messages, model_settings, model_request_parameters)
-        except Exception as exc:
-            _guard_llm_output(self, {"error": str(exc)}, stream=False, error=str(exc))
-            raise
-        decision = _guard_llm_output(self, response, stream=False)
-        if decision.decision_type == DecisionType.MODIFY_LLM_OUTPUT:
-            response = _modified_llm_output_value(_decision_payload(decision), response)
-        blocked = _blocked_llm_value(decision)
-        if blocked is not None:
-            raise AdapterError(blocked)
-        return response
-
-    _mark_patched(wrapper, original)
-    model_cls.request = wrapper
-    return True
-
-
-def _patch_llm_request_stream(model_cls: Any) -> bool:
-    original = getattr(model_cls, "request_stream", None)
-    if not callable(original) or _is_patched(original):
-        return False
-
-    @asynccontextmanager
-    @functools.wraps(original)
-    async def wrapper(
-        self: Any,
-        messages: list[Any],
-        model_settings: Any,
-        model_request_parameters: Any,
-        run_context: object | None = None,
-    ) -> AsyncIterator[Any]:
-        request_input = _build_dify_request_input(self, messages, model_settings, model_request_parameters)
-        decision = _guard_llm_input(self, request_input, stream=True)
-        current_messages = messages
-        if decision.decision_type == DecisionType.MODIFY_LLM_INPUT:
-            payload = _decision_payload(decision)
-            current_messages = payload if isinstance(payload, list) else [payload]
-        blocked = _blocked_llm_value(decision)
-        if blocked is not None:
-            raise AdapterError(blocked)
-        response = None
-        try:
-            async with original(
-                self,
-                current_messages,
-                model_settings,
-                model_request_parameters,
-                run_context=run_context,
-            ) as streamed:
-                response = streamed
-                yield streamed
-        except Exception as exc:
-            _guard_llm_output(self, {"error": str(exc)}, stream=True, error=str(exc))
-            raise
-        final_response = _streamed_response_value(response)
-        decision = _guard_llm_output(self, final_response if final_response is not None else response, stream=True)
-        blocked = _blocked_llm_value(decision)
-        if blocked is not None:
-            raise AdapterError(blocked)
-
-    _mark_patched(wrapper, original)
-    model_cls.request_stream = wrapper
-    return True
-
-
-def _patch_tool_builder(tools_module: Any) -> bool:
-    original = getattr(tools_module, "_build_pydantic_ai_tool", None)
-    if not callable(original) or _is_patched(original):
-        return False
-
-    @functools.wraps(original)
-    def wrapper(
-        *,
-        client: Any,
-        tool_config: Any,
-        effective_parameters: Any,
-    ) -> Any:
-        tool_name = str(getattr(tool_config, "name", None) or getattr(tool_config, "tool_name", "tool"))
-        tool_description = getattr(tool_config, "description", None) or tool_name
-        tool_schema = _deepcopy(getattr(tool_config, "parameters_json_schema", None) or {})
-
-        async def invoke_tool(_ctx: Any, **tool_arguments: object) -> str:
-            merged_arguments = tools_module._prepare_tool_arguments(
-                effective_parameters,
-                tool_config,
-                tool_arguments,
-            )
-            _report_tool_catalog(
-                tool_name,
-                description=tool_description,
-                capabilities=_tool_capabilities(tool_config),
-                schema=tool_schema,
-                required_args=_required_args_from_schema(tool_schema, merged_arguments),
-                metadata=_tool_metadata(tool_config, "tool_catalog"),
-            )
-            decision = _guard_tool_invoke(tool_config, tool_name, merged_arguments)
-            if decision.decision_type == DecisionType.MODIFY_TOOL_INVOKE:
-                payload = _decision_payload(decision)
-                merged_arguments = payload if isinstance(payload, dict) else {"value": payload}
-            blocked = _blocked_tool_value(decision, tool_name)
-            if blocked is not None:
-                return blocked
-            try:
-                messages = await client.invoke(
-                    provider=tool_config.provider,
-                    tool_name=tool_config.tool_name,
-                    credential_type=tool_config.credential_type,
-                    credentials=dict(getattr(tool_config, "credentials", {}) or {}),
-                    tool_parameters=merged_arguments,
-                )
-                result = tools_module._convert_tool_response_to_text(messages)
-            except Exception as exc:
-                _guard_tool_result(tool_config, tool_name, None, error=str(exc))
-                if _is_dify_tool_client_error(tools_module, exc):
-                    return tools_module._tool_error_text(tool_name=tool_name, error=exc)
-                if isinstance(exc, ValueError):
-                    return f"tool parameters validation error: {exc}, please check your tool parameters"
-                raise
-            decision = _guard_tool_result(tool_config, tool_name, result)
-            if decision.decision_type == DecisionType.MODIFY_TOOL_RESULT:
-                result = _modified_result_value(_decision_payload(decision), result)
-            blocked_result = _blocked_result_value(decision, tool_name)
-            return blocked_result if blocked_result is not None else result
-
-        async def prepare_tool_definition(_ctx: Any, tool_def: Any) -> Any:
-            tool_definition_cls = tools_module.ToolDefinition
-            return tool_definition_cls(
-                name=tool_def.name,
-                description=tool_def.description,
-                parameters_json_schema=tool_schema,
-                strict=getattr(tools_module, "PLUGIN_TOOL_STRICT", False),
-                sequential=tool_def.sequential,
-                metadata=tool_def.metadata,
-                timeout=tool_def.timeout,
-                defer_loading=tool_def.defer_loading,
-                kind=tool_def.kind,
-                return_schema=tool_def.return_schema,
-                include_return_schema=tool_def.include_return_schema,
-            )
-
-        tool_cls = tools_module.Tool
-        return tool_cls(
-            invoke_tool,
-            takes_ctx=True,
-            name=tool_name,
-            description=tool_description,
-            prepare=prepare_tool_definition,
-        )
-
-    _mark_patched(wrapper, original)
-    tools_module._build_pydantic_ai_tool = wrapper
-    return True
-
-
-def _build_dify_request_input(
+def _guard_legacy_llm_input(
     model: Any,
-    messages: list[Any],
-    model_settings: Any,
-    model_request_parameters: Any,
-) -> Any:
-    try:
-        prepared_settings, prepared_params = model.prepare_request(
-            model_settings,
-            model_request_parameters,
-        )
-        return model._build_request_input(messages, prepared_settings, prepared_params)
-    except Exception:
-        return {
-            "messages": _normalize_value(messages),
-            "model_settings": _normalize_value(model_settings),
-            "model_request_parameters": _normalize_value(model_request_parameters),
-        }
-
-
-def _guard_legacy_llm_input(model: Any, call: dict[str, Any]) -> GuardDecision:
+    call: DifyLegacyLLMCall,
+    extra_metadata: dict[str, Any] | None = None,
+) -> GuardDecision:
     guard = _active_guard()
     if guard is None:
         return GuardDecision.allow("AgentGuard Dify legacy adapter inactive.")
@@ -939,6 +691,8 @@ def _guard_legacy_llm_input(model: Any, call: dict[str, Any]) -> GuardDecision:
             ],
         }
     )
+    if extra_metadata:
+        metadata.update(extra_metadata)
     event = ev.llm_input(
         guard.context,
         _normalize_messages(call.get("prompt_messages")),
@@ -950,9 +704,9 @@ def _guard_legacy_llm_input(model: Any, call: dict[str, Any]) -> GuardDecision:
 def _guard_legacy_llm_output(
     model: Any,
     output: Any,
-    call: dict[str, Any],
-    *,
+    call: DifyLegacyLLMCall,
     error: str | None = None,
+    extra_metadata: dict[str, Any] | None = None,
 ) -> GuardDecision:
     guard = _active_guard()
     if guard is None:
@@ -968,6 +722,8 @@ def _guard_legacy_llm_output(
     )
     if error is not None:
         metadata["error"] = error
+    if extra_metadata:
+        metadata.update(extra_metadata)
     event = ev.llm_output(guard.context, _llm_output_payload(output), **metadata)
     return guard.runtime.guard(event, phase="after").decision
 
@@ -1136,167 +892,20 @@ def _guard_workflow_node_tool_result(
     return guard.runtime.guard(event, phase="after").decision
 
 
-def _guard_llm_input(model: Any, request_input: Any, *, stream: bool) -> GuardDecision:
-    guard = _active_guard()
-    if guard is None:
-        return GuardDecision.allow("AgentGuard Dify adapter inactive.")
-    metadata = _event_metadata(
-        {
-            "phase": "llm_before",
-            "stream": stream,
-            "model": str(getattr(model, "model_name", getattr(model, "model", ""))),
-            "model_provider": str(getattr(model, "model_provider", "")),
-            "provider": str(getattr(model, "system", "")),
-        }
-    )
-    event = ev.llm_input(
-        guard.context,
-        _messages_from_request_input(request_input),
-        **metadata,
-    )
-    return guard.runtime.guard(event).decision
-
-
-def _guard_llm_output(
-    model: Any,
-    output: Any,
-    *,
-    stream: bool,
-    error: str | None = None,
-) -> GuardDecision:
-    guard = _active_guard()
-    if guard is None:
-        return GuardDecision.allow("AgentGuard Dify adapter inactive.")
-    metadata = _event_metadata(
-        {
-            "phase": "llm_after",
-            "stream": stream,
-            "model": str(getattr(model, "model_name", getattr(model, "model", ""))),
-            "model_provider": str(getattr(model, "model_provider", "")),
-            "provider": str(getattr(model, "system", "")),
-        }
-    )
-    if error is not None:
-        metadata["error"] = error
-    event = ev.llm_output(guard.context, _llm_output_payload(output), **metadata)
-    return guard.runtime.guard(event, phase="after").decision
-
-
-def _guard_tool_invoke(tool_config: Any, tool_name: str, arguments: dict[str, Any]) -> GuardDecision:
-    guard = _active_guard()
-    if guard is None:
-        return GuardDecision.allow("AgentGuard Dify adapter inactive.")
-    event = ev.tool_invoke(
-        guard.context,
-        tool_name,
-        dict(arguments or {}),
-        capabilities=_tool_capabilities(tool_config),
-        **_tool_metadata(tool_config, "tool_before"),
-    )
-    return guard.runtime.guard(event).decision
-
-
-def _guard_tool_result(
-    tool_config: Any,
-    tool_name: str,
-    result: Any,
-    *,
-    error: str | None = None,
-) -> GuardDecision:
-    guard = _active_guard()
-    if guard is None:
-        return GuardDecision.allow("AgentGuard Dify adapter inactive.")
-    event = ev.tool_result(
-        guard.context,
-        tool_name,
-        result,
-        error=error,
-        **_tool_metadata(tool_config, "tool_after"),
-    )
-    return guard.runtime.guard(event, phase="after").decision
-
-
-def _messages_from_request_input(request_input: Any) -> list[dict[str, Any]]:
-    prompt_messages = _get_attr_or_key(request_input, "prompt_messages")
-    if prompt_messages is None:
-        messages = _get_attr_or_key(request_input, "messages")
-        return _normalize_messages(messages)
-    return [_prompt_message_to_message(item) for item in list(prompt_messages or [])]
-
-
 def _prompt_message_to_message(message: Any) -> dict[str, Any]:
-    role = _message_role(message)
-    content = _get_attr_or_key(message, "content")
-    data = _normalize_value(message)
-    if isinstance(data, dict):
-        data.setdefault("role", role)
-        data.setdefault("content", _content_to_text(content))
-        return data
-    return {"role": role, "content": _content_to_text(content)}
+    return _LEGACY_LLM_NORMALIZER.prompt_message_to_message(message)
 
 
 def _message_role(message: Any) -> str:
-    name = type(message).__name__.lower()
-    if "system" in name:
-        return "system"
-    if "assistant" in name:
-        return "assistant"
-    if "tool" in name:
-        return "tool"
-    return "user"
+    return _LEGACY_LLM_NORMALIZER.message_role(message)
 
 
 def _normalize_messages(messages: Any) -> list[dict[str, Any]]:
-    if isinstance(messages, list):
-        normalized: list[dict[str, Any]] = []
-        for item in messages:
-            if isinstance(item, dict):
-                normalized.append(
-                    {
-                        **item,
-                        "role": str(item.get("role") or "user"),
-                        "content": _content_to_text(item.get("content")),
-                    }
-                )
-            else:
-                normalized.append(_prompt_message_to_message(item))
-        return normalized
-    if messages is None:
-        return []
-    return [_prompt_message_to_message(messages)]
+    return _LEGACY_LLM_NORMALIZER.normalize_messages(messages)
 
 
 def _llm_output_payload(output: Any) -> dict[str, Any]:
-    if isinstance(output, dict):
-        if "output" in output:
-            text = _content_to_optional_text(output.get("output"))
-        elif "content" in output:
-            text = _content_to_optional_text(output.get("content"))
-        elif "text" in output:
-            text = _content_to_optional_text(output.get("text"))
-        elif output.get("tool_calls"):
-            text = None
-        else:
-            text = _content_to_text(output)
-
-        return _llm_output_payload_from_text(
-            text,
-            thought=_extract_llm_thought(output),
-            final_output=_content_to_optional_text(output.get("final_output"))
-            if "final_output" in output
-            else None,
-        )
-    parts = getattr(output, "parts", None)
-    if isinstance(parts, list):
-        text_parts: list[str] = []
-        for part in parts:
-            content = getattr(part, "content", None)
-            if content is not None:
-                text_parts.append(_content_to_text(content))
-        text = "\n".join(part for part in text_parts if part) or None
-        return _llm_output_payload_from_text(text, thought=_extract_llm_thought({"parts": parts}))
-    text = _content_to_text(output)
-    return _llm_output_payload_from_text(text)
+    return _LEGACY_LLM_NORMALIZER.output_payload(output)
 
 
 def _llm_output_payload_from_text(
@@ -1305,76 +914,19 @@ def _llm_output_payload_from_text(
     thought: str | None = None,
     final_output: str | None = None,
 ) -> dict[str, Any]:
-    parsed = _parse_tagged_llm_output(output) if output is not None else _ParsedLLMOutput(None, None)
-    payload = {
-        "output": output,
-        "final_output": final_output if final_output is not None else parsed.final_output,
-    }
-    thought = thought if thought is not None else parsed.thought
-    if thought is not None:
-        payload["thought"] = thought
-    return payload
+    return _LEGACY_LLM_NORMALIZER.output_payload_from_text(
+        output,
+        thought=thought,
+        final_output=final_output,
+    )
 
 
 def _extract_llm_thought(value: Any) -> str | None:
-    if isinstance(value, dict):
-        direct = _first_non_empty_text(
-            value,
-            "thought",
-            "reasoning_content",
-            "reasoningContent",
-            "thinking",
-            "reasoning",
-        )
-        if direct is not None:
-            return direct
-        for container_key in ("additional_kwargs", "response_metadata", "metadata", "extra"):
-            nested = value.get(container_key)
-            if isinstance(nested, dict):
-                nested_thought = _extract_llm_thought(nested)
-                if nested_thought is not None:
-                    return nested_thought
-        for blocks_key in ("parts", "content", "output"):
-            blocks = value.get(blocks_key)
-            if isinstance(blocks, list):
-                block_thought = _extract_llm_thought_from_blocks(blocks)
-                if block_thought is not None:
-                    return block_thought
-        return None
-
-    direct = _first_non_empty_attr(
-        value,
-        "thought",
-        "reasoning_content",
-        "reasoningContent",
-        "thinking",
-        "reasoning",
-    )
-    if direct is not None:
-        return direct
-    parts = getattr(value, "parts", None)
-    if isinstance(parts, list):
-        return _extract_llm_thought_from_blocks(parts)
-    return None
+    return _LEGACY_LLM_NORMALIZER.extract_llm_thought(value)
 
 
 def _extract_llm_thought_from_blocks(blocks: list[Any]) -> str | None:
-    thought_parts: list[str] = []
-    for block in blocks:
-        block_type = ""
-        if isinstance(block, dict):
-            block_type = str(block.get("type") or block.get("kind") or "").lower()
-            if block_type in {"thinking", "thinkingblock", "reasoning", "reasoningblock"}:
-                text = _first_non_empty_text(block, "content", "text", "thinking", "reasoning", "summary")
-                if text is not None:
-                    thought_parts.append(text)
-        else:
-            block_type = str(getattr(block, "type", None) or getattr(block, "kind", None) or "").lower()
-            if block_type in {"thinking", "thinkingblock", "reasoning", "reasoningblock"}:
-                text = _first_non_empty_attr(block, "content", "text", "thinking", "reasoning", "summary")
-                if text is not None:
-                    thought_parts.append(text)
-    return "\n\n".join(thought_parts) or None
+    return _LEGACY_LLM_NORMALIZER.extract_llm_thought_from_blocks(blocks)
 
 
 def _first_non_empty_text(value: dict[str, Any], *keys: str) -> str | None:
@@ -1410,32 +962,8 @@ _FINAL_TAG_RE = re.compile(
 
 
 def _parse_tagged_llm_output(output: str) -> _ParsedLLMOutput:
-    thought_matches = list(_THOUGHT_TAG_RE.finditer(output))
-    if not thought_matches:
-        return _ParsedLLMOutput(thought=None, final_output=output)
-
-    thought_parts = [match.group("body").strip() for match in thought_matches]
-    thought = "\n\n".join(part for part in thought_parts if part) or None
-    remainder = _THOUGHT_TAG_RE.sub("", output).strip()
-
-    final_matches = list(_FINAL_TAG_RE.finditer(remainder))
-    if final_matches:
-        final_parts = [match.group("body").strip() for match in final_matches]
-        final_output = "\n\n".join(part for part in final_parts if part)
-    else:
-        final_output = remainder
-
-    return _ParsedLLMOutput(thought=thought, final_output=final_output)
-
-
-def _streamed_response_value(response: Any) -> Any:
-    getter = getattr(response, "get", None)
-    if callable(getter):
-        try:
-            return getter()
-        except Exception:
-            return None
-    return None
+    parsed = parse_tagged_llm_output(output)
+    return _ParsedLLMOutput(thought=parsed.thought, final_output=parsed.final_output)
 
 
 def _tool_metadata(tool_config: Any, phase: str) -> dict[str, Any]:
@@ -1727,19 +1255,6 @@ def _merged_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
-def _metadata_from_runner(runner: Any) -> dict[str, Any]:
-    request = getattr(runner, "request", None)
-    request_metadata = _normalize_value(getattr(request, "metadata", None))
-    if not isinstance(request_metadata, dict):
-        request_metadata = {}
-    metadata = {
-        "adapter": "dify",
-        "dify_agent_run_id": str(getattr(runner, "run_id", "") or ""),
-    }
-    metadata.update({str(k): v for k, v in request_metadata.items()})
-    return metadata
-
-
 def _legacy_run_context(node: Any) -> Any:
     try:
         from core.app.entities.app_invoke_entities import (  # type: ignore
@@ -1773,16 +1288,8 @@ def _workflow_metadata_allowed(metadata: dict[str, Any]) -> bool:
     return True
 
 
-def _legacy_llm_call_from_args(args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[str, Any]:
-    names = ["prompt_messages", "model_parameters", "tools", "stop", "stream", "callbacks"]
-    call = {name: kwargs.get(name) for name in names if name in kwargs}
-    for index, value in enumerate(args):
-        if index < len(names) and names[index] not in call:
-            call[names[index]] = value
-    call.setdefault("prompt_messages", [])
-    call.setdefault("tools", None)
-    call.setdefault("stream", True)
-    return call
+def _legacy_llm_call_from_args(args: tuple[Any, ...], kwargs: dict[str, Any]) -> DifyLegacyLLMCall:
+    return DifyLegacyLLMCall.from_args_kwargs(args, kwargs)
 
 
 def _decision_payload(decision: GuardDecision) -> Any:
@@ -2181,36 +1688,8 @@ def _legacy_model_provider(model: Any) -> str:
     return ""
 
 
-def _wrap_legacy_llm_generator(model: Any, result: Any, call: dict[str, Any]) -> Generator[Any, None, None]:
-    chunks: list[Any] = []
-    try:
-        for chunk in result:
-            chunks.append(chunk)
-            yield chunk
-    except Exception as exc:
-        _guard_legacy_llm_output(model, {"error": str(exc)}, call, error=str(exc))
-        raise
-    decision = _guard_legacy_llm_output(model, _legacy_stream_output_payload(chunks), call)
-    blocked = _blocked_llm_value(decision)
-    if blocked is not None:
-        raise AdapterError(blocked)
-
-
 def _legacy_stream_output_payload(chunks: list[Any]) -> dict[str, Any]:
-    text_parts: list[str] = []
-    thought_parts: list[str] = []
-    for chunk in chunks:
-        delta = getattr(chunk, "delta", None)
-        message = getattr(delta, "message", None)
-        content = getattr(message, "content", None)
-        if content is not None:
-            text_parts.append(_content_to_text(content))
-        thought = _extract_llm_thought(delta) or _extract_llm_thought(message) or _extract_llm_thought(chunk)
-        if thought is not None:
-            thought_parts.append(thought)
-    output = "\n".join(part for part in text_parts if part) or None
-    thought = "\n\n".join(thought_parts) or None
-    return _llm_output_payload_from_text(output, thought=thought)
+    return _LEGACY_LLM_NORMALIZER.stream_output_payload(chunks)
 
 
 def _wrap_workflow_tool_generator(
@@ -2833,11 +2312,6 @@ def _blocked_result_value(decision: GuardDecision, tool: str) -> str | None:
     return None
 
 
-def _is_dify_tool_client_error(tools_module: Any, exc: Exception) -> bool:
-    err_cls = getattr(tools_module, "DifyPluginToolClientError", None)
-    return isinstance(exc, err_cls) if isinstance(err_cls, type) else False
-
-
 def _is_patched(obj: Any) -> bool:
     return bool(getattr(obj, _PATCHED_ATTR, False))
 
@@ -3072,7 +2546,6 @@ def _workflow_catalog_tools(app: Any, workflow: Any) -> list[dict[str, Any]]:
                 continue
             tools.extend(_catalog_tools_from_workflow_node(node))
 
-    tools.extend(_catalog_tools_from_agent_v2_bindings(app, workflow, graph))
     return _dedupe_catalog_tools(tools)
 
 
@@ -3178,167 +2651,6 @@ def _catalog_tool_from_legacy_agent_tool(
             "source": "dify_workflow_catalog",
             "workflow_node_kind": "legacy_agent",
             "agent_strategy": _optional_text(data.get("agent_strategy_name")),
-        },
-    )
-
-
-def _catalog_tools_from_agent_v2_bindings(app: Any, workflow: Any, graph: dict[str, Any]) -> list[dict[str, Any]]:
-    node_ids = {
-        str(node.get("id"))
-        for node in graph.get("nodes", [])
-        if isinstance(node, dict)
-        and isinstance(node.get("data"), dict)
-        and node["data"].get("type") == "agent"
-        and node["data"].get("version") == "2"
-    }
-    if not node_ids:
-        return []
-    try:
-        from extensions.ext_database import db  # type: ignore
-        from models.agent import AgentConfigSnapshot, WorkflowAgentNodeBinding  # type: ignore
-        from sqlalchemy import select  # type: ignore
-    except Exception:
-        return []
-
-    try:
-        bindings = list(
-            db.session.scalars(
-                select(WorkflowAgentNodeBinding).where(
-                    WorkflowAgentNodeBinding.tenant_id == getattr(workflow, "tenant_id", None),
-                    WorkflowAgentNodeBinding.app_id == getattr(app, "id", None),
-                    WorkflowAgentNodeBinding.workflow_id == getattr(workflow, "id", None),
-                    WorkflowAgentNodeBinding.workflow_version == getattr(workflow, "version", None),
-                    WorkflowAgentNodeBinding.node_id.in_(node_ids),
-                )
-            ).all()
-        )
-    except Exception:
-        return []
-    snapshot_ids = {
-        _optional_text(getattr(binding, "current_snapshot_id", None))
-        for binding in bindings
-        if _optional_text(getattr(binding, "current_snapshot_id", None))
-    }
-    if not snapshot_ids:
-        return []
-    try:
-        snapshots = {
-            str(snapshot.id): snapshot
-            for snapshot in db.session.scalars(
-                select(AgentConfigSnapshot).where(AgentConfigSnapshot.id.in_(snapshot_ids))
-            ).all()
-        }
-    except Exception:
-        return []
-
-    node_data_by_id = {
-        str(node.get("id")): node.get("data")
-        for node in graph.get("nodes", [])
-        if isinstance(node, dict)
-    }
-    tools: list[dict[str, Any]] = []
-    for binding in bindings:
-        node_id = _optional_text(getattr(binding, "node_id", None))
-        snapshot = snapshots.get(str(getattr(binding, "current_snapshot_id", "")))
-        if snapshot is None:
-            continue
-        data = node_data_by_id.get(str(node_id)) if node_id else {}
-        if not isinstance(data, dict):
-            data = {}
-        tools.extend(_catalog_tools_from_agent_v2_snapshot(snapshot, node_id=node_id, node_data=data))
-    return tools
-
-
-def _catalog_tools_from_agent_v2_snapshot(
-    snapshot: Any,
-    *,
-    node_id: str | None,
-    node_data: dict[str, Any],
-) -> list[dict[str, Any]]:
-    config = _normalize_value(
-        getattr(snapshot, "config_snapshot_dict", None)
-        or getattr(snapshot, "config_snapshot", None)
-    )
-    if not isinstance(config, dict):
-        return []
-    tool_config = config.get("tools")
-    if not isinstance(tool_config, dict):
-        return []
-    tools: list[dict[str, Any]] = []
-    for entry in tool_config.get("dify_tools") or []:
-        if isinstance(entry, dict):
-            payload = _catalog_tool_from_agent_v2_dify_tool(entry, node_id=node_id, node_data=node_data)
-            if payload is not None:
-                tools.append(payload)
-    for entry in tool_config.get("cli_tools") or []:
-        if isinstance(entry, dict):
-            payload = _catalog_tool_from_agent_v2_cli_tool(entry, node_id=node_id, node_data=node_data)
-            if payload is not None:
-                tools.append(payload)
-    return tools
-
-
-def _catalog_tool_from_agent_v2_dify_tool(
-    entry: dict[str, Any],
-    *,
-    node_id: str | None,
-    node_data: dict[str, Any],
-) -> dict[str, Any] | None:
-    if entry.get("enabled") is False:
-        return None
-    tool_name = _optional_text(entry.get("tool_name"))
-    if not tool_name:
-        return None
-    provider_id = _optional_text(
-        entry.get("provider_id")
-        or "/".join(str(part) for part in (entry.get("plugin_id"), entry.get("provider")) if part)
-    )
-    provider_name = _optional_text(entry.get("provider") or provider_id)
-    return _catalog_tool_payload(
-        name=tool_name,
-        description=_optional_text(entry.get("name")) or tool_name,
-        provider_id=provider_id,
-        provider_name=provider_name,
-        provider_type="plugin",
-        node_id=node_id,
-        node_type="agent",
-        node_title=_optional_text(node_data.get("title")),
-        input_params=_config_required_args(entry.get("runtime_parameters")),
-        metadata={
-            "source": "dify_workflow_catalog",
-            "workflow_node_kind": "agent_v2",
-            "agent_tool_kind": "dify_tool",
-            "plugin_id": _optional_text(entry.get("plugin_id")),
-        },
-    )
-
-
-def _catalog_tool_from_agent_v2_cli_tool(
-    entry: dict[str, Any],
-    *,
-    node_id: str | None,
-    node_data: dict[str, Any],
-) -> dict[str, Any] | None:
-    if entry.get("enabled") is False:
-        return None
-    tool_name = _optional_text(entry.get("name") or entry.get("tool_name") or entry.get("label"))
-    if not tool_name:
-        return None
-    schema = entry.get("input_schema") if isinstance(entry.get("input_schema"), dict) else {}
-    return _catalog_tool_payload(
-        name=tool_name,
-        description=_optional_text(entry.get("description")) or tool_name,
-        provider_id="agent_cli",
-        provider_name="agent_cli",
-        provider_type="cli",
-        node_id=node_id,
-        node_type="agent",
-        node_title=_optional_text(node_data.get("title")),
-        input_params=_required_args_from_schema(schema, entry.get("parameters")),
-        metadata={
-            "source": "dify_workflow_catalog",
-            "workflow_node_kind": "agent_v2",
-            "agent_tool_kind": "cli_tool",
         },
     )
 
@@ -3794,48 +3106,15 @@ def _tool_type_text(value: Any) -> str | None:
 
 
 def _normalize_value(value: Any) -> Any:
-    if value is None or isinstance(value, bool | int | float | str):
-        return value
-    if isinstance(value, bytes):
-        return value.decode("utf-8", errors="replace")
-    if isinstance(value, dict):
-        return {str(key): _normalize_value(item) for key, item in value.items()}
-    if isinstance(value, list | tuple | set | frozenset):
-        return [_normalize_value(item) for item in value]
-    for attr in ("model_dump", "to_dict", "dict"):
-        dumper = getattr(value, attr, None)
-        if callable(dumper):
-            try:
-                return _normalize_value(dumper())
-            except Exception:
-                continue
-    data: dict[str, Any] = {}
-    for attr in ("role", "content", "name", "tool_name", "tool_call_id"):
-        item = getattr(value, attr, None)
-        if item is not None:
-            data[attr] = _normalize_value(item)
-    return data or str(value)
+    return _LEGACY_LLM_NORMALIZER.normalize_value(value)
 
 
 def _content_to_text(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, str):
-        return value
-    if isinstance(value, bytes):
-        return value.decode("utf-8", errors="replace")
-    if isinstance(value, list | tuple):
-        return "\n".join(_content_to_text(item) for item in value)
-    if isinstance(value, dict):
-        return safe_dumps(value)
-    return str(value)
+    return _LEGACY_LLM_NORMALIZER.content_to_text(value)
 
 
 def _content_to_optional_text(value: Any) -> str | None:
-    if value is None:
-        return None
-    text = _content_to_text(value)
-    return text if text else None
+    return _LEGACY_LLM_NORMALIZER.content_to_optional_text(value)
 
 
 def _deepcopy(value: Any) -> Any:

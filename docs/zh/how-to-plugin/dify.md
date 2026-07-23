@@ -182,7 +182,7 @@ Workflow adapter patch 的 Dify 调用点包括：
 当前暂不覆盖：
 
 - 逻辑或控制流节点本身，例如 If/Else、Human Input、Iteration、Loop、Start、End、Answer。
-- Dify Agent v2 backend / `dify-agent` 服务路径的完整验证。
+- Dify Agent v2 backend / `dify-agent` 服务路径。
 
 ## 手动接入文件
 

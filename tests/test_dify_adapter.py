@@ -1,161 +1,10 @@
-import asyncio
 import importlib
 import sys
 import types
-from contextlib import asynccontextmanager
+
+import pytest
 
 from agentguard.schemas.decisions import GuardDecision
-
-
-def _install_fake_dify_modules(monkeypatch):
-    dify_agent = types.ModuleType("dify_agent")
-    adapters = types.ModuleType("dify_agent.adapters")
-    llm_pkg = types.ModuleType("dify_agent.adapters.llm")
-    model_mod = types.ModuleType("dify_agent.adapters.llm.model")
-    layers = types.ModuleType("dify_agent.layers")
-    dify_plugin = types.ModuleType("dify_agent.layers.dify_plugin")
-    tools_mod = types.ModuleType("dify_agent.layers.dify_plugin.tools_layer")
-    runtime = types.ModuleType("dify_agent.runtime")
-    runner_mod = types.ModuleType("dify_agent.runtime.runner")
-
-    class DifyLLMAdapterModel:
-        model_provider = "openai"
-        model_name = "gpt-test"
-        system = "DifyPlugin/plugin-1"
-
-        def prepare_request(self, model_settings, model_request_parameters):
-            return model_settings, model_request_parameters
-
-        def _build_request_input(self, messages, model_settings, model_request_parameters):
-            return types.SimpleNamespace(
-                prompt_messages=[types.SimpleNamespace(content="hello from dify")],
-                model_parameters={},
-                tools=None,
-            )
-
-        async def request(self, messages, model_settings, model_request_parameters):
-            return types.SimpleNamespace(parts=[types.SimpleNamespace(content="llm answer")])
-
-        @asynccontextmanager
-        async def request_stream(
-            self,
-            messages,
-            model_settings,
-            model_request_parameters,
-            run_context=None,
-        ):
-            yield types.SimpleNamespace(
-                get=lambda: types.SimpleNamespace(parts=[types.SimpleNamespace(content="stream answer")])
-            )
-
-    class AgentRunRunner:
-        def __init__(self):
-            self.run_id = "dify-run-1"
-            self.request = types.SimpleNamespace(
-                metadata={
-                    "tenant_id": "tenant-1",
-                    "app_id": "app-1",
-                    "workflow_id": "workflow-1",
-                    "workflow_run_id": "workflow-run-1",
-                    "node_id": "agent-node-1",
-                    "node_execution_id": "node-exec-1",
-                    "user_id": "user-1",
-                }
-            )
-
-        async def _run_agent(self):
-            model = DifyLLMAdapterModel()
-            await model.request([], None, None)
-            tool = tools_mod._build_pydantic_ai_tool(
-                client=FakeToolClient(),
-                tool_config=FakeToolConfig(),
-                effective_parameters=[],
-            )
-            return await tool.fn(None, query="weather")
-
-    class ToolDefinition:
-        def __init__(self, **kwargs):
-            self.__dict__.update(kwargs)
-
-    class Tool:
-        def __init__(self, fn, **kwargs):
-            self.fn = fn
-            self.kwargs = kwargs
-            self.name = kwargs.get("name")
-
-    class DifyPluginToolClientError(Exception):
-        error_type = "ToolError"
-        status_code = 400
-
-    class FakeToolClient:
-        async def invoke(self, **kwargs):
-            return [{"text": f"result:{kwargs['tool_parameters']['query']}"}]
-
-    class FakeToolConfig:
-        plugin_id = "plugin-1"
-        provider = "local_bing_web_search"
-        tool_name = "web_search"
-        credential_type = "unauthorized"
-        credentials = {}
-        name = "web_search"
-        description = "Search"
-        parameters_json_schema = {"type": "object"}
-
-    def _build_pydantic_ai_tool(*, client, tool_config, effective_parameters):
-        async def invoke_tool(_ctx, **tool_arguments):
-            merged = _prepare_tool_arguments(effective_parameters, tool_config, tool_arguments)
-            messages = await client.invoke(
-                provider=tool_config.provider,
-                tool_name=tool_config.tool_name,
-                credential_type=tool_config.credential_type,
-                credentials=dict(tool_config.credentials),
-                tool_parameters=merged,
-            )
-            return _convert_tool_response_to_text(messages)
-
-        return Tool(invoke_tool, takes_ctx=True, name=tool_config.name, description=tool_config.description)
-
-    def _prepare_tool_arguments(_effective_parameters, _tool_config, tool_arguments):
-        return dict(tool_arguments)
-
-    def _convert_tool_response_to_text(messages):
-        return "|".join(str(item) for item in messages)
-
-    def _tool_error_text(*, tool_name, error):
-        return f"tool invoke error: {tool_name}:{error}"
-
-    model_mod.DifyLLMAdapterModel = DifyLLMAdapterModel
-    runner_mod.AgentRunRunner = AgentRunRunner
-    tools_mod.Tool = Tool
-    tools_mod.ToolDefinition = ToolDefinition
-    tools_mod.PLUGIN_TOOL_STRICT = False
-    tools_mod.DifyPluginToolClientError = DifyPluginToolClientError
-    tools_mod._build_pydantic_ai_tool = _build_pydantic_ai_tool
-    tools_mod._prepare_tool_arguments = _prepare_tool_arguments
-    tools_mod._convert_tool_response_to_text = _convert_tool_response_to_text
-    tools_mod._tool_error_text = _tool_error_text
-    dify_plugin.tools_layer = tools_mod
-
-    modules = {
-        "dify_agent": dify_agent,
-        "dify_agent.adapters": adapters,
-        "dify_agent.adapters.llm": llm_pkg,
-        "dify_agent.adapters.llm.model": model_mod,
-        "dify_agent.layers": layers,
-        "dify_agent.layers.dify_plugin": dify_plugin,
-        "dify_agent.layers.dify_plugin.tools_layer": tools_mod,
-        "dify_agent.runtime": runtime,
-        "dify_agent.runtime.runner": runner_mod,
-    }
-    for name, module in modules.items():
-        monkeypatch.setitem(sys.modules, name, module)
-    return types.SimpleNamespace(
-        model_mod=model_mod,
-        runner_mod=runner_mod,
-        tools_mod=tools_mod,
-        FakeToolClient=FakeToolClient,
-        FakeToolConfig=FakeToolConfig,
-    )
 
 
 def _install_fake_legacy_dify_modules(monkeypatch):
@@ -510,7 +359,6 @@ def _install_fake_workflow_catalog_modules(monkeypatch):
     models_pkg = types.ModuleType("models")
     model_mod = types.ModuleType("models.model")
     workflow_mod = types.ModuleType("models.workflow")
-    agent_mod = types.ModuleType("models.agent")
     sqlalchemy_mod = types.ModuleType("sqlalchemy")
 
     class FakeColumn:
@@ -570,24 +418,6 @@ def _install_fake_workflow_catalog_modules(monkeypatch):
         def graph_dict(self):
             return self.graph
 
-    class WorkflowAgentNodeBinding:
-        tenant_id = FakeColumn("binding_tenant_id")
-        app_id = FakeColumn("binding_app_id")
-        workflow_id = FakeColumn("binding_workflow_id")
-        workflow_version = FakeColumn("binding_workflow_version")
-        node_id = FakeColumn("binding_node_id")
-
-        def __init__(self, *, node_id, current_snapshot_id):
-            self.node_id = node_id
-            self.current_snapshot_id = current_snapshot_id
-
-    class AgentConfigSnapshot:
-        id = FakeColumn("snapshot_id")
-
-        def __init__(self, *, id, config_snapshot):
-            self.id = id
-            self.config_snapshot = config_snapshot
-
     app = App(id="app-1", tenant_id="tenant-1", mode="workflow", workflow_id="workflow-published")
     graph = {
         "nodes": [
@@ -630,14 +460,6 @@ def _install_fake_workflow_catalog_modules(monkeypatch):
                     },
                 },
             },
-            {
-                "id": "agent-v2-node-1",
-                "data": {
-                    "type": "agent",
-                    "version": "2",
-                    "title": "Agent V2",
-                },
-            },
         ]
     }
     workflow = Workflow(
@@ -647,38 +469,6 @@ def _install_fake_workflow_catalog_modules(monkeypatch):
         version="2026-07-02T00:00:00",
         graph=graph,
     )
-    binding = WorkflowAgentNodeBinding(node_id="agent-v2-node-1", current_snapshot_id="snapshot-1")
-    snapshot = AgentConfigSnapshot(
-        id="snapshot-1",
-        config_snapshot={
-            "tools": {
-                "dify_tools": [
-                    {
-                        "enabled": True,
-                        "plugin_id": "langgenius/google",
-                        "provider": "google",
-                        "provider_id": "langgenius/google/google",
-                        "tool_name": "google_search",
-                        "runtime_parameters": {"query": None},
-                    },
-                    {
-                        "enabled": False,
-                        "provider_id": "disabled",
-                        "tool_name": "disabled_tool",
-                    },
-                ],
-                "cli_tools": [
-                    {
-                        "enabled": True,
-                        "name": "local_script",
-                        "description": "Run local script",
-                        "input_schema": {"type": "object", "required": ["path"]},
-                    }
-                ],
-            }
-        },
-    )
-
     class FakeScalarResult:
         def __init__(self, values):
             self._values = values
@@ -696,18 +486,12 @@ def _install_fake_workflow_catalog_modules(monkeypatch):
             return FakeExecuteResult([])
 
         def scalars(self, stmt):
-            if stmt.entities == (WorkflowAgentNodeBinding,):
-                return FakeScalarResult([binding])
-            if stmt.entities == (AgentConfigSnapshot,):
-                return FakeScalarResult([snapshot])
             return FakeScalarResult([])
 
     ext_database_mod.db = types.SimpleNamespace(session=FakeSession())
     model_mod.App = App
     model_mod.AppMode = AppMode
     workflow_mod.Workflow = Workflow
-    agent_mod.WorkflowAgentNodeBinding = WorkflowAgentNodeBinding
-    agent_mod.AgentConfigSnapshot = AgentConfigSnapshot
     sqlalchemy_mod.select = select
 
     modules = {
@@ -716,12 +500,11 @@ def _install_fake_workflow_catalog_modules(monkeypatch):
         "models": models_pkg,
         "models.model": model_mod,
         "models.workflow": workflow_mod,
-        "models.agent": agent_mod,
         "sqlalchemy": sqlalchemy_mod,
     }
     for name, module in modules.items():
         monkeypatch.setitem(sys.modules, name, module)
-    return types.SimpleNamespace(app=app, workflow=workflow, binding=binding, snapshot=snapshot)
+    return types.SimpleNamespace(app=app, workflow=workflow)
 
 
 def _fresh_adapter(monkeypatch):
@@ -736,8 +519,103 @@ def _event_types(guard) -> list[str]:
     return [entry.event.event_type.value for entry in guard.trace.entries]
 
 
+def test_dify_legacy_llm_call_binds_args_and_kwargs():
+    from agentguard.adapters.agent.dify_legacy_llm import DifyLegacyLLMCall
+
+    call = DifyLegacyLLMCall.from_args_kwargs(
+        (["hello"], {"temperature": 0}, ["tool"], ["stop"]),
+        {"stream": False, "callbacks": ["cb"]},
+    )
+
+    assert call.prompt_messages == ["hello"]
+    assert call.model_parameters == {"temperature": 0}
+    assert call.tools == ["tool"]
+    assert call.stop == ["stop"]
+    assert call.stream is False
+    assert call.callbacks == ["cb"]
+
+
+def test_dify_legacy_llm_runner_before_deny_skips_execute():
+    from agentguard.adapters.agent.dify_legacy_llm import (
+        DifyLegacyLLMNormalizer,
+        run_dify_legacy_llm_call,
+    )
+    from agentguard.utils.errors import AdapterError
+
+    calls = []
+
+    def guard_input(_model, _call, _extra_metadata):
+        calls.append("before")
+        return GuardDecision.deny("blocked")
+
+    def guard_output(_model, _output, _call, _error, _extra_metadata):
+        calls.append("after")
+        return GuardDecision.allow()
+
+    def execute(_args, _kwargs):
+        calls.append("execute")
+        return "raw"
+
+    with pytest.raises(AdapterError, match="blocked"):
+        run_dify_legacy_llm_call(
+            model=object(),
+            args=(["hello"],),
+            kwargs={},
+            arg_names=("prompt_messages", "model_parameters", "tools", "stop", "stream", "callbacks"),
+            execute=execute,
+            guard_input=guard_input,
+            guard_output=guard_output,
+            blocked_value=lambda decision: decision.reason if not decision.is_allow else None,
+            normalizer=DifyLegacyLLMNormalizer(),
+        )
+
+    assert calls == ["before"]
+
+
+def test_dify_legacy_llm_runner_guards_generator_after_consumption():
+    from agentguard.adapters.agent.dify_legacy_llm import (
+        DifyLegacyLLMNormalizer,
+        run_dify_legacy_llm_call,
+    )
+
+    calls = []
+    outputs = []
+
+    def guard_input(_model, _call, _extra_metadata):
+        calls.append("before")
+        return GuardDecision.allow()
+
+    def guard_output(_model, output, _call, _error, _extra_metadata):
+        calls.append("after")
+        outputs.append(output)
+        return GuardDecision.allow()
+
+    def execute(_args, _kwargs):
+        def chunks():
+            yield types.SimpleNamespace(delta=types.SimpleNamespace(message=types.SimpleNamespace(content="a")))
+            yield types.SimpleNamespace(delta=types.SimpleNamespace(message=types.SimpleNamespace(content="b")))
+
+        return chunks()
+
+    result = run_dify_legacy_llm_call(
+        model=object(),
+        args=(["hello"],),
+        kwargs={},
+        arg_names=("prompt_messages", "model_parameters", "tools", "stop", "stream", "callbacks"),
+        execute=execute,
+        guard_input=guard_input,
+        guard_output=guard_output,
+        blocked_value=lambda _decision: None,
+        normalizer=DifyLegacyLLMNormalizer(),
+    )
+
+    assert calls == ["before"]
+    assert len(list(result)) == 2
+    assert calls == ["before", "after"]
+    assert outputs == [{"output": "a\nb", "final_output": "a\nb"}]
+
+
 def test_install_dify_adapter_disabled_is_noop(monkeypatch):
-    fake = _install_fake_dify_modules(monkeypatch)
     monkeypatch.setenv("AGENTGUARD_ENABLED", "false")
     import agentguard.adapters.agent.dify as dify_adapter
 
@@ -745,7 +623,6 @@ def test_install_dify_adapter_disabled_is_noop(monkeypatch):
     status = dify_adapter.install_dify_adapter()
 
     assert status == {"enabled": False, "patched": False, "reason": "disabled"}
-    assert not getattr(fake.runner_mod.AgentRunRunner._run_agent, "__agentguard_dify_patched__", False)
 
 
 def test_install_dify_adapter_without_dify_is_noop(monkeypatch):
@@ -758,12 +635,11 @@ def test_install_dify_adapter_without_dify_is_noop(monkeypatch):
 
     assert status["enabled"] is True
     assert status["patched"] is False
-    assert status["details"]["agent_v2"]["reason"] == "dify_import_failed"
     assert status["details"]["legacy_api"]["reason"] == "legacy_import_failed"
 
 
 def test_install_dify_adapter_is_idempotent(monkeypatch):
-    fake = _install_fake_dify_modules(monkeypatch)
+    fake = _install_fake_legacy_dify_modules(monkeypatch)
     dify_adapter = _fresh_adapter(monkeypatch)
 
     first = dify_adapter.install_dify_adapter()
@@ -771,9 +647,9 @@ def test_install_dify_adapter_is_idempotent(monkeypatch):
 
     assert first["patched"] is True
     assert second["patched"] is False
-    assert getattr(fake.runner_mod.AgentRunRunner._run_agent, "__agentguard_dify_patched__", False)
-    assert getattr(fake.model_mod.DifyLLMAdapterModel.request, "__agentguard_dify_patched__", False)
-    assert getattr(fake.tools_mod._build_pydantic_ai_tool, "__agentguard_dify_patched__", False)
+    assert getattr(fake.DifyNodeFactory.create_node, "__agentguard_dify_patched__", False)
+    assert getattr(fake.AgentNode._run, "__agentguard_dify_patched__", False)
+    assert getattr(fake.ModelInstance.invoke_llm, "__agentguard_dify_patched__", False)
 
 
 def test_workflow_catalog_sync_defaults_to_api_process(monkeypatch):
@@ -815,166 +691,6 @@ def test_workflow_catalog_sync_defaults_to_api_process(monkeypatch):
     assert started == ["agentguard-dify-workflow-catalog-sync", "started"]
 
 
-def test_dify_runner_llm_and_tool_hooks_emit_events(monkeypatch):
-    fake = _install_fake_dify_modules(monkeypatch)
-    dify_adapter = _fresh_adapter(monkeypatch)
-    dify_adapter.install_dify_adapter()
-    created_guards = []
-
-    from agentguard import AgentGuard
-
-    def make_guard(metadata):
-        guard = AgentGuard("runner-test", sandbox="noop")
-        guard.context.metadata.update(metadata)
-        guard.reported_tools = []
-        guard._report_tool_metadata = guard.reported_tools.append
-        created_guards.append(guard)
-        return guard
-
-    monkeypatch.setattr(dify_adapter, "_make_guard", make_guard)
-
-    runner = fake.runner_mod.AgentRunRunner()
-    result = asyncio.run(runner._run_agent())
-    guard = dify_adapter._current_guard.get()
-
-    assert "result:weather" in result
-    assert guard is None
-    assert len(created_guards) == 1
-    assert _event_types(created_guards[0]) == [
-        "llm_input",
-        "llm_output",
-        "tool_invoke",
-        "tool_result",
-    ]
-    assert [tool.name for tool in created_guards[0].reported_tools] == ["web_search"]
-
-
-def test_dify_llm_request_wrapper_emits_before_and_after(monkeypatch):
-    fake = _install_fake_dify_modules(monkeypatch)
-    dify_adapter = _fresh_adapter(monkeypatch)
-    dify_adapter.install_dify_adapter()
-
-    from agentguard import AgentGuard
-
-    guard = AgentGuard("dify-llm-test", sandbox="noop")
-    token_guard = dify_adapter._current_guard.set(guard)
-    token_meta = dify_adapter._current_metadata.set({"dify_agent_run_id": "run-llm"})
-    try:
-        response = asyncio.run(fake.model_mod.DifyLLMAdapterModel().request([], None, None))
-    finally:
-        dify_adapter._current_metadata.reset(token_meta)
-        dify_adapter._current_guard.reset(token_guard)
-
-    assert response.parts[0].content == "llm answer"
-    assert _event_types(guard) == ["llm_input", "llm_output"]
-    assert guard.trace.entries[0].event.payload.messages[0]["content"] == "hello from dify"
-    assert guard.trace.entries[0].event.metadata["adapter"] == "dify"
-
-
-def test_dify_llm_request_stream_wrapper_emits_before_and_after(monkeypatch):
-    fake = _install_fake_dify_modules(monkeypatch)
-    dify_adapter = _fresh_adapter(monkeypatch)
-    dify_adapter.install_dify_adapter()
-
-    from agentguard import AgentGuard
-
-    async def run_stream():
-        async with fake.model_mod.DifyLLMAdapterModel().request_stream([], None, None) as streamed:
-            assert streamed.get().parts[0].content == "stream answer"
-
-    guard = AgentGuard("dify-llm-stream-test", sandbox="noop")
-    token_guard = dify_adapter._current_guard.set(guard)
-    token_meta = dify_adapter._current_metadata.set({"dify_agent_run_id": "run-stream"})
-    try:
-        asyncio.run(run_stream())
-    finally:
-        dify_adapter._current_metadata.reset(token_meta)
-        dify_adapter._current_guard.reset(token_guard)
-
-    assert _event_types(guard) == ["llm_input", "llm_output"]
-    assert guard.trace.entries[1].event.payload.output == "stream answer"
-    assert guard.trace.entries[1].event.metadata["stream"] is True
-
-
-def test_dify_tool_wrapper_emits_before_and_after(monkeypatch):
-    fake = _install_fake_dify_modules(monkeypatch)
-    dify_adapter = _fresh_adapter(monkeypatch)
-    dify_adapter.install_dify_adapter()
-
-    from agentguard import AgentGuard
-
-    guard = AgentGuard("dify-tool-test", sandbox="noop")
-    guard.reported_tools = []
-    guard._report_tool_metadata = guard.reported_tools.append
-    token_guard = dify_adapter._current_guard.set(guard)
-    token_meta = dify_adapter._current_metadata.set({"dify_agent_run_id": "run-tool"})
-    try:
-        tool = fake.tools_mod._build_pydantic_ai_tool(
-            client=fake.FakeToolClient(),
-            tool_config=fake.FakeToolConfig(),
-            effective_parameters=[],
-        )
-        result = asyncio.run(tool.fn(None, query="weather"))
-    finally:
-        dify_adapter._current_metadata.reset(token_meta)
-        dify_adapter._current_guard.reset(token_guard)
-
-    assert "result:weather" in result
-    assert _event_types(guard) == ["tool_invoke", "tool_result"]
-    invoke = guard.trace.entries[0].event
-    assert invoke.payload.tool_name == "web_search"
-    assert invoke.payload.arguments == {"query": "weather"}
-    assert invoke.metadata["plugin_id"] == "plugin-1"
-    assert len(guard.reported_tools) == 1
-    assert guard.reported_tools[0].name == "web_search"
-    assert guard.reported_tools[0].schema == {"type": "object"}
-
-
-def test_dify_tool_before_deny_skips_original_tool(monkeypatch):
-    fake = _install_fake_dify_modules(monkeypatch)
-    dify_adapter = _fresh_adapter(monkeypatch)
-    dify_adapter.install_dify_adapter()
-
-    class DenyRuntime:
-        def __init__(self):
-            self.calls = []
-
-        def guard(self, event, phase="before"):
-            self.calls.append((event.event_type.value, phase))
-            decision = (
-                GuardDecision.deny("blocked search")
-                if event.event_type.value == "tool_invoke"
-                else GuardDecision.allow()
-            )
-            return types.SimpleNamespace(decision=decision)
-
-    class DenyGuard:
-        def __init__(self):
-            self.runtime = DenyRuntime()
-            self.context = types.SimpleNamespace(session_id="deny")
-
-    class ExplodingClient:
-        async def invoke(self, **_kwargs):
-            raise AssertionError("original tool should not run")
-
-    guard = DenyGuard()
-    token_guard = dify_adapter._current_guard.set(guard)
-    token_meta = dify_adapter._current_metadata.set({"dify_agent_run_id": "run-deny"})
-    try:
-        tool = fake.tools_mod._build_pydantic_ai_tool(
-            client=ExplodingClient(),
-            tool_config=fake.FakeToolConfig(),
-            effective_parameters=[],
-        )
-        result = asyncio.run(tool.fn(None, query="weather"))
-    finally:
-        dify_adapter._current_metadata.reset(token_meta)
-        dify_adapter._current_guard.reset(token_guard)
-
-    assert "blocked search" in result
-    assert guard.runtime.calls == [("tool_invoke", "before")]
-
-
 def test_install_dify_adapter_patches_legacy_api(monkeypatch):
     fake = _install_fake_legacy_dify_modules(monkeypatch)
     dify_adapter = _fresh_adapter(monkeypatch)
@@ -985,7 +701,6 @@ def test_install_dify_adapter_patches_legacy_api(monkeypatch):
     assert first["patched"] is True
     assert first["details"]["workflow_api"]["patched"] is True
     assert first["details"]["legacy_api"]["patched"] is True
-    assert first["details"]["agent_v2"]["patched"] is False
     assert second["details"]["workflow_api"]["patched"] is False
     assert second["details"]["legacy_api"]["patched"] is False
     assert getattr(fake.DifyNodeFactory.create_node, "__agentguard_dify_patched__", False)
@@ -1466,7 +1181,7 @@ def test_workflow_catalog_sync_reports_published_workflow_tools(monkeypatch):
             "app_id": "app-1",
             "workflow_id": "workflow-published",
             "agent_id": "dify-workflow:app-1",
-            "tool_count": 4,
+            "tool_count": 2,
         }
     ]
     assert registered[0]["agent_id"] == "dify-workflow:app-1"
@@ -1490,13 +1205,10 @@ def test_workflow_catalog_sync_reports_published_workflow_tools(monkeypatch):
         }
     ]
     tools = {tool["name"]: tool for tool in synced[0][1]}
-    assert sorted(tools) == ["google_search", "local_script", "web_search", "weekday"]
+    assert sorted(tools) == ["web_search", "weekday"]
     assert tools["weekday"]["input_params"] == ["year", "month"]
     assert tools["weekday"]["metadata"]["node_id"] == "tool-node-1"
     assert tools["web_search"]["metadata"]["workflow_node_kind"] == "legacy_agent"
-    assert tools["google_search"]["metadata"]["workflow_node_kind"] == "agent_v2"
-    assert tools["local_script"]["input_params"] == ["path"]
-    assert "disabled_tool" not in tools
 
 
 def test_workflow_catalog_sync_skips_unchanged_tools(monkeypatch):
@@ -1523,11 +1235,11 @@ def test_workflow_catalog_sync_skips_unchanged_tools(monkeypatch):
     first = dify_adapter._sync_workflow_tool_catalog(fake.app, fake.workflow)
     second = dify_adapter._sync_workflow_tool_catalog(fake.app, fake.workflow)
 
-    assert first["tool_count"] == 4
+    assert first["tool_count"] == 2
     assert second["skipped"] is True
     assert remote_calls == [
         ("register", "dify-workflow:app-1"),
-        ("sync", "dify-workflow:app-1", 4),
+        ("sync", "dify-workflow:app-1", 2),
     ]
 
 

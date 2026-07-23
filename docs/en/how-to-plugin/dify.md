@@ -182,7 +182,7 @@ Validated support currently includes:
 Not covered yet:
 
 - Logic or control-flow nodes themselves, such as If/Else, Human Input, Iteration, Loop, Start, End, and Answer.
-- Fully validated Dify Agent v2 backend / `dify-agent` service integration.
+- Dify Agent v2 backend / `dify-agent` service integration.
 
 ## Manual Integration Files
 

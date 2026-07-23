@@ -17,10 +17,16 @@ import re
 import sys
 import threading
 import time
-from collections.abc import Generator
 from dataclasses import dataclass
 from typing import Any
 
+from agentguard.adapters.agent.dify_legacy_llm import (
+    DifyLegacyLLMCall,
+    DifyLegacyLLMNormalizer,
+    modified_message_llm_output_value,
+    parse_tagged_llm_output,
+    run_dify_legacy_llm_call,
+)
 from agentguard.adapters.agent.dify_flask import (
     get_dify_flask_app,
     on_dify_flask_app_ready,
@@ -36,7 +42,7 @@ from agentguard.adapters.agent.dify_runtime_auth import manager as _runtime_auth
 from agentguard.u_guard.agent_keys import agent_identity_key_id, build_agent_registration_payload
 from agentguard.u_guard.remote_client import RemoteGuardClient
 from agentguard.utils.errors import AdapterError
-from agentguard.adapters.agent.normalization import denormalize_llm_output_payload, denormalize_tool_result_payload
+from agentguard.adapters.agent.normalization import denormalize_tool_result_payload
 from agentguard.utils.json import safe_dumps, safe_loads
 
 _PATCHED_ATTR = "__agentguard_dify_agent_chat_patched__"
@@ -62,6 +68,16 @@ _config_update_hook_installed = False
 _config_update_hook_lock = threading.Lock()
 _runtime_agent_registrations: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
 _runtime_agent_registrations_lock = threading.Lock()
+_LEGACY_LLM_NORMALIZER = DifyLegacyLLMNormalizer(
+    content_list_joiner="",
+    stream_text_joiner="",
+    preserve_dict_payload=True,
+    include_message_key=True,
+    include_text_data_attrs=True,
+    object_message_payload=True,
+    include_stream_tool_calls=True,
+    value_attrs=("role", "content", "name", "tool_calls", "usage"),
+)
 
 
 _LLM_ARG_NAMES = ("prompt_messages", "model_parameters", "tools", "stop", "stream")
@@ -222,36 +238,18 @@ def _patch_model_invoke_llm(model_instance_cls: Any) -> bool:
 
     @functools.wraps(original)
     def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
-        current_args = tuple(args)
-        current_kwargs = dict(kwargs)
-        call = _llm_call_from_args(current_args, current_kwargs)
-        decision = _guard_llm_input(self, call)
-        if decision.decision_type == DecisionType.MODIFY_LLM_INPUT:
-            current_args, current_kwargs = _replace_named_argument(
-                current_args,
-                current_kwargs,
-                _LLM_ARG_NAMES,
-                "prompt_messages",
-                _decision_payload(decision),
-            )
-            call = _llm_call_from_args(current_args, current_kwargs)
-        blocked = _blocked_llm_value(decision)
-        if blocked is not None:
-            raise AdapterError(blocked)
-        try:
-            result = original(self, *current_args, **current_kwargs)
-        except Exception as exc:
-            _guard_llm_output(self, {"error": str(exc)}, call, error=str(exc))
-            raise
-        if _is_generator_like(result):
-            return _wrap_llm_generator(self, result, call)
-        decision = _guard_llm_output(self, result, call)
-        if decision.decision_type == DecisionType.MODIFY_LLM_OUTPUT:
-            result = _modified_llm_output_value(_decision_payload(decision), result)
-        blocked = _blocked_llm_value(decision)
-        if blocked is not None:
-            raise AdapterError(blocked)
-        return result
+        return run_dify_legacy_llm_call(
+            model=self,
+            args=tuple(args),
+            kwargs=dict(kwargs),
+            arg_names=_LLM_ARG_NAMES,
+            execute=lambda current_args, current_kwargs: original(self, *current_args, **current_kwargs),
+            guard_input=_guard_llm_input,
+            guard_output=_guard_llm_output,
+            blocked_value=_blocked_llm_value,
+            normalizer=_LEGACY_LLM_NORMALIZER,
+            modify_output=modified_message_llm_output_value,
+        )
 
     _mark_patched(wrapper, original)
     model_instance_cls.invoke_llm = wrapper
@@ -326,7 +324,11 @@ def _report_runtime_tools(tool_instances: Any) -> None:
     _current_tool_catalog.set(registered)
 
 
-def _guard_llm_input(model: Any, call: dict[str, Any]) -> GuardDecision:
+def _guard_llm_input(
+    model: Any,
+    call: DifyLegacyLLMCall,
+    extra_metadata: dict[str, Any] | None = None,
+) -> GuardDecision:
     guard = _active_guard()
     if guard is None:
         return GuardDecision.allow("AgentGuard Dify Agent Chat adapter inactive.")
@@ -340,6 +342,8 @@ def _guard_llm_input(model: Any, call: dict[str, Any]) -> GuardDecision:
             "tool_names": list(_current_tool_catalog.get([])),
         }
     )
+    if extra_metadata:
+        metadata.update(extra_metadata)
     event = ev.llm_input(guard.context, _normalize_messages(call.get("prompt_messages")), **metadata)
     return guard.runtime.guard(event).decision
 
@@ -347,9 +351,9 @@ def _guard_llm_input(model: Any, call: dict[str, Any]) -> GuardDecision:
 def _guard_llm_output(
     model: Any,
     output: Any,
-    call: dict[str, Any],
-    *,
+    call: DifyLegacyLLMCall,
     error: str | None = None,
+    extra_metadata: dict[str, Any] | None = None,
 ) -> GuardDecision:
     guard = _active_guard()
     if guard is None:
@@ -365,6 +369,8 @@ def _guard_llm_output(
     )
     if error is not None:
         metadata["error"] = error
+    if extra_metadata:
+        metadata.update(extra_metadata)
     event = ev.llm_output(guard.context, _llm_output_payload(output), **metadata)
     return guard.runtime.guard(event, phase="after").decision
 
@@ -490,14 +496,8 @@ def _replace_response_text(response: Any, value: Any) -> Any:
     return value
 
 
-def _llm_call_from_args(args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "prompt_messages": kwargs.get("prompt_messages", args[0] if len(args) > 0 else None),
-        "model_parameters": kwargs.get("model_parameters", args[1] if len(args) > 1 else None),
-        "tools": kwargs.get("tools", args[2] if len(args) > 2 else None),
-        "stop": kwargs.get("stop", args[3] if len(args) > 3 else None),
-        "stream": kwargs.get("stream", args[4] if len(args) > 4 else True),
-    }
+def _llm_call_from_args(args: tuple[Any, ...], kwargs: dict[str, Any]) -> DifyLegacyLLMCall:
+    return DifyLegacyLLMCall.from_args_kwargs(args, kwargs)
 
 
 def _tool_call_from_args(args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -911,106 +911,23 @@ def _model_provider(model: Any) -> str:
 
 
 def _normalize_messages(messages: Any) -> list[dict[str, Any]]:
-    if isinstance(messages, list):
-        return [_prompt_message_to_message(item) for item in messages]
-    if messages is None:
-        return []
-    return [_prompt_message_to_message(messages)]
+    return _LEGACY_LLM_NORMALIZER.normalize_messages(messages)
 
 
 def _prompt_message_to_message(message: Any) -> dict[str, Any]:
-    if isinstance(message, dict):
-        return {
-            **message,
-            "role": str(message.get("role") or "user"),
-            "content": _content_to_text(message.get("content")),
-        }
-    role = _message_role(message)
-    content = _get_attr_or_key(message, "content")
-    text = _content_to_text(content)
-    data = _normalize_value(message)
-    if isinstance(data, dict):
-        data.setdefault("role", role)
-        data.setdefault("content", text)
-        return data
-    return {"role": role, "content": text}
+    return _LEGACY_LLM_NORMALIZER.prompt_message_to_message(message)
 
 
 def _message_role(message: Any) -> str:
-    name = type(message).__name__.lower()
-    if "system" in name:
-        return "system"
-    if "assistant" in name:
-        return "assistant"
-    if "tool" in name:
-        return "tool"
-    return "user"
+    return _LEGACY_LLM_NORMALIZER.message_role(message)
 
 
 def _llm_stream_output_payload(chunks: list[Any]) -> dict[str, Any]:
-    text_parts: list[str] = []
-    thought_parts: list[str] = []
-    tool_calls: list[Any] = []
-    for chunk in chunks:
-        delta = _get_attr_or_key(chunk, "delta")
-        message = _get_attr_or_key(delta, "message")
-        content = _get_attr_or_key(message, "content")
-        if content:
-            text_parts.append(_content_to_text(content))
-        thought = _extract_llm_thought(delta) or _extract_llm_thought(message) or _extract_llm_thought(chunk)
-        if thought is not None:
-            thought_parts.append(thought)
-        calls = _get_attr_or_key(message, "tool_calls")
-        if calls:
-            tool_calls.extend(list(calls))
-    payload = _llm_output_payload_from_text(
-        "".join(text_parts),
-        thought="\n\n".join(thought_parts) or None,
-    )
-    if tool_calls:
-        payload["tool_calls"] = _normalize_value(tool_calls)
-    return payload
+    return _LEGACY_LLM_NORMALIZER.stream_output_payload(chunks)
 
 
 def _llm_output_payload(output: Any) -> dict[str, Any]:
-    if isinstance(output, dict):
-        if "error" in output:
-            return _llm_output_payload_from_text(_content_to_text(output))
-        if "output" in output:
-            text = _content_to_optional_text(output.get("output"))
-        elif "content" in output:
-            text = _content_to_optional_text(output.get("content"))
-        elif "text" in output:
-            text = _content_to_optional_text(output.get("text"))
-        elif "message" in output:
-            text = _content_to_optional_text(output.get("message"))
-        elif output.get("tool_calls"):
-            text = None
-        else:
-            text = _content_to_text(output)
-        payload = dict(output)
-        payload.update(
-            _llm_output_payload_from_text(
-                text,
-                thought=_extract_llm_thought(output),
-                final_output=_content_to_optional_text(output.get("final_output"))
-                if "final_output" in output
-                else None,
-            )
-        )
-        return payload
-    message = _get_attr_or_key(output, "message")
-    if message is not None:
-        content = _get_attr_or_key(message, "content")
-        tool_calls = _get_attr_or_key(message, "tool_calls")
-        payload = _llm_output_payload_from_text(
-            _content_to_text(content),
-            thought=_extract_llm_thought(output) or _extract_llm_thought(message),
-        )
-        if tool_calls:
-            payload["tool_calls"] = _normalize_value(tool_calls)
-        return payload
-    return _llm_output_payload_from_text(_content_to_text(output), thought=_extract_llm_thought(output))
+    return _LEGACY_LLM_NORMALIZER.output_payload(output)
 
 
 def _llm_output_payload_from_text(
@@ -1019,75 +936,19 @@ def _llm_output_payload_from_text(
     thought: str | None = None,
     final_output: str | None = None,
 ) -> dict[str, Any]:
-    parsed = _parse_tagged_llm_output(output) if output is not None else _ParsedLLMOutput(None, None)
-    payload = {
-        "output": output,
-        "final_output": final_output if final_output is not None else parsed.final_output,
-    }
-    thought = thought if thought is not None else parsed.thought
-    if thought is not None:
-        payload["thought"] = thought
-    return payload
+    return _LEGACY_LLM_NORMALIZER.output_payload_from_text(
+        output,
+        thought=thought,
+        final_output=final_output,
+    )
 
 
 def _extract_llm_thought(value: Any) -> str | None:
-    if isinstance(value, dict):
-        direct = _first_non_empty_text(
-            value,
-            "thought",
-            "reasoning_content",
-            "reasoningContent",
-            "thinking",
-            "reasoning",
-        )
-        if direct is not None:
-            return direct
-        for container_key in ("additional_kwargs", "response_metadata", "metadata", "extra"):
-            nested = value.get(container_key)
-            if isinstance(nested, dict):
-                nested_thought = _extract_llm_thought(nested)
-                if nested_thought is not None:
-                    return nested_thought
-        for blocks_key in ("parts", "content", "output"):
-            blocks = value.get(blocks_key)
-            if isinstance(blocks, list):
-                block_thought = _extract_llm_thought_from_blocks(blocks)
-                if block_thought is not None:
-                    return block_thought
-        return None
-
-    direct = _first_non_empty_attr(
-        value,
-        "thought",
-        "reasoning_content",
-        "reasoningContent",
-        "thinking",
-        "reasoning",
-    )
-    if direct is not None:
-        return direct
-    parts = getattr(value, "parts", None)
-    if isinstance(parts, list):
-        return _extract_llm_thought_from_blocks(parts)
-    return None
+    return _LEGACY_LLM_NORMALIZER.extract_llm_thought(value)
 
 
 def _extract_llm_thought_from_blocks(blocks: list[Any]) -> str | None:
-    thought_parts: list[str] = []
-    for block in blocks:
-        if isinstance(block, dict):
-            block_type = str(block.get("type") or block.get("kind") or "").lower()
-            if block_type in {"thinking", "thinkingblock", "reasoning", "reasoningblock"}:
-                text = _first_non_empty_text(block, "content", "text", "thinking", "reasoning", "summary")
-                if text is not None:
-                    thought_parts.append(text)
-        else:
-            block_type = str(getattr(block, "type", None) or getattr(block, "kind", None) or "").lower()
-            if block_type in {"thinking", "thinkingblock", "reasoning", "reasoningblock"}:
-                text = _first_non_empty_attr(block, "content", "text", "thinking", "reasoning", "summary")
-                if text is not None:
-                    thought_parts.append(text)
-    return "\n\n".join(thought_parts) or None
+    return _LEGACY_LLM_NORMALIZER.extract_llm_thought_from_blocks(blocks)
 
 
 def _first_non_empty_text(value: dict[str, Any], *keys: str) -> str | None:
@@ -1123,71 +984,20 @@ _FINAL_TAG_RE = re.compile(
 
 
 def _parse_tagged_llm_output(output: str) -> _ParsedLLMOutput:
-    thought_matches = list(_THOUGHT_TAG_RE.finditer(output))
-    if not thought_matches:
-        return _ParsedLLMOutput(thought=None, final_output=output)
-
-    thought_parts = [match.group("body").strip() for match in thought_matches]
-    thought = "\n\n".join(part for part in thought_parts if part) or None
-    remainder = _THOUGHT_TAG_RE.sub("", output).strip()
-
-    final_matches = list(_FINAL_TAG_RE.finditer(remainder))
-    if final_matches:
-        final_parts = [match.group("body").strip() for match in final_matches]
-        final_output = "\n\n".join(part for part in final_parts if part)
-    else:
-        final_output = remainder
-
-    return _ParsedLLMOutput(thought=thought, final_output=final_output)
+    parsed = parse_tagged_llm_output(output)
+    return _ParsedLLMOutput(thought=parsed.thought, final_output=parsed.final_output)
 
 
 def _content_to_text(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, str):
-        return value
-    if isinstance(value, bytes):
-        return value.decode("utf-8", errors="replace")
-    if isinstance(value, list | tuple):
-        return "".join(_content_to_text(item) for item in value)
-    if isinstance(value, dict):
-        return safe_dumps(value)
-    text = getattr(value, "text", None)
-    if text is not None:
-        return _content_to_text(text)
-    data = getattr(value, "data", None)
-    if data is not None:
-        return _content_to_text(data)
-    return str(value)
+    return _LEGACY_LLM_NORMALIZER.content_to_text(value)
 
 
 def _content_to_optional_text(value: Any) -> str | None:
-    if value is None:
-        return None
-    text = _content_to_text(value)
-    return text if text else None
+    return _LEGACY_LLM_NORMALIZER.content_to_optional_text(value)
 
 
 def _normalize_value(value: Any) -> Any:
-    if value is None or isinstance(value, bool | int | float | str):
-        return value
-    if isinstance(value, bytes):
-        return value.decode("utf-8", errors="replace")
-    if isinstance(value, dict):
-        return {str(key): _normalize_value(item) for key, item in value.items()}
-    if isinstance(value, list | tuple | set | frozenset):
-        return [_normalize_value(item) for item in value]
-    for attr in ("model_dump", "to_dict", "dict"):
-        dumper = getattr(value, attr, None)
-        if callable(dumper):
-            with _suppress_exceptions():
-                return _normalize_value(dumper())
-    out: dict[str, Any] = {}
-    for attr in ("role", "content", "name", "tool_calls", "usage"):
-        attr_value = getattr(value, attr, None)
-        if attr_value is not None:
-            out[attr] = _normalize_value(attr_value)
-    return out or str(value)
+    return _LEGACY_LLM_NORMALIZER.normalize_value(value)
 
 
 def _blocked_llm_value(decision: GuardDecision) -> str | None:
