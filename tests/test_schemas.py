@@ -55,6 +55,21 @@ def test_human_check_roundtrip_and_legacy_compatibility():
     assert legacy.to_dict()["decision_type"] == "human_check"
 
 
+def test_modify_decisions_roundtrip_and_non_blocking_properties():
+    decision = GuardDecision.modify_tool_result(
+        "rewrite tool output",
+        processed_content='{"result": "rewritten"}',
+    )
+
+    restored = GuardDecision.from_dict(decision.to_dict())
+
+    assert restored.decision_type == DecisionType.MODIFY_TOOL_RESULT
+    assert restored.is_blocking is False
+    assert restored.requires_user is False
+    assert restored.requires_remote is False
+    assert restored.processed_content == '{"result": "rewritten"}'
+
+
 def test_llm_output_supports_thought_and_final_output_roundtrip():
     ctx = RuntimeContext(session_id="s")
     event = ev.llm_output(

@@ -909,6 +909,29 @@ function applyLoopbackToResponsesRequest(request = {}, processedContent = "") {
   };
 }
 
+function applyModifiedResponsesRequest(request = {}, processedContent = "") {
+  const payload = coerceLoopbackPayload(processedContent);
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    const nextRequest = { ...(request || {}) };
+    for (const [key, value] of Object.entries(payload)) {
+      if (["input", "messages"].includes(key)) {
+        continue;
+      }
+      nextRequest[key] = normalizeValue(value);
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, "input") || Object.prototype.hasOwnProperty.call(payload, "messages")) {
+      nextRequest.input = denormalizeResponsesInput(
+        Object.prototype.hasOwnProperty.call(payload, "input") ? payload.input : payload.messages
+      );
+      return nextRequest;
+    }
+  }
+  return {
+    ...(request || {}),
+    input: denormalizeResponsesInput(payload),
+  };
+}
+
 function applyLoopbackToNodeParameters(parameters = {}, processedContent = "") {
   const payload = coerceLoopbackPayload(processedContent);
   const nextMessages = denormalizeResponsesInput(payload);
@@ -943,6 +966,423 @@ function applyLoopbackToRunNodeArgs(args = {}, processedContent = "") {
       ...(node || {}),
       parameters: applyLoopbackToNodeParameters(parameters, processedContent),
     },
+  };
+}
+
+function applyModifiedRunNodeArgs(args = {}, processedContent = "") {
+  const node = args && args.node;
+  const parameters = isPlainObject(node && node.parameters) ? node.parameters : {};
+  return {
+    ...(args || {}),
+    node: {
+      ...(node || {}),
+      parameters: applyLoopbackToNodeParameters(parameters, processedContent),
+    },
+  };
+}
+
+function responseOutputItemsFromText(text) {
+  return [
+    {
+      id: `agentguard_modified_message_${Date.now()}`,
+      type: "message",
+      status: "completed",
+      role: "assistant",
+      content: [
+        {
+          type: "output_text",
+          text,
+          annotations: [],
+        },
+      ],
+    },
+  ];
+}
+
+function denormalizeResponsesOutput(payload, original = null) {
+  const normalizedPayload = coerceLoopbackPayload(payload);
+  const updated = isPlainObject(original) ? { ...original } : {};
+  if (normalizedPayload && typeof normalizedPayload === "object" && !Array.isArray(normalizedPayload)) {
+    const outputItems = Array.isArray(normalizedPayload.output) ? normalizeValue(normalizedPayload.output) : null;
+    Object.assign(updated, normalizeValue(normalizedPayload));
+    if (outputItems) {
+      updated.output = outputItems;
+      updated.output_text = firstNonEmptyText(
+        normalizedPayload.output_text,
+        normalizedPayload.final_output,
+        extractVisibleOutputText({ output: outputItems })
+      ) || "";
+    } else {
+      const text = firstNonEmptyText(
+        normalizedPayload.output_text,
+        normalizedPayload.final_output,
+        normalizedPayload.output,
+        normalizedPayload.text,
+        normalizedPayload.content,
+        normalizedPayload.message
+      ) || safeString(normalizedPayload);
+      updated.output_text = text;
+      updated.output = responseOutputItemsFromText(text);
+    }
+  } else {
+    const text = normalizedPayload == null ? "" : String(normalizedPayload);
+    updated.output_text = text;
+    updated.output = responseOutputItemsFromText(text);
+  }
+  if (!updated.id) {
+    updated.id = `agentguard_modified_${Date.now()}`;
+  }
+  if (!updated.object) {
+    updated.object = "response";
+  }
+  if (updated.created_at == null) {
+    updated.created_at = Math.floor(Date.now() / 1000);
+  }
+  if (!updated.status) {
+    updated.status = "completed";
+  }
+  return updated;
+}
+
+function denormalizeToolPayload(payload) {
+  const value = coerceLoopbackPayload(payload);
+  if (value == null) {
+    return {};
+  }
+  if (isPlainObject(value)) {
+    return normalizeValue(value);
+  }
+  if (Array.isArray(value)) {
+    return normalizeValue(value);
+  }
+  return normalizeValue(value);
+}
+
+function applyModifiedConnectedToolInput(input = {}, processedContent = "") {
+  const payload = denormalizeToolPayload(processedContent);
+  if (!isPlainObject(input)) {
+    return payload;
+  }
+  if (isPlainObject(input.args)) {
+    return {
+      ...(input || {}),
+      args: isPlainObject(payload) ? payload : { value: payload },
+    };
+  }
+  return isPlainObject(payload)
+    ? {
+      ...(input || {}),
+      ...payload,
+    }
+    : payload;
+}
+
+function setConnectionDataJson(data = {}, jsonValue, connectionType = "main") {
+  const nextData = isPlainObject(data) ? { ...data } : {};
+  const existingBranches = Array.isArray(nextData[connectionType]) ? nextData[connectionType].map((branch) => (
+    Array.isArray(branch) ? [...branch] : []
+  )) : [[]];
+  const branches = existingBranches.length ? existingBranches : [[]];
+  const firstBranch = Array.isArray(branches[0]) ? [...branches[0]] : [];
+  const firstItem = isPlainObject(firstBranch[0]) ? { ...firstBranch[0] } : {};
+  firstItem.json = normalizeValue(jsonValue);
+  firstBranch[0] = firstItem;
+  branches[0] = firstBranch;
+  nextData[connectionType] = branches;
+  return nextData;
+}
+
+function applyModifiedActionInput(action = {}, processedContent = "") {
+  const originalInput = isPlainObject(action && action.input) ? action.input : {};
+  const payload = denormalizeToolPayload(processedContent);
+  return {
+    ...(action || {}),
+    input: isPlainObject(payload)
+      ? {
+        ...originalInput,
+        ...payload,
+      }
+      : payload,
+  };
+}
+
+function applyModifiedAiToolExecutionData(executionData = {}, processedContent = "") {
+  const data = isPlainObject(executionData && executionData.data) ? executionData.data : {};
+  const currentInput = firstJsonFromConnectionData(data, [AI_TOOL_CONNECTION_TYPE, "main"]) || {};
+  const updatedInput = applyModifiedConnectedToolInput(currentInput, processedContent);
+  const connectionType = Array.isArray(data[AI_TOOL_CONNECTION_TYPE]) ? AI_TOOL_CONNECTION_TYPE : "main";
+  return {
+    ...(executionData || {}),
+    data: setConnectionDataJson(data, updatedInput, connectionType),
+  };
+}
+
+function applyModifiedOrdinaryExecutionData(executionData = {}, processedContent = "") {
+  const payload = coerceLoopbackPayload(processedContent);
+  return {
+    ...(executionData || {}),
+    data: isPlainObject(payload) ? normalizeValue(payload) : setConnectionDataJson(executionData && executionData.data, payload),
+  };
+}
+
+function applyModifiedToolResult(processedContent = "") {
+  return coerceLoopbackPayload(processedContent);
+}
+
+function applyModifiedExecuteEngineActionResult(result, action, processedContent = "") {
+  const payload = coerceLoopbackPayload(processedContent);
+  if (result && result.data && result.data.data) {
+    return {
+      ...result,
+      data: {
+        ...result.data,
+        data: normalizeValue(payload),
+      },
+    };
+  }
+  return aiToolResult(action, normalizeValue(payload));
+}
+
+function applyModifiedRunNodeResult(result, processedContent = "") {
+  const payload = coerceLoopbackPayload(processedContent);
+  if (result && typeof result === "object" && Object.prototype.hasOwnProperty.call(result, "data")) {
+    return {
+      ...result,
+      data: normalizeValue(payload),
+    };
+  }
+  return ordinaryNodeResult(normalizeValue(payload));
+}
+
+function applyModifiedLLMRunNodeResult(result, processedContent = "") {
+  const originalResponse = firstJsonFromConnectionData(result && result.data, ["main"]);
+  const response = denormalizeResponsesOutput(
+    processedContent,
+    originalResponse && originalResponse.response ? originalResponse.response : null
+  );
+  const rebuilt = n8nLLMRunNodeResult(response);
+  return result && typeof result === "object"
+    ? {
+      ...result,
+      data: rebuilt.data,
+    }
+    : rebuilt;
+}
+
+function applyModifyToResponsesRequest(request = {}, processedContent = "") {
+  const payload = coerceLoopbackPayload(processedContent);
+  const next = {
+    ...(request || {}),
+  };
+  if (isPlainObject(payload)) {
+    for (const [key, value] of Object.entries(payload)) {
+      if (key === "input" || key === "messages") {
+        continue;
+      }
+      next[key] = normalizeValue(value);
+    }
+  }
+  next.input = denormalizeResponsesInput(payload);
+  return next;
+}
+
+function applyModifyToNodeParameters(parameters = {}, processedContent = "") {
+  const payload = coerceLoopbackPayload(processedContent);
+  const next = {
+    ...(parameters || {}),
+  };
+  if (isPlainObject(payload)) {
+    for (const [key, value] of Object.entries(payload)) {
+      if (key === "input" || key === "messages") {
+        continue;
+      }
+      next[key] = normalizeValue(value);
+    }
+  }
+  return applyLoopbackToNodeParameters(next, payload);
+}
+
+function applyModifyToRunNodeArgs(args = {}, processedContent = "") {
+  const node = args && args.node;
+  const parameters = isPlainObject(node && node.parameters) ? node.parameters : {};
+  return {
+    ...(args || {}),
+    node: {
+      ...(node || {}),
+      parameters: applyModifyToNodeParameters(parameters, processedContent),
+    },
+  };
+}
+
+function applyModifyToToolInput(input = {}, processedContent = "") {
+  const payload = coerceLoopbackPayload(processedContent);
+  if (isPlainObject(payload)) {
+    return isPlainObject(input)
+      ? normalizeValue({
+        ...(input || {}),
+        ...payload,
+      })
+      : normalizeValue(payload);
+  }
+  return isPlainObject(input)
+    ? {
+      ...(input || {}),
+      input: normalizeValue(payload),
+    }
+    : { input: normalizeValue(payload) };
+}
+
+function extractModifiedPrimaryValue(payload) {
+  const data = coerceLoopbackPayload(payload);
+  if (isPlainObject(data)) {
+    for (const key of ["result", "output", "final_output", "content", "text", "message", "value"]) {
+      if (Object.prototype.hasOwnProperty.call(data, key)) {
+        return normalizeValue(data[key]);
+      }
+    }
+  }
+  return normalizeValue(data);
+}
+
+function replaceResponseOutputItems(output = [], text) {
+  if (!Array.isArray(output)) {
+    return output;
+  }
+  let replaced = false;
+  const next = output.map((item) => {
+    if (replaced || !item || typeof item !== "object" || item.type !== "message") {
+      return item;
+    }
+    replaced = true;
+    const currentContent = Array.isArray(item.content) ? item.content : [];
+    const content = currentContent.length
+      ? currentContent.map((part, index) => {
+        if (index > 0 || !part || typeof part !== "object") {
+          return part;
+        }
+        if (part.type === "output_text" || part.type === "text") {
+          return { ...part, text };
+        }
+        return { ...part, content: text };
+      })
+      : [{ type: "output_text", text, annotations: [] }];
+    return { ...item, content };
+  });
+  if (replaced) {
+    return next;
+  }
+  return [
+    ...next,
+    {
+      id: "agentguard_modified_message",
+      type: "message",
+      status: "completed",
+      role: "assistant",
+      content: [{ type: "output_text", text, annotations: [] }],
+    },
+  ];
+}
+
+function applyModifyToResponsesResult(result, processedContent = "") {
+  const payload = coerceLoopbackPayload(processedContent);
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    return extractModifiedPrimaryValue(payload);
+  }
+  const next = {
+    ...result,
+  };
+  if (isPlainObject(payload)) {
+    Object.assign(next, normalizeValue(payload));
+  }
+  const text = textFromValue(extractModifiedPrimaryValue(payload));
+  if (text != null) {
+    next.output_text = text;
+    next.output = replaceResponseOutputItems(Array.isArray(result.output) ? result.output : [], text);
+  }
+  return next;
+}
+
+function replaceFirstJsonValue(data = {}, value, connectionTypes = ["main"]) {
+  const next = isPlainObject(data) ? { ...data } : {};
+  let replaced = false;
+  for (const connectionType of connectionTypes) {
+    const branches = Array.isArray(next[connectionType]) ? next[connectionType] : [];
+    next[connectionType] = branches.map((branch) => {
+      if (replaced || !Array.isArray(branch)) {
+        return branch;
+      }
+      return branch.map((item) => {
+        if (replaced || !item || typeof item !== "object") {
+          return item;
+        }
+        replaced = true;
+        return { ...item, json: normalizeValue(value) };
+      });
+    });
+    if (replaced) {
+      break;
+    }
+  }
+  if (!replaced) {
+    const connectionType = connectionTypes[0] || "main";
+    next[connectionType] = [[{ json: normalizeValue(value) }]];
+  }
+  return next;
+}
+
+function applyModifyToRunNodeResult(result, processedContent = "") {
+  const value = extractModifiedPrimaryValue(processedContent);
+  if (!result || typeof result !== "object" || !Array.isArray(result.data)) {
+    return value;
+  }
+  let replaced = false;
+  const data = result.data.map((branch) => {
+    if (!Array.isArray(branch)) {
+      return branch;
+    }
+    return branch.map((item) => {
+      if (replaced || !item || typeof item !== "object") {
+        return item;
+      }
+      replaced = true;
+      if (item.json && typeof item.json === "object" && !Array.isArray(item.json) && Object.prototype.hasOwnProperty.call(item.json, "output")) {
+        return { ...item, json: { ...item.json, output: value } };
+      }
+      return { ...item, json: normalizeValue(value) };
+    });
+  });
+  return {
+    ...(result || {}),
+    data,
+  };
+}
+
+function applyModifyToEngineActionResult(result, processedContent = "") {
+  const value = extractModifiedPrimaryValue(processedContent);
+  if (!result || typeof result !== "object") {
+    return value;
+  }
+  if (result.data && result.data.data && typeof result.data.data === "object") {
+    return {
+      ...result,
+      data: {
+        ...result.data,
+        data: replaceFirstJsonValue(result.data.data, { output: value }, ["ai_tool", "main"]),
+      },
+    };
+  }
+  return result;
+}
+
+function applyModifyToExecutionData(executionData = {}, processedContent = "", connectionTypes = ["main"]) {
+  const payload = coerceLoopbackPayload(processedContent);
+  return {
+    ...(executionData || {}),
+    data: replaceFirstJsonValue(
+      executionData && executionData.data ? executionData.data : {},
+      applyModifyToToolInput(payload),
+      connectionTypes,
+    ),
   };
 }
 
@@ -1584,10 +2024,11 @@ function wrapConnectedTool(tool, sourceContext = {}) {
   const toolName = String((tool && tool.name) || (sourceContext && sourceContext.tool_name) || "n8n_ai_tool");
   tool.invoke = async function agentguardN8nToolInvoke(input, ...rest) {
     const activeSourceContext = tool[TOOL_SOURCE_CONTEXT] || sourceContext;
-    const invocation = buildAiToolInvocation(input || {}, sourceNodeForToolInvocation(activeSourceContext));
+    let currentInput = input;
+    let invocation = buildAiToolInvocation(currentInput || {}, sourceNodeForToolInvocation(activeSourceContext));
     const context = enrichContextWithN8nSession(
       toolContext(tool, activeSourceContext),
-      input,
+      currentInput,
       invocation.metadata
     );
     if (!matchesConfiguredFilters(context)) {
@@ -1598,14 +2039,21 @@ function wrapConnectedTool(tool, sourceContext = {}) {
       ["ai_tool"]
     );
     const beforeDecision = await guardToolBefore(toolName, invocation.arguments, context, capabilities, invocation.metadata);
+    if (beforeDecision.decision_type === DecisionType.MODIFY_TOOL_INVOKE) {
+      currentInput = applyModifyToToolInput(currentInput || {}, beforeDecision.processed_content);
+      invocation = buildAiToolInvocation(currentInput, sourceNodeForToolInvocation(activeSourceContext));
+    }
     const blocked = blockedToolValue(beforeDecision, toolName);
     if (blocked) {
       flushGuardAsync(context);
       return blocked;
     }
     try {
-      const output = await original.call(this, input, ...rest);
+      let output = await original.call(this, currentInput, ...rest);
       const afterDecision = await guardToolAfter(toolName, output, context, { metadata: invocation.metadata });
+      if (afterDecision.decision_type === DecisionType.MODIFY_TOOL_RESULT) {
+        output = extractModifiedPrimaryValue(afterDecision.processed_content);
+      }
       const resultBlocked = blockedResultValue(afterDecision, toolName);
       return resultBlocked || output;
     } catch (error) {
@@ -1650,6 +2098,9 @@ function patchOpenAI(moduleExports) {
           attempts += 1;
           continue;
         }
+        if (beforeDecision.decision_type === DecisionType.MODIFY_LLM_INPUT) {
+          currentRequest = applyModifyToResponsesRequest(currentRequest, beforeDecision.processed_content);
+        }
         const beforeBlocked = blockedToolValue(beforeDecision, "llm");
         if (beforeBlocked) {
           return blockedLLMResponse(beforeDecision, currentRequest);
@@ -1667,10 +2118,14 @@ function patchOpenAI(moduleExports) {
           attempts += 1;
           continue;
         }
+        let finalRaw = raw;
+        if (afterDecision.decision_type === DecisionType.MODIFY_LLM_OUTPUT) {
+          finalRaw = applyModifyToResponsesResult(raw, afterDecision.processed_content);
+        }
         const afterBlocked = blockedResultValue(afterDecision, "llm");
         return afterBlocked
           ? syntheticResponsesPayload(afterBlocked.reason || afterDecision.reason, currentRequest && currentRequest.model)
-          : raw;
+          : finalRaw;
       }
     };
     Klass.prototype.completionWithRetry[PATCHED] = true;
@@ -1788,19 +2243,25 @@ function patchExecuteEngineAction(moduleExports) {
       tool_call_id: invocation.metadata.tool_call_id || (action && action.id ? String(action.id) : null),
     };
     const capabilities = inferCapabilitiesFromNode({ type: context.node_type, name: context.node_name }, ["ai_tool"]);
-    const beforeDecision = await guardToolBefore(toolName, args, context, capabilities, invocationMetadata);
+    let currentAction = action;
+    let currentArgs = args;
+    const beforeDecision = await guardToolBefore(toolName, currentArgs, context, capabilities, invocationMetadata);
+    if (beforeDecision.decision_type === DecisionType.MODIFY_TOOL_INVOKE) {
+      currentArgs = applyModifyToToolInput(currentArgs, beforeDecision.processed_content);
+      currentAction = { ...(action || {}), input: currentArgs };
+    }
     const blocked = blockedToolValue(beforeDecision, toolName);
     if (blocked) {
-      return aiToolResult(action, blocked);
+      return aiToolResult(currentAction, blocked);
     }
     try {
       let result;
       if (tool && typeof tool.invoke === "function") {
-        const input = { ...(args || {}) };
+        const input = { ...(currentArgs || {}) };
         delete input.tool;
         result = await tool.invoke(input);
         result = {
-          action,
+          action: currentAction,
           data: {
             executionTime: 0,
             startTime: 0,
@@ -1811,15 +2272,18 @@ function patchExecuteEngineAction(moduleExports) {
           },
         };
       } else {
-        result = await original.call(this, node, action, tools);
+        result = await original.call(this, node, currentAction, tools);
       }
       const output = result && result.data && result.data.data ? result.data.data : result;
       const afterDecision = await guardToolAfter(toolName, output, context, { metadata: invocationMetadata });
+      if (afterDecision.decision_type === DecisionType.MODIFY_TOOL_RESULT) {
+        result = applyModifyToEngineActionResult(result, afterDecision.processed_content);
+      }
       const resultBlocked = blockedResultValue(afterDecision, toolName);
-      return resultBlocked ? aiToolResult(action, resultBlocked) : result;
+      return resultBlocked ? aiToolResult(currentAction, resultBlocked) : result;
     } catch (error) {
       await guardToolAfter(toolName, null, context, { error, metadata: invocationMetadata });
-      return aiToolResult(action, null, "error", error);
+      return aiToolResult(currentAction, null, "error", error);
     } finally {
       flushGuardAsync(context);
     }
@@ -1941,6 +2405,9 @@ async function guardedRunNodeLLM(original, target, args) {
         attempts += 1;
         continue;
       }
+      if (beforeDecision.decision_type === DecisionType.MODIFY_LLM_INPUT) {
+        currentArgs = applyModifyToRunNodeArgs(currentArgs, beforeDecision.processed_content);
+      }
       const beforeBlocked = blockedToolValue(beforeDecision, "llm");
       if (beforeBlocked) {
         return n8nLLMRunNodeResult(blockedLLMResponse(beforeDecision, request));
@@ -1971,10 +2438,14 @@ async function guardedRunNodeLLM(original, target, args) {
         attempts += 1;
         continue;
       }
+      let finalResult = result;
+      if (afterDecision.decision_type === DecisionType.MODIFY_LLM_OUTPUT) {
+        finalResult = applyModifyToRunNodeResult(result, afterDecision.processed_content);
+      }
       const afterBlocked = blockedResultValue(afterDecision, "llm");
       return afterBlocked
         ? n8nLLMRunNodeResult(syntheticResponsesPayload(afterBlocked.reason || afterDecision.reason, request.model))
-        : result;
+        : finalResult;
     }
   } catch (error) {
     await guardLLMAfter({ output_text: "", output: [], status: "error", error: safeString(error) }, llmContext, {
@@ -2002,17 +2473,24 @@ async function guardedRunNodeAiTool(original, target, args) {
     tool_call_id: invocationMetadata.tool_call_id || null,
     tool_description: nodeType && nodeType.description ? nodeType.description.description : "",
   }, invocationMetadata, executionData, runExecutionData, additionalData);
+  let currentExecutionData = executionData;
   const beforeDecision = await guardToolBefore(toolName, input, toolContext, capabilities, invocationMetadata);
+  if (beforeDecision.decision_type === DecisionType.MODIFY_TOOL_INVOKE) {
+    currentExecutionData = applyModifyToExecutionData(executionData, beforeDecision.processed_content, [AI_TOOL_CONNECTION_TYPE, "main"]);
+  }
   const blocked = blockedToolValue(beforeDecision, toolName);
   if (blocked) {
     flushGuardAsync(toolContext);
     return aiToolRunNodeResult(blocked);
   }
   try {
-    const result = await original.call(target, workflow, executionData, runExecutionData, runIndex, additionalData, mode, abortSignal, subNodeExecutionResults);
+    let result = await original.call(target, workflow, currentExecutionData, runExecutionData, runIndex, additionalData, mode, abortSignal, subNodeExecutionResults);
     const afterDecision = await guardToolAfter(toolName, result && result.data !== undefined ? result.data : result, toolContext, {
       metadata: invocationMetadata,
     });
+    if (afterDecision.decision_type === DecisionType.MODIFY_TOOL_RESULT) {
+      result = applyModifyToRunNodeResult(result, afterDecision.processed_content);
+    }
     const resultBlocked = blockedResultValue(afterDecision, toolName);
     return resultBlocked ? aiToolRunNodeResult(resultBlocked) : result;
   } catch (error) {
@@ -2034,14 +2512,21 @@ async function guardedRunNodeTool(original, target, args) {
     tool_kind: "n8n_node",
     tool_description: nodeType && nodeType.description ? nodeType.description.description : "",
   };
+  let currentExecutionData = executionData;
   const beforeDecision = await guardToolBefore(toolName, input, toolContext, capabilities);
+  if (beforeDecision.decision_type === DecisionType.MODIFY_TOOL_INVOKE) {
+    currentExecutionData = applyModifyToExecutionData(executionData, beforeDecision.processed_content, ["main"]);
+  }
   const blocked = blockedToolValue(beforeDecision, toolName);
   if (blocked) {
     return ordinaryNodeResult(blocked);
   }
   try {
-    const result = await original.call(target, workflow, executionData, runExecutionData, runIndex, additionalData, mode, abortSignal, subNodeExecutionResults);
+    let result = await original.call(target, workflow, currentExecutionData, runExecutionData, runIndex, additionalData, mode, abortSignal, subNodeExecutionResults);
     const afterDecision = await guardToolAfter(toolName, result && result.data !== undefined ? result.data : result, toolContext);
+    if (afterDecision.decision_type === DecisionType.MODIFY_TOOL_RESULT) {
+      result = applyModifyToRunNodeResult(result, afterDecision.processed_content);
+    }
     const resultBlocked = blockedResultValue(afterDecision, toolName);
     return resultBlocked ? ordinaryNodeResult(resultBlocked) : result;
   } catch (error) {
@@ -2920,6 +3405,14 @@ module.exports = {
     applyLoopbackToNodeParameters,
     applyLoopbackToResponsesRequest,
     applyLoopbackToRunNodeArgs,
+    applyModifyToNodeParameters,
+    applyModifyToResponsesRequest,
+    applyModifyToRunNodeArgs,
+    applyModifyToResponsesResult,
+    applyModifyToRunNodeResult,
+    applyModifyToToolInput,
+    applyModifyToExecutionData,
+    applyModifyToEngineActionResult,
     extractProviderBuiltInTools,
     extractWorkflowTools,
     hasNonMainConnection,

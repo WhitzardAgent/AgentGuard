@@ -1,6 +1,7 @@
 """HarnessRuntime: orchestrates the full client-side execution flow."""
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from typing import Any
 
@@ -128,6 +129,7 @@ class HarnessRuntime:
         if self.session.tool_call_count >= self.max_tool_calls:
             return self._safe_error("tool call budget exceeded", tool_name)
         self.session.inc_tool_call()
+        current_arguments = dict(arguments)
 
         invoke_event = ev.tool_invoke(
             self.context, tool_name, arguments, capabilities=list(meta.capabilities)
@@ -140,9 +142,11 @@ class HarnessRuntime:
         if decision.requires_user or decision.requires_remote:
             return self._pending(decision.reason, tool_name, decision)
         if decision.decision_type == DecisionType.DEGRADE:
-            return self._run_degraded(tool_name, arguments, decision)
+            return self._run_degraded(tool_name, current_arguments, decision)
+        if decision.decision_type == DecisionType.MODIFY_TOOL_INVOKE:
+            current_arguments = self._decision_payload(decision)
 
-        return self._execute(tool_name, arguments, fn, list(meta.capabilities), decision)
+        return self._execute(tool_name, current_arguments, fn, list(meta.capabilities), decision)
 
     # ---- client/server trace sync -------------------------------------
     def sync_local_cache_async(self, *, reason: str = "round_complete") -> bool:
@@ -207,6 +211,8 @@ class HarnessRuntime:
             return {"agentguard": "sanitized", "reason": rd.reason, "tool": tool_name}
         if rd.requires_user or rd.requires_remote:
             return self._pending(rd.reason, tool_name, rd)
+        if rd.decision_type == DecisionType.MODIFY_TOOL_RESULT:
+            return self._decision_payload(rd)
         return sb.value
 
     def _run_degraded(
@@ -247,3 +253,16 @@ class HarnessRuntime:
             "reason": reason,
             "decision": decision.decision_type.value,
         }
+
+    @staticmethod
+    def _decision_payload(decision: GuardDecision) -> Any:
+        payload = decision.processed_content
+        if not isinstance(payload, str):
+            return payload
+        text = payload.strip()
+        if not text or text[0] not in {"{", "["}:
+            return payload
+        try:
+            return json.loads(text)
+        except Exception:
+            return payload

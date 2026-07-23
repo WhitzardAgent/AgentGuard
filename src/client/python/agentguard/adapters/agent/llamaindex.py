@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import functools
 import inspect
+import json
 import re
 from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 from dataclasses import dataclass
@@ -10,10 +11,13 @@ from typing import Any
 
 from agentguard.adapters.agent.base import BaseAgentAdapter, LLMBinding
 from agentguard.adapters.agent.normalization import (
+    LLMOutputDenormalization,
     LLMInputDenormalization,
     LLMInputNormalization,
     LLMOutputNormalization,
+    ToolInvokeDenormalization,
     ToolInvokeNormalization,
+    ToolResultDenormalization,
     ToolResultNormalization,
 )
 from agentguard.adapters.agent.patching import is_guarded, mark_guarded, set_attr
@@ -172,6 +176,27 @@ class LlamaIndexAgentAdapter(BaseAgentAdapter):
             metadata=_llamaindex_meta(label=label, owner=owner),
         )
 
+    def denormalize_llm_output(
+        self,
+        *,
+        label: str,
+        payload: Any,
+        output: Any,
+        fn: Callable[..., Any] | None = None,
+        owner: Any = None,
+    ) -> LLMOutputDenormalization:
+        denormalized = super().denormalize_llm_output(
+            label=label,
+            payload=payload,
+            output=output,
+            fn=fn,
+            owner=owner,
+        )
+        return LLMOutputDenormalization(
+            output=denormalized.output,
+            metadata=_llamaindex_meta(label=label, owner=owner),
+        )
+
     def normalize_tool_invoke(
         self,
         *,
@@ -190,6 +215,30 @@ class LlamaIndexAgentAdapter(BaseAgentAdapter):
             metadata=_llamaindex_meta(owner=owner),
         )
 
+    def denormalize_tool_invoke(
+        self,
+        *,
+        tool_metadata: ToolMetadata,
+        payload: Any,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        fn: Callable[..., Any] | None = None,
+        owner: Any = None,
+    ) -> ToolInvokeDenormalization:
+        denormalized = super().denormalize_tool_invoke(
+            tool_metadata=tool_metadata,
+            payload=payload,
+            args=args,
+            kwargs=kwargs,
+            fn=fn,
+            owner=owner,
+        )
+        return ToolInvokeDenormalization(
+            args=denormalized.args,
+            kwargs=denormalized.kwargs,
+            metadata=_llamaindex_meta(owner=owner),
+        )
+
     def normalize_tool_result(
         self,
         *,
@@ -203,6 +252,30 @@ class LlamaIndexAgentAdapter(BaseAgentAdapter):
         return ToolResultNormalization(
             result=_normalize_llamaindex_value(result),
             error=error,
+            metadata=_llamaindex_meta(owner=owner),
+        )
+
+    def denormalize_tool_result(
+        self,
+        *,
+        tool_name: str,
+        payload: Any,
+        result: Any = None,
+        error: str | None = None,
+        fn: Callable[..., Any] | None = None,
+        owner: Any = None,
+    ) -> ToolResultDenormalization:
+        denormalized = super().denormalize_tool_result(
+            tool_name=tool_name,
+            payload=payload,
+            result=result,
+            error=error,
+            fn=fn,
+            owner=owner,
+        )
+        return ToolResultDenormalization(
+            result=denormalized.result,
+            error=denormalized.error,
             metadata=_llamaindex_meta(owner=owner),
         )
 
@@ -246,6 +319,8 @@ def _make_guarded_call_tool(
     async def wrapper(*args: Any, **kwargs: Any) -> Any:
         tool, tool_input = _extract_call_tool_args(args, kwargs)
         metadata = adapter.tool_metadata_for(guard, tool, original)
+        current_args = tuple(args)
+        current_kwargs = dict(kwargs)
         arguments = tool_input if isinstance(tool_input, dict) else {"input": tool_input}
         try:
             invoke = adapter.normalize_tool_invoke(
@@ -263,12 +338,23 @@ def _make_guarded_call_tool(
                     **dict(invoke.metadata),
                 )
             ).decision
+            if decision.decision_type == DecisionType.MODIFY_TOOL_INVOKE:
+                denormalized = adapter.denormalize_tool_invoke(
+                    tool_metadata=metadata,
+                    payload=_decision_payload(decision),
+                    args=current_args,
+                    kwargs=current_kwargs,
+                    fn=original,
+                    owner=tool,
+                )
+                current_args = tuple(denormalized.args)
+                current_kwargs = dict(denormalized.kwargs)
             blocked = _blocked_tool_output(decision, metadata.name, arguments)
             if blocked is not None:
                 return blocked
 
             try:
-                value = original(*args, **kwargs)
+                value = original(*current_args, **current_kwargs)
                 if inspect.isawaitable(value):
                     value = await value
             except Exception as exc:
@@ -307,6 +393,14 @@ def _make_guarded_call_tool(
                 ),
                 phase="after",
             ).decision
+            if result_decision.decision_type == DecisionType.MODIFY_TOOL_RESULT:
+                value = adapter.denormalize_tool_result(
+                    tool_name=metadata.name,
+                    payload=_decision_payload(result_decision),
+                    result=value,
+                    fn=original,
+                    owner=tool,
+                ).result
             result_blocked = _blocked_result_output(
                 result_decision,
                 metadata.name,
@@ -357,14 +451,35 @@ def _make_guarded_llm_callable(
         @functools.wraps(fn)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
             try:
-                decision = _guard_llm_before(guard, adapter, label, args, kwargs, fn, owner)
+                current_args = tuple(args)
+                current_kwargs = dict(kwargs)
+                decision = _guard_llm_before(guard, adapter, label, current_args, current_kwargs, fn, owner)
+                if decision.decision_type == DecisionType.MODIFY_LLM_INPUT:
+                    denormalized = adapter.denormalize_llm_input(
+                        label=label,
+                        payload=_decision_payload(decision),
+                        args=current_args,
+                        kwargs=current_kwargs,
+                        fn=fn,
+                        owner=owner,
+                    )
+                    current_args = tuple(denormalized.args)
+                    current_kwargs = dict(denormalized.kwargs)
                 blocked = _blocked_llm_value(decision)
                 if blocked is not None:
                     return blocked
-                raw = await fn(*args, **kwargs)
+                raw = await fn(*current_args, **current_kwargs)
                 if stream:
                     return _wrap_async_stream(guard, adapter, label, raw, fn, owner)
                 decision = _guard_llm_after(guard, adapter, label, raw, fn, owner)
+                if decision.decision_type == DecisionType.MODIFY_LLM_OUTPUT:
+                    raw = adapter.denormalize_llm_output(
+                        label=label,
+                        payload=_decision_payload(decision),
+                        output=raw,
+                        fn=fn,
+                        owner=owner,
+                    ).output
                 blocked = _blocked_llm_value(decision)
                 return blocked if blocked is not None else raw
             except Exception:
@@ -378,14 +493,35 @@ def _make_guarded_llm_callable(
     @functools.wraps(fn)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         try:
-            decision = _guard_llm_before(guard, adapter, label, args, kwargs, fn, owner)
+            current_args = tuple(args)
+            current_kwargs = dict(kwargs)
+            decision = _guard_llm_before(guard, adapter, label, current_args, current_kwargs, fn, owner)
+            if decision.decision_type == DecisionType.MODIFY_LLM_INPUT:
+                denormalized = adapter.denormalize_llm_input(
+                    label=label,
+                    payload=_decision_payload(decision),
+                    args=current_args,
+                    kwargs=current_kwargs,
+                    fn=fn,
+                    owner=owner,
+                )
+                current_args = tuple(denormalized.args)
+                current_kwargs = dict(denormalized.kwargs)
             blocked = _blocked_llm_value(decision)
             if blocked is not None:
                 return blocked
-            raw = fn(*args, **kwargs)
+            raw = fn(*current_args, **current_kwargs)
             if stream:
                 return _wrap_sync_stream(guard, adapter, label, raw, fn, owner)
             decision = _guard_llm_after(guard, adapter, label, raw, fn, owner)
+            if decision.decision_type == DecisionType.MODIFY_LLM_OUTPUT:
+                raw = adapter.denormalize_llm_output(
+                    label=label,
+                    payload=_decision_payload(decision),
+                    output=raw,
+                    fn=fn,
+                    owner=owner,
+                ).output
             blocked = _blocked_llm_value(decision)
             return blocked if blocked is not None else raw
         except Exception:
@@ -431,6 +567,19 @@ def _guard_llm_after(
         ev.llm_output(guard.context, normalized.payload, **dict(normalized.metadata)),
         phase="after",
     ).decision
+
+
+def _decision_payload(decision: GuardDecision) -> Any:
+    payload = decision.processed_content
+    if not isinstance(payload, str):
+        return payload
+    text = payload.strip()
+    if not text or text[0] not in {"{", "["}:
+        return payload
+    try:
+        return json.loads(text)
+    except Exception:
+        return payload
 
 
 def _wrap_sync_stream(

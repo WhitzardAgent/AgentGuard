@@ -7,12 +7,18 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agentguard.adapters.agent.normalization import (
+    LLMOutputDenormalization,
     LLMInputDenormalization,
     LLMInputNormalization,
     LLMOutputNormalization,
+    ToolInvokeDenormalization,
     ToolInvokeNormalization,
+    ToolResultDenormalization,
     ToolResultNormalization,
     denormalize_llm_input_payload,
+    denormalize_llm_output_payload,
+    denormalize_tool_invoke_payload,
+    denormalize_tool_result_payload,
     normalize_generic_llm_output_payload,
 )
 from agentguard.schemas.context import RuntimeContext
@@ -179,6 +185,21 @@ class BaseAgentAdapter:
             metadata=self._metadata(label=label, owner=owner),
         )
 
+    def denormalize_llm_output(
+        self,
+        *,
+        label: str,
+        payload: Any,
+        output: Any,
+        fn: Callable[..., Any] | None = None,
+        owner: Any = None,
+    ) -> LLMOutputDenormalization:
+        _ = fn
+        return LLMOutputDenormalization(
+            output=denormalize_llm_output_payload(payload=payload, output=output),
+            metadata=self._metadata(label=label, owner=owner),
+        )
+
     def normalize_tool_invoke(
         self,
         *,
@@ -191,6 +212,29 @@ class BaseAgentAdapter:
         return ToolInvokeNormalization(
             arguments=self.normalize_value(arguments),
             capabilities=list(tool_metadata.capabilities),
+            metadata=self._metadata(owner=owner),
+        )
+
+    def denormalize_tool_invoke(
+        self,
+        *,
+        tool_metadata: ToolMetadata,
+        payload: Any,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        fn: Callable[..., Any] | None = None,
+        owner: Any = None,
+    ) -> ToolInvokeDenormalization:
+        _ = tool_metadata
+        denormalized = denormalize_tool_invoke_payload(
+            payload=payload,
+            args=args,
+            kwargs=kwargs,
+            fn=fn,
+        )
+        return ToolInvokeDenormalization(
+            args=denormalized.args,
+            kwargs=denormalized.kwargs,
             metadata=self._metadata(owner=owner),
         )
 
@@ -207,6 +251,28 @@ class BaseAgentAdapter:
         return ToolResultNormalization(
             result=self.normalize_value(result),
             error=error,
+            metadata=self._metadata(owner=owner),
+        )
+
+    def denormalize_tool_result(
+        self,
+        *,
+        tool_name: str,
+        payload: Any,
+        result: Any = None,
+        error: str | None = None,
+        fn: Callable[..., Any] | None = None,
+        owner: Any = None,
+    ) -> ToolResultDenormalization:
+        _ = (tool_name, fn)
+        denormalized = denormalize_tool_result_payload(
+            payload=payload,
+            result=result,
+            error=error,
+        )
+        return ToolResultDenormalization(
+            result=denormalized.result,
+            error=denormalized.error,
             metadata=self._metadata(owner=owner),
         )
 

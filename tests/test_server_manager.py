@@ -6,13 +6,13 @@ import pytest
 from backend.llm.provider import HeuristicProvider, OpenAICompatibleProvider, get_provider
 from backend.runtime.manager import RuntimeManager
 from backend.runtime.plugins.base import BasePlugin, CheckResult
-from backend.runtime.plugins.manager import PluginManager, load_plugin_config
+from backend.runtime.plugins.manager import PluginManager, decision_type_rank, load_plugin_config
 from backend.runtime.plugins.registry import plugin_descriptions, register
 from backend.runtime.plugins.tool_before.rule_based_plugin import RuleBasedPlugin
 
 from shared.rules.loader import load_rules_file
 from shared.schemas.context import RuntimeContext
-from shared.schemas.decisions import GuardDecision
+from shared.schemas.decisions import DecisionType, GuardDecision
 from shared.schemas.events import EventType, RuntimeEvent
 from shared.schemas.policy import PolicyEffect, PolicyRule, RuleCondition
 
@@ -23,6 +23,12 @@ class _FakeTicketIdentity:
     ticket_id = 7
     ticket_prefix = "agt_fake"
     expires_at = None
+
+
+def test_decision_rank_places_modify_between_log_only_and_loopback():
+    assert decision_type_rank(DecisionType.MODIFY_LLM_INPUT) == decision_type_rank(DecisionType.ALIGN_THOUGHT)
+    assert decision_type_rank(DecisionType.MODIFY_TOOL_RESULT) > decision_type_rank(DecisionType.LOG_ONLY)
+    assert decision_type_rank(DecisionType.MODIFY_TOOL_RESULT) < decision_type_rank(DecisionType.LOOP_BACK_TO_LLM)
 
 
 def _exfil_request():

@@ -12,10 +12,13 @@ from typing import Any
 
 from agentguard.adapters.agent.base import BaseAgentAdapter, ToolBinding
 from agentguard.adapters.agent.normalization import (
+    LLMOutputDenormalization,
     LLMInputDenormalization,
     LLMInputNormalization,
     LLMOutputNormalization,
+    ToolInvokeDenormalization,
     ToolInvokeNormalization,
+    ToolResultDenormalization,
     ToolResultNormalization,
 )
 from agentguard.adapters.agent.patching import (
@@ -156,6 +159,27 @@ class LangChainAgentAdapter(BaseAgentAdapter):
             metadata=self._langchain_llm_meta(label=label, owner=owner),
         )
 
+    def denormalize_llm_output(
+        self,
+        *,
+        label: str,
+        payload: Any,
+        output: Any,
+        fn: Any = None,
+        owner: Any = None,
+    ) -> LLMOutputDenormalization:
+        denormalized = super().denormalize_llm_output(
+            label=label,
+            payload=payload,
+            output=output,
+            fn=fn,
+            owner=owner,
+        )
+        return LLMOutputDenormalization(
+            output=denormalized.output,
+            metadata=self._langchain_llm_meta(label=label, owner=owner),
+        )
+
     def handle_blocked_llm_decision(
         self,
         *,
@@ -206,6 +230,30 @@ class LangChainAgentAdapter(BaseAgentAdapter):
             metadata=self._langchain_meta(owner=owner),
         )
 
+    def denormalize_tool_invoke(
+        self,
+        *,
+        tool_metadata: ToolMetadata,
+        payload: Any,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        fn: Any = None,
+        owner: Any = None,
+    ) -> ToolInvokeDenormalization:
+        denormalized = super().denormalize_tool_invoke(
+            tool_metadata=tool_metadata,
+            payload=payload,
+            args=args,
+            kwargs=kwargs,
+            fn=fn,
+            owner=owner,
+        )
+        return ToolInvokeDenormalization(
+            args=denormalized.args,
+            kwargs=denormalized.kwargs,
+            metadata=self._langchain_meta(owner=owner),
+        )
+
     def normalize_tool_result(
         self,
         *,
@@ -219,6 +267,30 @@ class LangChainAgentAdapter(BaseAgentAdapter):
         return ToolResultNormalization(
             result=_normalize_langchain_value(result),
             error=error,
+            metadata=self._langchain_meta(owner=owner),
+        )
+
+    def denormalize_tool_result(
+        self,
+        *,
+        tool_name: str,
+        payload: Any,
+        result: Any = None,
+        error: str | None = None,
+        fn: Any = None,
+        owner: Any = None,
+    ) -> ToolResultDenormalization:
+        denormalized = super().denormalize_tool_result(
+            tool_name=tool_name,
+            payload=payload,
+            result=result,
+            error=error,
+            fn=fn,
+            owner=owner,
+        )
+        return ToolResultDenormalization(
+            result=denormalized.result,
+            error=denormalized.error,
             metadata=self._langchain_meta(owner=owner),
         )
 
@@ -718,6 +790,19 @@ def _parse_tagged_llm_output(output: str) -> _ParsedLLMOutput:
     return _ParsedLLMOutput(thought=thought, final_output=final_output)
 
 
+def _decision_payload(decision: GuardDecision) -> Any:
+    payload = decision.processed_content
+    if not isinstance(payload, str):
+        return payload
+    text = payload.strip()
+    if not text or text[0] not in {"{", "["}:
+        return payload
+    try:
+        return json.loads(text)
+    except Exception:
+        return payload
+
+
 def _normalize_langchain_value(value: Any) -> Any:
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
@@ -898,7 +983,9 @@ def _install_langchain_tool_binding(
         @functools.wraps(fn)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
             try:
-                arguments = _build_langchain_tool_arguments(fn, args, kwargs)
+                current_args = tuple(args)
+                current_kwargs = dict(kwargs)
+                arguments = _build_langchain_tool_arguments(fn, current_args, current_kwargs)
                 decision = guard_tool_before(
                     guard,
                     metadata,
@@ -907,11 +994,22 @@ def _install_langchain_tool_binding(
                     fn=fn,
                     owner=tool,
                 )
-                blocked = _blocked_langchain_tool_value(decision, metadata.name, args, kwargs)
+                if decision.decision_type == DecisionType.MODIFY_TOOL_INVOKE:
+                    denormalized = adapter.denormalize_tool_invoke(
+                        tool_metadata=metadata,
+                        payload=_decision_payload(decision),
+                        args=current_args,
+                        kwargs=current_kwargs,
+                        fn=fn,
+                        owner=tool,
+                    )
+                    current_args = tuple(denormalized.args)
+                    current_kwargs = dict(denormalized.kwargs)
+                blocked = _blocked_langchain_tool_value(decision, metadata.name, current_args, current_kwargs)
                 if blocked is not None:
                     return blocked
                 try:
-                    value = await fn(*args, **kwargs)
+                    value = await fn(*current_args, **current_kwargs)
                 except Exception as exc:
                     guard_tool_after(
                         guard,
@@ -930,11 +1028,19 @@ def _install_langchain_tool_binding(
                     fn=fn,
                     owner=tool,
                 )
+                if result_decision.decision_type == DecisionType.MODIFY_TOOL_RESULT:
+                    value = adapter.denormalize_tool_result(
+                        tool_name=metadata.name,
+                        payload=_decision_payload(result_decision),
+                        result=value,
+                        fn=fn,
+                        owner=tool,
+                    ).result
                 result_blocked = _blocked_langchain_result_value(
                     result_decision,
                     metadata.name,
-                    args,
-                    kwargs,
+                    current_args,
+                    current_kwargs,
                 )
                 return result_blocked if result_blocked is not None else value
             except Exception:
@@ -948,7 +1054,9 @@ def _install_langchain_tool_binding(
     @functools.wraps(fn)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         try:
-            arguments = _build_langchain_tool_arguments(fn, args, kwargs)
+            current_args = tuple(args)
+            current_kwargs = dict(kwargs)
+            arguments = _build_langchain_tool_arguments(fn, current_args, current_kwargs)
             decision = guard_tool_before(
                 guard,
                 metadata,
@@ -957,11 +1065,22 @@ def _install_langchain_tool_binding(
                 fn=fn,
                 owner=tool,
             )
-            blocked = _blocked_langchain_tool_value(decision, metadata.name, args, kwargs)
+            if decision.decision_type == DecisionType.MODIFY_TOOL_INVOKE:
+                denormalized = adapter.denormalize_tool_invoke(
+                    tool_metadata=metadata,
+                    payload=_decision_payload(decision),
+                    args=current_args,
+                    kwargs=current_kwargs,
+                    fn=fn,
+                    owner=tool,
+                )
+                current_args = tuple(denormalized.args)
+                current_kwargs = dict(denormalized.kwargs)
+            blocked = _blocked_langchain_tool_value(decision, metadata.name, current_args, current_kwargs)
             if blocked is not None:
                 return blocked
             try:
-                value = fn(*args, **kwargs)
+                value = fn(*current_args, **current_kwargs)
             except Exception as exc:
                 guard_tool_after(
                     guard,
@@ -980,11 +1099,19 @@ def _install_langchain_tool_binding(
                 fn=fn,
                 owner=tool,
             )
+            if result_decision.decision_type == DecisionType.MODIFY_TOOL_RESULT:
+                value = adapter.denormalize_tool_result(
+                    tool_name=metadata.name,
+                    payload=_decision_payload(result_decision),
+                    result=value,
+                    fn=fn,
+                    owner=tool,
+                ).result
             result_blocked = _blocked_langchain_result_value(
                 result_decision,
                 metadata.name,
-                args,
-                kwargs,
+                current_args,
+                current_kwargs,
             )
             return result_blocked if result_blocked is not None else value
         except Exception:

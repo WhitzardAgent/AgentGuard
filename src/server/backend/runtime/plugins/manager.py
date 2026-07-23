@@ -26,6 +26,10 @@ _EVENT_PHASE = {
 _DECISION_RANK = {
     DecisionType.ALLOW: 0,
     DecisionType.LOG_ONLY: 1,
+    DecisionType.MODIFY_LLM_INPUT: 2,
+    DecisionType.MODIFY_LLM_OUTPUT: 2,
+    DecisionType.MODIFY_TOOL_INVOKE: 2,
+    DecisionType.MODIFY_TOOL_RESULT: 2,
     DecisionType.ALIGN_THOUGHT: 2,
     DecisionType.LOOP_BACK_TO_LLM: 3,
     DecisionType.REPAIR: 4,

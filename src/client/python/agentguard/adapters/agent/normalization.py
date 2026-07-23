@@ -37,7 +37,27 @@ class ToolInvokeNormalization:
 
 
 @dataclass(slots=True)
+class LLMOutputDenormalization:
+    output: Any
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class ToolInvokeDenormalization:
+    args: tuple[Any, ...]
+    kwargs: dict[str, Any]
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class ToolResultNormalization:
+    result: Any
+    error: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class ToolResultDenormalization:
     result: Any
     error: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -75,6 +95,16 @@ class AgentEventNormalizer(Protocol):
         owner: Any = None,
     ) -> LLMInputDenormalization: ...
 
+    def denormalize_llm_output(
+        self,
+        *,
+        label: str,
+        payload: Any,
+        output: Any,
+        fn: Callable[..., Any] | None = None,
+        owner: Any = None,
+    ) -> LLMOutputDenormalization: ...
+
     def normalize_tool_invoke(
         self,
         *,
@@ -83,6 +113,17 @@ class AgentEventNormalizer(Protocol):
         fn: Callable[..., Any] | None = None,
         owner: Any = None,
     ) -> ToolInvokeNormalization: ...
+
+    def denormalize_tool_invoke(
+        self,
+        *,
+        tool_metadata: ToolMetadata,
+        payload: Any,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        fn: Callable[..., Any] | None = None,
+        owner: Any = None,
+    ) -> ToolInvokeDenormalization: ...
 
     def normalize_tool_result(
         self,
@@ -93,6 +134,17 @@ class AgentEventNormalizer(Protocol):
         fn: Callable[..., Any] | None = None,
         owner: Any = None,
     ) -> ToolResultNormalization: ...
+
+    def denormalize_tool_result(
+        self,
+        *,
+        tool_name: str,
+        payload: Any,
+        result: Any = None,
+        error: str | None = None,
+        fn: Callable[..., Any] | None = None,
+        owner: Any = None,
+    ) -> ToolResultDenormalization: ...
 
 
 class _FallbackAgentEventNormalizer:
@@ -207,6 +259,21 @@ class _FallbackAgentEventNormalizer:
             metadata=self._metadata(label=label, owner=owner),
         )
 
+    def denormalize_llm_output(
+        self,
+        *,
+        label: str,
+        payload: Any,
+        output: Any,
+        fn: Callable[..., Any] | None = None,
+        owner: Any = None,
+    ) -> LLMOutputDenormalization:
+        _ = fn
+        return LLMOutputDenormalization(
+            output=denormalize_llm_output_payload(payload=payload, output=output),
+            metadata=self._metadata(label=label, owner=owner),
+        )
+
     def normalize_tool_invoke(
         self,
         *,
@@ -219,6 +286,29 @@ class _FallbackAgentEventNormalizer:
         return ToolInvokeNormalization(
             arguments=self.normalize_value(arguments),
             capabilities=list(tool_metadata.capabilities),
+            metadata=self._metadata(owner=owner),
+        )
+
+    def denormalize_tool_invoke(
+        self,
+        *,
+        tool_metadata: ToolMetadata,
+        payload: Any,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        fn: Callable[..., Any] | None = None,
+        owner: Any = None,
+    ) -> ToolInvokeDenormalization:
+        _ = tool_metadata
+        denormalized = denormalize_tool_invoke_payload(
+            payload=payload,
+            args=args,
+            kwargs=kwargs,
+            fn=fn,
+        )
+        return ToolInvokeDenormalization(
+            args=denormalized.args,
+            kwargs=denormalized.kwargs,
             metadata=self._metadata(owner=owner),
         )
 
@@ -235,6 +325,28 @@ class _FallbackAgentEventNormalizer:
         return ToolResultNormalization(
             result=self.normalize_value(result),
             error=error,
+            metadata=self._metadata(owner=owner),
+        )
+
+    def denormalize_tool_result(
+        self,
+        *,
+        tool_name: str,
+        payload: Any,
+        result: Any = None,
+        error: str | None = None,
+        fn: Callable[..., Any] | None = None,
+        owner: Any = None,
+    ) -> ToolResultDenormalization:
+        _ = (tool_name, fn)
+        denormalized = denormalize_tool_result_payload(
+            payload=payload,
+            result=result,
+            error=error,
+        )
+        return ToolResultDenormalization(
+            result=denormalized.result,
+            error=denormalized.error,
             metadata=self._metadata(owner=owner),
         )
 
@@ -450,6 +562,237 @@ def denormalize_llm_input_payload(
     return LLMInputDenormalization(args=tuple(current_args), kwargs=current_kwargs)
 
 
+def denormalize_llm_output_payload(
+    *,
+    payload: Any,
+    output: Any,
+) -> Any:
+    return _denormalize_structured_value(payload=payload, template=output, primary_keys=("output", "final_output", "content", "text", "message"))
+
+
+def denormalize_tool_invoke_payload(
+    *,
+    payload: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    fn: Callable[..., Any] | None = None,
+) -> ToolInvokeDenormalization:
+    current_args = list(args)
+    current_kwargs = dict(kwargs)
+    data = payload if isinstance(payload, dict) else {"input": payload}
+
+    if not callable(fn):
+        if current_args:
+            current_args[0] = data
+            return ToolInvokeDenormalization(args=tuple(current_args), kwargs=current_kwargs)
+        if current_kwargs:
+            current_kwargs.update(data if isinstance(data, dict) else {"input": data})
+            return ToolInvokeDenormalization(args=tuple(current_args), kwargs=current_kwargs)
+        return ToolInvokeDenormalization(args=(data,), kwargs={})
+
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        if current_args:
+            current_args[0] = data
+            return ToolInvokeDenormalization(args=tuple(current_args), kwargs=current_kwargs)
+        return ToolInvokeDenormalization(args=(data,), kwargs=current_kwargs)
+
+    if isinstance(data, dict) and not any(name in sig.parameters for name in data):
+        preferred_name = _preferred_tool_input_parameter(sig)
+        if preferred_name is not None:
+            data = {preferred_name: data}
+
+    original_positions = _argument_positions(sig, current_args, current_kwargs)
+    next_args: list[Any] = []
+    next_kwargs: dict[str, Any] = {}
+    consumed: set[str] = set()
+
+    for idx, (name, param) in enumerate(sig.parameters.items()):
+        if param.kind == inspect.Parameter.VAR_POSITIONAL:
+            extra_args = data.get(name)
+            if isinstance(extra_args, (list, tuple)):
+                next_args.extend(extra_args)
+                consumed.add(name)
+            continue
+        if param.kind == inspect.Parameter.VAR_KEYWORD:
+            extra_kwargs = data.get(name)
+            if isinstance(extra_kwargs, dict):
+                next_kwargs.update(extra_kwargs)
+                consumed.add(name)
+            continue
+
+        if name in data:
+            value = data[name]
+            consumed.add(name)
+        elif name in current_kwargs:
+            value = current_kwargs[name]
+        elif idx < len(current_args):
+            value = current_args[idx]
+        else:
+            continue
+
+        if param.kind == inspect.Parameter.POSITIONAL_ONLY:
+            next_args.append(value)
+            continue
+
+        if param.kind == inspect.Parameter.KEYWORD_ONLY:
+            next_kwargs[name] = value
+            continue
+
+        if name in original_positions:
+            next_args.append(value)
+        else:
+            next_kwargs[name] = value
+
+    for key, value in data.items():
+        if key in consumed:
+            continue
+        next_kwargs[key] = value
+
+    return ToolInvokeDenormalization(args=tuple(next_args), kwargs=next_kwargs)
+
+
+def denormalize_tool_result_payload(
+    *,
+    payload: Any,
+    result: Any = None,
+    error: str | None = None,
+) -> ToolResultDenormalization:
+    if isinstance(payload, dict) and "error" in payload:
+        return ToolResultDenormalization(
+            result=denormalize_llm_output_payload(payload=payload, output=result),
+            error=str(payload.get("error")) if payload.get("error") is not None else error,
+        )
+    return ToolResultDenormalization(
+        result=_denormalize_structured_value(payload=payload, template=result, primary_keys=("result", "output", "final_output", "content", "text", "message", "value")),
+        error=error,
+    )
+
+
+def _denormalize_structured_value(
+    *,
+    payload: Any,
+    template: Any,
+    primary_keys: tuple[str, ...],
+) -> Any:
+    if template is None:
+        return _extract_primary_value(payload, primary_keys)
+
+    if isinstance(template, str):
+        value = _extract_primary_value(payload, primary_keys)
+        return value if isinstance(value, str) else str(value)
+
+    if isinstance(template, dict):
+        return _denormalize_mapping(payload, template, primary_keys=primary_keys)
+
+    if isinstance(template, list):
+        return payload if isinstance(payload, list) else [payload]
+
+    for attr in ("content", "text", "output", "message", "value"):
+        if hasattr(template, attr):
+            updated = _clone_like(template)
+            value = _extract_primary_value(payload, primary_keys)
+            if _set_denormalized_attr(updated, attr, value):
+                return updated
+    return payload
+
+
+def _denormalize_mapping(payload: Any, template: dict[str, Any], *, primary_keys: tuple[str, ...]) -> dict[str, Any]:
+    if isinstance(payload, dict):
+        updated = dict(template)
+        for key, value in payload.items():
+            if key in updated:
+                updated[key] = value
+        nested_message = updated.get("message")
+        if isinstance(nested_message, dict):
+            updated["message"] = _denormalize_mapping(payload, nested_message, primary_keys=primary_keys)
+        elif isinstance(nested_message, str) and any(key in payload for key in primary_keys):
+            updated["message"] = _extract_primary_value(payload, primary_keys)
+        primary = _extract_primary_value(payload, primary_keys)
+        if primary is not payload:
+            for key in primary_keys:
+                if key in updated:
+                    updated[key] = primary
+                    break
+        return updated
+
+    updated = dict(template)
+    primary = _extract_primary_value(payload, primary_keys)
+    for key in primary_keys:
+        if key in updated:
+            updated[key] = primary
+            return updated
+    return {**updated, primary_keys[0]: primary}
+
+
+def _extract_primary_value(payload: Any, primary_keys: tuple[str, ...]) -> Any:
+    if isinstance(payload, dict):
+        for key in primary_keys:
+            value = payload.get(key)
+            if value is not None:
+                return value
+    return payload
+
+
+def _clone_like(value: Any) -> Any:
+    try:
+        import copy
+
+        return copy.deepcopy(value)
+    except Exception:
+        return value
+
+
+def _set_denormalized_attr(target: Any, attr: str, value: Any) -> bool:
+    try:
+        setattr(target, attr, value)
+        return True
+    except Exception:
+        return False
+
+
+def _argument_positions(
+    sig: inspect.Signature,
+    args: list[Any],
+    kwargs: dict[str, Any],
+) -> set[str]:
+    positions: set[str] = set()
+    for idx, (name, param) in enumerate(sig.parameters.items()):
+        if param.kind not in {
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        }:
+            continue
+        if idx < len(args) and name not in kwargs:
+            positions.add(name)
+    return positions
+
+
+def _preferred_tool_input_parameter(sig: inspect.Signature) -> str | None:
+    for preferred in ("input", "json_input", "arguments", "payload", "data", "message", "msg"):
+        param = sig.parameters.get(preferred)
+        if param is None:
+            continue
+        if param.kind in {
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        }:
+            return preferred
+    candidate_names = [
+        name
+        for name, param in sig.parameters.items()
+        if param.kind in {
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        }
+        and name not in {"self", "cls", "ctx", "context", "run_context"}
+    ]
+    return candidate_names[-1] if candidate_names else None
+
+
 def _replace_primary_llm_input(
     value: Any,
     *,
@@ -510,13 +853,19 @@ def _function_accepts_keyword(fn: Callable[..., Any] | None, key: str) -> bool:
 __all__ = [
     "AgentEventNormalizer",
     "DEFAULT_AGENT_EVENT_NORMALIZER",
+    "LLMOutputDenormalization",
     "LLMInputDenormalization",
     "LLMInputNormalization",
     "LLMOutputNormalization",
     "ParsedLLMOutput",
+    "ToolInvokeDenormalization",
     "ToolInvokeNormalization",
+    "ToolResultDenormalization",
     "ToolResultNormalization",
     "denormalize_llm_input_payload",
+    "denormalize_llm_output_payload",
+    "denormalize_tool_invoke_payload",
+    "denormalize_tool_result_payload",
     "normalize_generic_llm_output_payload",
     "parse_generic_llm_output_text",
 ]

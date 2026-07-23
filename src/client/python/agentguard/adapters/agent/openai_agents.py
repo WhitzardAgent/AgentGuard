@@ -13,7 +13,12 @@ import threading
 from typing import Any
 
 from agentguard.adapters.agent.base import BaseAgentAdapter, LLMBinding, ToolBinding
-from agentguard.adapters.agent.normalization import LLMOutputNormalization
+from agentguard.adapters.agent.normalization import (
+    LLMOutputDenormalization,
+    LLMOutputNormalization,
+    ToolInvokeDenormalization,
+    ToolResultDenormalization,
+)
 from agentguard.adapters.agent.patching import (
     guard_tool_after,
     guard_tool_before,
@@ -158,6 +163,75 @@ class OpenAIAgentsAdapter(BaseAgentAdapter):
         return LLMOutputNormalization(
             payload=_normalize_openai_agents_llm_output(output),
             metadata=self._metadata(label=label, owner=owner),
+        )
+
+    def denormalize_llm_output(
+        self,
+        *,
+        label: str,
+        payload: Any,
+        output: Any,
+        fn: Any = None,
+        owner: Any = None,
+    ) -> LLMOutputDenormalization:
+        denormalized = super().denormalize_llm_output(
+            label=label,
+            payload=payload,
+            output=output,
+            fn=fn,
+            owner=owner,
+        )
+        return LLMOutputDenormalization(
+            output=denormalized.output,
+            metadata=self._metadata(label=label, owner=owner),
+        )
+
+    def denormalize_tool_invoke(
+        self,
+        *,
+        tool_metadata: Any,
+        payload: Any,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        fn: Any = None,
+        owner: Any = None,
+    ) -> ToolInvokeDenormalization:
+        denormalized = super().denormalize_tool_invoke(
+            tool_metadata=tool_metadata,
+            payload=payload,
+            args=args,
+            kwargs=kwargs,
+            fn=fn,
+            owner=owner,
+        )
+        return ToolInvokeDenormalization(
+            args=denormalized.args,
+            kwargs=denormalized.kwargs,
+            metadata=self._metadata(owner=owner),
+        )
+
+    def denormalize_tool_result(
+        self,
+        *,
+        tool_name: str,
+        payload: Any,
+        result: Any = None,
+        error: str | None = None,
+        fn: Any = None,
+        owner: Any = None,
+    ) -> ToolResultDenormalization:
+        denormalized = super().denormalize_tool_result(
+            tool_name=tool_name,
+            payload=payload,
+            result=result,
+            error=error,
+            fn=fn,
+            owner=owner,
+        )
+        return ToolResultDenormalization(
+            result=denormalized.result,
+            error=denormalized.error,
+            metadata=self._metadata(owner=owner),
         )
 
 _UNRESOLVED = object()
@@ -823,7 +897,9 @@ def _install_openai_tool_binding(
     @functools.wraps(original)
     async def guarded_invoke(*args: Any, **kwargs: Any) -> Any:
         try:
-            tool_args = _extract_json_args(args, kwargs)
+            current_args = tuple(args)
+            current_kwargs = dict(kwargs)
+            tool_args = _extract_json_args(current_args, current_kwargs)
             decision = guard_tool_before(
                 guard,
                 metadata,
@@ -832,6 +908,17 @@ def _install_openai_tool_binding(
                 fn=original,
                 owner=tool,
             )
+            if decision.decision_type == DecisionType.MODIFY_TOOL_INVOKE:
+                denormalized = adapter.denormalize_tool_invoke(
+                    tool_metadata=metadata,
+                    payload=_decision_payload(decision),
+                    args=current_args,
+                    kwargs=current_kwargs,
+                    fn=original,
+                    owner=tool,
+                )
+                current_args = tuple(denormalized.args)
+                current_kwargs = dict(denormalized.kwargs)
             if decision.decision_type == DecisionType.DENY:
                 return json.dumps({"agentguard": "blocked", "reason": decision.reason})
             if decision.requires_user or decision.requires_remote:
@@ -842,7 +929,7 @@ def _install_openai_tool_binding(
                 })
 
             try:
-                value = await _call_original(*args, **kwargs)
+                value = await _call_original(*current_args, **current_kwargs)
             except Exception as exc:
                 guard_tool_after(
                     guard,
@@ -866,6 +953,14 @@ def _install_openai_tool_binding(
                 return json.dumps({"agentguard": "blocked", "reason": result_decision.reason})
             if result_decision.decision_type == DecisionType.SANITIZE:
                 return json.dumps({"agentguard": "sanitized", "reason": result_decision.reason})
+            if result_decision.decision_type == DecisionType.MODIFY_TOOL_RESULT:
+                value = adapter.denormalize_tool_result(
+                    tool_name=name,
+                    payload=_decision_payload(result_decision),
+                    result=value,
+                    fn=original,
+                    owner=tool,
+                ).result
             return value
         except Exception:
             guard.runtime.sync_local_cache_now(reason="client_error")
@@ -902,6 +997,19 @@ def _extract_json_args(args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[st
         for key, value in kwargs.items()
         if key not in {"ctx", "context", "run_context"}
     }
+
+
+def _decision_payload(decision: Any) -> Any:
+    payload = getattr(decision, "processed_content", "")
+    if not isinstance(payload, str):
+        return payload
+    text = payload.strip()
+    if not text or text[0] not in {"{", "["}:
+        return payload
+    try:
+        return json.loads(text)
+    except Exception:
+        return payload
 
 
 def _openai_tool_description(tool: Any, original: Any) -> str:

@@ -231,7 +231,10 @@ def make_guarded_tool(
         @functools.wraps(fn)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
             try:
-                arguments = bind_arguments(fn, args, kwargs)
+                resolved = _resolve_normalizer(normalizer)
+                current_args = tuple(args)
+                current_kwargs = dict(kwargs)
+                arguments = bind_arguments(fn, current_args, current_kwargs)
                 decision = guard_tool_before(
                     guard,
                     metadata,
@@ -240,11 +243,21 @@ def make_guarded_tool(
                     fn=fn,
                     owner=owner if owner is not None else tool,
                 )
+                if decision.decision_type == DecisionType.MODIFY_TOOL_INVOKE:
+                    current_args, current_kwargs = _modified_tool_args_kwargs(
+                        decision=decision,
+                        tool_metadata=metadata,
+                        args=current_args,
+                        kwargs=current_kwargs,
+                        normalizer=resolved,
+                        fn=fn,
+                        owner=owner if owner is not None else tool,
+                    )
                 blocked = _blocked_tool_value(decision, metadata.name)
                 if blocked is not None:
                     return blocked
                 try:
-                    value = await fn(*args, **kwargs)
+                    value = await fn(*current_args, **current_kwargs)
                 except Exception as exc:
                     guard_tool_after(
                         guard,
@@ -263,6 +276,15 @@ def make_guarded_tool(
                     fn=fn,
                     owner=owner if owner is not None else tool,
                 )
+                if result_decision.decision_type == DecisionType.MODIFY_TOOL_RESULT:
+                    value = _modified_tool_result(
+                        decision=result_decision,
+                        tool_name=metadata.name,
+                        result=value,
+                        normalizer=resolved,
+                        fn=fn,
+                        owner=owner if owner is not None else tool,
+                    )
                 result_blocked = _blocked_result_value(result_decision, metadata.name)
                 return result_blocked if result_blocked is not None else value
             except Exception:
@@ -273,13 +295,72 @@ def make_guarded_tool(
 
         return mark_guarded(async_wrapper)
 
-    wrapped = guard.wrap_tool(
-        fn,
-        name=metadata.name,
-        description=metadata.description,
-        capabilities=list(metadata.capabilities),
-    )
-    return mark_guarded(wrapped)
+    @functools.wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        try:
+            resolved = _resolve_normalizer(normalizer)
+            current_args = tuple(args)
+            current_kwargs = dict(kwargs)
+            arguments = bind_arguments(fn, current_args, current_kwargs)
+            decision = guard_tool_before(
+                guard,
+                metadata,
+                arguments,
+                normalizer=normalizer,
+                fn=fn,
+                owner=owner if owner is not None else tool,
+            )
+            if decision.decision_type == DecisionType.MODIFY_TOOL_INVOKE:
+                current_args, current_kwargs = _modified_tool_args_kwargs(
+                    decision=decision,
+                    tool_metadata=metadata,
+                    args=current_args,
+                    kwargs=current_kwargs,
+                    normalizer=resolved,
+                    fn=fn,
+                    owner=owner if owner is not None else tool,
+                )
+            blocked = _blocked_tool_value(decision, metadata.name)
+            if blocked is not None:
+                return blocked
+            try:
+                value = fn(*current_args, **current_kwargs)
+            except Exception as exc:
+                guard_tool_after(
+                    guard,
+                    metadata.name,
+                    error=str(exc),
+                    normalizer=normalizer,
+                    fn=fn,
+                    owner=owner if owner is not None else tool,
+                )
+                raise
+            result_decision = guard_tool_after(
+                guard,
+                metadata.name,
+                value,
+                normalizer=normalizer,
+                fn=fn,
+                owner=owner if owner is not None else tool,
+            )
+            if result_decision.decision_type == DecisionType.MODIFY_TOOL_RESULT:
+                value = _modified_tool_result(
+                    decision=result_decision,
+                    tool_name=metadata.name,
+                    result=value,
+                    normalizer=resolved,
+                    fn=fn,
+                    owner=owner if owner is not None else tool,
+                )
+            result_blocked = _blocked_result_value(result_decision, metadata.name)
+            return result_blocked if result_blocked is not None else value
+        except Exception:
+            _sync_local_cache_now(guard, reason="client_error")
+            raise
+        finally:
+            _sync_local_cache_async(guard, reason="round_complete")
+
+    return mark_guarded(wrapper)
 
 
 def make_guarded_llm_callable(
@@ -382,6 +463,17 @@ async def _run_guarded_llm_async(
                 attempts += 1
                 continue
 
+        if before_decision.decision_type == DecisionType.MODIFY_LLM_INPUT:
+            current_args, current_kwargs = _modified_llm_args_kwargs(
+                decision=before_decision,
+                label=label,
+                args=current_args,
+                kwargs=current_kwargs,
+                normalizer=resolved,
+                fn=fn,
+                owner=owner,
+            )
+
         before_blocked = _blocked_llm_value(before_decision)
         if before_blocked is not None:
             return before_blocked
@@ -411,6 +503,16 @@ async def _run_guarded_llm_async(
                 )
                 attempts += 1
                 continue
+
+        if decision.decision_type == DecisionType.MODIFY_LLM_OUTPUT:
+            raw = _modified_llm_output(
+                decision=decision,
+                label=label,
+                output=raw,
+                normalizer=resolved,
+                fn=fn,
+                owner=owner,
+            )
 
         blocked = _blocked_llm_value(decision)
         return blocked if blocked is not None else raw
@@ -461,6 +563,17 @@ def _run_guarded_llm_sync(
                 attempts += 1
                 continue
 
+        if before_decision.decision_type == DecisionType.MODIFY_LLM_INPUT:
+            current_args, current_kwargs = _modified_llm_args_kwargs(
+                decision=before_decision,
+                label=label,
+                args=current_args,
+                kwargs=current_kwargs,
+                normalizer=resolved,
+                fn=fn,
+                owner=owner,
+            )
+
         before_blocked = _blocked_llm_value(before_decision)
         if before_blocked is not None:
             return before_blocked
@@ -491,6 +604,16 @@ def _run_guarded_llm_sync(
                 attempts += 1
                 continue
 
+        if decision.decision_type == DecisionType.MODIFY_LLM_OUTPUT:
+            raw = _modified_llm_output(
+                decision=decision,
+                label=label,
+                output=raw,
+                normalizer=resolved,
+                fn=fn,
+                owner=owner,
+            )
+
         blocked = _blocked_llm_value(decision)
         return blocked if blocked is not None else raw
 
@@ -519,6 +642,90 @@ def _loopback_llm_args_kwargs(
 
 
 def _loopback_payload_from_decision(decision: GuardDecision) -> Any:
+    return _coerce_loopback_payload(decision.processed_content)
+
+
+def _modified_llm_args_kwargs(
+    *,
+    decision: GuardDecision,
+    label: str,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    normalizer: AgentEventNormalizer,
+    fn: Callable[..., Any] | None = None,
+    owner: Any = None,
+) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    denormalized = normalizer.denormalize_llm_input(
+        label=label,
+        payload=_processed_payload_from_decision(decision),
+        args=args,
+        kwargs=kwargs,
+        fn=fn,
+        owner=owner,
+    )
+    return tuple(denormalized.args), dict(denormalized.kwargs)
+
+
+def _modified_llm_output(
+    *,
+    decision: GuardDecision,
+    label: str,
+    output: Any,
+    normalizer: AgentEventNormalizer,
+    fn: Callable[..., Any] | None = None,
+    owner: Any = None,
+) -> Any:
+    denormalized = normalizer.denormalize_llm_output(
+        label=label,
+        payload=_processed_payload_from_decision(decision),
+        output=output,
+        fn=fn,
+        owner=owner,
+    )
+    return denormalized.output
+
+
+def _modified_tool_args_kwargs(
+    *,
+    decision: GuardDecision,
+    tool_metadata: ToolMetadata,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    normalizer: AgentEventNormalizer,
+    fn: Callable[..., Any] | None = None,
+    owner: Any = None,
+) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    denormalized = normalizer.denormalize_tool_invoke(
+        tool_metadata=tool_metadata,
+        payload=_processed_payload_from_decision(decision),
+        args=args,
+        kwargs=kwargs,
+        fn=fn,
+        owner=owner,
+    )
+    return tuple(denormalized.args), dict(denormalized.kwargs)
+
+
+def _modified_tool_result(
+    *,
+    decision: GuardDecision,
+    tool_name: str,
+    result: Any,
+    normalizer: AgentEventNormalizer,
+    fn: Callable[..., Any] | None = None,
+    owner: Any = None,
+) -> Any:
+    denormalized = normalizer.denormalize_tool_result(
+        tool_name=tool_name,
+        payload=_processed_payload_from_decision(decision),
+        result=result,
+        fn=fn,
+        owner=owner,
+    )
+    return denormalized.result
+
+
+def _processed_payload_from_decision(decision: GuardDecision) -> Any:
     return _coerce_loopback_payload(decision.processed_content)
 
 

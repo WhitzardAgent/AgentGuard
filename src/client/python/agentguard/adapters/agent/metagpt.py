@@ -5,16 +5,20 @@ import contextvars
 from dataclasses import dataclass
 import functools
 import inspect
+import json
 import re
 from collections.abc import Iterable
 from typing import Any
 
 from agentguard.adapters.agent.base import BaseAgentAdapter, LLMBinding, ToolBinding
 from agentguard.adapters.agent.normalization import (
+    LLMOutputDenormalization,
     LLMInputDenormalization,
     LLMInputNormalization,
     LLMOutputNormalization,
+    ToolInvokeDenormalization,
     ToolInvokeNormalization,
+    ToolResultDenormalization,
     ToolResultNormalization,
 )
 from agentguard.adapters.agent.patching import (
@@ -159,6 +163,31 @@ class MetaGPTAgentAdapter(BaseAgentAdapter):
             ),
         )
 
+    def denormalize_llm_output(
+        self,
+        *,
+        label: str,
+        payload: Any,
+        output: Any,
+        fn: Any = None,
+        owner: Any = None,
+    ) -> LLMOutputDenormalization:
+        denormalized = super().denormalize_llm_output(
+            label=label,
+            payload=payload,
+            output=output,
+            fn=fn,
+            owner=owner,
+        )
+        return LLMOutputDenormalization(
+            output=denormalized.output,
+            metadata=self._metadata(
+                label=label,
+                owner=owner,
+                extra=_metagpt_llm_extra(owner),
+            ),
+        )
+
     def normalize_tool_invoke(
         self,
         *,
@@ -171,6 +200,33 @@ class MetaGPTAgentAdapter(BaseAgentAdapter):
         return ToolInvokeNormalization(
             arguments=self.normalize_value(arguments),
             capabilities=list(tool_metadata.capabilities),
+            metadata=self._metadata(
+                owner=owner,
+                extra=_metagpt_tool_extra(tool_metadata.name, owner=owner),
+            ),
+        )
+
+    def denormalize_tool_invoke(
+        self,
+        *,
+        tool_metadata: ToolMetadata,
+        payload: Any,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        fn: Any = None,
+        owner: Any = None,
+    ) -> ToolInvokeDenormalization:
+        denormalized = super().denormalize_tool_invoke(
+            tool_metadata=tool_metadata,
+            payload=payload,
+            args=args,
+            kwargs=kwargs,
+            fn=fn,
+            owner=owner,
+        )
+        return ToolInvokeDenormalization(
+            args=denormalized.args,
+            kwargs=denormalized.kwargs,
             metadata=self._metadata(
                 owner=owner,
                 extra=_metagpt_tool_extra(tool_metadata.name, owner=owner),
@@ -190,6 +246,33 @@ class MetaGPTAgentAdapter(BaseAgentAdapter):
         return ToolResultNormalization(
             result=self.normalize_value(result),
             error=error,
+            metadata=self._metadata(
+                owner=owner,
+                extra=_metagpt_tool_extra(tool_name, owner=owner),
+            ),
+        )
+
+    def denormalize_tool_result(
+        self,
+        *,
+        tool_name: str,
+        payload: Any,
+        result: Any = None,
+        error: str | None = None,
+        fn: Any = None,
+        owner: Any = None,
+    ) -> ToolResultDenormalization:
+        denormalized = super().denormalize_tool_result(
+            tool_name=tool_name,
+            payload=payload,
+            result=result,
+            error=error,
+            fn=fn,
+            owner=owner,
+        )
+        return ToolResultDenormalization(
+            result=denormalized.result,
+            error=denormalized.error,
             metadata=self._metadata(
                 owner=owner,
                 extra=_metagpt_tool_extra(tool_name, owner=owner),
@@ -743,7 +826,9 @@ def _install_metagpt_tool_binding(
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
             token = _CURRENT_METAGPT_CALL.set(call_context)
             try:
-                arguments = _build_metagpt_tool_arguments(fn, args, kwargs)
+                current_args = tuple(args)
+                current_kwargs = dict(kwargs)
+                arguments = _build_metagpt_tool_arguments(fn, current_args, current_kwargs)
                 decision = guard_tool_before(
                     guard,
                     metadata,
@@ -752,11 +837,22 @@ def _install_metagpt_tool_binding(
                     fn=fn,
                     owner=owner,
                 )
+                if decision.decision_type == DecisionType.MODIFY_TOOL_INVOKE:
+                    denormalized = adapter.denormalize_tool_invoke(
+                        tool_metadata=metadata,
+                        payload=_decision_payload(decision),
+                        args=current_args,
+                        kwargs=current_kwargs,
+                        fn=fn,
+                        owner=owner,
+                    )
+                    current_args = tuple(denormalized.args)
+                    current_kwargs = dict(denormalized.kwargs)
                 blocked = _blocked_metagpt_tool_value(decision, metadata.name)
                 if blocked is not None:
                     return blocked
                 try:
-                    value = await fn(*args, **kwargs)
+                    value = await fn(*current_args, **current_kwargs)
                 except Exception as exc:
                     guard_tool_after(
                         guard,
@@ -775,6 +871,14 @@ def _install_metagpt_tool_binding(
                     fn=fn,
                     owner=owner,
                 )
+                if result_decision.decision_type == DecisionType.MODIFY_TOOL_RESULT:
+                    value = adapter.denormalize_tool_result(
+                        tool_name=metadata.name,
+                        payload=_decision_payload(result_decision),
+                        result=value,
+                        fn=fn,
+                        owner=owner,
+                    ).result
                 result_blocked = _blocked_metagpt_result_value(result_decision, metadata.name)
                 return result_blocked if result_blocked is not None else value
             finally:
@@ -786,7 +890,9 @@ def _install_metagpt_tool_binding(
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         token = _CURRENT_METAGPT_CALL.set(call_context)
         try:
-            arguments = _build_metagpt_tool_arguments(fn, args, kwargs)
+            current_args = tuple(args)
+            current_kwargs = dict(kwargs)
+            arguments = _build_metagpt_tool_arguments(fn, current_args, current_kwargs)
             decision = guard_tool_before(
                 guard,
                 metadata,
@@ -795,11 +901,22 @@ def _install_metagpt_tool_binding(
                 fn=fn,
                 owner=owner,
             )
+            if decision.decision_type == DecisionType.MODIFY_TOOL_INVOKE:
+                denormalized = adapter.denormalize_tool_invoke(
+                    tool_metadata=metadata,
+                    payload=_decision_payload(decision),
+                    args=current_args,
+                    kwargs=current_kwargs,
+                    fn=fn,
+                    owner=owner,
+                )
+                current_args = tuple(denormalized.args)
+                current_kwargs = dict(denormalized.kwargs)
             blocked = _blocked_metagpt_tool_value(decision, metadata.name)
             if blocked is not None:
                 return blocked
             try:
-                value = fn(*args, **kwargs)
+                value = fn(*current_args, **current_kwargs)
             except Exception as exc:
                 guard_tool_after(
                     guard,
@@ -818,6 +935,14 @@ def _install_metagpt_tool_binding(
                 fn=fn,
                 owner=owner,
             )
+            if result_decision.decision_type == DecisionType.MODIFY_TOOL_RESULT:
+                value = adapter.denormalize_tool_result(
+                    tool_name=metadata.name,
+                    payload=_decision_payload(result_decision),
+                    result=value,
+                    fn=fn,
+                    owner=owner,
+                ).result
             result_blocked = _blocked_metagpt_result_value(result_decision, metadata.name)
             return result_blocked if result_blocked is not None else value
         finally:
@@ -874,6 +999,19 @@ def _blocked_metagpt_result_value(decision: GuardDecision, tool: str) -> Any | N
             "decision": decision.decision_type.value,
         }
     return None
+
+
+def _decision_payload(decision: GuardDecision) -> Any:
+    payload = decision.processed_content
+    if not isinstance(payload, str):
+        return payload
+    text = payload.strip()
+    if not text or text[0] not in {"{", "["}:
+        return payload
+    try:
+        return json.loads(text)
+    except Exception:
+        return payload
 
 
 __all__ = ["MetaGPTAgentAdapter"]

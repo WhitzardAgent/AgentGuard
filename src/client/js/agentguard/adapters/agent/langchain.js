@@ -3,14 +3,18 @@
 const {
   LLMInputDenormalization,
   LLMInputNormalization,
+  LLMOutputDenormalization,
   LLMOutputNormalization,
+  ToolInvokeDenormalization,
   ToolInvokeNormalization,
+  ToolResultDenormalization,
   ToolResultNormalization,
 } = require("./normalization");
 const { BaseAgentAdapter } = require("./base");
 const {
   bindArguments,
   guardToolAfter,
+  invokeWithArgsAndKwargs,
   guardToolBefore,
   isGuarded,
   markGuarded,
@@ -125,6 +129,20 @@ class LangChainAgentAdapter extends BaseAgentAdapter {
     });
   }
 
+  denormalize_llm_output({ label, payload, output, fn = null, owner = null } = {}) {
+    const denormalized = super.denormalize_llm_output({
+      label,
+      payload,
+      output,
+      fn,
+      owner,
+    });
+    return new LLMOutputDenormalization({
+      output: denormalized.output,
+      metadata: this._langchainMeta({ label, owner }),
+    });
+  }
+
   normalize_tool_invoke({ tool_metadata, arguments: arguments_ = {}, fn = null, owner = null } = {}) {
     void fn;
     let normalized = normalizeLangchainValue(arguments_);
@@ -138,12 +156,44 @@ class LangChainAgentAdapter extends BaseAgentAdapter {
     });
   }
 
+  denormalize_tool_invoke({ tool_metadata, payload, args = [], kwargs = {}, fn = null, owner = null } = {}) {
+    const denormalized = super.denormalize_tool_invoke({
+      tool_metadata,
+      payload,
+      args,
+      kwargs,
+      fn,
+      owner,
+    });
+    return new ToolInvokeDenormalization({
+      args: denormalized.args,
+      kwargs: denormalized.kwargs,
+      metadata: this._langchainMeta({ owner }),
+    });
+  }
+
   normalize_tool_result({ tool_name, result = null, error = null, fn = null, owner = null } = {}) {
     void tool_name;
     void fn;
     return new ToolResultNormalization({
       result: normalizeLangchainValue(result),
       error,
+      metadata: this._langchainMeta({ owner }),
+    });
+  }
+
+  denormalize_tool_result({ tool_name, payload, result = null, error = null, fn = null, owner = null } = {}) {
+    const denormalized = super.denormalize_tool_result({
+      tool_name,
+      payload,
+      result,
+      error,
+      fn,
+      owner,
+    });
+    return new ToolResultDenormalization({
+      result: denormalized.result,
+      error: denormalized.error,
       metadata: this._langchainMeta({ owner }),
     });
   }
@@ -744,14 +794,28 @@ function installLangchainToolBinding(guard, binding, adapter) {
 
   const wrapper = async (...args) => {
     try {
+      let currentArgs = Array.isArray(args) ? [...args] : [];
+      let currentKwargs = {};
       const eventMetadata = buildLangchainToolEventMetadata(args, {});
-      const arguments_ = buildLangchainToolArguments(fn, args, {});
+      const arguments_ = buildLangchainToolArguments(fn, currentArgs, {});
       const decision = await guardToolBefore(guard, metadata, arguments_, {
         normalizer: adapter,
         fn,
         owner: tool,
         extraMetadata: eventMetadata,
       });
+      if (decision.decision_type === DecisionType.MODIFY_TOOL_INVOKE) {
+        const denormalized = adapter.denormalize_tool_invoke({
+          tool_metadata: metadata,
+          payload: decisionPayload(decision),
+          args: currentArgs,
+          kwargs: currentKwargs,
+          fn,
+          owner: tool,
+        });
+        currentArgs = Array.isArray(denormalized.args) ? [...denormalized.args] : [];
+        currentKwargs = isPlainObject(denormalized.kwargs) ? { ...denormalized.kwargs } : {};
+      }
       const blocked = blockedLangchainToolValue(decision, metadata.name, args, {});
       if (blocked !== null) {
         return blocked;
@@ -759,7 +823,7 @@ function installLangchainToolBinding(guard, binding, adapter) {
 
       let value;
       try {
-        value = await fn.apply(tool, args);
+        value = await invokeWithArgsAndKwargs(fn, currentArgs, { callTarget: tool, kwargs: currentKwargs });
       } catch (error) {
         await guardToolAfter(guard, metadata.name, null, {
           error: String(error && error.message ? error.message : error),
@@ -777,6 +841,15 @@ function installLangchainToolBinding(guard, binding, adapter) {
         owner: tool,
         extraMetadata: eventMetadata,
       });
+      if (resultDecision.decision_type === DecisionType.MODIFY_TOOL_RESULT) {
+        value = adapter.denormalize_tool_result({
+          tool_name: metadata.name,
+          payload: decisionPayload(resultDecision),
+          result: value,
+          fn,
+          owner: tool,
+        }).result;
+      }
       const resultBlocked = blockedLangchainResultValue(resultDecision, metadata.name, args, {});
       return resultBlocked !== null ? resultBlocked : value;
     } catch (error) {
@@ -792,6 +865,22 @@ function installLangchainToolBinding(guard, binding, adapter) {
   };
 
   return setAttr(tool, attr, markGuarded(wrapper)) ? 1 : 0;
+}
+
+function decisionPayload(decision) {
+  const payload = decision && decision.processed_content;
+  if (typeof payload !== "string") {
+    return payload;
+  }
+  const text = payload.trim();
+  if (!text || !["{", "["].includes(text[0])) {
+    return payload;
+  }
+  try {
+    return JSON.parse(text);
+  } catch (_) {
+    return payload;
+  }
 }
 
 function installLangchainAgentNodeLLMBinding(guard, binding, adapter) {

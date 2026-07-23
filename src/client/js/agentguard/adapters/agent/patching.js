@@ -350,12 +350,25 @@ function makeGuardedTool(
   const metadata = registerToolMetadata(guard, fn, { name, tool, capabilities });
   const wrapper = async (...args) => {
     try {
-      const arguments_ = bindArguments(fn, args);
+      const resolved = resolveNormalizer(normalizer);
+      let currentArgs = Array.isArray(args) ? [...args] : [];
+      let currentKwargs = {};
+      const arguments_ = bindArguments(fn, currentArgs);
       const decision = await guardToolBefore(guard, metadata, arguments_, {
         normalizer,
         fn,
         owner,
       });
+      if (decision.decision_type === DecisionType.MODIFY_TOOL_INVOKE) {
+        ({ args: currentArgs, kwargs: currentKwargs } = modifiedToolArgs(decision, {
+          toolMetadata: metadata,
+          args: currentArgs,
+          kwargs: currentKwargs,
+          normalizer: resolved,
+          fn,
+          owner,
+        }));
+      }
       const blocked = blockedToolValue(decision, metadata.name);
       if (blocked !== null) {
         return blocked;
@@ -363,7 +376,7 @@ function makeGuardedTool(
 
       let value;
       try {
-        value = await (callTarget != null ? fn.apply(callTarget, args) : fn(...args));
+        value = await invokeWithArgsAndKwargs(fn, currentArgs, { callTarget, kwargs: currentKwargs });
       } catch (error) {
         await guardToolAfter(guard, metadata.name, null, {
           error: String(error && error.message ? error.message : error),
@@ -379,6 +392,15 @@ function makeGuardedTool(
         fn,
         owner,
       });
+      if (resultDecision.decision_type === DecisionType.MODIFY_TOOL_RESULT) {
+        value = modifiedToolResult(resultDecision, {
+          toolName: metadata.name,
+          result: value,
+          normalizer: resolved,
+          fn,
+          owner,
+        });
+      }
       const resultBlocked = blockedResultValue(resultDecision, metadata.name);
       return resultBlocked !== null ? resultBlocked : value;
     } catch (error) {
@@ -433,6 +455,16 @@ async function runGuardedLLM(
       attempts += 1;
       continue;
     }
+    if (beforeDecision.decision_type === DecisionType.MODIFY_LLM_INPUT) {
+      ({ args: currentArgs, kwargs: currentKwargs } = modifiedLLMArgs(beforeDecision, {
+        label,
+        args: currentArgs,
+        kwargs: currentKwargs,
+        normalizer: resolved,
+        fn,
+        owner,
+      }));
+    }
 
     const beforeBlocked = blockedValue(beforeDecision);
     if (beforeBlocked !== null) {
@@ -461,9 +493,19 @@ async function runGuardedLLM(
       attempts += 1;
       continue;
     }
+    let finalRaw = raw;
+    if (decision.decision_type === DecisionType.MODIFY_LLM_OUTPUT) {
+      finalRaw = modifiedLLMOutput(decision, {
+        label,
+        output: raw,
+        normalizer: resolved,
+        fn,
+        owner,
+      });
+    }
 
     const blocked = blockedValue(decision);
-    return blocked !== null ? blocked : raw;
+    return blocked !== null ? blocked : finalRaw;
   }
 }
 
@@ -500,7 +542,7 @@ function loopbackLLMArgs(
   decision,
   { label, args = [], kwargs = {}, normalizer, fn = null, owner = null } = {}
 ) {
-  const payload = coerceLoopbackPayload(decision && decision.processed_content);
+  const payload = processedPayloadFromDecision(decision);
   const denormalized = normalizer.denormalize_llm_input({
     label,
     payload,
@@ -513,6 +555,74 @@ function loopbackLLMArgs(
     args: Array.isArray(denormalized.args) ? [...denormalized.args] : [],
     kwargs: isPlainObject(denormalized.kwargs) ? { ...denormalized.kwargs } : {},
   };
+}
+
+function modifiedLLMArgs(
+  decision,
+  { label, args = [], kwargs = {}, normalizer, fn = null, owner = null } = {}
+) {
+  const denormalized = normalizer.denormalize_llm_input({
+    label,
+    payload: processedPayloadFromDecision(decision),
+    args,
+    kwargs,
+    fn,
+    owner,
+  });
+  return {
+    args: Array.isArray(denormalized.args) ? [...denormalized.args] : [],
+    kwargs: isPlainObject(denormalized.kwargs) ? { ...denormalized.kwargs } : {},
+  };
+}
+
+function modifiedLLMOutput(
+  decision,
+  { label, output, normalizer, fn = null, owner = null } = {}
+) {
+  const denormalized = normalizer.denormalize_llm_output({
+    label,
+    payload: processedPayloadFromDecision(decision),
+    output,
+    fn,
+    owner,
+  });
+  return denormalized.output;
+}
+
+function modifiedToolArgs(
+  decision,
+  { toolMetadata, args = [], kwargs = {}, normalizer, fn = null, owner = null } = {}
+) {
+  const denormalized = normalizer.denormalize_tool_invoke({
+    tool_metadata: toolMetadata,
+    payload: processedPayloadFromDecision(decision),
+    args,
+    kwargs,
+    fn,
+    owner,
+  });
+  return {
+    args: Array.isArray(denormalized.args) ? [...denormalized.args] : [],
+    kwargs: isPlainObject(denormalized.kwargs) ? { ...denormalized.kwargs } : {},
+  };
+}
+
+function modifiedToolResult(
+  decision,
+  { toolName, result, normalizer, fn = null, owner = null } = {}
+) {
+  const denormalized = normalizer.denormalize_tool_result({
+    tool_name: toolName,
+    payload: processedPayloadFromDecision(decision),
+    result,
+    fn,
+    owner,
+  });
+  return denormalized.result;
+}
+
+function processedPayloadFromDecision(decision) {
+  return coerceLoopbackPayload(decision && decision.processed_content);
 }
 
 function coerceLoopbackPayload(payload) {
@@ -531,12 +641,18 @@ function coerceLoopbackPayload(payload) {
 }
 
 async function invokeLLM(fn, args, { callTarget = null, kwargs = {} } = {}) {
+  return invokeWithArgsAndKwargs(fn, args, { callTarget, kwargs });
+}
+
+async function invokeWithArgsAndKwargs(fn, args, { callTarget = null, kwargs = {} } = {}) {
   const nextArgs = Array.isArray(args) ? [...args] : [];
   if (isPlainObject(kwargs) && Object.keys(kwargs).length) {
     if (!nextArgs.length) {
       nextArgs.push(kwargs);
     } else if (isPlainObject(nextArgs[0])) {
       nextArgs[0] = { ...nextArgs[0], ...kwargs };
+    } else {
+      nextArgs.push(kwargs);
     }
   }
   return callTarget != null ? fn.apply(callTarget, nextArgs) : fn(...nextArgs);
@@ -603,6 +719,7 @@ module.exports = {
   guardToolAfter,
   guardToolBefore,
   isGuarded,
+  invokeWithArgsAndKwargs,
   makeGuardedLLMCallable,
   makeGuardedTool,
   markGuarded,

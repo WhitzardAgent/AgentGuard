@@ -495,6 +495,112 @@ function buildApproval(decision) {
   };
 }
 
+function decisionPayload(decision) {
+  const payload = decision && decision.processed_content;
+  if (typeof payload !== "string") {
+    return payload;
+  }
+  const text = payload.trim();
+  if (!text || !["{", "["].includes(text[0])) {
+    return payload;
+  }
+  try {
+    return JSON.parse(text);
+  } catch (_) {
+    return payload;
+  }
+}
+
+function buildModifiedParams(decision, fallback = {}) {
+  const payload = decisionPayload(decision);
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    const direct = payload.params ?? payload.arguments ?? payload.args ?? payload.input;
+    if (direct && typeof direct === "object" && !Array.isArray(direct)) {
+      return { ...direct };
+    }
+    return { ...payload };
+  }
+  if (fallback && typeof fallback === "object" && !Array.isArray(fallback)) {
+    return { ...fallback, input: payload };
+  }
+  return payload;
+}
+
+function buildModifiedToolResult(decision, fallback = null) {
+  const payload = decisionPayload(decision);
+  if (fallback && typeof fallback === "object" && !Array.isArray(fallback)) {
+    if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+      const direct = payload.result;
+      if (direct && typeof direct === "object" && !Array.isArray(direct)) {
+        return { ...fallback, ...direct };
+      }
+      return { ...fallback, ...payload };
+    }
+    const updated = { ...fallback };
+    const text = normalizeOpenClawContent(payload);
+    for (const key of ["text", "output", "message", "result"]) {
+      if (Object.prototype.hasOwnProperty.call(updated, key)) {
+        updated[key] = text;
+        return updated;
+      }
+    }
+    if (Array.isArray(updated.content)) {
+      updated.content = [{ type: "text", text }];
+      return updated;
+    }
+  }
+  return payload;
+}
+
+function buildModifiedAgentInput(decision, event = {}) {
+  const payload = decisionPayload(decision);
+  if (Array.isArray(payload)) {
+    return {
+      messages: payload.map((item) => normalizeOpenClawMessage(item)),
+    };
+  }
+  if (payload && typeof payload === "object") {
+    if (Array.isArray(payload.messages)) {
+      return {
+        messages: payload.messages.map((item) => normalizeOpenClawMessage(item)),
+      };
+    }
+    const next = {};
+    if (payload.prompt != null) {
+      next.prompt = normalizeOpenClawContent(payload.prompt);
+    } else if (payload.input != null) {
+      next.prompt = normalizeOpenClawContent(payload.input);
+    } else if (payload.content != null) {
+      next.prompt = normalizeOpenClawContent(payload.content);
+    } else if (payload.text != null) {
+      next.prompt = normalizeOpenClawContent(payload.text);
+    }
+    if (payload.systemPrompt != null) {
+      next.systemPrompt = normalizeOpenClawContent(payload.systemPrompt);
+    }
+    if (Object.keys(next).length) {
+      return next;
+    }
+  }
+  return {
+    ...(event && event.systemPrompt ? { systemPrompt: event.systemPrompt } : {}),
+    prompt: normalizeOpenClawContent(payload),
+  };
+}
+
+function buildModifiedMessageText(decision, fallback = DEFAULT_SANITIZED_MESSAGE) {
+  const payload = decisionPayload(decision);
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    const text = normalizeOpenClawContent(
+      payload.content ?? payload.output ?? payload.final_output ?? payload.text ?? payload.message,
+    );
+    if (text) {
+      return text;
+    }
+  }
+  return normalizeOpenClawContent(payload) || fallback;
+}
+
 function buildRewrittenParams(decision) {
   const direct = pickMetadata(decision, [
     "params",
@@ -2542,6 +2648,9 @@ class AgentGuardOpenClawBridge {
       await this.flushNow(state, "guard_decide");
       return { requireApproval: buildApproval(decision) };
     }
+    if (decision.decision_type === DecisionType.MODIFY_TOOL_INVOKE) {
+      return { params: buildModifiedParams(decision, event.params || {}) };
+    }
 
     const rewrittenParams = buildRewrittenParams(decision);
     if (
@@ -2585,8 +2694,13 @@ class AgentGuardOpenClawBridge {
         ...mcpRuntimeMetadata,
       },
     });
-    await this.enforce(state, runtimeEvent, { phase: "tool_after" });
+    const result = await this.enforce(state, runtimeEvent, { phase: "tool_after" });
+    const decision = result.decision;
     await this.flushAsync(state);
+    if (decision.decision_type === DecisionType.MODIFY_TOOL_RESULT) {
+      return { result: buildModifiedToolResult(decision, event.result) };
+    }
+    return undefined;
   }
 
   async runBeforeAgentRun({ ctx, event }) {
@@ -2618,6 +2732,9 @@ class AgentGuardOpenClawBridge {
       decision.decision_type === DecisionType.LOG_ONLY
     ) {
       return undefined;
+    }
+    if (decision.decision_type === DecisionType.MODIFY_LLM_INPUT) {
+      return buildModifiedAgentInput(decision, event);
     }
 
     await this.flushNow(state, "guard_decide");
@@ -2666,6 +2783,18 @@ class AgentGuardOpenClawBridge {
     ) {
       this.rememberLlmOutput(state, outputText);
       return undefined;
+    }
+    if (decision.decision_type === DecisionType.MODIFY_LLM_OUTPUT) {
+      this.rememberLlmOutput(state, outputText);
+      return {
+        content: buildModifiedMessageText(decision, outputText),
+        metadata: {
+          agentguard: {
+            decisionType: decision.decision_type,
+            reason: decision.reason,
+          },
+        },
+      };
     }
     if (
       decision.decision_type === DecisionType.SANITIZE ||
@@ -2729,8 +2858,13 @@ module.exports = {
   AgentGuardOpenClawBridge,
   __testing: {
     buildApproval,
+    buildModifiedAgentInput,
+    buildModifiedMessageText,
+    buildModifiedParams,
+    buildModifiedToolResult,
     buildReplacementText,
     buildRewrittenParams,
+    decisionPayload,
     buildRuntimeContext,
     buildLlmInputMessages,
     buildLlmOutputText,

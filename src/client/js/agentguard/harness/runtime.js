@@ -92,6 +92,7 @@ class HarnessRuntime {
       return this.safeError("tool call budget exceeded", tool_name);
     }
     this.session.inc_tool_call();
+    let currentArguments = isPlainObject(arguments_) ? { ...arguments_ } : arguments_;
     const invokeEvent = ev.tool_invoke(this.context, tool_name, arguments_, {
       capabilities: [...(meta.capabilities || [])],
     });
@@ -104,9 +105,12 @@ class HarnessRuntime {
       return this.pending(decision.reason, tool_name, decision);
     }
     if (decision.decision_type === DecisionType.DEGRADE) {
-      return this.runDegraded(tool_name, arguments_, decision);
+      return this.runDegraded(tool_name, currentArguments, decision);
     }
-    return this.execute(tool_name, arguments_, fn, [...(meta.capabilities || [])]);
+    if (decision.decision_type === DecisionType.MODIFY_TOOL_INVOKE) {
+      currentArguments = decisionPayload(decision);
+    }
+    return this.execute(tool_name, currentArguments, fn, [...(meta.capabilities || [])]);
   }
 
   sync_local_cache_async({ reason = "round_complete" } = {}) {
@@ -177,6 +181,9 @@ class HarnessRuntime {
     if (decision.requires_user || decision.requires_remote) {
       return this.pending(decision.reason, toolName, decision);
     }
+    if (decision.decision_type === DecisionType.MODIFY_TOOL_RESULT) {
+      return decisionPayload(decision);
+    }
     return resolved.value;
   }
 
@@ -218,6 +225,26 @@ class HarnessRuntime {
       decision: decision.decision_type,
     };
   }
+}
+
+function decisionPayload(decision) {
+  const payload = decision && decision.processed_content;
+  if (typeof payload !== "string") {
+    return payload;
+  }
+  const text = payload.trim();
+  if (!text || !["{", "["].includes(text[0])) {
+    return payload;
+  }
+  try {
+    return JSON.parse(text);
+  } catch (_) {
+    return payload;
+  }
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 module.exports = {

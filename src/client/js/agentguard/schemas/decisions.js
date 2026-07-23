@@ -3,6 +3,10 @@
 const DecisionType = Object.freeze({
   ALLOW: "allow",
   DENY: "deny",
+  MODIFY_LLM_INPUT: "modify_llm_input",
+  MODIFY_LLM_OUTPUT: "modify_llm_output",
+  MODIFY_TOOL_INVOKE: "modify_tool_invoke",
+  MODIFY_TOOL_RESULT: "modify_tool_result",
   SANITIZE: "sanitize",
   REWRITE: "rewrite",
   REPAIR: "repair",
@@ -77,6 +81,10 @@ function makeDecision(decisionType, reason, extra = {}) {
 
 GuardDecision.allow = (reason = "allowed", extra = {}) => makeDecision(DecisionType.ALLOW, reason, extra);
 GuardDecision.deny = (reason, extra = {}) => makeDecision(DecisionType.DENY, reason, extra);
+GuardDecision.modify_llm_input = (reason, extra = {}) => makeDecision(DecisionType.MODIFY_LLM_INPUT, reason, extra);
+GuardDecision.modify_llm_output = (reason, extra = {}) => makeDecision(DecisionType.MODIFY_LLM_OUTPUT, reason, extra);
+GuardDecision.modify_tool_invoke = (reason, extra = {}) => makeDecision(DecisionType.MODIFY_TOOL_INVOKE, reason, extra);
+GuardDecision.modify_tool_result = (reason, extra = {}) => makeDecision(DecisionType.MODIFY_TOOL_RESULT, reason, extra);
 GuardDecision.sanitize = (reason, extra = {}) => makeDecision(DecisionType.SANITIZE, reason, extra);
 GuardDecision.rewrite = (reason, extra = {}) => makeDecision(DecisionType.REWRITE, reason, extra);
 GuardDecision.repair = (reason, extra = {}) => makeDecision(DecisionType.REPAIR, reason, extra);

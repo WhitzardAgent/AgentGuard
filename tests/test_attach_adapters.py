@@ -92,6 +92,82 @@ def test_wrap_agent_is_not_exposed():
     assert not hasattr(guard, "wrap_agent")
 
 
+def test_wrap_tool_applies_modify_decisions():
+    guard = AgentGuard("wrap-tool-modify", sandbox="noop")
+    calls: list[str] = []
+
+    def read_local_file(path: str) -> dict[str, str]:
+        calls.append(path)
+        return {"output": f"raw:{path}"}
+
+    wrapped = guard.wrap_tool(read_local_file, name="read_local_file")
+
+    def fake_guard(event, *, force_remote: bool = False, phase: str = "before"):
+        del force_remote, phase
+        if event.event_type.value == "tool_invoke":
+            return types.SimpleNamespace(
+                decision=GuardDecision.modify_tool_invoke(
+                    "rewrite tool input",
+                    processed_content=json.dumps({"path": "/safe.txt"}),
+                )
+            )
+        if event.event_type.value == "tool_result":
+            return types.SimpleNamespace(
+                decision=GuardDecision.modify_tool_result(
+                    "rewrite tool result",
+                    processed_content=json.dumps({"output": "redacted"}),
+                )
+            )
+        return types.SimpleNamespace(decision=GuardDecision.allow("ok"))
+
+    guard.runtime.guard = fake_guard
+
+    try:
+        result = wrapped(path="/secret.txt")
+        assert calls == ["/safe.txt"]
+        assert result == {"output": "redacted"}
+    finally:
+        guard.close()
+
+
+def test_wrap_llm_applies_modify_decisions():
+    guard = AgentGuard("wrap-llm-modify", sandbox="noop")
+    calls: list[dict[str, str]] = []
+
+    def model(request: dict[str, str]) -> dict[str, str]:
+        calls.append(request)
+        return {"text": f"raw:{request['prompt']}"}
+
+    wrapped = guard.wrap_llm(model)
+
+    def fake_guard(event, *, force_remote: bool = False, phase: str = "before"):
+        del force_remote, phase
+        if event.event_type.value == "llm_input":
+            return types.SimpleNamespace(
+                decision=GuardDecision.modify_llm_input(
+                    "rewrite llm input",
+                    processed_content=json.dumps({"prompt": "rewritten prompt"}),
+                )
+            )
+        if event.event_type.value == "llm_output":
+            return types.SimpleNamespace(
+                decision=GuardDecision.modify_llm_output(
+                    "rewrite llm output",
+                    processed_content=json.dumps({"text": "rewritten output"}),
+                )
+            )
+        return types.SimpleNamespace(decision=GuardDecision.allow("ok"))
+
+    guard.runtime.guard = fake_guard
+
+    try:
+        result = wrapped.complete({"prompt": "hello"})
+        assert calls == [{"prompt": "rewritten prompt"}]
+        assert result == {"text": "rewritten output"}
+    finally:
+        guard.close()
+
+
 def test_attach_autogen_patches_tool_and_llm_method():
     calls = []
 
@@ -538,6 +614,96 @@ def test_thought_alignment_deny_payload_uses_generic_blocked_shape():
         "agentguard": "blocked",
         "reason": "blocked",
     }
+
+
+def test_make_guarded_llm_callable_applies_modify_input_and_output_decisions(monkeypatch):
+    calls: list[tuple[str, float]] = []
+
+    def llm(prompt: str, *, temperature: float = 0.0) -> dict[str, str]:
+        calls.append((prompt, temperature))
+        return {"content": f"raw:{prompt}:{temperature}"}
+
+    guard = AgentGuard("patching-modify-llm", sandbox="noop")
+    decisions = iter(
+        [
+            GuardDecision(
+                decision_type=DecisionType.MODIFY_LLM_INPUT,
+                reason="rewrite input",
+                processed_content=json.dumps(
+                    {
+                        "args": ["rewritten prompt"],
+                        "kwargs": {"temperature": 0.7},
+                    }
+                ),
+            ),
+            GuardDecision(
+                decision_type=DecisionType.MODIFY_LLM_OUTPUT,
+                reason="rewrite output",
+                processed_content=json.dumps({"output": "guarded answer"}),
+            ),
+        ]
+    )
+
+    monkeypatch.setattr(
+        guard.runtime,
+        "guard",
+        lambda event, **kwargs: types.SimpleNamespace(decision=next(decisions)),
+    )
+
+    wrapped = agent_patching.make_guarded_llm_callable(
+        guard,
+        llm,
+        label="invoke",
+        normalizer=BaseAgentAdapter(),
+    )
+
+    result = wrapped("original prompt")
+
+    assert calls == [("rewritten prompt", 0.7)]
+    assert result == {"content": "guarded answer"}
+
+
+def test_make_guarded_tool_applies_modify_invoke_and_result_decisions(monkeypatch):
+    calls: list[tuple[str, str]] = []
+
+    def tool(path: str, mode: str = "r") -> dict[str, str]:
+        calls.append((path, mode))
+        return {"result": f"{path}:{mode}"}
+
+    guard = AgentGuard("patching-modify-tool", sandbox="noop")
+    decisions = iter(
+        [
+            GuardDecision(
+                decision_type=DecisionType.MODIFY_TOOL_INVOKE,
+                reason="rewrite invoke",
+                processed_content=json.dumps({"path": "guarded.txt", "mode": "w"}),
+            ),
+            GuardDecision(
+                decision_type=DecisionType.MODIFY_TOOL_RESULT,
+                reason="rewrite result",
+                processed_content=json.dumps({"result": "tool output rewritten"}),
+            ),
+        ]
+    )
+
+    monkeypatch.setattr(
+        guard.runtime,
+        "guard",
+        lambda event, **kwargs: types.SimpleNamespace(decision=next(decisions)),
+    )
+
+    wrapped = agent_patching.make_guarded_tool(
+        guard,
+        tool,
+        name="write_file",
+        tool=tool,
+        normalizer=BaseAgentAdapter(),
+    )
+
+    result = wrapped("original.txt", mode="r")
+
+    assert calls == [("guarded.txt", "w")]
+    assert result == {"result": "tool output rewritten"}
 
 
 def test_langchain_handle_blocked_llm_decision_records_event_and_raises():
@@ -1725,6 +1891,48 @@ async def test_attach_openai_agents_extracts_nested_input_payload_and_real_tool_
         "url": "https://example.com",
         "body": "secret",
     }
+
+
+@pytest.mark.asyncio
+async def test_attach_openai_agents_applies_modify_tool_decisions(monkeypatch):
+    class FunctionTool:
+        name = "send"
+
+        async def on_invoke_tool(self, ctx, input: dict[str, object]) -> dict[str, str]:
+            return {"result": str(input["message"])}
+
+    class Agent:
+        def __init__(self) -> None:
+            self.tools = [FunctionTool()]
+
+    guard = AgentGuard("attach-openai-modify-tool", sandbox="noop")
+    agent = Agent()
+    decisions = iter(
+        [
+            GuardDecision(
+                decision_type=DecisionType.MODIFY_TOOL_INVOKE,
+                reason="rewrite invoke",
+                processed_content=json.dumps({"message": "guarded hello"}),
+            ),
+            GuardDecision(
+                decision_type=DecisionType.MODIFY_TOOL_RESULT,
+                reason="rewrite result",
+                processed_content=json.dumps({"result": "guarded result"}),
+            ),
+        ]
+    )
+
+    monkeypatch.setattr(
+        guard.runtime,
+        "guard",
+        lambda event, **kwargs: types.SimpleNamespace(decision=next(decisions)),
+    )
+
+    patched = guard.attach_openai_agents(agent, wrap_llm=False)
+    result = await agent.tools[0].on_invoke_tool(None, {"message": "hello"})
+
+    assert patched == {"tools": 1, "llm": 0}
+    assert result == {"result": "guarded result"}
 
 
 @pytest.mark.asyncio

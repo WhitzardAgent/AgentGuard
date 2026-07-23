@@ -299,6 +299,88 @@ test("agentguard flushRemoteOperations waits for tool reports", async () => {
   await guard.close();
 });
 
+test("js wrap_tool applies modify invoke and result decisions", async () => {
+  const { AgentGuard } = require("./guard");
+  const { DecisionType, GuardDecision } = require("./schemas/decisions");
+
+  const calls = [];
+  const guard = new AgentGuard("js-wrap-tool-modify", { sandbox: "noop" });
+  const wrapped = guard.wrap_tool(async ({ path }) => {
+    calls.push(path);
+    return { output: `raw:${path}` };
+  }, {
+    name: "read_local_file",
+  });
+
+  guard.runtime.guard = async (event) => {
+    if (event && event.event_type === "tool_invoke") {
+      return {
+        decision: new GuardDecision({
+          decision_type: DecisionType.MODIFY_TOOL_INVOKE,
+          reason: "rewrite tool input",
+          processed_content: JSON.stringify({ path: "/safe.txt" }),
+        }),
+      };
+    }
+    if (event && event.event_type === "tool_result") {
+      return {
+        decision: new GuardDecision({
+          decision_type: DecisionType.MODIFY_TOOL_RESULT,
+          reason: "rewrite tool result",
+          processed_content: JSON.stringify({ output: "redacted" }),
+        }),
+      };
+    }
+    return { decision: GuardDecision.allow("ok") };
+  };
+
+  const result = await wrapped.invoke({ path: "/secret.txt" });
+
+  assert.deepEqual(calls, ["/safe.txt"]);
+  assert.deepEqual(result, { output: "redacted" });
+  await guard.close();
+});
+
+test("js wrap_llm applies modify input and output decisions", async () => {
+  const { AgentGuard } = require("./guard");
+  const { DecisionType, GuardDecision } = require("./schemas/decisions");
+
+  const calls = [];
+  const guard = new AgentGuard("js-wrap-llm-modify", { sandbox: "noop" });
+  const wrapped = guard.wrap_llm(async (request = {}) => {
+    calls.push(request);
+    return { text: `raw:${request.prompt}` };
+  });
+
+  guard.runtime.guard = async (event) => {
+    if (event && event.event_type === "llm_input") {
+      return {
+        decision: new GuardDecision({
+          decision_type: DecisionType.MODIFY_LLM_INPUT,
+          reason: "rewrite llm input",
+          processed_content: JSON.stringify({ prompt: "rewritten prompt" }),
+        }),
+      };
+    }
+    if (event && event.event_type === "llm_output") {
+      return {
+        decision: new GuardDecision({
+          decision_type: DecisionType.MODIFY_LLM_OUTPUT,
+          reason: "rewrite llm output",
+          processed_content: JSON.stringify({ text: "rewritten output" }),
+        }),
+      };
+    }
+    return { decision: GuardDecision.allow("ok") };
+  };
+
+  const result = await wrapped.complete({ prompt: "hello" });
+
+  assert.deepEqual(calls, [{ prompt: "rewritten prompt" }]);
+  assert.deepEqual(result, { text: "rewritten output" });
+  await guard.close();
+});
+
 test("js langchain tool reports use schema keys for input_params", async () => {
   const calls = [];
   global.fetch = async (url, options = {}) => {
@@ -641,6 +723,69 @@ test("js langchain adapter loops back to llm with rewritten direct model input",
   await guard.close();
 });
 
+test("js langchain adapter applies modify decisions on direct model invoke", async () => {
+  const { AgentGuard } = require("./guard");
+  const { DecisionType, GuardDecision } = require("./schemas/decisions");
+
+  const calls = [];
+
+  class Model {
+    async invoke(prompt, options = {}) {
+      calls.push([prompt, options]);
+      return `reply:${prompt}`;
+    }
+  }
+
+  class Agent {
+    constructor() {
+      this.model = new Model();
+    }
+  }
+
+  const guard = new AgentGuard("js-langchain-modify-direct-model", { sandbox: "noop" });
+  const agent = new Agent();
+
+  guard.runtime.guard = async (event) => {
+    if (event && event.event_type === "llm_input") {
+      return {
+        decision: new GuardDecision({
+          decision_type: DecisionType.MODIFY_LLM_INPUT,
+          reason: "rewrite direct model input",
+          processed_content: JSON.stringify({
+            input: "rewritten prompt",
+            kwargs: { temperature: 0.3 },
+          }),
+        }),
+      };
+    }
+    if (event && event.event_type === "llm_output") {
+      return {
+        decision: new GuardDecision({
+          decision_type: DecisionType.MODIFY_LLM_OUTPUT,
+          reason: "rewrite direct model output",
+          processed_content: JSON.stringify({ output: "rewritten answer" }),
+        }),
+      };
+    }
+    return { decision: GuardDecision.allow("ok") };
+  };
+
+  const patched = guard.attach_langchain(agent, { wrap_tools: false });
+  const result = await agent.model.invoke("hello", { tags: ["orig"] });
+
+  assert.equal(patched.tools, 0);
+  assert.equal(patched.llm, 1);
+  assert.deepEqual(calls, [[
+    "rewritten prompt",
+    {
+      tags: ["orig"],
+      temperature: 0.3,
+    },
+  ]]);
+  assert.equal(result, "rewritten answer");
+  await guard.close();
+});
+
 test("js langchain adapter patches classic agent.llm_chain.llm", async () => {
   const { AgentGuard } = require("./guard");
 
@@ -825,6 +970,86 @@ test("js langchain adapter prefers raw tool callable arguments over generic inpu
   assert.deepEqual(toolInvoke.event.payload.arguments, {
     url: "https://example.com/upload",
     body: "secret",
+  });
+  await guard.close();
+});
+
+test("js langchain adapter applies modify decisions on tool invoke and result", async () => {
+  const { AgentGuard } = require("./guard");
+  const { DecisionType, GuardDecision } = require("./schemas/decisions");
+
+  const calls = [];
+
+  class Tool {
+    constructor() {
+      this.name = "send_http";
+      this.func = async ({ url, body }) => {
+        calls.push({ url, body });
+        return { ok: true, url, body };
+      };
+    }
+
+    async invoke(input, config = null) {
+      void config;
+      return this.func(input.args);
+    }
+  }
+
+  class Agent {
+    constructor() {
+      this.tools_by_name = { send_http: new Tool() };
+    }
+  }
+
+  const guard = new AgentGuard("js-langchain-modify-tool", { sandbox: "noop" });
+  const agent = new Agent();
+
+  guard.runtime.guard = async (event) => {
+    if (event && event.event_type === "tool_invoke") {
+      return {
+        decision: new GuardDecision({
+          decision_type: DecisionType.MODIFY_TOOL_INVOKE,
+          reason: "rewrite tool args",
+          processed_content: JSON.stringify({
+            url: "https://safe.example.com/upload",
+            body: "scrubbed",
+          }),
+        }),
+      };
+    }
+    if (event && event.event_type === "tool_result") {
+      return {
+        decision: new GuardDecision({
+          decision_type: DecisionType.MODIFY_TOOL_RESULT,
+          reason: "rewrite tool result",
+          processed_content: JSON.stringify({ ok: true, body: "redacted" }),
+        }),
+      };
+    }
+    return { decision: GuardDecision.allow("ok") };
+  };
+
+  const patched = guard.attach_langchain(agent, { wrap_llm: false });
+  const result = await agent.tools_by_name.send_http.invoke({
+    id: "tool-call-3",
+    name: "send_http",
+    type: "tool_call",
+    args: {
+      url: "https://secret.example.com/upload",
+      body: "secret",
+    },
+  });
+
+  assert.equal(patched.tools, 1);
+  assert.equal(patched.llm, 0);
+  assert.deepEqual(calls, [{
+    url: "https://safe.example.com/upload",
+    body: "scrubbed",
+  }]);
+  assert.deepEqual(result, {
+    ok: true,
+    url: "https://safe.example.com/upload",
+    body: "redacted",
   });
   await guard.close();
 });

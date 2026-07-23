@@ -551,6 +551,10 @@ def _clamp_limit(limit: int) -> int:
 _DECISION_TO_ACTION = {
     DecisionType.ALLOW: "allow",
     DecisionType.LOG_ONLY: "allow",
+    DecisionType.MODIFY_LLM_INPUT: "allow",
+    DecisionType.MODIFY_LLM_OUTPUT: "allow",
+    DecisionType.MODIFY_TOOL_INVOKE: "allow",
+    DecisionType.MODIFY_TOOL_RESULT: "allow",
     DecisionType.DENY: "deny",
     DecisionType.REQUIRE_APPROVAL: "human_check",
     DecisionType.HUMAN_CHECK: "human_check",

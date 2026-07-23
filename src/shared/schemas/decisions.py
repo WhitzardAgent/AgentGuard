@@ -10,6 +10,11 @@ class DecisionType(str, Enum):
     ALLOW = "allow"
     DENY = "deny"
 
+    MODIFY_LLM_INPUT = "modify_llm_input"
+    MODIFY_LLM_OUTPUT = "modify_llm_output"
+    MODIFY_TOOL_INVOKE = "modify_tool_invoke"
+    MODIFY_TOOL_RESULT = "modify_tool_result"
+
     SANITIZE = "sanitize"
     REWRITE = "rewrite"
     REPAIR = "repair"
@@ -103,6 +108,22 @@ class GuardDecision:
     @staticmethod
     def deny(reason: str, **kw: Any) -> GuardDecision:
         return GuardDecision(DecisionType.DENY, reason, **kw)
+
+    @staticmethod
+    def modify_llm_input(reason: str, **kw: Any) -> GuardDecision:
+        return GuardDecision(DecisionType.MODIFY_LLM_INPUT, reason, **kw)
+
+    @staticmethod
+    def modify_llm_output(reason: str, **kw: Any) -> GuardDecision:
+        return GuardDecision(DecisionType.MODIFY_LLM_OUTPUT, reason, **kw)
+
+    @staticmethod
+    def modify_tool_invoke(reason: str, **kw: Any) -> GuardDecision:
+        return GuardDecision(DecisionType.MODIFY_TOOL_INVOKE, reason, **kw)
+
+    @staticmethod
+    def modify_tool_result(reason: str, **kw: Any) -> GuardDecision:
+        return GuardDecision(DecisionType.MODIFY_TOOL_RESULT, reason, **kw)
 
     @staticmethod
     def sanitize(reason: str, **kw: Any) -> GuardDecision:

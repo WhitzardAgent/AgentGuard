@@ -8,6 +8,7 @@ not workflow nodes.
 from __future__ import annotations
 
 import contextvars
+import copy
 import functools
 import hashlib
 import json
@@ -35,7 +36,8 @@ from agentguard.adapters.agent.dify_runtime_auth import manager as _runtime_auth
 from agentguard.u_guard.agent_keys import agent_identity_key_id, build_agent_registration_payload
 from agentguard.u_guard.remote_client import RemoteGuardClient
 from agentguard.utils.errors import AdapterError
-from agentguard.utils.json import safe_dumps
+from agentguard.adapters.agent.normalization import denormalize_llm_output_payload, denormalize_tool_result_payload
+from agentguard.utils.json import safe_dumps, safe_loads
 
 _PATCHED_ATTR = "__agentguard_dify_agent_chat_patched__"
 _ORIGINAL_ATTR = "__agentguard_dify_agent_chat_original__"
@@ -60,6 +62,22 @@ _config_update_hook_installed = False
 _config_update_hook_lock = threading.Lock()
 _runtime_agent_registrations: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
 _runtime_agent_registrations_lock = threading.Lock()
+
+
+_LLM_ARG_NAMES = ("prompt_messages", "model_parameters", "tools", "stop", "stream")
+_TOOL_ARG_NAMES = (
+    "tool",
+    "tool_parameters",
+    "user_id",
+    "tenant_id",
+    "message",
+    "invoke_from",
+    "agent_tool_callback",
+    "trace_manager",
+    "conversation_id",
+    "app_id",
+    "message_id",
+)
 
 
 def install_dify_agent_chat_adapter() -> dict[str, Any]:
@@ -204,19 +222,32 @@ def _patch_model_invoke_llm(model_instance_cls: Any) -> bool:
 
     @functools.wraps(original)
     def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
-        call = _llm_call_from_args(args, kwargs)
+        current_args = tuple(args)
+        current_kwargs = dict(kwargs)
+        call = _llm_call_from_args(current_args, current_kwargs)
         decision = _guard_llm_input(self, call)
+        if decision.decision_type == DecisionType.MODIFY_LLM_INPUT:
+            current_args, current_kwargs = _replace_named_argument(
+                current_args,
+                current_kwargs,
+                _LLM_ARG_NAMES,
+                "prompt_messages",
+                _decision_payload(decision),
+            )
+            call = _llm_call_from_args(current_args, current_kwargs)
         blocked = _blocked_llm_value(decision)
         if blocked is not None:
             raise AdapterError(blocked)
         try:
-            result = original(self, *args, **kwargs)
+            result = original(self, *current_args, **current_kwargs)
         except Exception as exc:
             _guard_llm_output(self, {"error": str(exc)}, call, error=str(exc))
             raise
         if _is_generator_like(result):
             return _wrap_llm_generator(self, result, call)
         decision = _guard_llm_output(self, result, call)
+        if decision.decision_type == DecisionType.MODIFY_LLM_OUTPUT:
+            result = _modified_llm_output_value(_decision_payload(decision), result)
         blocked = _blocked_llm_value(decision)
         if blocked is not None:
             raise AdapterError(blocked)
@@ -234,18 +265,35 @@ def _patch_tool_agent_invoke(tool_engine_cls: Any) -> bool:
 
     @functools.wraps(original)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
-        call = _tool_call_from_args(args, kwargs)
+        current_args = tuple(args)
+        current_kwargs = dict(kwargs)
+        call = _tool_call_from_args(current_args, current_kwargs)
         decision = _guard_tool_invoke(call)
+        if decision.decision_type == DecisionType.MODIFY_TOOL_INVOKE:
+            payload = _decision_payload(decision)
+            current_args, current_kwargs = _replace_named_argument(
+                current_args,
+                current_kwargs,
+                _TOOL_ARG_NAMES,
+                "tool_parameters",
+                payload,
+            )
+            call = _tool_call_from_args(current_args, current_kwargs)
         blocked = _blocked_tool_value(decision, call["tool_name"])
         if blocked is not None:
             return _blocked_tool_response(blocked)
         try:
-            response = original(*args, **kwargs)
+            response = original(*current_args, **current_kwargs)
         except Exception as exc:
             _guard_tool_result(call, None, error=str(exc))
             raise
         result_text = response[0] if isinstance(response, tuple) and response else response
         decision = _guard_tool_result(call, result_text)
+        if decision.decision_type == DecisionType.MODIFY_TOOL_RESULT:
+            response = _replace_response_text(
+                response,
+                _modified_result_value(_decision_payload(decision), result_text),
+            )
         blocked_result = _blocked_result_value(decision, call["tool_name"])
         if blocked_result is not None:
             return _blocked_tool_response(blocked_result)
@@ -373,6 +421,73 @@ def _wrap_llm_generator(model: Any, result: Any, call: dict[str, Any]) -> Genera
     blocked = _blocked_llm_value(decision)
     if blocked is not None:
         raise AdapterError(blocked)
+
+
+def _decision_payload(decision: GuardDecision) -> Any:
+    payload = decision.processed_content
+    if not isinstance(payload, str):
+        return payload
+    text = payload.strip()
+    if not text or text[0] not in {"{", "["}:
+        return payload
+    return safe_loads(text, fallback=payload)
+
+
+def _replace_named_argument(
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    names: tuple[str, ...],
+    key: str,
+    value: Any,
+) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    current_args = list(args)
+    current_kwargs = dict(kwargs)
+    if key in current_kwargs:
+        current_kwargs[key] = value
+        return tuple(current_args), current_kwargs
+
+    try:
+        index = names.index(key)
+    except ValueError:
+        current_kwargs[key] = value
+        return tuple(current_args), current_kwargs
+
+    if index < len(current_args):
+        current_args[index] = value
+    else:
+        current_kwargs[key] = value
+    return tuple(current_args), current_kwargs
+
+
+def _modified_result_value(payload: Any, result: Any, *, error: str | None = None) -> Any:
+    return denormalize_tool_result_payload(
+        payload=payload,
+        result=result,
+        error=error,
+    ).result
+
+
+def _modified_llm_output_value(payload: Any, result: Any) -> Any:
+    message = _get_attr_or_key(result, "message")
+    if message is not None and hasattr(message, "content"):
+        updated_result = copy.copy(result)
+        updated_message = copy.copy(message)
+        updated_message.content = denormalize_llm_output_payload(
+            payload=payload,
+            output=getattr(message, "content", None),
+        )
+        updated_result.message = updated_message
+        return updated_result
+    return denormalize_llm_output_payload(payload=payload, output=result)
+
+
+def _replace_response_text(response: Any, value: Any) -> Any:
+    if isinstance(response, tuple):
+        items = list(response)
+        if items:
+            items[0] = value
+        return tuple(items)
+    return value
 
 
 def _llm_call_from_args(args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -1076,7 +1191,11 @@ def _normalize_value(value: Any) -> Any:
 
 
 def _blocked_llm_value(decision: GuardDecision) -> str | None:
-    if decision.is_allow or decision.decision_type == DecisionType.LOG_ONLY:
+    if decision.is_allow or decision.decision_type in {
+        DecisionType.LOG_ONLY,
+        DecisionType.MODIFY_LLM_INPUT,
+        DecisionType.MODIFY_LLM_OUTPUT,
+    }:
         return None
     if decision.decision_type == DecisionType.SANITIZE:
         return f"AgentGuard sanitized Dify Agent Chat LLM call: {decision.reason}"
@@ -1084,7 +1203,11 @@ def _blocked_llm_value(decision: GuardDecision) -> str | None:
 
 
 def _blocked_tool_value(decision: GuardDecision, tool: str) -> str | None:
-    if decision.is_allow or decision.decision_type == DecisionType.LOG_ONLY:
+    if decision.is_allow or decision.decision_type in {
+        DecisionType.LOG_ONLY,
+        DecisionType.MODIFY_TOOL_INVOKE,
+        DecisionType.MODIFY_TOOL_RESULT,
+    }:
         return None
     if decision.decision_type == DecisionType.HUMAN_CHECK:
         return safe_dumps({"agentguard": "pending", "tool": tool, "reason": decision.reason})
@@ -1096,7 +1219,10 @@ def _blocked_tool_value(decision: GuardDecision, tool: str) -> str | None:
 
 
 def _blocked_result_value(decision: GuardDecision, tool: str) -> str | None:
-    if decision.is_allow or decision.decision_type == DecisionType.LOG_ONLY:
+    if decision.is_allow or decision.decision_type in {
+        DecisionType.LOG_ONLY,
+        DecisionType.MODIFY_TOOL_RESULT,
+    }:
         return None
     if decision.decision_type == DecisionType.SANITIZE:
         return safe_dumps({"agentguard": "sanitized", "tool": tool, "reason": decision.reason})

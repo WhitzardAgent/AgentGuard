@@ -174,6 +174,32 @@ test("applyLoopbackToResponsesRequest rewrites request input only", () => {
   ]);
 });
 
+test("applyModifyToResponsesRequest rewrites request input and keeps other fields", () => {
+  const request = _private.applyModifyToResponsesRequest(
+    {
+      model: "gpt-4.1",
+      stream: false,
+      tools: [{ type: "web_search" }],
+      input: [{ role: "user", content: "原始输入" }],
+    },
+    JSON.stringify({
+      model: "gpt-4.1-mini",
+      input: [
+        { role: "system", content: "你是一名审查助手" },
+        { role: "user", content: "改写后的输入" },
+      ],
+    })
+  );
+
+  assert.equal(request.model, "gpt-4.1-mini");
+  assert.equal(request.stream, false);
+  assert.deepEqual(request.tools, [{ type: "web_search" }]);
+  assert.deepEqual(request.input, [
+    { role: "system", content: "你是一名审查助手" },
+    { role: "user", content: "改写后的输入" },
+  ]);
+});
+
 test("applyLoopbackToRunNodeArgs rewrites node response messages only", () => {
   const rewritten = _private.applyLoopbackToRunNodeArgs(
     {
@@ -209,6 +235,98 @@ test("applyLoopbackToRunNodeArgs rewrites node response messages only", () => {
     { role: "user", content: "重写 user" },
   ]);
   assert.deepEqual(rewritten.executionData.data.main[0][0].json, { chatInput: "原始输入" });
+});
+
+test("applyModifyToRunNodeArgs rewrites messages and preserves other node parameters", () => {
+  const rewritten = _private.applyModifyToRunNodeArgs(
+    {
+      node: {
+        type: "@n8n/n8n-nodes-langchain.openAi",
+        parameters: {
+          modelId: { value: "chatgpt-4o-latest" },
+          responses: {
+            values: [
+              { role: "system", content: "原始 system" },
+              { role: "user", content: "原始 user" },
+            ],
+          },
+          builtInTools: { webSearch: true },
+        },
+      },
+      executionData: {
+        data: {
+          main: [[{ json: { chatInput: "原始输入" } }]],
+        },
+      },
+    },
+    JSON.stringify({
+      modelId: { value: "gpt-4.1-mini" },
+      messages: [
+        { role: "system", content: "重写 system" },
+        { role: "user", content: "重写 user" },
+      ],
+    })
+  );
+
+  assert.equal(rewritten.node.parameters.modelId.value, "gpt-4.1-mini");
+  assert.deepEqual(rewritten.node.parameters.builtInTools, { webSearch: true });
+  assert.deepEqual(rewritten.node.parameters.responses.values, [
+    { role: "system", content: "重写 system" },
+    { role: "user", content: "重写 user" },
+  ]);
+});
+
+test("applyModifyToResponsesResult rewrites response output text", () => {
+  const rewritten = _private.applyModifyToResponsesResult(
+    {
+      id: "resp_1",
+      object: "response",
+      status: "completed",
+      output_text: "old answer",
+      output: [
+        {
+          type: "message",
+          content: [{ type: "output_text", text: "old answer", annotations: [] }],
+        },
+      ],
+    },
+    JSON.stringify({ final_output: "new answer" })
+  );
+
+  assert.equal(rewritten.id, "resp_1");
+  assert.equal(rewritten.output_text, "new answer");
+  assert.equal(rewritten.output[0].content[0].text, "new answer");
+});
+
+test("applyModifyToToolInput preserves runtime metadata fields", () => {
+  const rewritten = _private.applyModifyToToolInput(
+    {
+      toolCallId: "call_1",
+      sessionId: "sess_1",
+      action: "execute",
+      url: "https://secret.example.com",
+    },
+    JSON.stringify({ url: "https://safe.example.com" })
+  );
+
+  assert.equal(rewritten.toolCallId, "call_1");
+  assert.equal(rewritten.sessionId, "sess_1");
+  assert.equal(rewritten.action, "execute");
+  assert.equal(rewritten.url, "https://safe.example.com");
+});
+
+test("applyModifyToRunNodeResult rewrites first json output field", () => {
+  const rewritten = _private.applyModifyToRunNodeResult(
+    {
+      data: [[{ json: { output: "old answer", keep: true } }]],
+      hints: ["keep"],
+    },
+    JSON.stringify({ output: "new answer" })
+  );
+
+  assert.deepEqual(rewritten.hints, ["keep"]);
+  assert.equal(rewritten.data[0][0].json.output, "new answer");
+  assert.equal(rewritten.data[0][0].json.keep, true);
 });
 
 test("llmOutputFromRunNodeResult extracts n8n OpenAI node output", () => {

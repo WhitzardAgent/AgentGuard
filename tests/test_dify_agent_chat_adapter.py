@@ -942,3 +942,194 @@ def test_agent_chat_tool_result_sanitize_returns_safe_observation(monkeypatch):
     assert response[1] == []
     assert "sanitized" in response[0]
     assert "hide result" in response[0]
+
+
+
+def test_agent_chat_llm_modify_input_rewrites_prompt_messages(monkeypatch):
+    adapter = _fresh_adapter(monkeypatch)
+
+    class ModelInstance:
+        def __init__(self):
+            self.seen_prompt_messages = None
+
+        def invoke_llm(
+            self,
+            prompt_messages,
+            model_parameters=None,
+            tools=None,
+            stop=None,
+            stream=True,
+            callbacks=None,
+        ):
+            self.seen_prompt_messages = prompt_messages
+            return types.SimpleNamespace(message=types.SimpleNamespace(content="final", tool_calls=[]))
+
+    adapter._patch_model_invoke_llm(ModelInstance)
+
+    class ModifyRuntime:
+        def guard(self, event, phase="before"):
+            if event.event_type.value == "llm_input":
+                return types.SimpleNamespace(
+                    decision=GuardDecision.modify_llm_input(
+                        "rewrite llm input",
+                        processed_content='[{"role": "user", "content": "rewritten prompt"}]',
+                    )
+                )
+            return types.SimpleNamespace(decision=GuardDecision.allow())
+
+    guard = types.SimpleNamespace(
+        runtime=ModifyRuntime(),
+        context=types.SimpleNamespace(session_id="rewrite-input", agent_id="agent"),
+    )
+    token_guard = adapter._current_guard.set(guard)
+    token_meta = adapter._current_metadata.set({"app_id": "app-1"})
+    try:
+        model = ModelInstance()
+        result = model.invoke_llm(
+            prompt_messages=[types.SimpleNamespace(content="original prompt")],
+            stream=False,
+        )
+    finally:
+        adapter._current_metadata.reset(token_meta)
+        adapter._current_guard.reset(token_guard)
+
+    assert result.message.content == "final"
+    assert model.seen_prompt_messages == [{"role": "user", "content": "rewritten prompt"}]
+
+
+def test_agent_chat_llm_modify_output_rewrites_message_content(monkeypatch):
+    adapter = _fresh_adapter(monkeypatch)
+
+    class ModelInstance:
+        def invoke_llm(
+            self,
+            prompt_messages,
+            model_parameters=None,
+            tools=None,
+            stop=None,
+            stream=True,
+            callbacks=None,
+        ):
+            return types.SimpleNamespace(message=types.SimpleNamespace(content="original answer", tool_calls=[]))
+
+    adapter._patch_model_invoke_llm(ModelInstance)
+
+    class ModifyRuntime:
+        def guard(self, event, phase="before"):
+            if event.event_type.value == "llm_output":
+                return types.SimpleNamespace(
+                    decision=GuardDecision.modify_llm_output(
+                        "rewrite llm output",
+                        processed_content='{"output": "rewritten answer"}',
+                    )
+                )
+            return types.SimpleNamespace(decision=GuardDecision.allow())
+
+    guard = types.SimpleNamespace(
+        runtime=ModifyRuntime(),
+        context=types.SimpleNamespace(session_id="rewrite-output", agent_id="agent"),
+    )
+    token_guard = adapter._current_guard.set(guard)
+    token_meta = adapter._current_metadata.set({"app_id": "app-1"})
+    try:
+        result = ModelInstance().invoke_llm(
+            prompt_messages=[types.SimpleNamespace(content="original prompt")],
+            stream=False,
+        )
+    finally:
+        adapter._current_metadata.reset(token_meta)
+        adapter._current_guard.reset(token_guard)
+
+    assert result.message.content == "rewritten answer"
+
+
+def test_agent_chat_tool_modify_invoke_rewrites_tool_parameters(monkeypatch):
+    fake = _install_fake_dify_agent_chat_modules(monkeypatch)
+    adapter = _fresh_adapter(monkeypatch)
+    fake.ToolEngine.calls = []
+    adapter._patch_tool_agent_invoke(fake.ToolEngine)
+
+    class ModifyRuntime:
+        def guard(self, event, phase="before"):
+            if event.event_type.value == "tool_invoke":
+                return types.SimpleNamespace(
+                    decision=GuardDecision.modify_tool_invoke(
+                        "rewrite tool args",
+                        processed_content='{"year": 2027, "month": 3, "day": 1}',
+                    )
+                )
+            return types.SimpleNamespace(decision=GuardDecision.allow())
+
+    tool = fake.BaseAgentRunner()._init_prompt_tools()[0]["weekday"]
+    message = types.SimpleNamespace(id="message-1", conversation_id="conversation-1")
+    guard = types.SimpleNamespace(
+        runtime=ModifyRuntime(),
+        context=types.SimpleNamespace(session_id="tool-input", agent_id="agent"),
+    )
+    token_guard = adapter._current_guard.set(guard)
+    token_meta = adapter._current_metadata.set({"app_id": "app-1"})
+    try:
+        response = fake.ToolEngine.agent_invoke(
+            tool=tool,
+            tool_parameters={"year": 2026, "month": 2, "day": 28},
+            user_id="user-1",
+            tenant_id="tenant-1",
+            message=message,
+            invoke_from="debugger",
+            agent_tool_callback=object(),
+            conversation_id="conversation-1",
+            app_id="app-1",
+            message_id="message-1",
+        )
+    finally:
+        adapter._current_metadata.reset(token_meta)
+        adapter._current_guard.reset(token_guard)
+
+    assert response[0] == "Saturday"
+    assert fake.ToolEngine.calls == [("weekday", {"year": 2027, "month": 3, "day": 1})]
+
+
+def test_agent_chat_tool_modify_result_rewrites_tool_observation(monkeypatch):
+    fake = _install_fake_dify_agent_chat_modules(monkeypatch)
+    adapter = _fresh_adapter(monkeypatch)
+    fake.ToolEngine.calls = []
+    adapter._patch_tool_agent_invoke(fake.ToolEngine)
+
+    class ModifyRuntime:
+        def guard(self, event, phase="before"):
+            if event.event_type.value == "tool_result":
+                return types.SimpleNamespace(
+                    decision=GuardDecision.modify_tool_result(
+                        "rewrite tool result",
+                        processed_content='{"result": "Sunday"}',
+                    )
+                )
+            return types.SimpleNamespace(decision=GuardDecision.allow())
+
+    tool = fake.BaseAgentRunner()._init_prompt_tools()[0]["weekday"]
+    message = types.SimpleNamespace(id="message-1", conversation_id="conversation-1")
+    guard = types.SimpleNamespace(
+        runtime=ModifyRuntime(),
+        context=types.SimpleNamespace(session_id="tool-output", agent_id="agent"),
+    )
+    token_guard = adapter._current_guard.set(guard)
+    token_meta = adapter._current_metadata.set({"app_id": "app-1"})
+    try:
+        response = fake.ToolEngine.agent_invoke(
+            tool=tool,
+            tool_parameters={"year": 2026, "month": 2, "day": 28},
+            user_id="user-1",
+            tenant_id="tenant-1",
+            message=message,
+            invoke_from="debugger",
+            agent_tool_callback=object(),
+            conversation_id="conversation-1",
+            app_id="app-1",
+            message_id="message-1",
+        )
+    finally:
+        adapter._current_metadata.reset(token_meta)
+        adapter._current_guard.reset(token_guard)
+
+    assert response[0] == "Sunday"
+    assert response[1] == []

@@ -28,6 +28,10 @@ from agentguard.adapters.agent.dify_flask import (
 from agentguard.adapters.agent.dify_flask import (
     register_dify_flask_app as _register_shared_dify_flask_app,
 )
+from agentguard.adapters.agent.normalization import (
+    denormalize_llm_output_payload,
+    denormalize_tool_result_payload,
+)
 from agentguard.schemas import events as ev
 from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.decisions import DecisionType, GuardDecision
@@ -58,6 +62,40 @@ _catalog_fingerprints: dict[str, str] = {}
 _catalog_fingerprints_lock = threading.Lock()
 _runtime_agent_registrations: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
 _runtime_agent_registrations_lock = threading.Lock()
+
+_LEGACY_LLM_ARG_NAMES = ("prompt_messages", "model_parameters", "tools", "stop", "stream", "callbacks")
+_LEGACY_TOOL_ARG_NAMES = (
+    "tool",
+    "tool_parameters",
+    "user_id",
+    "tenant_id",
+    "message",
+    "invoke_from",
+    "agent_tool_callback",
+    "trace_manager",
+    "conversation_id",
+    "app_id",
+    "message_id",
+)
+_WORKFLOW_TOOL_ARG_NAMES = (
+    "tool",
+    "tool_parameters",
+    "user_id",
+    "workflow_tool_callback",
+    "workflow_call_depth",
+    "conversation_id",
+    "app_id",
+    "message_id",
+)
+_PLUGIN_BACKWARDS_TOOL_ARG_NAMES = (
+    "tenant_id",
+    "user_id",
+    "tool_type",
+    "provider",
+    "tool_name",
+    "tool_parameters",
+    "credential_id",
+)
 
 
 def install_dify_adapter() -> dict[str, Any]:
@@ -484,17 +522,29 @@ def _run_legacy_llm_call(
     original: Any,
 ) -> Any:
     decision = _guard_legacy_llm_input(model, call)
+    current_args = tuple(args)
+    current_kwargs = dict(kwargs)
+    if decision.decision_type == DecisionType.MODIFY_LLM_INPUT:
+        current_args, current_kwargs = _replace_named_argument(
+            current_args,
+            current_kwargs,
+            _LEGACY_LLM_ARG_NAMES,
+            "prompt_messages",
+            _decision_payload(decision),
+        )
     blocked = _blocked_llm_value(decision)
     if blocked is not None:
         raise AdapterError(blocked)
     try:
-        result = original(model, *args, **kwargs)
+        result = original(model, *current_args, **current_kwargs)
     except Exception as exc:
         _guard_legacy_llm_output(model, {"error": str(exc)}, call, error=str(exc))
         raise
     if _is_generator_like(result):
         return _wrap_legacy_llm_generator(model, result, call)
     decision = _guard_legacy_llm_output(model, result, call)
+    if decision.decision_type == DecisionType.MODIFY_LLM_OUTPUT:
+        result = _modified_llm_output_value(_decision_payload(decision), result)
     blocked = _blocked_llm_value(decision)
     if blocked is not None:
         raise AdapterError(blocked)
@@ -524,18 +574,35 @@ def _patch_legacy_tool_agent_invoke(tool_engine_cls: Any) -> bool:
 
     @functools.wraps(original)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
-        call = _legacy_tool_call_from_args(args, kwargs)
+        current_args = tuple(args)
+        current_kwargs = dict(kwargs)
+        call = _legacy_tool_call_from_args(current_args, current_kwargs)
         decision = _guard_legacy_tool_invoke(call)
+        if decision.decision_type == DecisionType.MODIFY_TOOL_INVOKE:
+            payload = _decision_payload(decision)
+            current_args, current_kwargs = _replace_named_argument(
+                current_args,
+                current_kwargs,
+                _LEGACY_TOOL_ARG_NAMES,
+                "tool_parameters",
+                payload,
+            )
+            call["tool_parameters"] = payload if isinstance(payload, dict) else {"value": payload}
         blocked = _blocked_tool_value(decision, call["tool_name"])
         if blocked is not None:
             return _legacy_blocked_tool_response(blocked)
         try:
-            response = original(*args, **kwargs)
+            response = original(*current_args, **current_kwargs)
         except Exception as exc:
             _guard_legacy_tool_result(call, None, error=str(exc))
             raise
         result_text = response[0] if isinstance(response, tuple) and response else response
         decision = _guard_legacy_tool_result(call, result_text)
+        if decision.decision_type == DecisionType.MODIFY_TOOL_RESULT:
+            response = _replace_response_text(
+                response,
+                _modified_result_value(_decision_payload(decision), result_text),
+            )
         blocked_result = _blocked_result_value(decision, call["tool_name"])
         if blocked_result is not None:
             return _legacy_blocked_tool_response(blocked_result)
@@ -553,15 +620,27 @@ def _patch_workflow_tool_generic_invoke(tool_engine_cls: Any) -> bool:
 
     @functools.wraps(original)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
-        call = _workflow_tool_call_from_args(args, kwargs)
+        current_args = tuple(args)
+        current_kwargs = dict(kwargs)
+        call = _workflow_tool_call_from_args(current_args, current_kwargs)
         decision = _guard_workflow_tool_invoke(call)
+        if decision.decision_type == DecisionType.MODIFY_TOOL_INVOKE:
+            payload = _decision_payload(decision)
+            current_args, current_kwargs = _replace_named_argument(
+                current_args,
+                current_kwargs,
+                _WORKFLOW_TOOL_ARG_NAMES,
+                "tool_parameters",
+                payload,
+            )
+            call["tool_parameters"] = payload if isinstance(payload, dict) else {"value": payload}
         blocked = _blocked_tool_value(decision, call["tool_name"])
         if blocked is not None:
             return _workflow_blocked_tool_generator(blocked)
         scoped_guard = _active_guard()
         scoped_metadata = _merged_metadata(_workflow_tool_metadata(call, "tool_runtime"))
         try:
-            response = original(*args, **kwargs)
+            response = original(*current_args, **current_kwargs)
         except Exception as exc:
             _guard_workflow_tool_result(call, None, error=str(exc))
             raise
@@ -614,11 +693,23 @@ def _patch_legacy_plugin_backwards_tool(invocation_cls: Any) -> bool:
 
         def invoke() -> Any:
             decision = _guard_plugin_backwards_tool_invoke(call)
+            current_args = tuple(args)
+            current_kwargs = dict(kwargs)
+            if decision.decision_type == DecisionType.MODIFY_TOOL_INVOKE:
+                payload = _decision_payload(decision)
+                current_args, current_kwargs = _replace_named_argument(
+                    current_args,
+                    current_kwargs,
+                    _PLUGIN_BACKWARDS_TOOL_ARG_NAMES,
+                    "tool_parameters",
+                    payload,
+                )
+                call["tool_parameters"] = payload if isinstance(payload, dict) else {"value": payload}
             blocked = _blocked_tool_value(decision, call["tool_name"])
             if blocked is not None:
                 return _plugin_backwards_blocked_tool_generator(blocked)
             try:
-                response = original(*args, **kwargs)
+                response = original(*current_args, **current_kwargs)
             except Exception as exc:
                 _guard_plugin_backwards_tool_result(call, None, error=str(exc))
                 raise
@@ -649,15 +740,21 @@ def _patch_llm_request(model_cls: Any) -> bool:
     ) -> Any:
         request_input = _build_dify_request_input(self, messages, model_settings, model_request_parameters)
         decision = _guard_llm_input(self, request_input, stream=False)
+        current_messages = messages
         blocked = _blocked_llm_value(decision)
+        if decision.decision_type == DecisionType.MODIFY_LLM_INPUT:
+            payload = _decision_payload(decision)
+            current_messages = payload if isinstance(payload, list) else [payload]
         if blocked is not None:
             raise AdapterError(blocked)
         try:
-            response = await original(self, messages, model_settings, model_request_parameters)
+            response = await original(self, current_messages, model_settings, model_request_parameters)
         except Exception as exc:
             _guard_llm_output(self, {"error": str(exc)}, stream=False, error=str(exc))
             raise
         decision = _guard_llm_output(self, response, stream=False)
+        if decision.decision_type == DecisionType.MODIFY_LLM_OUTPUT:
+            response = _modified_llm_output_value(_decision_payload(decision), response)
         blocked = _blocked_llm_value(decision)
         if blocked is not None:
             raise AdapterError(blocked)
@@ -684,6 +781,10 @@ def _patch_llm_request_stream(model_cls: Any) -> bool:
     ) -> AsyncIterator[Any]:
         request_input = _build_dify_request_input(self, messages, model_settings, model_request_parameters)
         decision = _guard_llm_input(self, request_input, stream=True)
+        current_messages = messages
+        if decision.decision_type == DecisionType.MODIFY_LLM_INPUT:
+            payload = _decision_payload(decision)
+            current_messages = payload if isinstance(payload, list) else [payload]
         blocked = _blocked_llm_value(decision)
         if blocked is not None:
             raise AdapterError(blocked)
@@ -691,7 +792,7 @@ def _patch_llm_request_stream(model_cls: Any) -> bool:
         try:
             async with original(
                 self,
-                messages,
+                current_messages,
                 model_settings,
                 model_request_parameters,
                 run_context=run_context,
@@ -743,6 +844,9 @@ def _patch_tool_builder(tools_module: Any) -> bool:
                 metadata=_tool_metadata(tool_config, "tool_catalog"),
             )
             decision = _guard_tool_invoke(tool_config, tool_name, merged_arguments)
+            if decision.decision_type == DecisionType.MODIFY_TOOL_INVOKE:
+                payload = _decision_payload(decision)
+                merged_arguments = payload if isinstance(payload, dict) else {"value": payload}
             blocked = _blocked_tool_value(decision, tool_name)
             if blocked is not None:
                 return blocked
@@ -763,6 +867,8 @@ def _patch_tool_builder(tools_module: Any) -> bool:
                     return f"tool parameters validation error: {exc}, please check your tool parameters"
                 raise
             decision = _guard_tool_result(tool_config, tool_name, result)
+            if decision.decision_type == DecisionType.MODIFY_TOOL_RESULT:
+                result = _modified_result_value(_decision_payload(decision), result)
             blocked_result = _blocked_result_value(decision, tool_name)
             return blocked_result if blocked_result is not None else result
 
@@ -1677,6 +1783,63 @@ def _legacy_llm_call_from_args(args: tuple[Any, ...], kwargs: dict[str, Any]) ->
     call.setdefault("tools", None)
     call.setdefault("stream", True)
     return call
+
+
+def _decision_payload(decision: GuardDecision) -> Any:
+    payload = decision.processed_content
+    if not isinstance(payload, str):
+        return payload
+    text = payload.strip()
+    if not text or text[0] not in {"{", "["}:
+        return payload
+    return safe_loads(text, fallback=payload)
+
+
+def _replace_named_argument(
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    names: tuple[str, ...],
+    key: str,
+    value: Any,
+) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    current_args = list(args)
+    current_kwargs = dict(kwargs)
+    if key in current_kwargs:
+        current_kwargs[key] = value
+        return tuple(current_args), current_kwargs
+
+    try:
+        index = names.index(key)
+    except ValueError:
+        current_kwargs[key] = value
+        return tuple(current_args), current_kwargs
+
+    if index < len(current_args):
+        current_args[index] = value
+    else:
+        current_kwargs[key] = value
+    return tuple(current_args), current_kwargs
+
+
+def _modified_result_value(payload: Any, result: Any, *, error: str | None = None) -> Any:
+    return denormalize_tool_result_payload(
+        payload=payload,
+        result=result,
+        error=error,
+    ).result
+
+
+def _modified_llm_output_value(payload: Any, result: Any) -> Any:
+    return denormalize_llm_output_payload(payload=payload, output=result)
+
+
+def _replace_response_text(response: Any, value: Any) -> Any:
+    if isinstance(response, tuple):
+        items = list(response)
+        if items:
+            items[0] = value
+        return tuple(items)
+    return value
 
 
 def _legacy_tool_call_from_args(args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[str, Any]:

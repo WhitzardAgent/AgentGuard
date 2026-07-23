@@ -3,10 +3,16 @@
 const {
   LLMInputDenormalization,
   LLMInputNormalization,
+  LLMOutputDenormalization,
   LLMOutputNormalization,
+  ToolInvokeDenormalization,
   ToolInvokeNormalization,
+  ToolResultDenormalization,
   ToolResultNormalization,
   denormalizeLLMInputPayload,
+  denormalizeLLMOutputPayload,
+  denormalizeToolInvokePayload,
+  denormalizeToolResultPayload,
 } = require("./normalization");
 const {
   isGuarded,
@@ -179,11 +185,29 @@ class BaseAgentAdapter {
     });
   }
 
+  denormalize_llm_output({ label, payload, output, fn = null, owner = null } = {}) {
+    void fn;
+    return new LLMOutputDenormalization({
+      output: denormalizeLLMOutputPayload({ payload, output }),
+      metadata: this._metadata({ label, owner }),
+    });
+  }
+
   normalize_tool_invoke({ tool_metadata, arguments: arguments_ = {}, fn = null, owner = null } = {}) {
     void fn;
     return new ToolInvokeNormalization({
       arguments: this.normalizeValue(arguments_),
       capabilities: [...((tool_metadata && tool_metadata.capabilities) || [])],
+      metadata: this._metadata({ owner }),
+    });
+  }
+
+  denormalize_tool_invoke({ tool_metadata, payload, args = [], kwargs = {}, fn = null, owner = null } = {}) {
+    void tool_metadata;
+    const denormalized = denormalizeToolInvokePayload({ payload, args, kwargs, fn });
+    return new ToolInvokeDenormalization({
+      args: denormalized.args,
+      kwargs: denormalized.kwargs,
       metadata: this._metadata({ owner }),
     });
   }
@@ -194,6 +218,17 @@ class BaseAgentAdapter {
     return new ToolResultNormalization({
       result: this.normalizeValue(result),
       error,
+      metadata: this._metadata({ owner }),
+    });
+  }
+
+  denormalize_tool_result({ tool_name, payload, result = null, error = null, fn = null, owner = null } = {}) {
+    void tool_name;
+    void fn;
+    const denormalized = denormalizeToolResultPayload({ payload, result, error });
+    return new ToolResultDenormalization({
+      result: denormalized.result,
+      error: denormalized.error,
       metadata: this._metadata({ owner }),
     });
   }

@@ -177,6 +177,36 @@ def test_metagpt_denormalize_llm_input_rebuilds_structured_payload():
     }
 
 
+def test_metagpt_denormalize_tool_invoke_rebuilds_original_call_shape():
+    adapter = MetaGPTAgentAdapter()
+
+    def run(command: str, timeout: int = 10) -> str:
+        return f"{command}:{timeout}"
+
+    denormalized = adapter.denormalize_tool_invoke(
+        tool_metadata=type("Metadata", (), {"name": "Terminal.run", "capabilities": []})(),
+        payload={"command": "pwd", "timeout": 1},
+        args=("ls",),
+        kwargs={"timeout": 10},
+        fn=run,
+    )
+
+    assert denormalized.args == ("pwd",)
+    assert denormalized.kwargs == {"timeout": 1}
+
+
+def test_metagpt_denormalize_tool_result_updates_structured_output():
+    adapter = MetaGPTAgentAdapter()
+
+    denormalized = adapter.denormalize_tool_result(
+        tool_name="Terminal.run",
+        payload={"result": "guarded output"},
+        result={"result": "raw output", "status": "ok"},
+    )
+
+    assert denormalized.result == {"result": "guarded output", "status": "ok"}
+
+
 @pytest.mark.asyncio
 async def test_attach_metagpt_patches_data_interpreter_execute_code_run():
     calls = []
