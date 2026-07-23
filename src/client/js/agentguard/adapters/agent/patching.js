@@ -305,13 +305,6 @@ function blockedLLMValue(decision) {
   if (decision.decision_type === DecisionType.DENY) {
     return { agentguard: "blocked", reason: decision.reason };
   }
-  if (decision.decision_type === DecisionType.LOOP_BACK_TO_LLM) {
-    return {
-      agentguard: "loop_back_to_llm",
-      reason: decision.reason,
-      decision: decision.processed_content,
-    };
-  }
   if (decision.decision_type === DecisionType.SANITIZE) {
     return { agentguard: "sanitized", reason: decision.reason };
   }
