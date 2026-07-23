@@ -918,6 +918,212 @@ test("ticket-enabled sessions read the real OpenClaw sessionId from the session 
   }
 });
 
+test("ticket-enabled sessions persist runtime auth into the OpenClaw session store", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalAgentKeyDir = process.env.AGENTGUARD_AGENT_KEY_DIR;
+  const keyDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-openclaw-keys-"));
+  const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-openclaw-runtime-persist-"));
+  const storePath = path.join(configDir, "sessions.json");
+  process.env.AGENTGUARD_AGENT_KEY_DIR = keyDir;
+  fs.writeFileSync(
+    storePath,
+    JSON.stringify({
+      "agent:agent-main:main": {
+        sessionId: "openclaw-real-session-1",
+        updatedAt: Date.now(),
+      },
+    }),
+  );
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const body = options.body ? JSON.parse(options.body) : null;
+    calls.push({ url: String(url), headers: { ...(options.headers || {}) }, body });
+    if (String(url).endsWith("/v1/server/agents/bootstrap")) {
+      return {
+        ok: true,
+        async json() {
+          return {
+            status: "ok",
+            provider: "openclaw",
+            user_id: "user-7",
+            agents: [
+              {
+                external_agent_id: "agent-main",
+                agent_id: "ag_openclaw_canonical",
+                agent_identity_code: "agic_openclaw_canonical",
+                public_key_thumbprint: "thumb-openclaw-canonical",
+                user_bound: true,
+              },
+            ],
+          };
+        },
+      };
+    }
+    if (String(url).endsWith("/v1/server/session/create")) {
+      return {
+        ok: true,
+        async json() {
+          return {
+            status: "ok",
+            session_id: "ags_openclaw_1",
+            agent_id: "ag_openclaw_canonical",
+            user_id: "user-7",
+            session_token: "runtime-token-openclaw",
+            expires_at: Math.floor(Date.now() / 1000) + 600,
+          };
+        },
+      };
+    }
+    return { ok: true, async json() { return {}; } };
+  };
+
+  let bridge = null;
+  try {
+    bridge = new AgentGuardOpenClawBridge({
+      pluginConfig: {
+        serverUrl: "http://server.test",
+        userTicket: "agt-ticket-openclaw",
+        phases: buildPhases(),
+      },
+      openclawRuntime: {
+        config: {
+          loadConfig() {
+            return { session: { store: storePath } };
+          },
+        },
+        channel: {
+          session: {
+            resolveStorePath(store) {
+              return store;
+            },
+          },
+        },
+      },
+    });
+
+    const state = bridge.getState(buildToolContext({
+      sessionId: undefined,
+      sessionKey: "agent:agent-main:main",
+    }));
+    await bridge.ensureRuntimeAuth(state);
+
+    const updated = JSON.parse(fs.readFileSync(storePath, "utf8"));
+    const entry = updated["agent:agent-main:main"];
+    assert.equal(entry.agentguardRuntimeSessionId, "ags_openclaw_1");
+    assert.equal(entry.agentguardAgentId, "ag_openclaw_canonical");
+    assert.equal(entry.agentguardUserId, "user-7");
+    assert.equal(entry.agentguardRuntimeSessionToken, "runtime-token-openclaw");
+    assert.equal(entry.agentguardRuntimeTokenExpiresAt > Math.floor(Date.now() / 1000), true);
+    assert.ok(entry.agentguardRuntimeDpopKeyId);
+  } finally {
+    bridge?.clearAll();
+    globalThis.fetch = originalFetch;
+    if (originalAgentKeyDir === undefined) {
+      delete process.env.AGENTGUARD_AGENT_KEY_DIR;
+    } else {
+      process.env.AGENTGUARD_AGENT_KEY_DIR = originalAgentKeyDir;
+    }
+  }
+});
+
+test("ticket-enabled sessions restore persisted runtime auth without a fresh ticket", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalAgentKeyDir = process.env.AGENTGUARD_AGENT_KEY_DIR;
+  const keyDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-openclaw-keys-"));
+  const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-openclaw-runtime-restore-"));
+  const storePath = path.join(configDir, "sessions.json");
+  const dpopKeyId = ["openclaw", "ag_openclaw_canonical", "openclaw-real-session-1"].join("\x1f");
+  process.env.AGENTGUARD_AGENT_KEY_DIR = keyDir;
+  fs.writeFileSync(
+    storePath,
+    JSON.stringify({
+      "agent:agent-main:main": {
+        sessionId: "openclaw-real-session-1",
+        updatedAt: Date.now(),
+        agentguardRuntimeSessionId: "ags_openclaw_1",
+        agentguardRuntimeAuthVersion: 1,
+        agentguardAgentId: "ag_openclaw_canonical",
+        agentguardUserId: "user-7",
+        agentguardRuntimeSessionToken: "runtime-token-old",
+        agentguardRuntimeTokenExpiresAt: 1,
+        agentguardRuntimeDpopKeyId: dpopKeyId,
+      },
+    }),
+  );
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const body = options.body ? JSON.parse(options.body) : null;
+    calls.push({ url: String(url), headers: { ...(options.headers || {}) }, body });
+    if (String(url).endsWith("/v1/server/session/refresh")) {
+      return {
+        ok: true,
+        async json() {
+          return {
+            status: "ok",
+            session_id: "ags_openclaw_1",
+            agent_id: "ag_openclaw_canonical",
+            user_id: "user-7",
+            session_token: "runtime-token-refreshed",
+            expires_at: Math.floor(Date.now() / 1000) + 600,
+          };
+        },
+      };
+    }
+    return { ok: true, async json() { return {}; } };
+  };
+
+  let bridge = null;
+  try {
+    bridge = new AgentGuardOpenClawBridge({
+      pluginConfig: {
+        serverUrl: "http://server.test",
+        userTicketEnvVar: "AGENTGUARD_USER_TICKET",
+        phases: buildPhases(),
+      },
+      openclawRuntime: {
+        config: {
+          loadConfig() {
+            return { session: { store: storePath } };
+          },
+        },
+        channel: {
+          session: {
+            resolveStorePath(store) {
+              return store;
+            },
+          },
+        },
+      },
+    });
+
+    const state = bridge.getState(buildToolContext({
+      sessionId: undefined,
+      sessionKey: "agent:agent-main:main",
+    }));
+    assert.equal(state.runtimeAuth.session_token, "runtime-token-old");
+    await bridge.ensureRuntimeAuth(state);
+
+    const refreshCalls = calls.filter((call) => call.url.endsWith("/v1/server/session/refresh"));
+    const bootstrapCalls = calls.filter((call) => call.url.endsWith("/v1/server/agents/bootstrap"));
+    const createCalls = calls.filter((call) => call.url.endsWith("/v1/server/session/create"));
+    assert.equal(refreshCalls.length, 1);
+    assert.equal(refreshCalls[0].headers.Authorization, "DPoP runtime-token-old");
+    assert.equal(bootstrapCalls.length, 0);
+    assert.equal(createCalls.length, 0);
+    assert.equal(state.runtimeAuth.session_token, "runtime-token-refreshed");
+    const updated = JSON.parse(fs.readFileSync(storePath, "utf8"));
+    assert.equal(updated["agent:agent-main:main"].agentguardRuntimeSessionToken, "runtime-token-refreshed");
+  } finally {
+    bridge?.clearAll();
+    globalThis.fetch = originalFetch;
+    if (originalAgentKeyDir === undefined) {
+      delete process.env.AGENTGUARD_AGENT_KEY_DIR;
+    } else {
+      process.env.AGENTGUARD_AGENT_KEY_DIR = originalAgentKeyDir;
+    }
+  }
+});
+
 test("ticket-enabled sessions create a new runtime session when the stored OpenClaw sessionId changes", async () => {
   const originalFetch = globalThis.fetch;
   const originalAgentKeyDir = process.env.AGENTGUARD_AGENT_KEY_DIR;

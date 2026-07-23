@@ -384,11 +384,14 @@ class ConsoleState:
                 ]
                 for key in stale_keys:
                     self._skills.pop(key, None)
+            else:
+                stale_keys = []
             self._record_agent_external_accounts(agent_id, external_accounts)
             self._record_agent_display_metadata(agent_id, display_metadata)
             return {
                 "owner_agent_id": agent_id,
                 "skill_count": len(normalized),
+                "stale_removed_count": len(stale_keys),
                 "skills": [
                     self._with_agent_display_metadata(item.to_dict(), agent_id)
                     for item in normalized

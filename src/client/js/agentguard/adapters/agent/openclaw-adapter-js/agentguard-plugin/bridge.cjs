@@ -78,6 +78,8 @@ function normalizePluginConfig(raw = {}) {
     mcpScan: normalizeMcpScanConfig(config.mcpScan, configDir),
     remoteUnavailableMode:
       asNonEmptyString(config.remoteUnavailableMode) || DEFAULT_REMOTE_UNAVAILABLE_MODE,
+    remoteTimeoutS: asPositiveNumber(config.remoteTimeoutS ?? config.timeoutS),
+    remoteRetries: asNonNegativeInteger(config.remoteRetries ?? config.retries),
     windowSize: asPositiveInteger(config.windowSize, DEFAULT_WINDOW_SIZE),
     hasRemoteConfigured: Boolean(serverUrl),
   };
@@ -321,10 +323,11 @@ function normalizeIdentity(value) {
 
 function normalizeRuntimeAuthConfig(config) {
   const userTicket = resolveUserTicket(config || {});
+  const userTicketEnvVar = asNonEmptyString(config && config.userTicketEnvVar);
   return {
     provider: "openclaw",
     userTicket,
-    configured: Boolean(userTicket),
+    configured: Boolean(userTicket || userTicketEnvVar),
   };
 }
 
@@ -383,6 +386,16 @@ function asPositiveInteger(value, fallback) {
     return fallback;
   }
   return Math.floor(value);
+}
+
+function asPositiveNumber(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function asNonNegativeInteger(value) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
 function safeJSONStringify(value) {
@@ -1383,6 +1396,104 @@ function clearRuntimeAuthSession(runtimeAuth) {
   runtimeAuth.expires_at = 0;
 }
 
+function resetRemoteBreaker(remote) {
+  if (remote && remote.breaker && typeof remote.breaker.record_success === "function") {
+    remote.breaker.record_success();
+  }
+}
+
+function hydrateRuntimeAuthFromOpenClawSessionStore(openclawRuntime, state, config = null, logger = console) {
+  const runtimeAuth = state && state.runtimeAuth;
+  if (!runtimeAuth || runtimeAuth.session_token) {
+    return false;
+  }
+  const metadata = state.context && state.context.metadata && typeof state.context.metadata === "object"
+    ? state.context.metadata
+    : {};
+  const openclaw = metadata.openclaw && typeof metadata.openclaw === "object" ? metadata.openclaw : {};
+  const sessionKey = asNonEmptyString(metadata.client_session_key || openclaw.sessionKey);
+  if (!sessionKey) {
+    return false;
+  }
+  const resolved = resolveOpenClawSessionEntry(openclawRuntime, sessionKey, config, logger);
+  const entry = resolved && resolved.entry;
+  if (!entry || isAgentGuardClosedOpenClawEntry(entry, openclaw.sessionId)) {
+    return false;
+  }
+  const sessionToken = asNonEmptyString(entry.agentguardRuntimeSessionToken);
+  const agentId = asNonEmptyString(entry.agentguardAgentId);
+  const externalSessionId = asNonEmptyString(entry.sessionId || entry.session_id || openclaw.sessionId);
+  const expiresAt = Number(entry.agentguardRuntimeTokenExpiresAt || 0);
+  if (
+    entry.agentguardRuntimeAuthVersion !== 1 ||
+    !sessionToken ||
+    !agentId ||
+    !externalSessionId ||
+    !Number.isFinite(expiresAt) ||
+    expiresAt <= 0
+  ) {
+    return false;
+  }
+  runtimeAuth.session_id = asNonEmptyString(entry.agentguardRuntimeSessionId) || runtimeAuth.session_id;
+  runtimeAuth.agent_id = agentId;
+  runtimeAuth.external_agent_id = asNonEmptyString(entry.agentguardExternalAgentId) || runtimeAuth.external_agent_id;
+  runtimeAuth.external_session_id = externalSessionId;
+  runtimeAuth.user_id = asNonEmptyString(entry.agentguardUserId) || runtimeAuth.user_id;
+  runtimeAuth.session_token = sessionToken;
+  runtimeAuth.expires_at = expiresAt;
+  const dpopKeyId = asNonEmptyString(entry.agentguardRuntimeDpopKeyId) || ["openclaw", agentId, externalSessionId].join("\x1f");
+  runtimeAuth.dpop_key = loadOrCreateDPoPKey(dpopKeyId);
+  runtimeAuth.dpop_key_id = dpopKeyId;
+  return true;
+}
+
+function persistRuntimeAuthToOpenClawSessionStore(openclawRuntime, state, config = null, logger = console) {
+  const runtimeAuth = state && state.runtimeAuth;
+  if (!runtimeAuth || !runtimeAuth.session_token) {
+    return false;
+  }
+  const metadata = state.context && state.context.metadata && typeof state.context.metadata === "object"
+    ? state.context.metadata
+    : {};
+  const openclaw = metadata.openclaw && typeof metadata.openclaw === "object" ? metadata.openclaw : {};
+  const sessionKey = asNonEmptyString(metadata.client_session_key || openclaw.sessionKey);
+  if (!sessionKey) {
+    return false;
+  }
+  const externalSessionId =
+    asNonEmptyString(runtimeAuth.external_session_id) ||
+    asNonEmptyString(openclaw.sessionId);
+  if (!externalSessionId) {
+    return false;
+  }
+  const resolved = resolveOpenClawSessionEntry(openclawRuntime, sessionKey, config, logger);
+  if (!resolved || !resolved.entry) {
+    return false;
+  }
+  const current = resolved.entry;
+  resolved.store[sessionKey] = {
+    ...current,
+    sessionId: externalSessionId,
+    updatedAt: Date.now(),
+    agentguardRuntimeSessionId: asNonEmptyString(runtimeAuth.session_id) || null,
+    agentguardRuntimeAuthVersion: 1,
+    agentguardAgentId: asNonEmptyString(runtimeAuth.agent_id) || null,
+    agentguardExternalAgentId: asNonEmptyString(runtimeAuth.external_agent_id) || null,
+    agentguardUserId: asNonEmptyString(runtimeAuth.user_id) || null,
+    agentguardRuntimeSessionToken: runtimeAuth.session_token,
+    agentguardRuntimeTokenExpiresAt: runtimeAuth.expires_at,
+    agentguardRuntimeDpopKeyId: asNonEmptyString(runtimeAuth.dpop_key_id) || null,
+    agentguardRuntimeUpdatedAt: new Date().toISOString(),
+  };
+  try {
+    writeOpenClawSessionStore(resolved.storePath, resolved.store);
+    return true;
+  } catch (error) {
+    logger.warn?.("AgentGuard OpenClaw plugin failed to persist runtime auth in OpenClaw session store.", error);
+    return false;
+  }
+}
+
 function openClawExternalSessionId(context) {
   const metadata = context && context.metadata && typeof context.metadata === "object"
     ? context.metadata
@@ -1470,6 +1581,9 @@ function resolveOpenClawStorePath(openclawRuntime, sessionKey, config = null) {
   if (configuredStorePath) {
     return configuredStorePath;
   }
+  if (asNonEmptyString(config && config.openclawConfigPath)) {
+    throw new Error(`OpenClaw config not found or has no session store: ${config.openclawConfigPath}`);
+  }
   const home = process.env.HOME || process.env.USERPROFILE || "";
   if (!home) {
     throw new Error("cannot resolve OpenClaw session store without HOME");
@@ -1532,8 +1646,8 @@ function isAgentGuardClosedOpenClawEntry(entry, sessionId) {
     return false;
   }
   return (
-    Boolean(closedSessionId || asNonEmptyString(entry.agentguardRuntimeSessionId)) &&
-    Boolean(asNonEmptyString(entry.agentguardClosedAt) || asNonEmptyString(entry.agentguardRuntimeSessionId))
+    Boolean(closedSessionId || asNonEmptyString(entry.agentguardClosedAt)) &&
+    Boolean(asNonEmptyString(entry.agentguardClosedAt) || closedSessionId)
   );
 }
 
@@ -2028,6 +2142,9 @@ class AgentGuardOpenClawBridge {
         state.skillReporting = null;
         state.skillReportingSignature = null;
         state.lastSkillReportSignature = null;
+        state.mcpReporting = null;
+        state.mcpReportingSignature = null;
+        state.lastMcpReportSignature = null;
       }
       this.syncContextMetadata(state);
     }
@@ -2365,6 +2482,8 @@ class AgentGuardOpenClawBridge {
       dpop_proof_factory: runtimeAuth && runtimeAuth.proof,
       use_dpop_auth: Boolean(runtimeAuth),
       legacy_identity_headers: !runtimeAuth,
+      timeout_s: this.config.remoteTimeoutS,
+      retries: this.config.remoteRetries,
     });
     const pluginManager = new PluginManager({
       config: { phases: this.config.phases },
@@ -2401,12 +2520,17 @@ class AgentGuardOpenClawBridge {
       skillReportingSignature: null,
       lastSkillReportSignature: null,
       mcpReporting: null,
+      mcpReportingSignature: null,
+      lastMcpReportSignature: null,
       openclawSessionClosed,
     };
     if (state.openclawSessionClosed) {
       this.resetRuntimeStateAfterOpenClawSessionClosed(state);
+    } else {
+      hydrateRuntimeAuthFromOpenClawSessionStore(this.openclawRuntime, state, this.config, this.logger);
     }
     this.syncContextMetadata(state);
+    this.applyRuntimeAuthContext(state);
     this.sessions.set(sessionKey, state);
     if (!state.openclawSessionClosed && !skipAutoReports) {
       this.ensureDefaultToolReports(state);
@@ -2441,6 +2565,8 @@ class AgentGuardOpenClawBridge {
     state.skillReportingSignature = null;
     state.lastSkillReportSignature = null;
     state.mcpReporting = null;
+    state.mcpReportingSignature = null;
+    state.lastMcpReportSignature = null;
     const remote = state.enforcer && state.enforcer.remote;
     if (remote) {
       remote.session_token = null;
@@ -2493,6 +2619,8 @@ class AgentGuardOpenClawBridge {
     state.skillReportingSignature = null;
     state.lastSkillReportSignature = null;
     state.mcpReporting = null;
+    state.mcpReportingSignature = null;
+    state.lastMcpReportSignature = null;
     state.recentLlmOutputs = new Map();
     state.audit = new AuditRecorder(
       context.session_id,
@@ -2563,6 +2691,9 @@ class AgentGuardOpenClawBridge {
     }
     const remote = state.enforcer && state.enforcer.remote;
     if (!remote || !remote.enabled) {
+      return null;
+    }
+    if (!state.runtimeAuth.user_ticket) {
       return null;
     }
     const discoveredCatalog = normalizeOpenClawAgentCatalog(this.openclawAgents);
@@ -2670,6 +2801,7 @@ class AgentGuardOpenClawBridge {
       remote.dpop_proof_factory = runtimeAuth.proof;
       remote.use_dpop_auth = true;
       remote.legacy_identity_headers = false;
+      resetRemoteBreaker(remote);
     }
   }
 
@@ -2681,11 +2813,8 @@ class AgentGuardOpenClawBridge {
     if (state.openclawSessionClosed) {
       throw new Error("OpenClaw external session is closed");
     }
+    hydrateRuntimeAuthFromOpenClawSessionStore(this.openclawRuntime, state, this.config, this.logger);
     const desiredExternalSessionId = openClawExternalSessionId(state.context);
-    if (runtimeAuthFresh(runtimeAuth) && runtimeAuth.external_session_id === desiredExternalSessionId) {
-      this.applyRuntimeAuthContext(state);
-      return true;
-    }
     if (runtimeAuthFresh(runtimeAuth) && runtimeAuth.external_session_id !== desiredExternalSessionId) {
       clearRuntimeAuthSession(runtimeAuth);
       state.remoteSessionRegistration = null;
@@ -2694,10 +2823,16 @@ class AgentGuardOpenClawBridge {
       state.skillReportingSignature = null;
       state.lastSkillReportSignature = null;
       state.mcpReporting = null;
+      state.mcpReportingSignature = null;
+      state.lastMcpReportSignature = null;
       const remote = state.enforcer && state.enforcer.remote;
       if (remote) {
         remote.session_token = null;
       }
+    }
+    if (runtimeAuthFresh(runtimeAuth)) {
+      this.applyRuntimeAuthContext(state);
+      return true;
     }
     if (state.runtimeAuthStartup) {
       await state.runtimeAuthStartup;
@@ -2787,6 +2922,7 @@ class AgentGuardOpenClawBridge {
     state.runtimeAuthError = null;
     this.applyRuntimeAuthContext(state);
     this.syncContextMetadata(state);
+    persistRuntimeAuthToOpenClawSessionStore(this.openclawRuntime, state, this.config, this.logger);
   }
 
   async updatePluginConfig(state, pluginConfig, { syncRemote = true, syncRemoteSession = syncRemote } = {}) {
@@ -2903,6 +3039,8 @@ class AgentGuardOpenClawBridge {
       state.skillReportingSignature = null;
       state.lastSkillReportSignature = null;
       state.mcpReporting = null;
+      state.mcpReportingSignature = null;
+      state.lastMcpReportSignature = null;
     }
     if (remote) {
       remote.session_token = null;
@@ -3076,9 +3214,14 @@ class AgentGuardOpenClawBridge {
     if (!state.mcpScan || !state.mcpScan.enabled || (!allowEmpty && mcps.length === 0)) {
       return Promise.resolve(false);
     }
-    if (state.mcpReporting && !force) {
+    const signature = mcpScanSignature(state.mcpScan);
+    if (state.mcpReporting && state.mcpReportingSignature === signature) {
       return state.mcpReporting;
     }
+    if (!force && state.lastMcpReportSignature === signature) {
+      return Promise.resolve(true);
+    }
+    state.mcpReportingSignature = signature;
     state.mcpReporting = this.reportWithRuntimeAuthRetry(
       state,
       () => remote.report_mcps(
@@ -3093,9 +3236,21 @@ class AgentGuardOpenClawBridge {
         },
       ),
     )
+      .then((reported) => {
+        if (reported) {
+          state.lastMcpReportSignature = signature;
+        }
+        return reported;
+      })
       .catch((error) => {
         this.logger.warn?.("AgentGuard OpenClaw plugin failed to report MCPs.", error);
         return false;
+      })
+      .finally(() => {
+        if (state.mcpReportingSignature === signature) {
+          state.mcpReporting = null;
+          state.mcpReportingSignature = null;
+        }
       });
     return state.mcpReporting;
   }
@@ -3274,13 +3429,6 @@ class AgentGuardOpenClawBridge {
     if (!state || !state.runtimeAuth || !state.runtimeAuth.session_token) {
       return null;
     }
-    clearRuntimeAuthSession(state.runtimeAuth);
-    state.runtimeAuthStartup = null;
-    state.remoteSessionRegistration = null;
-    const remote = state.enforcer && state.enforcer.remote;
-    if (remote) {
-      remote.session_token = null;
-    }
     try {
       await this.ensureRuntimeAuth(state);
       return await state.enforcer.enforce(runtimeEvent, state.context, {
@@ -3290,6 +3438,15 @@ class AgentGuardOpenClawBridge {
         },
       });
     } catch (error) {
+      if (isRuntimeAuthUnavailableError(error)) {
+        clearRuntimeAuthSession(state.runtimeAuth);
+        state.runtimeAuthStartup = null;
+        state.remoteSessionRegistration = null;
+        const remote = state.enforcer && state.enforcer.remote;
+        if (remote) {
+          remote.session_token = null;
+        }
+      }
       this.logger.warn?.("AgentGuard OpenClaw plugin failed to recover runtime auth session.", error);
       return null;
     }
