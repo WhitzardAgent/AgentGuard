@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from agentguard.schemas.context import RuntimeContext
 from agentguard.u_guard.remote_client import RemoteGuardClient
 
 
@@ -51,3 +52,24 @@ def test_remote_client_rejects_protected_calls_without_runtime_auth():
         assert "runtime-auth session_token" in str(exc)
     else:
         raise AssertionError("expected protected remote call to require runtime-auth")
+
+
+def test_remote_client_allows_catalog_tool_sync_with_adapter_key(monkeypatch):
+    sent = []
+
+    def fake_post(self, path, body):
+        sent.append((path, body))
+        return {"status": "ok", "tool_count": len(body["tools"])}
+
+    monkeypatch.setattr(RemoteGuardClient, "_post", fake_post)
+    client = RemoteGuardClient("http://agentguard.test", api_key="sk-test")
+    context = RuntimeContext(
+        session_id="catalog-session",
+        agent_id="catalog-agent",
+        metadata={"catalog_sync": True},
+    )
+
+    result = client.sync_tools(context, [{"name": "search"}])
+
+    assert result == {"status": "ok", "tool_count": 1}
+    assert sent[0][0] == "/v1/server/tools/sync"

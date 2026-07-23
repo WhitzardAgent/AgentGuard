@@ -264,6 +264,19 @@ class FakeRuntimeSessionStore:
             if token.session_id == session_id:
                 self.revoke_token(token.token_jti)
 
+    def close_external_sessions(self, *, provider: str, external_session_id: str, agent_id: str) -> int:
+        closed = 0
+        for session in list(self.sessions.values()):
+            if (
+                session.provider == provider
+                and session.external_session_id == external_session_id
+                and session.agent_id == agent_id
+                and session.status == "active"
+            ):
+                self.close_session(session.session_id)
+                closed += 1
+        return closed
+
     def create_token(self, *, token_jti: str, session_id: str, expires_at_epoch: int, cnf_jkt: str):
         token = RuntimeToken(
             token_jti=token_jti,
@@ -1044,6 +1057,24 @@ def test_dify_session_create_is_idempotent_for_same_external_session():
     assert second.session_token != first.session_token
 
 
+def test_dify_session_create_rejects_closed_external_session():
+    broker, store = _broker()
+    key = DPoPKey()
+    first = _create(broker, key)
+    store.close_session(first.session.session_id)
+    body = _body()
+
+    with pytest.raises(RuntimeAuthUnauthorized, match="dify external session is closed"):
+        broker.create_session(
+            **body,
+            dpop_proof=key.proof("POST", CREATE_URL),
+            agent_proof=_agent_proof(key, body),
+            request_body=body,
+            method="POST",
+            url=CREATE_URL,
+        )
+
+
 def test_dpop_proof_replay_is_rejected():
     broker, _ = _broker()
     key = DPoPKey()
@@ -1220,6 +1251,47 @@ def test_close_revokes_runtime_session():
             method="POST",
             url="http://agentguard.test/v1/server/guard/decide",
         )
+
+
+def test_close_revokes_external_session_siblings():
+    broker, store = _broker()
+    key = DPoPKey()
+    issue = _create(broker, key)
+    sibling = store.create_session(
+        agent_id=issue.session.agent_id,
+        user_id=issue.session.user_id,
+        provider=issue.session.provider,
+        external_session_id=issue.session.external_session_id,
+        external_account_email=issue.session.external_account_email,
+        dpop_jkt=issue.session.dpop_jkt,
+        metadata={},
+    )
+    sibling_token = broker.token_service.issue(
+        session_id=sibling.session_id,
+        agent_id=sibling.agent_id,
+        user_id=sibling.user_id,
+        dpop_jkt=sibling.dpop_jkt,
+        provider=sibling.provider,
+        external_session_id=sibling.external_session_id,
+    )
+    store.create_token(
+        token_jti=sibling_token.token_jti,
+        session_id=sibling.session_id,
+        expires_at_epoch=sibling_token.expires_at,
+        cnf_jkt=sibling.dpop_jkt,
+    )
+
+    broker.close_session(
+        token=issue.session_token,
+        dpop_proof=key.proof("POST", CLOSE_URL, issue.session_token),
+        method="POST",
+        url=CLOSE_URL,
+    )
+
+    assert store.get_session(issue.session.session_id).status == "closed"
+    assert store.get_session(sibling.session_id).status == "closed"
+    assert store.get_token(issue.token_jti).status == "revoked"
+    assert store.get_token(sibling_token.token_jti).status == "revoked"
 
 
 def test_expired_runtime_token_is_rejected():

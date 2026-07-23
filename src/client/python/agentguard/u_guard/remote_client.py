@@ -196,7 +196,9 @@ class RemoteGuardClient:
     def sync_tools(self, context: RuntimeContext, tools: list[dict[str, Any]]) -> dict[str, Any]:
         if not self.enabled:
             raise RemoteGuardError("no server_url configured")
-        self._require_runtime_auth("remote tool sync")
+        metadata = getattr(context, "metadata", {}) or {}
+        if not bool(metadata.get("catalog_sync")):
+            self._require_runtime_auth("remote tool sync")
         body = {
             "context": context.to_dict(),
             "tools": list(tools),

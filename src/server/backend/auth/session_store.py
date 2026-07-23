@@ -184,6 +184,47 @@ class RuntimeSessionStore:
             (session_id,),
         )
 
+    def close_external_sessions(
+        self,
+        *,
+        provider: str,
+        external_session_id: str,
+        agent_id: str,
+    ) -> int:
+        session_ids = [
+            str(row["session_id"])
+            for row in self.db.fetchall(
+                """
+                SELECT session_id
+                FROM runtime_sessions
+                WHERE provider = %s
+                  AND external_session_id = %s
+                  AND agent_id = %s
+                """,
+                (_normalize_provider(provider), external_session_id, agent_id),
+            )
+        ]
+        if not session_ids:
+            return 0
+        placeholders = ",".join(["%s"] * len(session_ids))
+        closed = self.db.execute(
+            f"""
+            UPDATE runtime_sessions
+            SET status = 'closed', closed_at = COALESCE(closed_at, UTC_TIMESTAMP())
+            WHERE session_id IN ({placeholders}) AND status = 'active'
+            """,
+            session_ids,
+        )
+        self.db.execute(
+            f"""
+            UPDATE runtime_tokens
+            SET status = 'revoked', revoked_at = COALESCE(revoked_at, UTC_TIMESTAMP())
+            WHERE session_id IN ({placeholders}) AND status = 'active'
+            """,
+            session_ids,
+        )
+        return closed
+
     def create_token(
         self,
         *,

@@ -38,13 +38,13 @@ class FakeOrgStore:
 
 
 class FakeRuntimeSessionStore:
-    def __init__(self, *, user_id: int = 7) -> None:
+    def __init__(self, *, user_id: int = 7, external_session_id: str | None = None) -> None:
         self.session = RuntimeSession(
             session_id="ags_dify_1",
             agent_id="ag_1",
             user_id=user_id,
             provider="dify",
-            external_session_id=None,
+            external_session_id=external_session_id,
             external_account_email="alice@example.com",
             dpop_jkt="jkt-1",
             status="active",
@@ -52,6 +52,7 @@ class FakeRuntimeSessionStore:
             last_seen_at=datetime(2026, 1, 2, tzinfo=timezone.utc),
         )
         self.closed = False
+        self.external_close_call = None
 
     def list_sessions(self, *, agent_id: str, user_id: int | None, status: str, limit: int):
         if agent_id != "ag_1":
@@ -90,6 +91,15 @@ class FakeRuntimeSessionStore:
             last_seen_at=self.session.last_seen_at,
             closed_at=datetime(2026, 1, 4, tzinfo=timezone.utc),
         )
+
+    def close_external_sessions(self, *, provider: str, external_session_id: str, agent_id: str) -> int:
+        self.external_close_call = {
+            "provider": provider,
+            "external_session_id": external_session_id,
+            "agent_id": agent_id,
+        }
+        self.close_session(self.session.session_id)
+        return 1
 
 
 class FakeConsole:
@@ -174,6 +184,25 @@ def test_agent_runtime_session_close_marks_session_closed(monkeypatch):
     assert payload["ok"] is True
     assert payload["session"]["status"] == "closed"
     assert payload["session"]["active_token_count"] == 0
+
+
+def test_agent_runtime_session_close_uses_external_session_scope(monkeypatch):
+    store = FakeRuntimeSessionStore(external_session_id="conversation-1")
+    _patch_console_dependencies(monkeypatch, store, agent_ids={"ag_1"})
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/v1/backend/agents/ag_1/runtime/sessions/ags_dify_1/close",
+        cookies={"agentguard_user_session": "session-1"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["session"]["status"] == "closed"
+    assert store.external_close_call == {
+        "provider": "dify",
+        "external_session_id": "conversation-1",
+        "agent_id": "ag_1",
+    }
 
 
 def test_admin_runtime_sessions_can_read_and_close_other_user_sessions(monkeypatch):

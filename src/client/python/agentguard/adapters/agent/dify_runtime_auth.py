@@ -1,14 +1,22 @@
 """Shared Dify runtime Auth Broker / DPoP client state."""
 from __future__ import annotations
 
+import hashlib
+import logging
+import os
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
-from agentguard.u_guard.dpop import DPoPKey
 from agentguard.u_guard.agent_keys import load_or_create_agent_key
+from agentguard.u_guard.dpop import DPoPKey
 from agentguard.u_guard.remote_client import RemoteGuardClient
+
+DIFY_RUNTIME_AUTH_KEY_DIR_ENV = "AGENTGUARD_DIFY_RUNTIME_AUTH_KEY_DIR"
+_DEFAULT_DPOP_KEY_DIR = "/tmp/agentguard/dify-runtime-auth-keys"
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -95,7 +103,7 @@ class DifyRuntimeAuthManager:
                     agent_id=agent_id,
                     cache_key=cache_key,
                     external_session_id=external_session_id,
-                    dpop_key=DPoPKey(),
+                    dpop_key=_load_or_create_dpop_key(agent_id=agent_id, cache_key=cache_key),
                 )
                 self._states[(agent_id, cache_key)] = state
             return state
@@ -211,6 +219,32 @@ class DifyRuntimeAuthManager:
 
 
 manager = DifyRuntimeAuthManager()
+
+
+def _load_or_create_dpop_key(*, agent_id: str, cache_key: str) -> DPoPKey:
+    key_path = _dpop_key_path(agent_id=agent_id, cache_key=cache_key)
+    try:
+        if key_path.exists():
+            return DPoPKey.from_private_pem(key_path.read_bytes())
+        key_path.parent.mkdir(parents=True, exist_ok=True)
+        key = DPoPKey()
+        data = key.private_pem()
+        try:
+            fd = os.open(str(key_path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            return DPoPKey.from_private_pem(key_path.read_bytes())
+        with os.fdopen(fd, "wb") as file:
+            file.write(data)
+        return key
+    except Exception as exc:
+        _LOGGER.warning("AgentGuard Dify DPoP key persistence failed at %s: %s", key_path, exc)
+        return DPoPKey()
+
+
+def _dpop_key_path(*, agent_id: str, cache_key: str) -> Path:
+    root = Path(os.getenv(DIFY_RUNTIME_AUTH_KEY_DIR_ENV) or _DEFAULT_DPOP_KEY_DIR)
+    digest = hashlib.sha256(f"{agent_id}\0{cache_key}".encode("utf-8")).hexdigest()
+    return root / f"{digest}.pem"
 
 
 def _optional_text(value: Any) -> str | None:

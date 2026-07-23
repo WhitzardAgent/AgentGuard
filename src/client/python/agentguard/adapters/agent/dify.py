@@ -10,6 +10,7 @@ import contextvars
 import functools
 import hashlib
 import json
+import logging
 import os
 import re
 import secrets
@@ -48,6 +49,7 @@ from agentguard.utils.json import safe_dumps, safe_loads
 
 _PATCHED_ATTR = "__agentguard_dify_patched__"
 _ORIGINAL_ATTR = "__agentguard_dify_original__"
+_LOGGER = logging.getLogger(__name__)
 
 _current_guard: contextvars.ContextVar[Any | None] = contextvars.ContextVar(
     "agentguard_dify_guard",
@@ -65,6 +67,8 @@ _catalog_sync_started = False
 _catalog_sync_lock = threading.Lock()
 _catalog_fingerprints: dict[str, str] = {}
 _catalog_fingerprints_lock = threading.Lock()
+_app_update_hook_installed = False
+_app_update_hook_lock = threading.Lock()
 _runtime_agent_registrations: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
 _runtime_agent_registrations_lock = threading.Lock()
 _LEGACY_LLM_NORMALIZER = DifyLegacyLLMNormalizer(
@@ -153,16 +157,16 @@ def start_dify_workflow_catalog_sync() -> dict[str, Any]:
         _catalog_sync_started = True
 
     if _dify_flask_app() is None:
-        on_dify_flask_app_ready(lambda _app: _start_workflow_catalog_sync_thread())
+        on_dify_flask_app_ready(lambda app: _start_workflow_catalog_sync_thread(app))
         return {"enabled": True, "started": False, "reason": "waiting_for_app_factory"}
 
     _start_workflow_catalog_sync_thread()
     return {"enabled": True, "started": True}
 
 
-def _start_workflow_catalog_sync_thread() -> None:
+def _start_workflow_catalog_sync_thread(app: Any | None = None) -> None:
     thread = threading.Thread(
-        target=_workflow_catalog_sync_loop,
+        target=lambda: _workflow_catalog_sync_loop(app),
         name="agentguard-dify-workflow-catalog-sync",
         daemon=True,
     )
@@ -183,7 +187,37 @@ def _install_publish_catalog_hooks() -> dict[str, Any]:
         patched["rag_pipeline_service"] = _patch_workflow_publish_service(RagPipelineService)
     except Exception:
         patched["rag_pipeline_service"] = False
+    patched["app_update_event"] = _install_workflow_app_update_catalog_hook()
     return {"patched": any(patched.values()), "details": patched}
+
+
+def _install_workflow_app_update_catalog_hook() -> bool:
+    global _app_update_hook_installed
+    with _app_update_hook_lock:
+        if _app_update_hook_installed:
+            return False
+        try:
+            from events.app_event import app_was_updated  # type: ignore
+        except Exception:
+            return False
+        app_was_updated.connect(_on_workflow_app_updated, weak=False)
+        _app_update_hook_installed = True
+        return True
+
+
+def _on_workflow_app_updated(sender: Any, **_kwargs: Any) -> None:
+    if not _is_workflow_app(sender):
+        return
+    app_id = _optional_text(getattr(sender, "id", None))
+    if not app_id or not _app_allowed(app_id):
+        return
+    _schedule_published_workflow_app_catalog_sync(app_id)
+
+
+def _is_workflow_app(app: Any) -> bool:
+    raw_mode = getattr(app, "mode", None)
+    mode = (_optional_text(getattr(raw_mode, "value", raw_mode)) or "").replace("_", "-").lower()
+    return mode in {"workflow", "advanced-chat"}
 
 
 def _patch_workflow_publish_service(service_cls: Any) -> bool:
@@ -1954,7 +1988,8 @@ def _runtime_auth_for_metadata(
     metadata = dict(metadata)
     account_email = _runtime_account_email(metadata)
     external_session_id = _external_session_id_from_metadata(metadata)
-    if not account_email:
+    server_url = os.getenv("AGENTGUARD_SERVER_URL") or None
+    if not server_url or not account_email:
         return None
     auth_metadata = {
         **metadata,
@@ -1972,8 +2007,8 @@ def _runtime_auth_for_metadata(
             fallback_session_id=fallback_session_id,
         )
     try:
-        return _runtime_auth_manager.ensure(
-            server_url=os.getenv("AGENTGUARD_SERVER_URL") or None,
+        runtime_auth = _runtime_auth_manager.ensure(
+            server_url=server_url,
             api_key=os.getenv("AGENTGUARD_API_KEY") or None,
             agent_id=agent_id,
             agent_identity_key_id=_optional_text(metadata.get("agent_identity_key_id")),
@@ -1986,8 +2021,17 @@ def _runtime_auth_for_metadata(
             timeout_s=_env_float("AGENTGUARD_DIFY_RUNTIME_AUTH_TIMEOUT_S", 5.0),
             retries=int(_env_float("AGENTGUARD_DIFY_RUNTIME_AUTH_RETRIES", 1.0)),
         )
-    except Exception:
-        return None
+    except Exception as exc:
+        _LOGGER.warning(
+            "AgentGuard Dify runtime auth failed for app_id=%s external_session_id=%s: %s",
+            metadata.get("app_id"),
+            external_session_id,
+            exc,
+        )
+        raise AdapterError(f"AgentGuard Dify runtime auth failed: {exc}") from exc
+    if runtime_auth is None or not getattr(runtime_auth, "session_token", None):
+        raise AdapterError("AgentGuard Dify runtime auth failed: server returned no session token")
+    return runtime_auth
 
 
 def _external_session_id_from_metadata(metadata: dict[str, Any]) -> str | None:
@@ -2339,25 +2383,29 @@ def _is_generator_like(value: Any) -> bool:
     return isinstance(value, Iterable) and not isinstance(value, str | bytes | dict | list | tuple)
 
 
-def _workflow_catalog_sync_loop() -> None:
+def _workflow_catalog_sync_loop(app: Any | None = None) -> None:
     initial_delay = _env_float("AGENTGUARD_DIFY_CATALOG_INITIAL_DELAY_S", 5.0)
     interval = _env_float("AGENTGUARD_DIFY_CATALOG_SYNC_INTERVAL_S", 60.0)
     if initial_delay > 0:
         time.sleep(initial_delay)
     try:
-        _sync_published_workflow_catalog_with_context()
-    except Exception:
-        pass
+        _sync_published_workflow_catalog_with_context(app=app)
+    except Exception as exc:
+        _LOGGER.warning("AgentGuard Dify workflow catalog sync failed: %s", exc)
     while interval > 0:
         time.sleep(interval)
         try:
             _clear_catalog_fingerprints()
-            _sync_published_workflow_catalog_with_context()
-        except Exception:
-            pass
+            _sync_published_workflow_catalog_with_context(app=app)
+        except Exception as exc:
+            _LOGGER.warning("AgentGuard Dify workflow catalog sync failed: %s", exc)
 
 
-def _sync_published_workflow_catalog_with_context() -> dict[str, Any]:
+def _sync_published_workflow_catalog_with_context(app: Any | None = None) -> dict[str, Any]:
+    if app is not None:
+        with app.app_context():
+            return _sync_published_workflow_catalog_once()
+
     try:
         from flask import has_app_context  # type: ignore
 
@@ -2387,13 +2435,30 @@ def _schedule_published_workflow_catalog_sync(workflow: Any) -> None:
     workflow_id = _optional_text(getattr(workflow, "id", None))
     if not workflow_id:
         return
+    app = _dify_flask_app()
 
     def _worker() -> None:
-        time.sleep(_env_float("AGENTGUARD_DIFY_PUBLISH_SYNC_DELAY_S", 0.5))
-        try:
-            _sync_published_workflow_by_id_with_context(workflow_id)
-        except Exception:
-            pass
+        delay_s = _env_float("AGENTGUARD_DIFY_PUBLISH_SYNC_DELAY_S", 0.5)
+        retries = max(1, int(_env_float("AGENTGUARD_DIFY_PUBLISH_SYNC_RETRIES", 5.0)))
+        retry_reasons = {"app_context_unavailable", "workflow_not_found"}
+        for attempt in range(retries):
+            if delay_s > 0:
+                time.sleep(delay_s)
+            try:
+                result = _sync_published_workflow_by_id_with_context(workflow_id, app=app)
+            except Exception as exc:
+                result = {"reason": "sync_failed", "error": str(exc)}
+            if result.get("synced"):
+                return
+            reason = _optional_text(result.get("reason"))
+            if reason not in retry_reasons or attempt >= retries - 1:
+                _LOGGER.warning(
+                    "AgentGuard Dify workflow publish catalog sync did not update workflow_id=%s reason=%s result=%s",
+                    workflow_id,
+                    reason or "unknown",
+                    result,
+                )
+                return
 
     threading.Thread(
         target=_worker,
@@ -2402,7 +2467,54 @@ def _schedule_published_workflow_catalog_sync(workflow: Any) -> None:
     ).start()
 
 
-def _sync_published_workflow_by_id_with_context(workflow_id: str) -> dict[str, Any]:
+def _schedule_published_workflow_app_catalog_sync(app_id: str) -> None:
+    if not _catalog_sync_enabled() or not os.getenv("AGENTGUARD_SERVER_URL"):
+        return
+    app = _dify_flask_app()
+
+    def _worker() -> None:
+        delay_s = _env_float("AGENTGUARD_DIFY_PUBLISH_SYNC_DELAY_S", 0.5)
+        retries = max(1, int(_env_float("AGENTGUARD_DIFY_PUBLISH_SYNC_RETRIES", 5.0)))
+        retry_reasons = {"app_context_unavailable", "app_not_found", "workflow_not_found"}
+        for attempt in range(retries):
+            if delay_s > 0:
+                time.sleep(delay_s)
+            try:
+                result = _sync_published_workflow_app_by_id_with_context(app_id, app=app)
+            except Exception as exc:
+                result = {"reason": "sync_failed", "error": str(exc)}
+            if result.get("synced"):
+                return
+            reason = _optional_text(result.get("reason"))
+            if reason not in retry_reasons or attempt >= retries - 1:
+                _LOGGER.warning(
+                    "AgentGuard Dify workflow app catalog sync did not update app_id=%s reason=%s result=%s",
+                    app_id,
+                    reason or "unknown",
+                    result,
+                )
+                return
+
+    threading.Thread(
+        target=_worker,
+        name=f"agentguard-dify-workflow-app-catalog-sync-{app_id}",
+        daemon=True,
+    ).start()
+
+
+def _sync_published_workflow_by_id_with_context(workflow_id: str, app: Any | None = None) -> dict[str, Any]:
+    if app is not None:
+        with app.app_context():
+            return _sync_published_workflow_by_id_once(workflow_id)
+
+    try:
+        from flask import has_app_context  # type: ignore
+
+        if has_app_context():
+            return _sync_published_workflow_by_id_once(workflow_id)
+    except Exception:
+        pass
+
     app = _dify_flask_app()
     if app is None:
         return {"synced": [], "reason": "app_context_unavailable"}
@@ -2410,8 +2522,36 @@ def _sync_published_workflow_by_id_with_context(workflow_id: str) -> dict[str, A
         return _sync_published_workflow_by_id_once(workflow_id)
 
 
+def _sync_published_workflow_app_by_id_with_context(app_id: str, app: Any | None = None) -> dict[str, Any]:
+    if app is not None:
+        with app.app_context():
+            return _sync_published_workflow_app_by_id_once(app_id)
+
+    try:
+        from flask import has_app_context  # type: ignore
+
+        if has_app_context():
+            return _sync_published_workflow_app_by_id_once(app_id)
+    except Exception:
+        pass
+
+    app = _dify_flask_app()
+    if app is None:
+        return {"synced": [], "reason": "app_context_unavailable"}
+    with app.app_context():
+        return _sync_published_workflow_app_by_id_once(app_id)
+
+
 def _sync_published_workflow_by_id_once(workflow_id: str) -> dict[str, Any]:
     pair = _published_workflow_app_by_workflow_id(workflow_id)
+    if pair is None:
+        return {"synced": [], "reason": "workflow_not_found"}
+    result = _sync_workflow_tool_catalog(pair[0], pair[1])
+    return {"synced": [result] if result is not None else []}
+
+
+def _sync_published_workflow_app_by_id_once(app_id: str) -> dict[str, Any]:
+    pair = _published_workflow_app_by_app_id(app_id)
     if pair is None:
         return {"synced": [], "reason": "workflow_not_found"}
     result = _sync_workflow_tool_catalog(pair[0], pair[1])
@@ -2514,8 +2654,34 @@ def _published_workflow_app_by_workflow_id(workflow_id: str) -> tuple[Any, Any] 
 
     stmt = (
         select(App, Workflow)
-        .join(Workflow, Workflow.id == App.workflow_id)
+        .join(Workflow, Workflow.app_id == App.id)
         .where(Workflow.id == workflow_id, App.mode.in_(modes))
+    )
+    try:
+        row = db.session.execute(stmt).first()
+    except Exception:
+        return None
+    return row if row is not None else None
+
+
+def _published_workflow_app_by_app_id(app_id: str) -> tuple[Any, Any] | None:
+    try:
+        from extensions.ext_database import db  # type: ignore
+        from models.model import App, AppMode  # type: ignore
+        from models.workflow import Workflow  # type: ignore
+        from sqlalchemy import select  # type: ignore
+    except Exception:
+        return None
+
+    modes = []
+    for name in ("WORKFLOW", "ADVANCED_CHAT"):
+        mode = getattr(AppMode, name, None)
+        modes.append(getattr(mode, "value", mode) or name.lower())
+
+    stmt = (
+        select(App, Workflow)
+        .join(Workflow, Workflow.id == App.workflow_id)
+        .where(App.id == app_id, App.mode.in_(modes))
     )
     try:
         row = db.session.execute(stmt).first()
@@ -2734,15 +2900,6 @@ def _sync_workflow_tools_to_agentguard(app: Any, workflow: Any, tools: list[dict
     account_email = _dify_account_email_for_app(app)
     fingerprint_key = f"workflow:{agent_id}"
     fingerprint = _catalog_fingerprint(tools, f"{version or ''}:{account_email or ''}")
-    if _catalog_fingerprint_unchanged(fingerprint_key, fingerprint):
-        return {
-            "app_id": app_id,
-            "workflow_id": workflow_id,
-            "agent_id": agent_id,
-            "tool_count": len(tools),
-            "skipped": True,
-            "reason": "unchanged",
-        }
     session_id = f"dify-workflow-catalog:{app_id}:{workflow_id}:{version or 'published'}"
     session_key = _catalog_session_key(app_id, workflow_id, version)
     metadata = {
@@ -2806,7 +2963,15 @@ def _sync_workflow_tools_to_agentguard(app: Any, workflow: Any, tools: list[dict
             registered_agent.get("public_key_thumbprint")
         )
         metadata["agentguard_user_bound"] = bool((registration.get("user_agent") or {}).get("bound"))
-    remote.register_session(context)
+    if _catalog_fingerprint_unchanged(fingerprint_key, fingerprint):
+        return {
+            "app_id": app_id,
+            "workflow_id": workflow_id,
+            "agent_id": agent_id,
+            "tool_count": len(tools),
+            "skipped": True,
+            "reason": "unchanged",
+        }
     result = remote.sync_tools(context, tools)
     _remember_catalog_fingerprint(fingerprint_key, fingerprint)
     return {

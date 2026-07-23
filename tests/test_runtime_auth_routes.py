@@ -6,6 +6,12 @@ from backend.api.app import create_app
 from backend.auth.models import AuthContext, RuntimeSession
 from fastapi.testclient import TestClient
 
+from backend.api.app import create_app
+from backend.auth.models import AuthContext
+from backend.auth.models import RuntimeSession
+from backend.console.state import ConsoleState
+from backend.runtime.manager import RuntimeManager
+
 
 class FakeBroker:
     def create_session(self, **kwargs):
@@ -466,6 +472,50 @@ def test_dpop_guard_decide_ignores_body_client_session_key(monkeypatch):
 
     assert first.status_code == 200
     assert second.status_code == 200
+
+
+def test_catalog_tool_sync_accepts_adapter_api_key(monkeypatch):
+    from backend.api import client_router
+
+    monkeypatch.setenv("AGENTGUARD_API_KEY", "sk-test")
+    original_console = client_router._console
+    client_router._console = ConsoleState(RuntimeManager())
+    client = TestClient(create_app())
+    try:
+        response = client.post(
+            "/v1/server/tools/sync",
+            headers={"Authorization": "Bearer sk-test"},
+            json={
+                "context": {
+                    "session_id": "catalog-session",
+                    "agent_id": "catalog-agent",
+                    "metadata": {"catalog_sync": True},
+                },
+                "tools": [{"name": "search", "input_params": ["query"]}],
+            },
+        )
+    finally:
+        client_router._console = original_console
+
+    assert response.status_code == 200
+    assert response.json()["tool_count"] == 1
+
+
+def test_non_catalog_tool_sync_still_requires_dpop(monkeypatch):
+    monkeypatch.setenv("AGENTGUARD_API_KEY", "sk-test")
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/v1/server/tools/sync",
+        headers={"Authorization": "Bearer sk-test"},
+        json={
+            "context": {"session_id": "runtime-session", "agent_id": "runtime-agent"},
+            "tools": [{"name": "search"}],
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "missing DPoP access token"
 
 
 def test_dpop_session_register_preserves_body_client_session_key(monkeypatch):

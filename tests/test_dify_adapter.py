@@ -5,6 +5,7 @@ import types
 import pytest
 
 from agentguard.schemas.decisions import GuardDecision
+from agentguard.utils.errors import AdapterError
 
 
 def _install_fake_legacy_dify_modules(monkeypatch):
@@ -864,6 +865,42 @@ def test_workflow_make_guard_uses_dpop_runtime_session(monkeypatch):
     assert guard._auto_close_runtime_session is False
 
 
+def test_workflow_runtime_auth_failure_blocks_instead_of_legacy_fallback(monkeypatch):
+    _install_fake_legacy_dify_modules(monkeypatch)
+    dify_adapter = _fresh_adapter(monkeypatch)
+    monkeypatch.setenv("AGENTGUARD_SERVER_URL", "http://agentguard.test")
+    monkeypatch.setenv("AGENTGUARD_API_KEY", "sk-test")
+    monkeypatch.setattr(
+        dify_adapter,
+        "_runtime_workflow_agent_registration",
+        lambda metadata: {
+            "agent": {
+                "agent_id": "ag_workflow",
+                "agent_identity_code": "agic_workflow",
+            },
+            "user_agent": {"bound": True},
+        },
+    )
+
+    def ensure(**kwargs):
+        raise RuntimeError("dify external session is closed")
+
+    monkeypatch.setattr(dify_adapter._runtime_auth_manager, "ensure", ensure)
+
+    with pytest.raises(AdapterError, match="external session is closed"):
+        dify_adapter._make_guard(
+            {
+                "adapter": "dify",
+                "dify_runtime": "workflow_api",
+                "app_id": "app-1",
+                "workflow_id": "workflow-1",
+                "workflow_run_id": "workflow-run-1",
+                "user_id": "dify-user-1",
+                "dify_user_email": "alice@example.com",
+            }
+        )
+
+
 def test_workflow_metadata_reads_workflow_run_id_from_dict_graph_params(monkeypatch):
     dify_adapter = _fresh_adapter(monkeypatch)
     node = types.SimpleNamespace(
@@ -1146,7 +1183,6 @@ def test_workflow_catalog_sync_reports_published_workflow_tools(monkeypatch):
     dify_adapter = _fresh_adapter(monkeypatch)
     monkeypatch.setenv("AGENTGUARD_SERVER_URL", "http://agentguard.test")
 
-    registered = []
     synced = []
     agent_syncs = []
 
@@ -1155,8 +1191,7 @@ def test_workflow_catalog_sync_reports_published_workflow_tools(monkeypatch):
             self.enabled = True
 
         def register_session(self, context):
-            registered.append(context.to_dict())
-            return {"status": "ok"}
+            raise AssertionError("catalog sync must not register runtime sessions")
 
         def sync_tools(self, context, tools):
             synced.append((context.to_dict(), list(tools)))
@@ -1184,13 +1219,11 @@ def test_workflow_catalog_sync_reports_published_workflow_tools(monkeypatch):
             "tool_count": 2,
         }
     ]
-    assert registered[0]["agent_id"] == "dify-workflow:app-1"
-    assert registered[0]["metadata"]["catalog_sync"] is True
-    assert registered[0]["metadata"]["external_provider"] == "dify"
-    assert registered[0]["metadata"]["dify_user_email"] == "alice@example.com"
-    assert registered[0]["metadata"]["external_account_email"] == "alice@example.com"
     assert synced[0][0]["agent_id"] == "dify-workflow:app-1"
+    assert synced[0][0]["metadata"]["catalog_sync"] is True
+    assert synced[0][0]["metadata"]["external_provider"] == "dify"
     assert synced[0][0]["metadata"]["dify_user_email"] == "alice@example.com"
+    assert synced[0][0]["metadata"]["external_account_email"] == "alice@example.com"
     assert agent_syncs == [
         {
             "provider": "dify",
@@ -1224,7 +1257,7 @@ def test_workflow_catalog_sync_skips_unchanged_tools(monkeypatch):
             pass
 
         def register_session(self, context):
-            remote_calls.append(("register", context.agent_id))
+            raise AssertionError("catalog sync must not register runtime sessions")
 
         def sync_tools(self, context, tools):
             remote_calls.append(("sync", context.agent_id, len(tools)))
@@ -1238,16 +1271,64 @@ def test_workflow_catalog_sync_skips_unchanged_tools(monkeypatch):
     assert first["tool_count"] == 2
     assert second["skipped"] is True
     assert remote_calls == [
-        ("register", "dify-workflow:app-1"),
         ("sync", "dify-workflow:app-1", 2),
     ]
+
+
+def test_workflow_catalog_sync_refreshes_agent_metadata_when_tools_unchanged(monkeypatch):
+    fake = _install_fake_workflow_catalog_modules(monkeypatch)
+    dify_adapter = _fresh_adapter(monkeypatch)
+    monkeypatch.setenv("AGENTGUARD_SERVER_URL", "http://agentguard.test")
+    fake.app.name = "Workflow One"
+    fake.app.description = "old"
+    registrations = []
+    sync_calls = []
+
+    class FakeRemote:
+        enabled = True
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def register_session(self, context):
+            return {"status": "ok"}
+
+        def sync_tools(self, context, tools):
+            sync_calls.append([tool["name"] for tool in tools])
+            return {"tool_count": len(tools)}
+
+    def register_agent(_remote, **kwargs):
+        registrations.append((kwargs["name"], kwargs["description"]))
+        return {"agent": {"agent_id": "canonical-workflow"}}
+
+    monkeypatch.setattr(dify_adapter, "RemoteGuardClient", FakeRemote)
+    monkeypatch.setattr(dify_adapter, "_register_dify_agent", register_agent)
+
+    dify_adapter._sync_workflow_tool_catalog(fake.app, fake.workflow)
+    fake.app.description = "new"
+    second = dify_adapter._sync_workflow_tool_catalog(fake.app, fake.workflow)
+
+    assert second["skipped"] is True
+    assert registrations == [("Workflow One", "old"), ("Workflow One", "new")]
+    assert sync_calls == [["weekday", "web_search"]]
+
+
+def test_workflow_app_update_schedules_workflow_catalog_sync(monkeypatch):
+    dify_adapter = _fresh_adapter(monkeypatch)
+    scheduled = []
+
+    monkeypatch.setattr(dify_adapter, "_schedule_published_workflow_app_catalog_sync", scheduled.append)
+
+    dify_adapter._on_workflow_app_updated(types.SimpleNamespace(id="agent-app", mode="agent-chat"))
+    dify_adapter._on_workflow_app_updated(types.SimpleNamespace(id="app-1", mode="workflow"))
+
+    assert scheduled == ["app-1"]
 
 
 def test_workflow_catalog_sync_uses_registered_agentguard_agent_id(monkeypatch):
     fake = _install_fake_workflow_catalog_modules(monkeypatch)
     dify_adapter = _fresh_adapter(monkeypatch)
     monkeypatch.setenv("AGENTGUARD_SERVER_URL", "http://agentguard.test")
-    registered = []
     synced = []
 
     class FakeRemote:
@@ -1257,7 +1338,7 @@ def test_workflow_catalog_sync_uses_registered_agentguard_agent_id(monkeypatch):
             self.agent_id = kwargs.get("agent_id")
 
         def register_session(self, context):
-            registered.append((self.agent_id, context.to_dict()))
+            raise AssertionError("catalog sync must not register runtime sessions")
 
         def sync_tools(self, context, tools):
             synced.append((self.agent_id, context.to_dict(), list(tools)))
@@ -1280,10 +1361,9 @@ def test_workflow_catalog_sync_uses_registered_agentguard_agent_id(monkeypatch):
     result = dify_adapter._sync_workflow_tool_catalog(fake.app, fake.workflow)
 
     assert result["agent_id"] == "ag_canonical"
-    assert registered[0][0] == "ag_canonical"
-    assert registered[0][1]["agent_id"] == "ag_canonical"
-    assert registered[0][1]["metadata"]["external_agent_id"] == "dify-workflow:app-1"
+    assert synced[0][0] == "ag_canonical"
     assert synced[0][1]["agent_id"] == "ag_canonical"
+    assert synced[0][1]["metadata"]["external_agent_id"] == "dify-workflow:app-1"
 
 
 def test_workflow_catalog_sync_keeps_agent_id_stable_across_publish_ids(monkeypatch):
@@ -1299,7 +1379,7 @@ def test_workflow_catalog_sync_keeps_agent_id_stable_across_publish_ids(monkeypa
             pass
 
         def register_session(self, context):
-            synced_agent_ids.append(("register", context.agent_id, context.metadata["workflow_id"]))
+            raise AssertionError("catalog sync must not register runtime sessions")
 
         def sync_tools(self, context, tools):
             synced_agent_ids.append(("sync", context.agent_id, context.metadata["workflow_id"]))
@@ -1315,9 +1395,7 @@ def test_workflow_catalog_sync_keeps_agent_id_stable_across_publish_ids(monkeypa
     assert first["agent_id"] == "dify-workflow:app-1"
     assert second["agent_id"] == "dify-workflow:app-1"
     assert synced_agent_ids == [
-        ("register", "dify-workflow:app-1", "workflow-published"),
         ("sync", "dify-workflow:app-1", "workflow-published"),
-        ("register", "dify-workflow:app-1", "workflow-published-next"),
         ("sync", "dify-workflow:app-1", "workflow-published-next"),
     ]
 
@@ -1342,6 +1420,52 @@ def test_workflow_publish_hook_schedules_single_workflow_sync(monkeypatch):
 
     assert result.id == "workflow-1"
     assert scheduled == ["workflow-1"]
+
+
+def test_workflow_publish_sync_retries_until_published_workflow_visible(monkeypatch):
+    dify_adapter = _fresh_adapter(monkeypatch)
+    monkeypatch.setenv("AGENTGUARD_DIFY_CATALOG_SYNC_ENABLED", "true")
+    monkeypatch.setenv("AGENTGUARD_SERVER_URL", "http://agentguard.test")
+    monkeypatch.setenv("AGENTGUARD_DIFY_PUBLISH_SYNC_DELAY_S", "0")
+    monkeypatch.setenv("AGENTGUARD_DIFY_PUBLISH_SYNC_RETRIES", "3")
+    calls = []
+    contexts = []
+
+    class FakeAppContext:
+        def __enter__(self):
+            contexts.append("enter")
+
+        def __exit__(self, exc_type, exc, tb):
+            contexts.append("exit")
+            return False
+
+    class FakeApp:
+        def app_context(self):
+            return FakeAppContext()
+
+    def sync(workflow_id):
+        calls.append(workflow_id)
+        if len(calls) == 1:
+            return {"synced": [], "reason": "workflow_not_found"}
+        return {"synced": [{"workflow_id": workflow_id}]}
+
+    class ImmediateThread:
+        def __init__(self, *, target, name, daemon):
+            self.target = target
+            self.name = name
+            self.daemon = daemon
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setattr(dify_adapter, "_dify_flask_app", lambda: FakeApp())
+    monkeypatch.setattr(dify_adapter, "_sync_published_workflow_by_id_once", sync)
+    monkeypatch.setattr(dify_adapter.threading, "Thread", ImmediateThread)
+
+    dify_adapter._schedule_published_workflow_catalog_sync(types.SimpleNamespace(id="workflow-1"))
+
+    assert calls == ["workflow-1", "workflow-1"]
+    assert contexts == ["enter", "exit", "enter", "exit"]
 
 
 def test_workflow_catalog_sync_filters_app_ids(monkeypatch):

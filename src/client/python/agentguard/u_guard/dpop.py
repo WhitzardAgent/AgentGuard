@@ -8,13 +8,28 @@ import secrets
 import time
 from typing import Any
 
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec, utils
 from cryptography.hazmat.primitives.hashes import SHA256
 
 
 class DPoPKey:
-    def __init__(self) -> None:
-        self._private_key = ec.generate_private_key(ec.SECP256R1())
+    def __init__(self, private_key: ec.EllipticCurvePrivateKey | None = None) -> None:
+        self._private_key = private_key or ec.generate_private_key(ec.SECP256R1())
+
+    @classmethod
+    def from_private_pem(cls, data: bytes) -> DPoPKey:
+        key = serialization.load_pem_private_key(data, password=None)
+        if not isinstance(key, ec.EllipticCurvePrivateKey):
+            raise ValueError("DPoP private key is not an EC key")
+        return cls(key)
+
+    def private_pem(self) -> bytes:
+        return self._private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
 
     @property
     def public_jwk(self) -> dict[str, str]:
@@ -63,4 +78,3 @@ def _b64url_json(value: dict[str, Any]) -> str:
 
 def _b64url(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
-

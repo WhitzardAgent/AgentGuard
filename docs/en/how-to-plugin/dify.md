@@ -86,16 +86,18 @@ The script generates:
 
 ```text
 /path/to/dify/agentguard-dify-bootstrap/sitecustomize.py
+/path/to/dify/agentguard-dify-bootstrap/Dockerfile.agentguard
 /path/to/dify/docker/docker-compose.agentguard.yml
 ```
 
 The script enables `AGENTGUARD_DIFY_AGENT_CHAT_ENABLED=true` by default, so the same configuration covers both legacy Agent Chat and Workflow/Chatflow.
+The generated compose override builds a thin `agentguard-dify-api:<tag>` image from the current Dify `api` image and installs `cryptography`, which AgentGuard runtime auth requires.
 
 ### 3. Start Dify With AgentGuard
 
 ```bash
 cd /path/to/dify/docker
-docker compose -f docker-compose.yaml -f docker-compose.agentguard.yml up -d --force-recreate api worker
+docker compose -f docker-compose.yaml -f docker-compose.agentguard.yml up -d --build --force-recreate api worker
 docker compose -f docker-compose.yaml -f docker-compose.agentguard.yml restart nginx
 ```
 
@@ -218,11 +220,28 @@ except Exception:
     logger.exception("AgentGuard Dify workflow adapter installation failed")
 ```
 
+Then create `/path/to/dify/agentguard-dify-bootstrap/Dockerfile.agentguard`:
+
+```dockerfile
+ARG DIFY_API_IMAGE=langgenius/dify-api:latest
+FROM ${DIFY_API_IMAGE}
+
+USER root
+RUN uv pip install --python /app/api/.venv/bin/python --no-cache "cryptography>=42"
+USER dify
+```
+
 Then create `/path/to/dify/docker/docker-compose.agentguard.yml`:
 
 ```yaml
 services:
   api:
+    image: "agentguard-dify-api:1.15.0"
+    build:
+      context: "/path/to/dify/agentguard-dify-bootstrap"
+      dockerfile: Dockerfile.agentguard
+      args:
+        DIFY_API_IMAGE: "langgenius/dify-api:1.15.0"
     environment:
       AGENTGUARD_ENABLED: "true"
       AGENTGUARD_DIFY_AGENT_CHAT_ENABLED: "true"
@@ -232,6 +251,8 @@ services:
       AGENTGUARD_DIFY_APP_IDS: ""
       AGENTGUARD_DIFY_NODE_IDS: ""
       AGENTGUARD_ENVIRONMENT: "dify"
+      AGENTGUARD_AGENT_KEY_DIR: "/app/api/storage/agentguard/agent_keys"
+      AGENTGUARD_DIFY_RUNTIME_AUTH_KEY_DIR: "/app/api/storage/agentguard/dpop_keys"
       PYTHONPATH: "/agentguard-dify-bootstrap:/agentguard/src/client/python:/agentguard/src:/app/api"
     volumes:
       - /path/to/AgentGuard:/agentguard:ro
@@ -240,6 +261,12 @@ services:
       - "host.docker.internal:host-gateway"
 
   worker:
+    image: "agentguard-dify-api:1.15.0"
+    build:
+      context: "/path/to/dify/agentguard-dify-bootstrap"
+      dockerfile: Dockerfile.agentguard
+      args:
+        DIFY_API_IMAGE: "langgenius/dify-api:1.15.0"
     environment:
       AGENTGUARD_ENABLED: "true"
       AGENTGUARD_DIFY_AGENT_CHAT_ENABLED: "true"
@@ -249,6 +276,8 @@ services:
       AGENTGUARD_DIFY_APP_IDS: ""
       AGENTGUARD_DIFY_NODE_IDS: ""
       AGENTGUARD_ENVIRONMENT: "dify"
+      AGENTGUARD_AGENT_KEY_DIR: "/app/api/storage/agentguard/agent_keys"
+      AGENTGUARD_DIFY_RUNTIME_AUTH_KEY_DIR: "/app/api/storage/agentguard/dpop_keys"
       PYTHONPATH: "/agentguard-dify-bootstrap:/agentguard/src/client/python:/agentguard/src:/app/api"
     volumes:
       - /path/to/AgentGuard:/agentguard:ro
@@ -274,6 +303,7 @@ docker compose -f docker-compose.yaml -f docker-compose.agentguard.yml restart n
 Check:
 
 - You are logged in to the correct AgentGuard console.
+- You started Dify with `--build`, and `api` / `worker` use the `agentguard-dify-api:<tag>` derived image.
 - Dify containers can reach `AGENTGUARD_SERVER_URL`.
 - `PYTHONPATH` includes the bootstrap and AgentGuard client paths.
 - Both `api` and `worker` mount AgentGuard and the bootstrap directory.

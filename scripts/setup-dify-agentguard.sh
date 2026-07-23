@@ -18,6 +18,8 @@ BOOTSTRAP_DIR=""
 OUTPUT_FILE=""
 APPLY="false"
 AGENT_CHAT="true"
+DIFY_API_IMAGE=""
+AGENTGUARD_DIFY_IMAGE=""
 
 usage() {
     cat <<'EOF'
@@ -46,6 +48,11 @@ Options:
   --console-url    Optional AgentGuard frontend URL to print after setup.
   --bootstrap-dir  Optional bootstrap directory. Defaults to <dify-dir>/agentguard-dify-bootstrap.
   --output-file    Optional compose override path. Defaults to <dify-dir>/docker/docker-compose.agentguard.yml.
+  --dify-api-image Base Dify API image used to build the AgentGuard-enabled image.
+                   Defaults to the api image detected from Dify docker-compose.yaml.
+  --agentguard-dify-image
+                   Name/tag for the generated AgentGuard-enabled Dify API image.
+                   Defaults to agentguard-dify-api:<base-image-tag>.
   --apply          Run docker compose to recreate api/worker after generating files.
   -h, --help       Show this help.
 EOF
@@ -99,6 +106,14 @@ while [ "$#" -gt 0 ]; do
             OUTPUT_FILE="${2:-}"
             shift 2
             ;;
+        --dify-api-image)
+            DIFY_API_IMAGE="${2:-}"
+            shift 2
+            ;;
+        --agentguard-dify-image)
+            AGENTGUARD_DIFY_IMAGE="${2:-}"
+            shift 2
+            ;;
         --apply)
             APPLY="true"
             shift
@@ -138,6 +153,33 @@ fi
 BOOTSTRAP_DIR="${BOOTSTRAP_DIR:-$DIFY_DIR/agentguard-dify-bootstrap}"
 OUTPUT_FILE="${OUTPUT_FILE:-$DIFY_DOCKER_DIR/docker-compose.agentguard.yml}"
 
+detect_dify_api_image() {
+    awk '
+        /^[[:space:]]{2}api:[[:space:]]*$/ { in_api = 1; next }
+        in_api && /^[[:space:]]{2}[[:alnum:]_-]+:[[:space:]]*$/ { in_api = 0 }
+        in_api && /^[[:space:]]*image:[[:space:]]*/ {
+            sub(/^[[:space:]]*image:[[:space:]]*/, "")
+            gsub(/["'\'']/, "")
+            print
+            exit
+        }
+    ' "$DIFY_DOCKER_DIR/docker-compose.yaml"
+}
+
+image_tag() {
+    local image="$1"
+    local tail="${image##*/}"
+    if [[ "$tail" == *:* ]]; then
+        printf '%s' "${tail##*:}"
+    else
+        printf 'latest'
+    fi
+}
+
+DIFY_API_IMAGE="${DIFY_API_IMAGE:-$(detect_dify_api_image)}"
+DIFY_API_IMAGE="${DIFY_API_IMAGE:-langgenius/dify-api:latest}"
+AGENTGUARD_DIFY_IMAGE="${AGENTGUARD_DIFY_IMAGE:-agentguard-dify-api:$(image_tag "$DIFY_API_IMAGE")}"
+
 mkdir -p "$BOOTSTRAP_DIR"
 cat > "$BOOTSTRAP_DIR/sitecustomize.py" <<'PY'
 import logging
@@ -169,11 +211,26 @@ except Exception:
     logger.exception("AgentGuard Dify workflow adapter installation failed")
 PY
 
+cat > "$BOOTSTRAP_DIR/Dockerfile.agentguard" <<'DOCKERFILE'
+ARG DIFY_API_IMAGE=langgenius/dify-api:latest
+FROM ${DIFY_API_IMAGE}
+
+USER root
+RUN uv pip install --python /app/api/.venv/bin/python --no-cache "cryptography>=42"
+USER dify
+DOCKERFILE
+
 AGENT_CHAT_ENABLED="$AGENT_CHAT"
 
 cat > "$OUTPUT_FILE" <<YAML
 services:
   api:
+    image: "$AGENTGUARD_DIFY_IMAGE"
+    build:
+      context: "$BOOTSTRAP_DIR"
+      dockerfile: Dockerfile.agentguard
+      args:
+        DIFY_API_IMAGE: "$DIFY_API_IMAGE"
     environment:
       AGENTGUARD_ENABLED: "true"
       AGENTGUARD_DIFY_AGENT_CHAT_ENABLED: "$AGENT_CHAT_ENABLED"
@@ -184,6 +241,7 @@ services:
       AGENTGUARD_DIFY_NODE_IDS: "$NODE_IDS"
       AGENTGUARD_ENVIRONMENT: "dify"
       AGENTGUARD_AGENT_KEY_DIR: "/app/api/storage/agentguard/agent_keys"
+      AGENTGUARD_DIFY_RUNTIME_AUTH_KEY_DIR: "/app/api/storage/agentguard/dpop_keys"
       PYTHONPATH: "/agentguard-dify-bootstrap:/agentguard/src/client/python:/agentguard/src:/app/api"
     volumes:
       - $AGENTGUARD_ROOT:/agentguard:ro
@@ -192,6 +250,12 @@ services:
       - "host.docker.internal:host-gateway"
 
   worker:
+    image: "$AGENTGUARD_DIFY_IMAGE"
+    build:
+      context: "$BOOTSTRAP_DIR"
+      dockerfile: Dockerfile.agentguard
+      args:
+        DIFY_API_IMAGE: "$DIFY_API_IMAGE"
     environment:
       AGENTGUARD_ENABLED: "true"
       AGENTGUARD_DIFY_AGENT_CHAT_ENABLED: "$AGENT_CHAT_ENABLED"
@@ -202,6 +266,7 @@ services:
       AGENTGUARD_DIFY_NODE_IDS: "$NODE_IDS"
       AGENTGUARD_ENVIRONMENT: "dify"
       AGENTGUARD_AGENT_KEY_DIR: "/app/api/storage/agentguard/agent_keys"
+      AGENTGUARD_DIFY_RUNTIME_AUTH_KEY_DIR: "/app/api/storage/agentguard/dpop_keys"
       PYTHONPATH: "/agentguard-dify-bootstrap:/agentguard/src/client/python:/agentguard/src:/app/api"
     volumes:
       - $AGENTGUARD_ROOT:/agentguard:ro
@@ -213,11 +278,16 @@ YAML
 cat <<EOF
 Generated:
   $BOOTSTRAP_DIR/sitecustomize.py
+  $BOOTSTRAP_DIR/Dockerfile.agentguard
   $OUTPUT_FILE
+
+AgentGuard-enabled Dify image:
+  base: $DIFY_API_IMAGE
+  image: $AGENTGUARD_DIFY_IMAGE
 
 Start Dify with AgentGuard:
   cd $DIFY_DOCKER_DIR
-  docker compose -f docker-compose.yaml -f $(basename "$OUTPUT_FILE") up -d --force-recreate api worker
+  docker compose -f docker-compose.yaml -f $(basename "$OUTPUT_FILE") up -d --build --force-recreate api worker
   docker compose -f docker-compose.yaml -f $(basename "$OUTPUT_FILE") restart nginx
 
 EOF
@@ -225,7 +295,7 @@ EOF
 if [ "$APPLY" = "true" ]; then
     (
         cd "$DIFY_DOCKER_DIR"
-        docker compose -f docker-compose.yaml -f "$(basename "$OUTPUT_FILE")" up -d --force-recreate api worker
+        docker compose -f docker-compose.yaml -f "$(basename "$OUTPUT_FILE")" up -d --build --force-recreate api worker
         docker compose -f docker-compose.yaml -f "$(basename "$OUTPUT_FILE")" restart nginx
     )
 fi

@@ -123,18 +123,26 @@ class DifyAuthBroker:
             body=request_body,
             dpop_jkt=verification.jkt,
         )
-        existing = (
-            self.session_store.find_active_external_session(
-                provider=provider,
-                external_session_id=external_session_id,
-                agent_id=agent_id,
-            )
-            if external_session_id
-            else None
-        )
+        existing = None
+        if external_session_id:
+            find_external_session = getattr(self.session_store, "find_external_session", None)
+            if callable(find_external_session):
+                existing = find_external_session(
+                    provider=provider,
+                    external_session_id=external_session_id,
+                    agent_id=agent_id,
+                )
+            else:
+                existing = self.session_store.find_active_external_session(
+                    provider=provider,
+                    external_session_id=external_session_id,
+                    agent_id=agent_id,
+                )
         if existing is not None:
             if existing.user_id != mapping.user_id:
                 raise RuntimeAuthForbidden(f"{provider} session belongs to another AgentGuard user")
+            if existing.status != "active":
+                raise RuntimeAuthUnauthorized(f"{provider} external session is closed")
             if existing.dpop_jkt != verification.jkt:
                 raise RuntimeAuthForbidden(f"{provider} session is bound to another DPoP key")
             self.session_store.touch_session(existing.session_id)
@@ -611,7 +619,14 @@ class DifyAuthBroker:
             method=method,
             url=url,
         )
-        self.session_store.close_session(auth.session_id)
+        if auth.external_provider and auth.external_session_id:
+            self.session_store.close_external_sessions(
+                provider=auth.external_provider,
+                external_session_id=auth.external_session_id,
+                agent_id=auth.agent_id,
+            )
+        else:
+            self.session_store.close_session(auth.session_id)
         return auth
 
     def authenticate_runtime_request(

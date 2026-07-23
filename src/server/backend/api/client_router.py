@@ -104,7 +104,7 @@ def report_tool(req: ToolReportRequest, request: Request) -> dict[str, Any]:
 
 @router.post("/v1/server/tools/sync")
 def sync_tools(req: ToolSyncRequest, request: Request) -> dict[str, Any]:
-    auth = _authenticate_runtime(request)
+    auth = _authenticate_runtime_or_catalog_sync(request, req.context)
     context = apply_auth_context_to_context(req.context, auth)
     result = _console.sync_tools(context, req.tools)
     if result is None:
@@ -429,6 +429,22 @@ def _authenticate_runtime(request: Request) -> AuthContext:
         _register_auth_context(auth, request)
         return auth
     raise HTTPException(status_code=401, detail="missing DPoP access token")
+
+
+def _authenticate_runtime_or_catalog_sync(request: Request, context: dict[str, Any]) -> AuthContext | None:
+    auth = authenticate_dpop_request(request)
+    if auth is not None:
+        _register_auth_context(auth, request)
+        return auth
+    if _is_catalog_sync_context(context):
+        _validate_adapter_api_key(request)
+        return None
+    raise HTTPException(status_code=401, detail="missing DPoP access token")
+
+
+def _is_catalog_sync_context(context: dict[str, Any]) -> bool:
+    metadata = context.get("metadata") if isinstance(context, dict) else None
+    return isinstance(metadata, dict) and bool(metadata.get("catalog_sync"))
 
 
 def _register_auth_context(auth: AuthContext, request: Request) -> None:

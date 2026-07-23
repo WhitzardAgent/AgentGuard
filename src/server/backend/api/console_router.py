@@ -370,7 +370,14 @@ def close_agent_runtime_session(
             or (not is_admin and session.user_id != int(user_id))
         ):
             return _err("runtime session not found", 404)
-        store.close_session(session_id)
+        if session.external_session_id:
+            store.close_external_sessions(
+                provider=session.provider,
+                external_session_id=session.external_session_id,
+                agent_id=session.agent_id,
+            )
+        else:
+            store.close_session(session_id)
         client_close = _notify_client_runtime_session_closed(session)
         updated = store.list_sessions(agent_id=agent_id, user_id=session_user_id, status="all", limit=200)
     except DatabaseUnavailable:

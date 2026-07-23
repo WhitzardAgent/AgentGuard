@@ -86,16 +86,18 @@ scripts/setup-dify-agentguard.sh \
 
 ```text
 /path/to/dify/agentguard-dify-bootstrap/sitecustomize.py
+/path/to/dify/agentguard-dify-bootstrap/Dockerfile.agentguard
 /path/to/dify/docker/docker-compose.agentguard.yml
 ```
 
 脚本默认开启 `AGENTGUARD_DIFY_AGENT_CHAT_ENABLED=true`，因此同一份配置会同时覆盖旧版 Agent Chat 和 Workflow/Chatflow。
+生成的 compose override 会基于当前 Dify `api` 镜像构建一个很薄的 `agentguard-dify-api:<tag>` 派生镜像，并在镜像构建阶段安装 AgentGuard runtime-auth 需要的 `cryptography`。
 
 ### 3. 启动接入后的 Dify
 
 ```bash
 cd /path/to/dify/docker
-docker compose -f docker-compose.yaml -f docker-compose.agentguard.yml up -d --force-recreate api worker
+docker compose -f docker-compose.yaml -f docker-compose.agentguard.yml up -d --build --force-recreate api worker
 docker compose -f docker-compose.yaml -f docker-compose.agentguard.yml restart nginx
 ```
 
@@ -218,11 +220,28 @@ except Exception:
     logger.exception("AgentGuard Dify workflow adapter installation failed")
 ```
 
+再创建 `/path/to/dify/agentguard-dify-bootstrap/Dockerfile.agentguard`：
+
+```dockerfile
+ARG DIFY_API_IMAGE=langgenius/dify-api:latest
+FROM ${DIFY_API_IMAGE}
+
+USER root
+RUN uv pip install --python /app/api/.venv/bin/python --no-cache "cryptography>=42"
+USER dify
+```
+
 再创建 `/path/to/dify/docker/docker-compose.agentguard.yml`：
 
 ```yaml
 services:
   api:
+    image: "agentguard-dify-api:1.15.0"
+    build:
+      context: "/path/to/dify/agentguard-dify-bootstrap"
+      dockerfile: Dockerfile.agentguard
+      args:
+        DIFY_API_IMAGE: "langgenius/dify-api:1.15.0"
     environment:
       AGENTGUARD_ENABLED: "true"
       AGENTGUARD_DIFY_AGENT_CHAT_ENABLED: "true"
@@ -232,6 +251,8 @@ services:
       AGENTGUARD_DIFY_APP_IDS: ""
       AGENTGUARD_DIFY_NODE_IDS: ""
       AGENTGUARD_ENVIRONMENT: "dify"
+      AGENTGUARD_AGENT_KEY_DIR: "/app/api/storage/agentguard/agent_keys"
+      AGENTGUARD_DIFY_RUNTIME_AUTH_KEY_DIR: "/app/api/storage/agentguard/dpop_keys"
       PYTHONPATH: "/agentguard-dify-bootstrap:/agentguard/src/client/python:/agentguard/src:/app/api"
     volumes:
       - /path/to/AgentGuard:/agentguard:ro
@@ -240,6 +261,12 @@ services:
       - "host.docker.internal:host-gateway"
 
   worker:
+    image: "agentguard-dify-api:1.15.0"
+    build:
+      context: "/path/to/dify/agentguard-dify-bootstrap"
+      dockerfile: Dockerfile.agentguard
+      args:
+        DIFY_API_IMAGE: "langgenius/dify-api:1.15.0"
     environment:
       AGENTGUARD_ENABLED: "true"
       AGENTGUARD_DIFY_AGENT_CHAT_ENABLED: "true"
@@ -249,6 +276,8 @@ services:
       AGENTGUARD_DIFY_APP_IDS: ""
       AGENTGUARD_DIFY_NODE_IDS: ""
       AGENTGUARD_ENVIRONMENT: "dify"
+      AGENTGUARD_AGENT_KEY_DIR: "/app/api/storage/agentguard/agent_keys"
+      AGENTGUARD_DIFY_RUNTIME_AUTH_KEY_DIR: "/app/api/storage/agentguard/dpop_keys"
       PYTHONPATH: "/agentguard-dify-bootstrap:/agentguard/src/client/python:/agentguard/src:/app/api"
     volumes:
       - /path/to/AgentGuard:/agentguard:ro
@@ -274,6 +303,7 @@ docker compose -f docker-compose.yaml -f docker-compose.agentguard.yml restart n
 检查：
 
 - 是否登录了正确的 AgentGuard 控制台地址。
+- 启动时是否使用了 `--build`，并确认 `api` / `worker` 使用的是 `agentguard-dify-api:<tag>` 派生镜像。
 - Dify 容器是否能访问 `AGENTGUARD_SERVER_URL`。
 - `PYTHONPATH` 是否包含 bootstrap 和 AgentGuard client 路径。
 - `api` 和 `worker` 是否都挂载了 AgentGuard 和 bootstrap。
