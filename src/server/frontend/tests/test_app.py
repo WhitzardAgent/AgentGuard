@@ -583,7 +583,9 @@ def test_user_organization_group_invitation_proxy_forwards_requests():
                 for path in [
                     "/api/user/me",
                     "/api/user/organizations/1",
+                    "/api/user/organizations/1/members/7",
                     "/api/user/groups/2",
+                    "/api/user/groups/2/members/7",
                 ]:
                     assert _json_request("PATCH", preview.url, path, {"display_name": "Demo"})[0] == 200
                 assert _json_request("DELETE", preview.url, "/api/user/organizations/1")[0] == 200
@@ -609,7 +611,9 @@ def test_user_organization_group_invitation_proxy_forwards_requests():
     assert observed["patch"] == [
         "/v1/user/me",
         "/v1/user/organizations/1",
+        "/v1/user/organizations/1/members/7",
         "/v1/user/groups/2",
+        "/v1/user/groups/2/members/7",
     ]
     assert observed["delete"] == [
         "/v1/user/organizations/1",
@@ -1601,6 +1605,12 @@ def test_user_page_group_forms_use_group_schema_fields():
     assert 'data-view-panel="invitations"' not in body
     assert 'id="invitation-create-form"' not in body
     assert 'id="invitation-accept-form"' not in body
+    assert 'id="join-modal-backdrop" hidden' in body
+    assert 'id="join-group-form"' in body
+    assert 'id="join-group-token"' in body
+    assert 'id="submit-join-modal-button" type="submit">Join</button>' in body
+    assert "openJoinModal()" in body
+    assert "window.prompt(" not in body
     assert ".compact-form[hidden]" in body
     assert "group_name:" in body
     assert "group_description:" in body

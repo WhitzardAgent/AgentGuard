@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from backend.database import MySQLDatabase, get_database
-from backend.user.permissions import is_admin_user
+from backend.user.permissions import is_admin_user, is_super_admin_user
 from backend.user.store import User
 
 INVITATION_TTL_ENV = "AGENTGUARD_USER_INVITATION_TTL_SECONDS"
@@ -145,6 +145,10 @@ class MemberRemovalNotAllowed(ValueError):
     pass
 
 
+class MemberRoleChangeNotAllowed(ValueError):
+    pass
+
+
 class OrgStore:
     def __init__(self, db: MySQLDatabase | None = None) -> None:
         self.db = db or get_database()
@@ -162,6 +166,8 @@ class OrgStore:
         display_name: str | None = None,
     ) -> User:
         clean_username = _normalize_username(username) if username is not None else user.username
+        if is_super_admin_user(user) and clean_username != user.username:
+            raise ValueError("super administrator username cannot be changed")
         clean_email = _normalize_email(email) if email is not None else user.email
         profile = _profile_object(user.profile_json)
         if display_name is not None:
@@ -203,6 +209,7 @@ class OrgStore:
         organization_name: str,
         organization_description: str | None = None,
     ) -> OrganizationRecord:
+        self._require_super_admin(user)
         clean_name = _normalize_name(organization_name, "organization name")
         builtin_admin = self._require_builtin_admin_user()
         org_id = self.db.insert(
@@ -323,7 +330,9 @@ class OrgStore:
         *,
         global_admin: bool | None = None,
     ) -> bool:
-        self._require_org_admin(user, organization_id, global_admin=global_admin)
+        self._require_super_admin(user)
+        if not self._organization_exists(organization_id):
+            raise OrganizationNotFound("organization not found")
         org_id = int(organization_id)
         self.db.execute(
             "DELETE FROM user_invitations WHERE organization_id = %s",
@@ -361,7 +370,7 @@ class OrgStore:
         group_description: str | None = None,
         global_admin: bool | None = None,
     ) -> GroupRecord:
-        self._require_org_member(user, organization_id, global_admin=global_admin)
+        self._require_org_admin(user, organization_id, global_admin=global_admin)
         clean_name = _normalize_name(group_name, "group name")
         builtin_admin = self._require_builtin_admin_user()
         self._upsert_org_member(int(organization_id), builtin_admin.id, ROLE_ADMIN)
@@ -378,6 +387,8 @@ class OrgStore:
                 _optional_text(group_description),
             ),
         )
+        for admin_user_id in self._organization_admin_user_ids(int(organization_id)):
+            self._upsert_group_user(group_id, admin_user_id, ROLE_ADMIN)
         self._upsert_group_user(group_id, user.id, ROLE_ADMIN)
         self._upsert_group_user(group_id, builtin_admin.id, ROLE_ADMIN)
         record = self.get_group(user, group_id, global_admin=True)
@@ -497,7 +508,10 @@ class OrgStore:
         *,
         global_admin: bool | None = None,
     ) -> bool:
-        self._require_group_admin(user, group_id, global_admin=global_admin)
+        group = self.get_group(user, group_id, global_admin=True)
+        if group is None:
+            raise GroupNotFound("group not found")
+        self._require_org_admin(user, group.organization_id, global_admin=global_admin)
         changed = self.db.execute(
             "DELETE FROM user_groups WHERE group_id = %s",
             (int(group_id),),
@@ -567,22 +581,27 @@ class OrgStore:
         )
         if member_row is None:
             return False
-        if str(member_row.get("role") or "").lower() == ROLE_ADMIN:
+        member_is_admin = str(member_row.get("role") or "").lower() == ROLE_ADMIN
+        member_is_builtin_super_admin = self._is_builtin_admin_member(member_user_id)
+        if member_is_builtin_super_admin:
+            raise MemberRemovalNotAllowed("cannot remove built-in super administrator")
+        if member_is_admin and not is_super_admin_user(user):
             raise MemberRemovalNotAllowed("cannot remove organization administrator")
-        admin_group = self.db.fetchone(
-            """
-            SELECT gu.group_id
-            FROM group_users gu
-            JOIN user_groups g ON g.group_id = gu.group_id
-            WHERE g.organization_id = %s
-              AND gu.user_id = %s
-              AND gu.role = %s
-            LIMIT 1
-            """,
-            (int(organization_id), int(member_user_id), ROLE_ADMIN),
-        )
-        if admin_group is not None:
-            raise MemberRemovalNotAllowed("cannot remove organization member who administers a group")
+        if not is_super_admin_user(user):
+            admin_group = self.db.fetchone(
+                """
+                SELECT gu.group_id
+                FROM group_users gu
+                JOIN user_groups g ON g.group_id = gu.group_id
+                WHERE g.organization_id = %s
+                  AND gu.user_id = %s
+                  AND gu.role = %s
+                LIMIT 1
+                """,
+                (int(organization_id), int(member_user_id), ROLE_ADMIN),
+            )
+            if admin_group is not None:
+                raise MemberRemovalNotAllowed("cannot remove organization member who administers a group")
         self.db.execute(
             """
             DELETE FROM group_users
@@ -620,7 +639,11 @@ class OrgStore:
         )
         if member_row is None:
             return False
-        if str(member_row.get("role") or "").lower() == ROLE_ADMIN:
+        member_is_admin = str(member_row.get("role") or "").lower() == ROLE_ADMIN
+        member_is_builtin_super_admin = self._is_builtin_admin_member(member_user_id)
+        if member_is_builtin_super_admin:
+            raise MemberRemovalNotAllowed("cannot remove built-in super administrator")
+        if member_is_admin and not is_super_admin_user(user):
             raise MemberRemovalNotAllowed("cannot remove group administrator")
         changed = self.db.execute(
             """
@@ -630,6 +653,94 @@ class OrgStore:
             (int(group_id), int(member_user_id)),
         )
         return changed > 0
+
+    def update_organization_member_role(
+        self,
+        user: User,
+        organization_id: int,
+        member_user_id: int,
+        *,
+        role: str,
+    ) -> MemberRecord | None:
+        self._require_super_admin(user)
+        org = self.get_organization(user, organization_id, global_admin=True)
+        if org is None:
+            raise OrganizationNotFound("organization not found")
+        if self._is_builtin_admin_member(member_user_id):
+            raise MemberRoleChangeNotAllowed("cannot change built-in super administrator role")
+        existing = self.db.fetchone(
+            """
+            SELECT id FROM organization_members
+            WHERE organization_id = %s AND user_id = %s
+            """,
+            (int(organization_id), int(member_user_id)),
+        )
+        if existing is None:
+            return None
+        clean_role = _normalize_role(role)
+        self.db.execute(
+            """
+            UPDATE organization_members
+            SET role = %s
+            WHERE organization_id = %s AND user_id = %s
+            """,
+            (clean_role, int(organization_id), int(member_user_id)),
+        )
+        if clean_role == ROLE_ADMIN:
+            group_rows = self.db.fetchall(
+                "SELECT group_id FROM user_groups WHERE organization_id = %s",
+                (int(organization_id),),
+            )
+            for row in group_rows:
+                self._upsert_group_user(int(row["group_id"]), int(member_user_id), ROLE_ADMIN)
+        if clean_role != ROLE_ADMIN:
+            self.db.execute(
+                """
+                UPDATE group_users gu
+                JOIN user_groups g ON g.group_id = gu.group_id
+                SET gu.role = %s
+                WHERE g.organization_id = %s
+                  AND gu.user_id = %s
+                  AND gu.role = %s
+                """,
+                (ROLE_MEMBER, int(organization_id), int(member_user_id), ROLE_ADMIN),
+            )
+        return self._organization_member_record(int(organization_id), int(member_user_id))
+
+    def update_group_member_role(
+        self,
+        user: User,
+        group_id: int,
+        member_user_id: int,
+        *,
+        role: str,
+    ) -> MemberRecord | None:
+        group = self.get_group(user, group_id, global_admin=True)
+        if group is None:
+            raise GroupNotFound("group not found")
+        if not is_super_admin_user(user):
+            self._require_org_admin(user, group.organization_id, global_admin=False)
+        if self._is_builtin_admin_member(member_user_id):
+            raise MemberRoleChangeNotAllowed("cannot change built-in super administrator role")
+        existing = self.db.fetchone(
+            """
+            SELECT user_id FROM group_users
+            WHERE group_id = %s AND user_id = %s
+            """,
+            (int(group_id), int(member_user_id)),
+        )
+        if existing is None:
+            return None
+        clean_role = _normalize_role(role)
+        self.db.execute(
+            """
+            UPDATE group_users
+            SET role = %s
+            WHERE group_id = %s AND user_id = %s
+            """,
+            (clean_role, int(group_id), int(member_user_id)),
+        )
+        return self._group_member_record(int(group_id), int(member_user_id))
 
     def invite_to_organization(
         self,
@@ -862,11 +973,13 @@ class OrgStore:
             global_admin = is_admin_user(user)
         if global_admin:
             return group
-        if self._is_org_admin(user.id, group.organization_id):
-            return group
         if not self._is_group_admin(user.id, group_id):
             raise OrganizationAccessDenied("group administrator access required")
         return group
+
+    def _require_super_admin(self, user: User) -> None:
+        if not is_super_admin_user(user):
+            raise OrganizationAccessDenied("super administrator access required")
 
     def _organization_exists(self, organization_id: int) -> bool:
         row = self.db.fetchone(
@@ -979,6 +1092,41 @@ class OrgStore:
             raise ValueError(f"{BUILTIN_ADMIN_USERNAME} must be a global admin user")
         return user
 
+    def _is_builtin_admin_member(self, user_id: int) -> bool:
+        row = self.db.fetchone(
+            """
+            SELECT username
+            FROM users
+            WHERE id = %s
+            """,
+            (int(user_id),),
+        )
+        return str(row.get("username") or "") == BUILTIN_ADMIN_USERNAME if row else False
+
+    def _organization_member_record(self, organization_id: int, user_id: int) -> MemberRecord | None:
+        row = self.db.fetchone(
+            """
+            SELECT u.id AS user_id, u.username, u.email, m.role, m.created_at AS joined_at
+            FROM organization_members m
+            JOIN users u ON u.id = m.user_id
+            WHERE m.organization_id = %s AND m.user_id = %s
+            """,
+            (int(organization_id), int(user_id)),
+        )
+        return _member_from_row(row) if row else None
+
+    def _group_member_record(self, group_id: int, user_id: int) -> MemberRecord | None:
+        row = self.db.fetchone(
+            """
+            SELECT u.id AS user_id, u.username, u.email, m.role, m.created_at AS joined_at
+            FROM group_users m
+            JOIN users u ON u.id = m.user_id
+            WHERE m.group_id = %s AND m.user_id = %s
+            """,
+            (int(group_id), int(user_id)),
+        )
+        return _member_from_row(row) if row else None
+
     def _organization_admins_by_id(
         self,
         organization_ids: Any,
@@ -1026,6 +1174,18 @@ class OrgStore:
         for row in rows:
             admins[int(row["group_id"])].append(_admin_from_row(row))
         return {group_id: tuple(items) for group_id, items in admins.items()}
+
+    def _organization_admin_user_ids(self, organization_id: int) -> tuple[int, ...]:
+        rows = self.db.fetchall(
+            """
+            SELECT user_id
+            FROM organization_members
+            WHERE organization_id = %s AND role = %s
+            ORDER BY user_id ASC
+            """,
+            (int(organization_id), ROLE_ADMIN),
+        )
+        return tuple(int(row["user_id"]) for row in rows)
 
 
 def ensure_org_schema() -> None:

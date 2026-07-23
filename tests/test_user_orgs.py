@@ -12,6 +12,7 @@ from backend.user.org_store import (
     GroupRecord,
     InvitationIssue,
     InvitationRecord,
+    MemberRoleChangeNotAllowed,
     MemberRemovalNotAllowed,
     MemberRecord,
     OrganizationAccessDenied,
@@ -72,6 +73,7 @@ class FakeOrgStore:
         organization_name: str,
         organization_description: str | None = None,
     ) -> OrganizationRecord:
+        self._require_super_admin(user)
         org_id = self.next_org_id
         self.next_org_id += 1
         self.organization_members[org_id] = {}
@@ -118,7 +120,7 @@ class FakeOrgStore:
         return self._org_for_user(user, organization_id)
 
     def delete_organization(self, user: User, organization_id: int) -> bool:
-        self._require_org_admin(user, organization_id)
+        self._require_super_admin(user)
         org_groups = [
             group_id
             for group_id, group in self.groups.items()
@@ -144,8 +146,7 @@ class FakeOrgStore:
         group_name: str,
         group_description: str | None = None,
     ) -> GroupRecord:
-        if user.id not in self.organization_members.get(organization_id, {}):
-            raise OrganizationAccessDenied("organization membership required")
+        self._require_org_admin(user, organization_id)
         self._upsert_org_member(organization_id, self._builtin_admin_user().id, "admin")
         group_id = self.next_group_id
         self.next_group_id += 1
@@ -157,6 +158,9 @@ class FakeOrgStore:
         )
         self.groups[group_id] = record
         self.group_users[group_id] = {}
+        for user_id, role in self.organization_members.get(organization_id, {}).items():
+            if role == "admin":
+                self._upsert_group_user(group_id, user_id, "admin")
         self._upsert_group_user(group_id, user.id, "admin")
         self._upsert_group_user(group_id, self._builtin_admin_user().id, "admin")
         return self._group_for_user(user, group_id)
@@ -207,7 +211,8 @@ class FakeOrgStore:
         return self._group_for_user(user, group_id)
 
     def delete_group(self, user: User, group_id: int) -> bool:
-        self._require_group_admin(user, group_id)
+        group = self.groups[group_id]
+        self._require_org_admin(user, group.organization_id)
         self.groups.pop(group_id, None)
         self.group_users.pop(group_id, None)
         return True
@@ -235,9 +240,11 @@ class FakeOrgStore:
         member_role = self.organization_members.get(organization_id, {}).get(member_user_id)
         if member_role is None:
             return False
-        if member_role == "admin":
+        if self._is_builtin_admin(member_user_id):
+            raise MemberRemovalNotAllowed("cannot remove built-in super administrator")
+        if member_role == "admin" and not self._is_super_admin(user):
             raise MemberRemovalNotAllowed("cannot remove organization administrator")
-        if any(
+        if (not self._is_super_admin(user)) and any(
             group.organization_id == organization_id
             and self.group_users.get(group.group_id, {}).get(member_user_id) == "admin"
             for group in self.groups.values()
@@ -251,13 +258,63 @@ class FakeOrgStore:
 
     def remove_group_member(self, user: User, group_id: int, member_user_id: int) -> bool:
         self._require_group_admin(user, group_id)
-        if self.group_users.get(group_id, {}).get(member_user_id) == "admin":
+        if self._is_builtin_admin(member_user_id):
+            raise MemberRemovalNotAllowed("cannot remove built-in super administrator")
+        if self.group_users.get(group_id, {}).get(member_user_id) == "admin" and not self._is_super_admin(user):
             raise MemberRemovalNotAllowed("cannot remove group administrator")
         members = self.group_users.get(group_id, {})
         if member_user_id not in members:
             return False
         members.pop(member_user_id, None)
         return True
+
+    def update_organization_member_role(
+        self,
+        user: User,
+        organization_id: int,
+        member_user_id: int,
+        *,
+        role: str,
+    ) -> MemberRecord | None:
+        self._require_super_admin(user)
+        if organization_id not in self.organizations:
+            return None
+        if self._is_builtin_admin(member_user_id):
+            raise MemberRoleChangeNotAllowed("cannot change built-in super administrator role")
+        members = self.organization_members.get(organization_id, {})
+        if member_user_id not in members:
+            return None
+        members[member_user_id] = role
+        if role == "admin":
+            for group_id, group in self.groups.items():
+                if group.organization_id == organization_id:
+                    self.group_users.setdefault(group_id, {})[member_user_id] = "admin"
+        if role != "admin":
+            for group_id, group in self.groups.items():
+                if group.organization_id == organization_id and self.group_users.get(group_id, {}).get(member_user_id) == "admin":
+                    self.group_users[group_id][member_user_id] = "member"
+        return self._member(member_user_id, role)
+
+    def update_group_member_role(
+        self,
+        user: User,
+        group_id: int,
+        member_user_id: int,
+        *,
+        role: str,
+    ) -> MemberRecord | None:
+        group = self.groups.get(group_id)
+        if group is None:
+            return None
+        if not self._is_super_admin(user):
+            self._require_org_admin(user, group.organization_id)
+        if self._is_builtin_admin(member_user_id):
+            raise MemberRoleChangeNotAllowed("cannot change built-in super administrator role")
+        members = self.group_users.get(group_id, {})
+        if member_user_id not in members:
+            return None
+        members[member_user_id] = role
+        return self._member(member_user_id, role)
 
     def invite_to_organization(
         self,
@@ -372,11 +429,13 @@ class FakeOrgStore:
 
     def _require_group_admin(self, user: User, group_id: int) -> GroupRecord:
         group = self.groups[group_id]
-        if self.organization_members.get(group.organization_id, {}).get(user.id) == "admin":
-            return group
         if self.group_users.get(group_id, {}).get(user.id) != "admin":
             raise OrganizationAccessDenied("group administrator access required")
         return group
+
+    def _require_super_admin(self, user: User) -> None:
+        if not self._is_super_admin(user):
+            raise OrganizationAccessDenied("super administrator access required")
 
     def _org_for_user(self, user: User, organization_id: int) -> OrganizationRecord:
         record = self.organizations[organization_id]
@@ -448,6 +507,12 @@ class FakeOrgStore:
                 return user
         raise AssertionError("AgentGuardAdmin test user is missing")
 
+    def _is_builtin_admin(self, user_id: int) -> bool:
+        return self.user_store.users[user_id].username == "AgentGuardAdmin"
+
+    def _is_super_admin(self, user: User) -> bool:
+        return user.username == "AgentGuardAdmin"
+
 
 def test_organization_group_admins_invitations_and_profile(monkeypatch):
     agentguard_admin = User(
@@ -488,20 +553,36 @@ def test_organization_group_admins_invitations_and_profile(monkeypatch):
     assert profile.json()["user"]["username"] == "alice-renamed"
     assert profile.json()["user"]["email"] == "alice-new@example.com"
     assert profile.json()["user"]["display_name"] == "Alice Admin"
+    assert profile.json()["user"]["is_super_admin"] is False
+
+    super_profile = client.get(
+        "/v1/user/me",
+        cookies={"agentguard_user_session": "session-99"},
+    )
+    assert super_profile.status_code == 200
+    assert super_profile.json()["user"]["is_super_admin"] is True
+
+    forbidden_org_create = client.post(
+        "/v1/user/organizations",
+        json={"organization_name": "engineering", "organization_description": "Engineering org"},
+        cookies={"agentguard_user_session": "session-1"},
+    )
+    assert forbidden_org_create.status_code == 403
 
     org = client.post(
         "/v1/user/organizations",
         json={"organization_name": "engineering", "organization_description": "Engineering org"},
-        cookies={"agentguard_user_session": "session-1"},
+        cookies={"agentguard_user_session": "session-99"},
     )
     assert org.status_code == 200
     assert org.json()["organization"]["organization_name"] == "engineering"
     assert org.json()["organization"]["current_user_role"] == "admin"
     assert org.json()["organization"]["admins"] == [
-        {"user_id": 99, "username": "AgentGuardAdmin", "email": "admin@example.com"},
-        {"user_id": 1, "username": "alice-renamed", "email": "alice-new@example.com"},
+        {"user_id": 99, "username": "AgentGuardAdmin", "email": "admin@example.com", "is_super_admin": True},
     ]
     assert "organization_admin_id" not in org.json()["organization"]
+
+    org_store._upsert_org_member(1, alice.id, "admin")
 
     updated_org = client.patch(
         "/v1/user/organizations/1",
@@ -521,8 +602,8 @@ def test_organization_group_admins_invitations_and_profile(monkeypatch):
     assert group.json()["group"]["group_name"] == "platform"
     assert group.json()["group"]["current_user_role"] == "admin"
     assert group.json()["group"]["admins"] == [
-        {"user_id": 99, "username": "AgentGuardAdmin", "email": "admin@example.com"},
-        {"user_id": 1, "username": "alice-renamed", "email": "alice-new@example.com"},
+        {"user_id": 99, "username": "AgentGuardAdmin", "email": "admin@example.com", "is_super_admin": True},
+        {"user_id": 1, "username": "alice-renamed", "email": "alice-new@example.com", "is_super_admin": False},
     ]
     assert "group_admin_id" not in group.json()["group"]
 
@@ -541,6 +622,13 @@ def test_organization_group_admins_invitations_and_profile(monkeypatch):
         cookies={"agentguard_user_session": "session-2"},
     )
     assert organization_invite.status_code == 404
+
+    forbidden_group_create = client.post(
+        "/v1/user/organizations/1/groups",
+        json={"group_name": "forbidden", "group_description": "Forbidden"},
+        cookies={"agentguard_user_session": "session-2"},
+    )
+    assert forbidden_group_create.status_code == 403
 
     forbidden_group_invite = client.post(
         "/v1/user/groups/1/invitations",
@@ -567,6 +655,22 @@ def test_organization_group_admins_invitations_and_profile(monkeypatch):
     )
     assert accepted_group.status_code == 200
 
+    forbidden_org_promotion = client.patch(
+        "/v1/user/organizations/1/members/2",
+        json={"role": "admin"},
+        cookies={"agentguard_user_session": "session-1"},
+    )
+    assert forbidden_org_promotion.status_code == 403
+
+    promoted_org_member = client.patch(
+        "/v1/user/organizations/1/members/2",
+        json={"role": "admin"},
+        cookies={"agentguard_user_session": "session-99"},
+    )
+    assert promoted_org_member.status_code == 200
+    assert promoted_org_member.json()["member"]["role"] == "admin"
+    assert promoted_org_member.json()["member"]["is_super_admin"] is False
+
     org_members = client.get(
         "/v1/user/organizations/1/members",
         cookies={"agentguard_user_session": "session-1"},
@@ -575,8 +679,9 @@ def test_organization_group_admins_invitations_and_profile(monkeypatch):
     assert {item["username"]: item["role"] for item in org_members.json()["members"]} == {
         "AgentGuardAdmin": "admin",
         "alice-renamed": "admin",
-        "bob": "member",
+        "bob": "admin",
     }
+    assert next(item for item in org_members.json()["members"] if item["username"] == "AgentGuardAdmin")["is_super_admin"] is True
 
     group_members = client.get(
         "/v1/user/groups/1/members",
@@ -586,35 +691,145 @@ def test_organization_group_admins_invitations_and_profile(monkeypatch):
     assert {item["username"]: item["role"] for item in group_members.json()["members"]} == {
         "AgentGuardAdmin": "admin",
         "alice-renamed": "admin",
-        "bob": "member",
+        "bob": "admin",
     }
 
-    deleted_group_member = client.delete(
-        "/v1/user/groups/1/members/2",
+    deleted_group_by_org_admin = client.delete(
+        "/v1/user/groups/1",
+        cookies={"agentguard_user_session": "session-2"},
+    )
+    assert deleted_group_by_org_admin.status_code == 200
+    assert deleted_group_by_org_admin.json()["deleted"] is True
+
+    recreated_group = client.post(
+        "/v1/user/organizations/1/groups",
+        json={"group_name": "platform-recreated", "group_description": "Platform team recreated"},
         cookies={"agentguard_user_session": "session-1"},
+    )
+    assert recreated_group.status_code == 200
+    assert recreated_group.json()["group"]["admins"] == [
+        {"user_id": 99, "username": "AgentGuardAdmin", "email": "admin@example.com", "is_super_admin": True},
+        {"user_id": 1, "username": "alice-renamed", "email": "alice-new@example.com", "is_super_admin": False},
+        {"user_id": 2, "username": "bob", "email": "bob@example.com", "is_super_admin": False},
+    ]
+
+    demoted_group_admin_by_org_admin = client.patch(
+        "/v1/user/groups/2/members/2",
+        json={"role": "member"},
+        cookies={"agentguard_user_session": "session-1"},
+    )
+    assert demoted_group_admin_by_org_admin.status_code == 200
+    assert demoted_group_admin_by_org_admin.json()["member"]["role"] == "member"
+
+    promoted_group_admin_by_org_admin = client.patch(
+        "/v1/user/groups/2/members/2",
+        json={"role": "admin"},
+        cookies={"agentguard_user_session": "session-1"},
+    )
+    assert promoted_group_admin_by_org_admin.status_code == 200
+    assert promoted_group_admin_by_org_admin.json()["member"]["role"] == "admin"
+
+    demote_group_admin_for_scope_check = client.patch(
+        "/v1/user/groups/2/members/1",
+        json={"role": "member"},
+        cookies={"agentguard_user_session": "session-99"},
+    )
+    assert demote_group_admin_for_scope_check.status_code == 200
+
+    forbidden_group_admin_role_change = client.patch(
+        "/v1/user/groups/2/members/2",
+        json={"role": "member"},
+        cookies={"agentguard_user_session": "session-2"},
+    )
+    assert forbidden_group_admin_role_change.status_code == 403
+
+    restore_group_admin_for_alice = client.patch(
+        "/v1/user/groups/2/members/1",
+        json={"role": "admin"},
+        cookies={"agentguard_user_session": "session-99"},
+    )
+    assert restore_group_admin_for_alice.status_code == 200
+
+    forbidden_admin_group_removal = client.delete(
+        "/v1/user/groups/2/members/2",
+        cookies={"agentguard_user_session": "session-1"},
+    )
+    assert forbidden_admin_group_removal.status_code == 409
+
+    demoted_group_member = client.patch(
+        "/v1/user/groups/2/members/2",
+        json={"role": "member"},
+        cookies={"agentguard_user_session": "session-99"},
+    )
+    assert demoted_group_member.status_code == 200
+    assert demoted_group_member.json()["member"]["role"] == "member"
+
+    demoted_group_creator = client.patch(
+        "/v1/user/groups/2/members/1",
+        json={"role": "member"},
+        cookies={"agentguard_user_session": "session-99"},
+    )
+    assert demoted_group_creator.status_code == 200
+    assert demoted_group_creator.json()["member"]["role"] == "member"
+
+    creator_group_view = client.get(
+        "/v1/user/groups/2",
+        cookies={"agentguard_user_session": "session-1"},
+    )
+    assert creator_group_view.status_code == 200
+    assert creator_group_view.json()["group"]["current_user_role"] == "member"
+
+    forbidden_group_update_after_demote = client.patch(
+        "/v1/user/groups/2",
+        json={"group_name": "platform-after-demote", "group_description": "should fail"},
+        cookies={"agentguard_user_session": "session-1"},
+    )
+    assert forbidden_group_update_after_demote.status_code == 403
+
+    deleted_group_member = client.delete(
+        "/v1/user/groups/2/members/2",
+        cookies={"agentguard_user_session": "session-99"},
     )
     assert deleted_group_member.status_code == 200
     assert deleted_group_member.json()["removed"] is True
 
     remaining_group_members = client.get(
-        "/v1/user/groups/1/members",
-        cookies={"agentguard_user_session": "session-1"},
+        "/v1/user/groups/2/members",
+        cookies={"agentguard_user_session": "session-99"},
     )
     assert remaining_group_members.status_code == 200
     assert {item["username"]: item["role"] for item in remaining_group_members.json()["members"]} == {
         "AgentGuardAdmin": "admin",
-        "alice-renamed": "admin",
+        "alice-renamed": "member",
     }
 
-    forbidden_admin_group_removal = client.delete(
-        "/v1/user/groups/1/members/1",
-        cookies={"agentguard_user_session": "session-1"},
+    protected_super_admin_group_removal = client.delete(
+        "/v1/user/groups/2/members/99",
+        cookies={"agentguard_user_session": "session-99"},
     )
-    assert forbidden_admin_group_removal.status_code == 409
+    assert protected_super_admin_group_removal.status_code == 409
+
+    demoted_org_member = client.patch(
+        "/v1/user/organizations/1/members/2",
+        json={"role": "member"},
+        cookies={"agentguard_user_session": "session-99"},
+    )
+    assert demoted_org_member.status_code == 200
+    assert demoted_org_member.json()["member"]["role"] == "member"
+
+    group_members_after_org_demote = client.get(
+        "/v1/user/groups/2/members",
+        cookies={"agentguard_user_session": "session-99"},
+    )
+    assert group_members_after_org_demote.status_code == 200
+    assert {item["username"]: item["role"] for item in group_members_after_org_demote.json()["members"]} == {
+        "AgentGuardAdmin": "admin",
+        "alice-renamed": "member",
+    }
 
     deleted_org_member = client.delete(
         "/v1/user/organizations/1/members/2",
-        cookies={"agentguard_user_session": "session-1"},
+        cookies={"agentguard_user_session": "session-99"},
     )
     assert deleted_org_member.status_code == 200
     assert deleted_org_member.json()["removed"] is True
@@ -635,14 +850,21 @@ def test_organization_group_admins_invitations_and_profile(monkeypatch):
     )
     assert removed_member_org_visibility.status_code == 403
 
+    protected_super_admin_org_demotion = client.patch(
+        "/v1/user/organizations/1/members/99",
+        json={"role": "member"},
+        cookies={"agentguard_user_session": "session-99"},
+    )
+    assert protected_super_admin_org_demotion.status_code == 409
+
     forbidden_group_delete = client.delete(
-        "/v1/user/groups/1",
+        "/v1/user/groups/2",
         cookies={"agentguard_user_session": "session-2"},
     )
     assert forbidden_group_delete.status_code == 403
 
     deleted_group = client.delete(
-        "/v1/user/groups/1",
+        "/v1/user/groups/2",
         cookies={"agentguard_user_session": "session-1"},
     )
     assert deleted_group.status_code == 200
@@ -664,6 +886,12 @@ def test_organization_group_admins_invitations_and_profile(monkeypatch):
     deleted_org = client.delete(
         "/v1/user/organizations/1",
         cookies={"agentguard_user_session": "session-1"},
+    )
+    assert deleted_org.status_code == 403
+
+    deleted_org = client.delete(
+        "/v1/user/organizations/1",
+        cookies={"agentguard_user_session": "session-99"},
     )
     assert deleted_org.status_code == 200
     assert deleted_org.json()["deleted"] is True

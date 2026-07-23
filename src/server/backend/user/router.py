@@ -18,14 +18,16 @@ from backend.user.org_store import (
     InvalidInvitation,
     InvitationIssue,
     InvitationRecord,
+    MemberRoleChangeNotAllowed,
     MemberRemovalNotAllowed,
     MemberRecord,
     OrgStore,
+    BUILTIN_ADMIN_USERNAME,
     OrganizationAccessDenied,
     OrganizationNotFound,
     OrganizationRecord,
 )
-from backend.user.permissions import is_admin_user
+from backend.user.permissions import is_admin_user, is_super_admin_user
 from backend.user.store import (
     DuplicateEmail,
     DuplicateExternalAccount,
@@ -107,6 +109,10 @@ class InvitationCreateRequest(BaseModel):
 
 class InvitationAcceptRequest(BaseModel):
     token: str = Field(min_length=8, max_length=512)
+
+
+class MemberRoleUpdateRequest(BaseModel):
+    role: str = Field(min_length=1, max_length=32)
 
 
 def get_user_store() -> UserStore:
@@ -428,6 +434,8 @@ def create_organization(
             organization_name=req.organization_name,
             organization_description=req.organization_description,
         )
+    except OrganizationAccessDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
         status_code = 409 if _is_duplicate_key(exc) else 400
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
@@ -584,6 +592,39 @@ def remove_organization_member(
     }
 
 
+@router.patch("/v1/user/organizations/{organization_id}/members/{member_user_id}")
+def update_organization_member_role(
+    organization_id: int,
+    member_user_id: int,
+    req: MemberRoleUpdateRequest,
+    agentguard_user_session: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    user = _current_user_or_401(agentguard_user_session)
+    try:
+        member = _org_store_or_503().update_organization_member_role(
+            user,
+            organization_id,
+            member_user_id,
+            role=req.role,
+        )
+    except OrganizationNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except OrganizationAccessDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except MemberRoleChangeNotAllowed as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if member is None:
+        raise HTTPException(status_code=404, detail="member not found")
+    return {
+        "status": "ok",
+        "organization_id": organization_id,
+        "user_id": member_user_id,
+        "member": _member_payload(member),
+    }
+
+
 @router.get("/v1/user/groups")
 def list_groups(
     organization_id: int | None = None,
@@ -698,6 +739,39 @@ def remove_group_member(
     }
 
 
+@router.patch("/v1/user/groups/{group_id}/members/{member_user_id}")
+def update_group_member_role(
+    group_id: int,
+    member_user_id: int,
+    req: MemberRoleUpdateRequest,
+    agentguard_user_session: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    user = _current_user_or_401(agentguard_user_session)
+    try:
+        member = _org_store_or_503().update_group_member_role(
+            user,
+            group_id,
+            member_user_id,
+            role=req.role,
+        )
+    except GroupNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except OrganizationAccessDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except MemberRoleChangeNotAllowed as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if member is None:
+        raise HTTPException(status_code=404, detail="member not found")
+    return {
+        "status": "ok",
+        "group_id": group_id,
+        "user_id": member_user_id,
+        "member": _member_payload(member),
+    }
+
+
 @router.post("/v1/user/groups/{group_id}/invitations")
 def invite_to_group(
     group_id: int,
@@ -798,6 +872,7 @@ def _user_payload(user: User) -> dict[str, Any]:
         "email": user.email,
         "email_verified": user.email_verified_at is not None,
         "is_admin": is_admin_user(user),
+        "is_super_admin": is_super_admin_user(user),
         "display_name": profile.get("display_name"),
     }
 
@@ -866,6 +941,7 @@ def _admin_payload(item: AdminRecord) -> dict[str, Any]:
         "user_id": item.user_id,
         "username": item.username,
         "email": item.email,
+        "is_super_admin": item.username == BUILTIN_ADMIN_USERNAME,
     }
 
 
@@ -875,6 +951,7 @@ def _member_payload(item: MemberRecord) -> dict[str, Any]:
         "username": item.username,
         "email": item.email,
         "role": item.role,
+        "is_super_admin": item.username == BUILTIN_ADMIN_USERNAME,
         "joined_at": _iso(item.joined_at),
     }
 

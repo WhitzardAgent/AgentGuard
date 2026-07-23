@@ -267,6 +267,24 @@
         </div>
       </section>
     </div>
+    <div class="ticket-modal-backdrop" id="join-modal-backdrop" hidden>
+      <section class="ticket-modal" role="dialog" aria-modal="true" aria-labelledby="join-modal-title">
+        <div class="heading-row">
+          <h3 id="join-modal-title">Join Group</h3>
+        </div>
+        <form class="ticket-field" id="join-group-form">
+          <label class="ticket-field">
+            <span id="join-modal-label">Invitation Token</span>
+            <input id="join-group-token" spellcheck="false" autocomplete="off" required>
+          </label>
+          <p class="subtle" id="join-modal-help">Paste the invitation token to join the group.</p>
+          <div class="form-grid-actions confirm-modal-actions">
+            <button class="btn" id="cancel-join-modal-button" type="button">Cancel</button>
+            <button class="btn primary" id="submit-join-modal-button" type="submit">Join</button>
+          </div>
+        </form>
+      </section>
+    </div>
     <div class="ticket-modal-backdrop" id="confirm-modal-backdrop" hidden>
       <section class="ticket-modal confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title" aria-describedby="confirm-modal-message">
         <div class="heading-row">
@@ -341,6 +359,14 @@
         ticketExpiry: document.getElementById("ticket-expiry"),
         copyTicketButton: document.getElementById("copy-ticket-button"),
         closeTicketModalButton: document.getElementById("close-ticket-modal-button"),
+        joinModalBackdrop: document.getElementById("join-modal-backdrop"),
+        joinModalTitle: document.getElementById("join-modal-title"),
+        joinModalLabel: document.getElementById("join-modal-label"),
+        joinModalHelp: document.getElementById("join-modal-help"),
+        joinGroupForm: document.getElementById("join-group-form"),
+        joinGroupToken: document.getElementById("join-group-token"),
+        cancelJoinModalButton: document.getElementById("cancel-join-modal-button"),
+        submitJoinModalButton: document.getElementById("submit-join-modal-button"),
         confirmModalBackdrop: document.getElementById("confirm-modal-backdrop"),
         confirmModalTitle: document.getElementById("confirm-modal-title"),
         confirmModalMessage: document.getElementById("confirm-modal-message"),
@@ -456,19 +482,165 @@
         return String(organization?.current_user_role || "").toLowerCase() === "admin";
       }
 
+      function canCreateOrganization() {
+        return Boolean(state.user?.is_super_admin);
+      }
+
+      function canCreateGroupInOrganization(organization) {
+        return Boolean(state.user?.is_super_admin) || canManageOrganization(organization);
+      }
+
+      function creatableOrganizations() {
+        return state.organizations.filter((organization) => canCreateGroupInOrganization(organization));
+      }
+
+      function canDeleteOrganization() {
+        return Boolean(state.user?.is_super_admin);
+      }
+
       function canManageGroup(group) {
         return String(group?.current_user_role || "").toLowerCase() === "admin";
+      }
+
+      function canManageGroupAdmins(group) {
+        if (state.user?.is_super_admin) {
+          return true;
+        }
+        const organization = groupOrganization(group);
+        return String(organization?.current_user_role || "").toLowerCase() === "admin";
+      }
+
+      function canDeleteGroup(group) {
+        const organization = groupOrganization(group);
+        return String(organization?.current_user_role || "").toLowerCase() === "admin";
       }
 
       function isAdminMember(member) {
         return String(member?.role || "").toLowerCase() === "admin";
       }
 
+      function isSuperAdminMember(member) {
+        return Boolean(member?.is_super_admin);
+      }
+
+      function canRemoveMember(member, canManageMembers) {
+        if (!canManageMembers || isSuperAdminMember(member)) {
+          return false;
+        }
+        return !isAdminMember(member) || Boolean(state.user?.is_super_admin);
+      }
+
+      function canPromoteGroupMember(group, member) {
+        return canManageGroupAdmins(group) && !isAdminMember(member) && !isSuperAdminMember(member);
+      }
+
+      function canDemoteGroupMember(group, member) {
+        return canManageGroupAdmins(group) && isAdminMember(member) && !isSuperAdminMember(member);
+      }
+
+      function roleDisplay(member) {
+        if (isSuperAdminMember(member)) {
+          return "superAdmin";
+        }
+        return member?.role || "member";
+      }
+
       function adminDisplay(admins) {
         if (!Array.isArray(admins) || !admins.length) {
           return "-";
         }
-        return admins.map((admin) => admin?.username || `User #${admin?.user_id || "?"}`).join(", ");
+        return admins.map((admin) => {
+          const name = admin?.username || `User #${admin?.user_id || "?"}`;
+          return admin?.is_super_admin ? `${name} (superAdmin)` : name;
+        }).join(", ");
+      }
+
+      function organizationMemberActions(organization, member) {
+        const canManageMembers = canManageOrganization(organization);
+        const actions = [];
+        if (Boolean(state.user?.is_super_admin) && !isAdminMember(member) && !isSuperAdminMember(member)) {
+          actions.push(`
+            <button
+              class="btn"
+              type="button"
+              data-organization-member-role="${escapeHtml(member.user_id)}"
+              data-organization-id="${escapeHtml(organization.id)}"
+              data-role="admin"
+            >
+              ${escapeHtml(t("Set Admin"))}
+            </button>
+          `);
+        }
+        if (Boolean(state.user?.is_super_admin) && isAdminMember(member) && !isSuperAdminMember(member)) {
+          actions.push(`
+            <button
+              class="btn"
+              type="button"
+              data-organization-member-role="${escapeHtml(member.user_id)}"
+              data-organization-id="${escapeHtml(organization.id)}"
+              data-role="member"
+            >
+              ${escapeHtml(t("Demote"))}
+            </button>
+          `);
+        }
+        if (canRemoveMember(member, canManageMembers)) {
+          actions.push(`
+            <button
+              class="btn danger"
+              type="button"
+              data-organization-member-remove="${escapeHtml(member.user_id)}"
+              data-organization-id="${escapeHtml(organization.id)}"
+            >
+              ${escapeHtml(t("Remove"))}
+            </button>
+          `);
+        }
+        return actions.length ? actions.join("") : '<span class="subtle">-</span>';
+      }
+
+      function groupMemberActions(group, member) {
+        const canManageMembers = canManageGroup(group);
+        const actions = [];
+        if (canPromoteGroupMember(group, member)) {
+          actions.push(`
+            <button
+              class="btn"
+              type="button"
+              data-group-member-role="${escapeHtml(member.user_id)}"
+              data-group-id="${escapeHtml(group.id)}"
+              data-role="admin"
+            >
+              ${escapeHtml(t("Set Admin"))}
+            </button>
+          `);
+        }
+        if (canDemoteGroupMember(group, member)) {
+          actions.push(`
+            <button
+              class="btn"
+              type="button"
+              data-group-member-role="${escapeHtml(member.user_id)}"
+              data-group-id="${escapeHtml(group.id)}"
+              data-role="member"
+            >
+              ${escapeHtml(t("Demote"))}
+            </button>
+          `);
+        }
+        if (canRemoveMember(member, canManageMembers)) {
+          actions.push(`
+            <button
+              class="btn danger"
+              type="button"
+              data-group-member-remove="${escapeHtml(member.user_id)}"
+              data-group-id="${escapeHtml(group.id)}"
+            >
+              ${escapeHtml(t("Remove"))}
+            </button>
+          `);
+        }
+        return actions.length ? actions.join("") : '<span class="subtle">-</span>';
       }
 
       function providerLabel(provider) {
@@ -518,7 +690,7 @@
           ? (user.email_verified ? `Email: ${user.email}.` : `Email: ${user.email} (unverified).`)
           : "Email: not bound.";
         nodes.status.textContent = signedIn
-          ? `Signed in as ${user.username} (user #${user.id}). ${emailLabel}`
+          ? `Signed in as ${user.username}${user.is_super_admin ? " [superAdmin]" : ""} (user #${user.id}). ${emailLabel}`
           : "Not signed in.";
         nodes.logoutButton.hidden = !signedIn;
         nodes.generateTicketButton.hidden = !signedIn;
@@ -572,7 +744,7 @@
       }
 
       function renderOrganizations() {
-        nodes.organizationAddButton.disabled = !state.user;
+        nodes.organizationAddButton.disabled = !canCreateOrganization();
         nodes.organizationAddButton.textContent = state.organizationCreateOpen ? "Cancel" : "Add";
         nodes.organizationCreateForm.hidden = !state.organizationCreateOpen;
         if (!state.organizations.length) {
@@ -587,22 +759,8 @@
                 <tr>
                   <td>${escapeHtml(member.username || `User #${member.user_id}`)}</td>
                   <td>${escapeHtml(member.email || "-")}</td>
-                  <td>${escapeHtml(member.role || "member")}</td>
-                  <td class="member-action-cell">
-                    ${canManageMembers && !isAdminMember(member)
-                      ? `
-                        <button
-                          class="btn danger"
-                          type="button"
-                          data-organization-member-remove="${escapeHtml(member.user_id)}"
-                          data-organization-id="${escapeHtml(organization.id)}"
-                        >
-                          ${escapeHtml(t("Remove"))}
-                        </button>
-                      `
-                      : '<span class="subtle">-</span>'
-                    }
-                  </td>
+                  <td>${escapeHtml(roleDisplay(member))}</td>
+                  <td class="member-action-cell">${organizationMemberActions(organization, member)}</td>
                 </tr>
               `).join("")
               : '<tr><td colspan="4" class="subtle">No members.</td></tr>';
@@ -610,7 +768,10 @@
               ? `
                 <div class="table-action-buttons">
                   <button class="btn primary" type="button" data-organization-edit="${escapeHtml(organization.id)}">Edit</button>
-                  <button class="btn danger" type="button" data-organization-delete="${escapeHtml(organization.id)}">Delete</button>
+                  ${canDeleteOrganization()
+                    ? `<button class="btn danger" type="button" data-organization-delete="${escapeHtml(organization.id)}">Delete</button>`
+                    : ""
+                  }
                 </div>
               `
               : "";
@@ -652,19 +813,20 @@
 
       function renderGroups() {
         const organization = selectedOrganization();
+        const creatableOrgs = creatableOrganizations();
         nodes.selectedOrganizationLabel.textContent = organization
           ? `Organization: ${organization.organization_name || organization.name}`
           : "Groups you belong to.";
-        nodes.groupAddButton.disabled = !state.organizations.length;
+        nodes.groupAddButton.disabled = !creatableOrgs.length;
         nodes.groupAddButton.textContent = state.groupCreateOpen ? "Cancel" : "Add";
-        nodes.groupCreateForm.hidden = !state.groupCreateOpen || !state.organizations.length;
+        nodes.groupCreateForm.hidden = !state.groupCreateOpen || !creatableOrgs.length;
         nodes.groupOrganizationSelect.innerHTML = [
           '<option value="">Select an organization</option>',
-          ...state.organizations.map((item) => `
+          ...creatableOrgs.map((item) => `
             <option value="${escapeHtml(item.id)}">${escapeHtml(item.organization_name || item.name)}</option>
           `),
         ].join("");
-        nodes.groupOrganizationSelect.value = organization ? String(organization.id) : "";
+        nodes.groupOrganizationSelect.value = organization && canCreateGroupInOrganization(organization) ? String(organization.id) : "";
         if (!state.groups.length) {
           nodes.groupList.innerHTML = '<tr><td colspan="5" class="subtle">No groups.</td></tr>';
         } else {
@@ -678,22 +840,8 @@
                 <tr>
                   <td>${escapeHtml(member.username || `User #${member.user_id}`)}</td>
                   <td>${escapeHtml(member.email || "-")}</td>
-                  <td>${escapeHtml(member.role || "member")}</td>
-                  <td class="member-action-cell">
-                    ${canManageMembers && !isAdminMember(member)
-                      ? `
-                        <button
-                          class="btn danger"
-                          type="button"
-                          data-group-member-remove="${escapeHtml(member.user_id)}"
-                          data-group-id="${escapeHtml(group.id)}"
-                        >
-                          ${escapeHtml(t("Remove"))}
-                        </button>
-                      `
-                      : '<span class="subtle">-</span>'
-                    }
-                  </td>
+                  <td>${escapeHtml(roleDisplay(member))}</td>
+                  <td class="member-action-cell">${groupMemberActions(group, member)}</td>
                 </tr>
               `).join("")
               : '<tr><td colspan="4" class="subtle">No members.</td></tr>';
@@ -702,7 +850,10 @@
                 <div class="table-action-buttons">
                   <button class="btn" type="button" data-group-invite="${escapeHtml(group.id)}">Invite</button>
                   <button class="btn primary" type="button" data-group-edit="${escapeHtml(group.id)}">Edit</button>
-                  <button class="btn danger" type="button" data-group-delete="${escapeHtml(group.id)}">Delete</button>
+                  ${canDeleteGroup(group)
+                    ? `<button class="btn danger" type="button" data-group-delete="${escapeHtml(group.id)}">Delete</button>`
+                    : ""
+                  }
                 </div>
               `
               : "";
@@ -849,6 +1000,22 @@
         });
       }
 
+      function openJoinModal() {
+        nodes.joinModalTitle.textContent = t("Join Group");
+        nodes.joinModalLabel.textContent = t("Invitation Token");
+        nodes.joinModalHelp.textContent = t("Paste the invitation token to join the group.");
+        nodes.cancelJoinModalButton.textContent = t("Cancel");
+        nodes.submitJoinModalButton.textContent = t("Join");
+        nodes.joinGroupToken.value = "";
+        nodes.joinModalBackdrop.hidden = false;
+        nodes.joinGroupToken.focus();
+      }
+
+      function closeJoinModal() {
+        nodes.joinGroupToken.value = "";
+        nodes.joinModalBackdrop.hidden = true;
+      }
+
       function closeTicketModal() {
         activeTicket = "";
         activeCopyMessage = "Ticket copied.";
@@ -952,6 +1119,10 @@
       });
 
       nodes.organizationAddButton.addEventListener("click", () => {
+        if (!canCreateOrganization()) {
+          showToast(t("Only superAdmin can create organizations."), "warning");
+          return;
+        }
         state.organizationCreateOpen = !state.organizationCreateOpen;
         if (!state.organizationCreateOpen) {
           nodes.organizationCreateForm.reset();
@@ -960,6 +1131,31 @@
       });
 
       nodes.organizationList.addEventListener("click", async (event) => {
+        const updateMemberRoleButton = event.target.closest("[data-organization-member-role]");
+        if (updateMemberRoleButton) {
+          const organizationId = updateMemberRoleButton.dataset.organizationId;
+          const memberUserId = updateMemberRoleButton.dataset.organizationMemberRole;
+          const role = updateMemberRoleButton.dataset.role || "member";
+          try {
+            await api(`/api/user/organizations/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(memberUserId)}`, {
+              method: "PATCH",
+              body: JSON.stringify({ role }),
+            });
+            await loadDirectory();
+            if (state.selectedOrganizationId) {
+              await loadOrganizationMembers(state.selectedOrganizationId);
+            }
+            if (state.selectedGroupId) {
+              await loadGroupMembers(state.selectedGroupId);
+            }
+            renderOrganizations();
+            renderGroups();
+            showToast(role === "admin" ? t("Organization admin assigned.") : t("Organization admin removed."), "success");
+          } catch (error) {
+            showToast(error.message || t("Failed to update organization member role."), "warning");
+          }
+          return;
+        }
         const removeMemberButton = event.target.closest("[data-organization-member-remove]");
         if (removeMemberButton) {
           const organizationId = removeMemberButton.dataset.organizationId;
@@ -1064,8 +1260,8 @@
       });
 
       nodes.groupAddButton.addEventListener("click", () => {
-        if (!state.organizations.length) {
-          showToast(t("Create or join an organization first."), "warning");
+        if (!creatableOrganizations().length) {
+          showToast(t("Only organization admins and superAdmin can create groups."), "warning");
           return;
         }
         state.groupCreateOpen = !state.groupCreateOpen;
@@ -1076,6 +1272,31 @@
       });
 
       nodes.groupList.addEventListener("click", async (event) => {
+        const updateMemberRoleButton = event.target.closest("[data-group-member-role]");
+        if (updateMemberRoleButton) {
+          const groupId = updateMemberRoleButton.dataset.groupId;
+          const memberUserId = updateMemberRoleButton.dataset.groupMemberRole;
+          const role = updateMemberRoleButton.dataset.role || "member";
+          try {
+            await api(`/api/user/groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(memberUserId)}`, {
+              method: "PATCH",
+              body: JSON.stringify({ role }),
+            });
+            await loadDirectory();
+            if (state.selectedGroupId) {
+              await loadGroupMembers(state.selectedGroupId);
+            }
+            if (state.selectedOrganizationId) {
+              await loadOrganizationMembers(state.selectedOrganizationId);
+            }
+            renderOrganizations();
+            renderGroups();
+            showToast(role === "admin" ? t("Group admin assigned.") : t("Group admin removed."), "success");
+          } catch (error) {
+            showToast(error.message || t("Failed to update group member role."), "warning");
+          }
+          return;
+        }
         const removeMemberButton = event.target.closest("[data-group-member-remove]");
         if (removeMemberButton) {
           const groupId = removeMemberButton.dataset.groupId;
@@ -1224,6 +1445,11 @@
           showToast(t("Select an organization first."), "warning");
           return;
         }
+        const organization = state.organizations.find((item) => String(item.id) === String(organizationId));
+        if (!canCreateGroupInOrganization(organization)) {
+          showToast(t("Only organization admins and superAdmin can create groups."), "warning");
+          return;
+        }
         state.selectedOrganizationId = organizationId;
         state.editingOrganizationId = null;
         try {
@@ -1270,24 +1496,33 @@
       });
 
       nodes.groupJoinButton.addEventListener("click", async () => {
-        const token = window.prompt(t("Invitation token"));
-        if (!token || !token.trim()) {
+        openJoinModal();
+      });
+
+      nodes.joinGroupForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const token = nodes.joinGroupToken.value.trim();
+        if (!token) {
+          nodes.joinGroupToken.focus();
           return;
         }
-        nodes.groupJoinButton.disabled = true;
+        nodes.submitJoinModalButton.disabled = true;
+        nodes.cancelJoinModalButton.disabled = true;
         try {
           await api("/api/user/invitations/accept", {
             method: "POST",
             body: JSON.stringify({
-              token: token.trim(),
+              token,
             }),
           });
+          closeJoinModal();
           await loadDirectory();
           showToast(t("Invitation accepted."), "success");
         } catch (error) {
           showToast(error.message || t("Failed to accept invitation."), "warning");
         } finally {
-          nodes.groupJoinButton.disabled = false;
+          nodes.submitJoinModalButton.disabled = false;
+          nodes.cancelJoinModalButton.disabled = false;
         }
       });
 
@@ -1321,11 +1556,17 @@
       });
 
       nodes.closeTicketModalButton.addEventListener("click", closeTicketModal);
+      nodes.cancelJoinModalButton.addEventListener("click", closeJoinModal);
       nodes.cancelConfirmModalButton.addEventListener("click", () => closeConfirmModal(false));
       nodes.confirmModalButton.addEventListener("click", () => closeConfirmModal(true));
       nodes.ticketModalBackdrop.addEventListener("click", (event) => {
         if (event.target === nodes.ticketModalBackdrop) {
           closeTicketModal();
+        }
+      });
+      nodes.joinModalBackdrop.addEventListener("click", (event) => {
+        if (event.target === nodes.joinModalBackdrop) {
+          closeJoinModal();
         }
       });
       nodes.confirmModalBackdrop.addEventListener("click", (event) => {
@@ -1337,6 +1578,10 @@
       document.addEventListener("keydown", (event) => {
         if (event.key === "Escape" && !nodes.confirmModalBackdrop.hidden) {
           closeConfirmModal(false);
+          return;
+        }
+        if (event.key === "Escape" && !nodes.joinModalBackdrop.hidden) {
+          closeJoinModal();
           return;
         }
         if (event.key === "Escape" && !nodes.ticketModalBackdrop.hidden) {
