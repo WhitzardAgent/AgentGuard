@@ -587,7 +587,9 @@ def test_user_organization_group_invitation_proxy_forwards_requests():
                 ]:
                     assert _json_request("PATCH", preview.url, path, {"display_name": "Demo"})[0] == 200
                 assert _json_request("DELETE", preview.url, "/api/user/organizations/1")[0] == 200
+                assert _json_request("DELETE", preview.url, "/api/user/organizations/1/members/7")[0] == 200
                 assert _json_request("DELETE", preview.url, "/api/user/groups/2")[0] == 200
+                assert _json_request("DELETE", preview.url, "/api/user/groups/2/members/7")[0] == 200
 
     assert observed["get"] == [
         "/v1/user/organizations?limit=10",
@@ -609,7 +611,12 @@ def test_user_organization_group_invitation_proxy_forwards_requests():
         "/v1/user/organizations/1",
         "/v1/user/groups/2",
     ]
-    assert observed["delete"] == ["/v1/user/organizations/1", "/v1/user/groups/2"]
+    assert observed["delete"] == [
+        "/v1/user/organizations/1",
+        "/v1/user/organizations/1/members/7",
+        "/v1/user/groups/2",
+        "/v1/user/groups/2/members/7",
+    ]
 
 
 def test_user_openclaw_binding_proxy_forwards_requests():

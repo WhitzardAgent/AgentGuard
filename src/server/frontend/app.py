@@ -632,7 +632,9 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
 
         if (
             re.fullmatch(r"/api/user/organizations/\d+", path)
+            or re.fullmatch(r"/api/user/organizations/\d+/members/\d+", path)
             or re.fullmatch(r"/api/user/groups/\d+", path)
+            or re.fullmatch(r"/api/user/groups/\d+/members/\d+", path)
         ):
             self._proxy(f"v1/user/{path.removeprefix('/api/user/')}", method="DELETE", query=query)
             return

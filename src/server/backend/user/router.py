@@ -12,11 +12,13 @@ from backend.agents.store import AgentStore
 from backend.database import DatabaseUnavailable
 from backend.user.email import EmailDeliveryUnavailable, get_email_sender
 from backend.user.org_store import (
+    AdminRecord,
     GroupNotFound,
     GroupRecord,
     InvalidInvitation,
     InvitationIssue,
     InvitationRecord,
+    MemberRemovalNotAllowed,
     MemberRecord,
     OrgStore,
     OrganizationAccessDenied,
@@ -557,6 +559,31 @@ def list_organization_members(
     return {"members": [_member_payload(item) for item in members]}
 
 
+@router.delete("/v1/user/organizations/{organization_id}/members/{member_user_id}")
+def remove_organization_member(
+    organization_id: int,
+    member_user_id: int,
+    agentguard_user_session: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    user = _current_user_or_401(agentguard_user_session)
+    try:
+        removed = _org_store_or_503().remove_organization_member(user, organization_id, member_user_id)
+    except OrganizationNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except OrganizationAccessDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except MemberRemovalNotAllowed as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not removed:
+        raise HTTPException(status_code=404, detail="member not found")
+    return {
+        "status": "ok",
+        "organization_id": organization_id,
+        "user_id": member_user_id,
+        "removed": True,
+    }
+
+
 @router.get("/v1/user/groups")
 def list_groups(
     organization_id: int | None = None,
@@ -644,6 +671,31 @@ def list_group_members(
     except OrganizationAccessDenied as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     return {"members": [_member_payload(item) for item in members]}
+
+
+@router.delete("/v1/user/groups/{group_id}/members/{member_user_id}")
+def remove_group_member(
+    group_id: int,
+    member_user_id: int,
+    agentguard_user_session: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    user = _current_user_or_401(agentguard_user_session)
+    try:
+        removed = _org_store_or_503().remove_group_member(user, group_id, member_user_id)
+    except GroupNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except OrganizationAccessDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except MemberRemovalNotAllowed as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not removed:
+        raise HTTPException(status_code=404, detail="member not found")
+    return {
+        "status": "ok",
+        "group_id": group_id,
+        "user_id": member_user_id,
+        "removed": True,
+    }
 
 
 @router.post("/v1/user/groups/{group_id}/invitations")
@@ -783,10 +835,7 @@ def _organization_payload(item: OrganizationRecord) -> dict[str, Any]:
         "display_name": item.organization_name,
         "description": item.organization_description,
         "organization_description": item.organization_description,
-        "admin_user_id": item.organization_admin_id,
-        "organization_admin_id": item.organization_admin_id,
-        "admin_username": item.organization_admin_username,
-        "organization_admin_username": item.organization_admin_username,
+        "admins": [_admin_payload(admin) for admin in item.admins],
         "current_user_role": item.current_user_role,
         "member_count": item.member_count,
         "created_at": _iso(item.created_at),
@@ -804,14 +853,19 @@ def _group_payload(item: GroupRecord) -> dict[str, Any]:
         "display_name": item.group_name,
         "description": item.group_description,
         "group_description": item.group_description,
-        "admin_user_id": item.group_admin_id,
-        "group_admin_id": item.group_admin_id,
-        "admin_username": item.group_admin_username,
-        "group_admin_username": item.group_admin_username,
+        "admins": [_admin_payload(admin) for admin in item.admins],
         "current_user_role": item.current_user_role,
         "member_count": item.member_count,
         "created_at": _iso(item.created_at),
         "updated_at": _iso(item.updated_at),
+    }
+
+
+def _admin_payload(item: AdminRecord) -> dict[str, Any]:
+    return {
+        "user_id": item.user_id,
+        "username": item.username,
+        "email": item.email,
     }
 
 

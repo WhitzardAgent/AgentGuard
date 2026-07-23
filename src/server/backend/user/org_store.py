@@ -15,6 +15,7 @@ from backend.user.store import User
 
 INVITATION_TTL_ENV = "AGENTGUARD_USER_INVITATION_TTL_SECONDS"
 DEFAULT_INVITATION_TTL_SECONDS = 86_400
+BUILTIN_ADMIN_USERNAME = "AgentGuardAdmin"
 ROLE_ADMIN = "admin"
 ROLE_MEMBER = "member"
 INVITATION_PENDING = "pending"
@@ -23,12 +24,18 @@ INVITATION_REVOKED = "revoked"
 
 
 @dataclass(frozen=True)
+class AdminRecord:
+    user_id: int
+    username: str
+    email: str | None
+
+
+@dataclass(frozen=True)
 class OrganizationRecord:
     organization_id: int
     organization_name: str
     organization_description: str | None
-    organization_admin_id: int
-    organization_admin_username: str | None = None
+    admins: tuple[AdminRecord, ...] = ()
     current_user_role: str | None = None
     member_count: int | None = None
     created_at: datetime | None = None
@@ -50,14 +57,6 @@ class OrganizationRecord:
     def description(self) -> str | None:
         return self.organization_description
 
-    @property
-    def admin_user_id(self) -> int:
-        return self.organization_admin_id
-
-    @property
-    def created_by_user_id(self) -> int:
-        return self.organization_admin_id
-
 
 @dataclass(frozen=True)
 class GroupRecord:
@@ -65,8 +64,7 @@ class GroupRecord:
     organization_id: int
     group_name: str
     group_description: str | None
-    group_admin_id: int
-    group_admin_username: str | None = None
+    admins: tuple[AdminRecord, ...] = ()
     current_user_role: str | None = None
     member_count: int | None = None
     created_at: datetime | None = None
@@ -87,10 +85,6 @@ class GroupRecord:
     @property
     def description(self) -> str | None:
         return self.group_description
-
-    @property
-    def admin_user_id(self) -> int:
-        return self.group_admin_id
 
 
 @dataclass(frozen=True)
@@ -147,18 +141,17 @@ class InvalidInvitation(ValueError):
     pass
 
 
+class MemberRemovalNotAllowed(ValueError):
+    pass
+
+
 class OrgStore:
     def __init__(self, db: MySQLDatabase | None = None) -> None:
         self.db = db or get_database()
 
     def ensure_schema(self) -> None:
-        for index, statement in enumerate(_SCHEMA):
+        for statement in _SCHEMA:
             self.db.execute(statement)
-            if index == 0:
-                self._ensure_organization_schema_columns()
-            if index == 2:
-                self._ensure_group_schema_columns()
-        self._ensure_group_users_from_legacy_members()
 
     def update_user_profile(
         self,
@@ -211,20 +204,21 @@ class OrgStore:
         organization_description: str | None = None,
     ) -> OrganizationRecord:
         clean_name = _normalize_name(organization_name, "organization name")
+        builtin_admin = self._require_builtin_admin_user()
         org_id = self.db.insert(
             """
             INSERT INTO organizations (
-              organization_name, organization_description, organization_admin_id
+              organization_name, organization_description
             )
-            VALUES (%s, %s, %s)
+            VALUES (%s, %s)
             """,
             (
                 clean_name,
                 _optional_text(organization_description),
-                user.id,
             ),
         )
         self._upsert_org_member(org_id, user.id, ROLE_ADMIN)
+        self._upsert_org_member(org_id, builtin_admin.id, ROLE_ADMIN)
         record = self.get_organization(user, org_id, global_admin=is_admin_user(user))
         if record is None:
             raise RuntimeError("failed to create organization")
@@ -248,7 +242,6 @@ class OrgStore:
         rows = self.db.fetchall(
             f"""
             SELECT o.organization_id, o.organization_name, o.organization_description,
-                   o.organization_admin_id, admin_user.username AS organization_admin_username,
                    o.created_at, o.updated_at,
                    m.role AS current_user_role,
                    (
@@ -256,7 +249,6 @@ class OrgStore:
                      WHERE om.organization_id = o.organization_id
                    ) AS member_count
             FROM organizations o
-            JOIN users admin_user ON admin_user.id = o.organization_admin_id
             LEFT JOIN organization_members m
               ON m.organization_id = o.organization_id AND m.user_id = %s
             {where}
@@ -264,7 +256,8 @@ class OrgStore:
             """,
             (user.id, *params),
         )
-        return [_organization_from_row(row) for row in rows]
+        admin_map = self._organization_admins_by_id(int(row["organization_id"]) for row in rows)
+        return [_organization_from_row(row, admin_map.get(int(row["organization_id"]), ())) for row in rows]
 
     def get_organization(
         self,
@@ -278,7 +271,6 @@ class OrgStore:
         row = self.db.fetchone(
             """
             SELECT o.organization_id, o.organization_name, o.organization_description,
-                   o.organization_admin_id, admin_user.username AS organization_admin_username,
                    o.created_at, o.updated_at,
                    m.role AS current_user_role,
                    (
@@ -286,7 +278,6 @@ class OrgStore:
                      WHERE om.organization_id = o.organization_id
                    ) AS member_count
             FROM organizations o
-            JOIN users admin_user ON admin_user.id = o.organization_admin_id
             LEFT JOIN organization_members m
               ON m.organization_id = o.organization_id AND m.user_id = %s
             WHERE o.organization_id = %s
@@ -297,7 +288,8 @@ class OrgStore:
             return None
         if not global_admin and not row.get("current_user_role"):
             raise OrganizationAccessDenied("organization not visible")
-        return _organization_from_row(row)
+        admins = self._organization_admins_by_id((int(organization_id),)).get(int(organization_id), ())
+        return _organization_from_row(row, admins)
 
     def update_organization(
         self,
@@ -371,21 +363,23 @@ class OrgStore:
     ) -> GroupRecord:
         self._require_org_member(user, organization_id, global_admin=global_admin)
         clean_name = _normalize_name(group_name, "group name")
+        builtin_admin = self._require_builtin_admin_user()
+        self._upsert_org_member(int(organization_id), builtin_admin.id, ROLE_ADMIN)
         group_id = self.db.insert(
             """
             INSERT INTO user_groups (
-              organization_id, group_admin_id, group_name, group_description
+              organization_id, group_name, group_description
             )
-            VALUES (%s, %s, %s, %s)
+            VALUES (%s, %s, %s)
             """,
             (
                 int(organization_id),
-                user.id,
                 clean_name,
                 _optional_text(group_description),
             ),
         )
-        self._upsert_group_user(group_id, user.id)
+        self._upsert_group_user(group_id, user.id, ROLE_ADMIN)
+        self._upsert_group_user(group_id, builtin_admin.id, ROLE_ADMIN)
         record = self.get_group(user, group_id, global_admin=True)
         if record is None:
             raise RuntimeError("failed to create group")
@@ -422,27 +416,22 @@ class OrgStore:
         rows = self.db.fetchall(
             f"""
             SELECT g.group_id, g.organization_id, g.group_name, g.group_description,
-                   g.group_admin_id, admin_user.username AS group_admin_username,
                    g.created_at, g.updated_at,
-                   CASE
-                     WHEN g.group_admin_id = %s THEN 'admin'
-                     WHEN gu.user_id IS NOT NULL THEN 'member'
-                     ELSE NULL
-                   END AS current_user_role,
+                   gu.role AS current_user_role,
                    (
                      SELECT COUNT(*) FROM group_users gu_count
                      WHERE gu_count.group_id = g.group_id
                    ) AS member_count
             FROM user_groups g
-            JOIN users admin_user ON admin_user.id = g.group_admin_id
             LEFT JOIN group_users gu
               ON gu.group_id = g.group_id AND gu.user_id = %s
             {where_clause}
             ORDER BY g.updated_at DESC, g.created_at DESC, g.group_name ASC
             """,
-            (user.id, *params),
+            tuple(params),
         )
-        return [_group_from_row(row) for row in rows]
+        admin_map = self._group_admins_by_id(int(row["group_id"]) for row in rows)
+        return [_group_from_row(row, admin_map.get(int(row["group_id"]), ())) for row in rows]
 
     def get_group(
         self,
@@ -456,30 +445,25 @@ class OrgStore:
         row = self.db.fetchone(
             """
             SELECT g.group_id, g.organization_id, g.group_name, g.group_description,
-                   g.group_admin_id, admin_user.username AS group_admin_username,
                    g.created_at, g.updated_at,
-                   CASE
-                     WHEN g.group_admin_id = %s THEN 'admin'
-                     WHEN gu.user_id IS NOT NULL THEN 'member'
-                     ELSE NULL
-                   END AS current_user_role,
+                   gu.role AS current_user_role,
                    (
                      SELECT COUNT(*) FROM group_users gu_count
                      WHERE gu_count.group_id = g.group_id
                    ) AS member_count
             FROM user_groups g
-            JOIN users admin_user ON admin_user.id = g.group_admin_id
             LEFT JOIN group_users gu
               ON gu.group_id = g.group_id AND gu.user_id = %s
             WHERE g.group_id = %s
             """,
-            (user.id, user.id, int(group_id)),
+            (user.id, int(group_id)),
         )
         if row is None:
             return None
         if not global_admin and not self._is_org_member(user.id, int(row["organization_id"])):
             raise OrganizationAccessDenied("group not visible")
-        return _group_from_row(row)
+        admins = self._group_admins_by_id((int(group_id),)).get(int(group_id), ())
+        return _group_from_row(row, admins)
 
     def update_group(
         self,
@@ -552,14 +536,8 @@ class OrgStore:
             raise GroupNotFound("group not found")
         rows = self.db.fetchall(
             """
-            SELECT u.id AS user_id, u.username, u.email,
-                   CASE
-                     WHEN g.group_admin_id = u.id THEN 'admin'
-                     ELSE 'member'
-                   END AS role,
-                   m.created_at AS joined_at
+            SELECT u.id AS user_id, u.username, u.email, m.role, m.created_at AS joined_at
             FROM group_users m
-            JOIN user_groups g ON g.group_id = m.group_id
             JOIN users u ON u.id = m.user_id
             WHERE m.group_id = %s
             ORDER BY role ASC, u.username ASC
@@ -567,6 +545,91 @@ class OrgStore:
             (int(group_id),),
         )
         return [_member_from_row(row) for row in rows]
+
+    def remove_organization_member(
+        self,
+        user: User,
+        organization_id: int,
+        member_user_id: int,
+        *,
+        global_admin: bool | None = None,
+    ) -> bool:
+        self._require_org_admin(user, organization_id, global_admin=global_admin)
+        org = self.get_organization(user, organization_id, global_admin=True)
+        if org is None:
+            raise OrganizationNotFound("organization not found")
+        member_row = self.db.fetchone(
+            """
+            SELECT role FROM organization_members
+            WHERE organization_id = %s AND user_id = %s
+            """,
+            (int(organization_id), int(member_user_id)),
+        )
+        if member_row is None:
+            return False
+        if str(member_row.get("role") or "").lower() == ROLE_ADMIN:
+            raise MemberRemovalNotAllowed("cannot remove organization administrator")
+        admin_group = self.db.fetchone(
+            """
+            SELECT gu.group_id
+            FROM group_users gu
+            JOIN user_groups g ON g.group_id = gu.group_id
+            WHERE g.organization_id = %s
+              AND gu.user_id = %s
+              AND gu.role = %s
+            LIMIT 1
+            """,
+            (int(organization_id), int(member_user_id), ROLE_ADMIN),
+        )
+        if admin_group is not None:
+            raise MemberRemovalNotAllowed("cannot remove organization member who administers a group")
+        self.db.execute(
+            """
+            DELETE FROM group_users
+            WHERE user_id = %s
+              AND group_id IN (
+                SELECT group_id FROM user_groups WHERE organization_id = %s
+              )
+            """,
+            (int(member_user_id), int(organization_id)),
+        )
+        changed = self.db.execute(
+            """
+            DELETE FROM organization_members
+            WHERE organization_id = %s AND user_id = %s
+            """,
+            (int(organization_id), int(member_user_id)),
+        )
+        return changed > 0
+
+    def remove_group_member(
+        self,
+        user: User,
+        group_id: int,
+        member_user_id: int,
+        *,
+        global_admin: bool | None = None,
+    ) -> bool:
+        self._require_group_admin(user, group_id, global_admin=global_admin)
+        member_row = self.db.fetchone(
+            """
+            SELECT role FROM group_users
+            WHERE group_id = %s AND user_id = %s
+            """,
+            (int(group_id), int(member_user_id)),
+        )
+        if member_row is None:
+            return False
+        if str(member_row.get("role") or "").lower() == ROLE_ADMIN:
+            raise MemberRemovalNotAllowed("cannot remove group administrator")
+        changed = self.db.execute(
+            """
+            DELETE FROM group_users
+            WHERE group_id = %s AND user_id = %s
+            """,
+            (int(group_id), int(member_user_id)),
+        )
+        return changed > 0
 
     def invite_to_organization(
         self,
@@ -673,7 +736,7 @@ class OrgStore:
             raise OrganizationAccessDenied("invitation email does not match current user")
         self._upsert_org_member(invitation.organization_id, user.id, ROLE_MEMBER)
         if invitation.group_id is not None:
-            self._upsert_group_user(invitation.group_id, user.id)
+            self._upsert_group_user(invitation.group_id, user.id, ROLE_MEMBER)
         self.db.execute(
             """
             UPDATE user_invitations
@@ -801,7 +864,7 @@ class OrgStore:
             return group
         if self._is_org_admin(user.id, group.organization_id):
             return group
-        if group.group_admin_id != user.id:
+        if not self._is_group_admin(user.id, group_id):
             raise OrganizationAccessDenied("group administrator access required")
         return group
 
@@ -832,6 +895,16 @@ class OrgStore:
         )
         return str(row.get("role") or "").lower() == ROLE_ADMIN if row else False
 
+    def _is_group_admin(self, user_id: int, group_id: int) -> bool:
+        row = self.db.fetchone(
+            """
+            SELECT role FROM group_users
+            WHERE group_id = %s AND user_id = %s
+            """,
+            (int(group_id), int(user_id)),
+        )
+        return str(row.get("role") or "").lower() == ROLE_ADMIN if row else False
+
     def _upsert_org_member(self, organization_id: int, user_id: int, role: str) -> None:
         existing = self.db.fetchone(
             """
@@ -856,85 +929,103 @@ class OrgStore:
                 (ROLE_ADMIN, int(existing["id"])),
             )
 
-    def _upsert_group_user(self, group_id: int, user_id: int) -> None:
+    def _upsert_group_user(self, group_id: int, user_id: int, role: str) -> None:
         existing = self.db.fetchone(
             """
-            SELECT group_id FROM group_users
+            SELECT role FROM group_users
             WHERE group_id = %s AND user_id = %s
             """,
             (int(group_id), int(user_id)),
         )
+        clean_role = _normalize_role(role)
         if existing is None:
             self.db.insert(
                 """
-                INSERT INTO group_users (group_id, user_id)
-                VALUES (%s, %s)
+                INSERT INTO group_users (group_id, user_id, role)
+                VALUES (%s, %s, %s)
                 """,
-                (int(group_id), int(user_id)),
+                (int(group_id), int(user_id), clean_role),
             )
-
-    def _ensure_organization_schema_columns(self) -> None:
-        if self._column_exists("organizations", "id") and not self._column_exists("organizations", "organization_id"):
-            self.db.execute("ALTER TABLE organizations CHANGE COLUMN id organization_id INT NOT NULL AUTO_INCREMENT")
-        if self._column_exists("organizations", "name") and not self._column_exists("organizations", "organization_name"):
-            self.db.execute("ALTER TABLE organizations CHANGE COLUMN name organization_name VARCHAR(255) NOT NULL")
-        if self._column_exists("organizations", "description") and not self._column_exists("organizations", "organization_description"):
-            self.db.execute("ALTER TABLE organizations CHANGE COLUMN description organization_description TEXT NULL")
-        if self._column_exists("organizations", "admin_user_id") and not self._column_exists("organizations", "organization_admin_id"):
-            self.db.execute("ALTER TABLE organizations CHANGE COLUMN admin_user_id organization_admin_id INT NOT NULL")
-        if self._column_exists("organizations", "display_name"):
-            self.db.execute("ALTER TABLE organizations MODIFY display_name VARCHAR(255) NULL")
-        if self._column_exists("organizations", "created_by_user_id"):
-            self.db.execute("ALTER TABLE organizations MODIFY created_by_user_id INT NULL")
-        if not self._index_exists("organizations", "idx_organizations_admin_user_id"):
-            self.db.execute("ALTER TABLE organizations ADD INDEX idx_organizations_admin_user_id (organization_admin_id)")
-
-    def _ensure_group_schema_columns(self) -> None:
-        if self._column_exists("user_groups", "id") and not self._column_exists("user_groups", "group_id"):
-            self.db.execute("ALTER TABLE user_groups CHANGE COLUMN id group_id INT NOT NULL AUTO_INCREMENT")
-        if self._column_exists("user_groups", "name") and not self._column_exists("user_groups", "group_name"):
-            self.db.execute("ALTER TABLE user_groups CHANGE COLUMN name group_name VARCHAR(255) NOT NULL")
-        if self._column_exists("user_groups", "description") and not self._column_exists("user_groups", "group_description"):
-            self.db.execute("ALTER TABLE user_groups CHANGE COLUMN description group_description TEXT NULL")
-        if self._column_exists("user_groups", "admin_user_id") and not self._column_exists("user_groups", "group_admin_id"):
-            self.db.execute("ALTER TABLE user_groups CHANGE COLUMN admin_user_id group_admin_id INT NOT NULL")
-        if self._column_exists("user_groups", "display_name"):
-            self.db.execute("ALTER TABLE user_groups MODIFY display_name VARCHAR(255) NULL")
-        if self._column_exists("user_groups", "created_by_user_id"):
-            self.db.execute("ALTER TABLE user_groups MODIFY created_by_user_id INT NULL")
-        if not self._index_exists("user_groups", "idx_user_groups_organization_id"):
-            self.db.execute("ALTER TABLE user_groups ADD INDEX idx_user_groups_organization_id (organization_id)")
-        if not self._index_exists("user_groups", "idx_user_groups_group_admin_id"):
-            self.db.execute("ALTER TABLE user_groups ADD INDEX idx_user_groups_group_admin_id (group_admin_id)")
-        if not self._index_exists("user_groups", "uniq_user_groups_org_name"):
-            self.db.execute("ALTER TABLE user_groups ADD UNIQUE KEY uniq_user_groups_org_name (organization_id, group_name)")
-
-    def _ensure_group_users_from_legacy_members(self) -> None:
-        if self._table_exists("group_members"):
+            return
+        if clean_role == ROLE_ADMIN and str(existing.get("role") or "").lower() != ROLE_ADMIN:
             self.db.execute(
                 """
-                INSERT IGNORE INTO group_users (group_id, user_id, created_at)
-                SELECT group_id, user_id, created_at FROM group_members
-                """
+                UPDATE group_users
+                SET role = %s
+                WHERE group_id = %s AND user_id = %s
+                """,
+                (ROLE_ADMIN, int(group_id), int(user_id)),
             )
-        self.db.execute(
+
+    def _require_builtin_admin_user(self) -> User:
+        row = self.db.fetchone(
             """
-            INSERT IGNORE INTO group_users (group_id, user_id, created_at)
-            SELECT group_id, group_admin_id, created_at FROM user_groups
-            """
+            SELECT id, username, email, email_verified_at, profile_json
+            FROM users
+            WHERE username = %s
+            """,
+            (BUILTIN_ADMIN_USERNAME,),
         )
+        if row is None:
+            raise ValueError(f"{BUILTIN_ADMIN_USERNAME} user is missing")
+        user = User(
+            id=int(row["id"]),
+            username=str(row["username"]),
+            email=_optional_text(row.get("email")),
+            email_verified_at=_coerce_datetime(row["email_verified_at"]) if row.get("email_verified_at") else None,
+            profile_json=row.get("profile_json"),
+        )
+        if not is_admin_user(user):
+            raise ValueError(f"{BUILTIN_ADMIN_USERNAME} must be a global admin user")
+        return user
 
-    def _table_exists(self, table: str) -> bool:
-        row = self.db.fetchone("SHOW TABLES LIKE %s", (table,))
-        return row is not None
+    def _organization_admins_by_id(
+        self,
+        organization_ids: Any,
+    ) -> dict[int, tuple[AdminRecord, ...]]:
+        ids = sorted({int(item) for item in organization_ids})
+        if not ids:
+            return {}
+        placeholders = ", ".join(["%s"] * len(ids))
+        rows = self.db.fetchall(
+            f"""
+            SELECT m.organization_id, u.id AS user_id, u.username, u.email
+            FROM organization_members m
+            JOIN users u ON u.id = m.user_id
+            WHERE m.organization_id IN ({placeholders})
+              AND m.role = %s
+            ORDER BY u.username ASC
+            """,
+            (*ids, ROLE_ADMIN),
+        )
+        admins: dict[int, list[AdminRecord]] = {org_id: [] for org_id in ids}
+        for row in rows:
+            admins[int(row["organization_id"])].append(_admin_from_row(row))
+        return {org_id: tuple(items) for org_id, items in admins.items()}
 
-    def _column_exists(self, table: str, column: str) -> bool:
-        row = self.db.fetchone(f"SHOW COLUMNS FROM {table} LIKE %s", (column,))
-        return row is not None
-
-    def _index_exists(self, table: str, index_name: str) -> bool:
-        row = self.db.fetchone(f"SHOW INDEX FROM {table} WHERE Key_name = %s", (index_name,))
-        return row is not None
+    def _group_admins_by_id(
+        self,
+        group_ids: Any,
+    ) -> dict[int, tuple[AdminRecord, ...]]:
+        ids = sorted({int(item) for item in group_ids})
+        if not ids:
+            return {}
+        placeholders = ", ".join(["%s"] * len(ids))
+        rows = self.db.fetchall(
+            f"""
+            SELECT gu.group_id, u.id AS user_id, u.username, u.email
+            FROM group_users gu
+            JOIN users u ON u.id = gu.user_id
+            WHERE gu.group_id IN ({placeholders})
+              AND gu.role = %s
+            ORDER BY u.username ASC
+            """,
+            (*ids, ROLE_ADMIN),
+        )
+        admins: dict[int, list[AdminRecord]] = {group_id: [] for group_id in ids}
+        for row in rows:
+            admins[int(row["group_id"])].append(_admin_from_row(row))
+        return {group_id: tuple(items) for group_id, items in admins.items()}
 
 
 def ensure_org_schema() -> None:
@@ -947,13 +1038,8 @@ _SCHEMA = [
       organization_id INT AUTO_INCREMENT PRIMARY KEY,
       organization_name VARCHAR(255) NOT NULL UNIQUE,
       organization_description TEXT NULL,
-      organization_admin_id INT NOT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      INDEX idx_organizations_admin_user_id (organization_admin_id),
-      CONSTRAINT fk_organizations_admin_user
-        FOREIGN KEY (organization_admin_id) REFERENCES users(id)
-        ON DELETE RESTRICT
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )
     """,
     """
@@ -977,26 +1063,22 @@ _SCHEMA = [
     CREATE TABLE IF NOT EXISTS user_groups (
       group_id INT AUTO_INCREMENT PRIMARY KEY,
       organization_id INT NOT NULL,
-      group_admin_id INT NOT NULL,
       group_name VARCHAR(255) NOT NULL,
       group_description TEXT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       UNIQUE KEY uniq_user_groups_org_name (organization_id, group_name),
       INDEX idx_user_groups_organization_id (organization_id),
-      INDEX idx_user_groups_group_admin_id (group_admin_id),
       CONSTRAINT fk_user_groups_organization
         FOREIGN KEY (organization_id) REFERENCES organizations(organization_id)
-        ON DELETE CASCADE,
-      CONSTRAINT fk_user_groups_admin_user
-        FOREIGN KEY (group_admin_id) REFERENCES users(id)
-        ON DELETE RESTRICT
+        ON DELETE CASCADE
     )
     """,
     """
     CREATE TABLE IF NOT EXISTS group_users (
       group_id INT NOT NULL,
       user_id INT NOT NULL,
+      role VARCHAR(32) NOT NULL DEFAULT 'member',
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (group_id, user_id),
       INDEX idx_group_users_user_id (user_id),
@@ -1043,13 +1125,15 @@ _SCHEMA = [
 ]
 
 
-def _organization_from_row(row: dict[str, Any]) -> OrganizationRecord:
+def _organization_from_row(
+    row: dict[str, Any],
+    admins: tuple[AdminRecord, ...],
+) -> OrganizationRecord:
     return OrganizationRecord(
         organization_id=int(row["organization_id"]),
         organization_name=str(row["organization_name"]),
         organization_description=_optional_text(row.get("organization_description")),
-        organization_admin_id=int(row["organization_admin_id"]),
-        organization_admin_username=_optional_text(row.get("organization_admin_username")),
+        admins=admins,
         current_user_role=_optional_text(row.get("current_user_role")),
         member_count=int(row["member_count"]) if row.get("member_count") is not None else None,
         created_at=_coerce_datetime(row["created_at"]) if row.get("created_at") else None,
@@ -1057,18 +1141,28 @@ def _organization_from_row(row: dict[str, Any]) -> OrganizationRecord:
     )
 
 
-def _group_from_row(row: dict[str, Any]) -> GroupRecord:
+def _group_from_row(
+    row: dict[str, Any],
+    admins: tuple[AdminRecord, ...],
+) -> GroupRecord:
     return GroupRecord(
         group_id=int(row["group_id"]),
         organization_id=int(row["organization_id"]),
         group_name=str(row["group_name"]),
         group_description=_optional_text(row.get("group_description")),
-        group_admin_id=int(row["group_admin_id"]),
-        group_admin_username=_optional_text(row.get("group_admin_username")),
+        admins=admins,
         current_user_role=_optional_text(row.get("current_user_role")),
         member_count=int(row["member_count"]) if row.get("member_count") is not None else None,
         created_at=_coerce_datetime(row["created_at"]) if row.get("created_at") else None,
         updated_at=_coerce_datetime(row["updated_at"]) if row.get("updated_at") else None,
+    )
+
+
+def _admin_from_row(row: dict[str, Any]) -> AdminRecord:
+    return AdminRecord(
+        user_id=int(row["user_id"]),
+        username=str(row["username"]),
+        email=_optional_text(row.get("email")),
     )
 
 

@@ -8,9 +8,11 @@ from fastapi.testclient import TestClient
 
 from backend.api.app import create_app
 from backend.user.org_store import (
+    AdminRecord,
     GroupRecord,
     InvitationIssue,
     InvitationRecord,
+    MemberRemovalNotAllowed,
     MemberRecord,
     OrganizationAccessDenied,
     OrganizationRecord,
@@ -37,7 +39,7 @@ class FakeOrgStore:
         self.organizations: dict[int, OrganizationRecord] = {}
         self.groups: dict[int, GroupRecord] = {}
         self.organization_members: dict[int, dict[int, str]] = {}
-        self.group_users: dict[int, set[int]] = {}
+        self.group_users: dict[int, dict[int, str]] = {}
         self.invitations: dict[str, InvitationRecord] = {}
         self.next_org_id = 1
         self.next_group_id = 1
@@ -72,18 +74,16 @@ class FakeOrgStore:
     ) -> OrganizationRecord:
         org_id = self.next_org_id
         self.next_org_id += 1
+        self.organization_members[org_id] = {}
+        self._upsert_org_member(org_id, user.id, "admin")
+        self._upsert_org_member(org_id, self._builtin_admin_user().id, "admin")
         record = OrganizationRecord(
             organization_id=org_id,
             organization_name=organization_name,
             organization_description=organization_description,
-            organization_admin_id=user.id,
-            organization_admin_username=user.username,
-            current_user_role="admin",
-            member_count=1,
         )
         self.organizations[org_id] = record
-        self.organization_members[org_id] = {user.id: "admin"}
-        return record
+        return self._org_for_user(user, org_id)
 
     def list_organizations(self, user: User) -> list[OrganizationRecord]:
         return [
@@ -113,13 +113,9 @@ class FakeOrgStore:
             organization_id=organization.organization_id,
             organization_name=organization_name or organization.organization_name,
             organization_description=organization_description,
-            organization_admin_id=organization.organization_admin_id,
-            organization_admin_username=organization.organization_admin_username,
-            current_user_role="admin",
-            member_count=len(self.organization_members.get(organization_id, {})),
         )
         self.organizations[organization_id] = updated
-        return updated
+        return self._org_for_user(user, organization_id)
 
     def delete_organization(self, user: User, organization_id: int) -> bool:
         self._require_org_admin(user, organization_id)
@@ -150,6 +146,7 @@ class FakeOrgStore:
     ) -> GroupRecord:
         if user.id not in self.organization_members.get(organization_id, {}):
             raise OrganizationAccessDenied("organization membership required")
+        self._upsert_org_member(organization_id, self._builtin_admin_user().id, "admin")
         group_id = self.next_group_id
         self.next_group_id += 1
         record = GroupRecord(
@@ -157,14 +154,12 @@ class FakeOrgStore:
             organization_id=organization_id,
             group_name=group_name,
             group_description=group_description,
-            group_admin_id=user.id,
-            group_admin_username=user.username,
-            current_user_role="admin",
-            member_count=1,
         )
         self.groups[group_id] = record
-        self.group_users[group_id] = {user.id}
-        return record
+        self.group_users[group_id] = {}
+        self._upsert_group_user(group_id, user.id, "admin")
+        self._upsert_group_user(group_id, self._builtin_admin_user().id, "admin")
+        return self._group_for_user(user, group_id)
 
     def list_groups(
         self,
@@ -175,8 +170,14 @@ class FakeOrgStore:
         return [
             self._group_for_user(user, group_id)
             for group_id, group in self.groups.items()
-            if (organization_id is None or group.organization_id == organization_id)
-            and user.id in self.organization_members.get(group.organization_id, {})
+            if (
+                (organization_id is None and user.id in self.group_users.get(group_id, {}))
+                or (
+                    organization_id is not None
+                    and group.organization_id == organization_id
+                    and user.id in self.organization_members.get(group.organization_id, {})
+                )
+            )
         ]
 
     def get_group(self, user: User, group_id: int) -> GroupRecord | None:
@@ -195,26 +196,18 @@ class FakeOrgStore:
         group_name: str | None = None,
         group_description: str | None = None,
     ) -> GroupRecord:
-        group = self.groups[group_id]
-        if group.group_admin_id != user.id:
-            raise OrganizationAccessDenied("group administrator access required")
+        group = self._require_group_admin(user, group_id)
         updated = GroupRecord(
             group_id=group.group_id,
             organization_id=group.organization_id,
             group_name=group_name or group.group_name,
             group_description=group_description,
-            group_admin_id=group.group_admin_id,
-            group_admin_username=group.group_admin_username,
-            current_user_role="admin",
-            member_count=len(self.group_users.get(group_id, set())),
         )
         self.groups[group_id] = updated
-        return updated
+        return self._group_for_user(user, group_id)
 
     def delete_group(self, user: User, group_id: int) -> bool:
-        group = self.groups[group_id]
-        if group.group_admin_id != user.id:
-            raise OrganizationAccessDenied("group administrator access required")
+        self._require_group_admin(user, group_id)
         self.groups.pop(group_id, None)
         self.group_users.pop(group_id, None)
         return True
@@ -230,9 +223,41 @@ class FakeOrgStore:
         group = self.groups[group_id]
         self._require_org_member(user, group.organization_id)
         return [
-            self._member(user_id, "admin" if user_id == group.group_admin_id else "member")
-            for user_id in self.group_users.get(group_id, set())
+            self._member(user_id, role)
+            for user_id, role in self.group_users.get(group_id, {}).items()
         ]
+
+    def remove_organization_member(self, user: User, organization_id: int, member_user_id: int) -> bool:
+        self._require_org_admin(user, organization_id)
+        organization = self.organizations.get(organization_id)
+        if organization is None:
+            return False
+        member_role = self.organization_members.get(organization_id, {}).get(member_user_id)
+        if member_role is None:
+            return False
+        if member_role == "admin":
+            raise MemberRemovalNotAllowed("cannot remove organization administrator")
+        if any(
+            group.organization_id == organization_id
+            and self.group_users.get(group.group_id, {}).get(member_user_id) == "admin"
+            for group in self.groups.values()
+        ):
+            raise MemberRemovalNotAllowed("cannot remove organization member who administers a group")
+        for group_id, group in self.groups.items():
+            if group.organization_id == organization_id:
+                self.group_users.get(group_id, {}).pop(member_user_id, None)
+        del self.organization_members[organization_id][member_user_id]
+        return True
+
+    def remove_group_member(self, user: User, group_id: int, member_user_id: int) -> bool:
+        self._require_group_admin(user, group_id)
+        if self.group_users.get(group_id, {}).get(member_user_id) == "admin":
+            raise MemberRemovalNotAllowed("cannot remove group administrator")
+        members = self.group_users.get(group_id, {})
+        if member_user_id not in members:
+            return False
+        members.pop(member_user_id, None)
+        return True
 
     def invite_to_organization(
         self,
@@ -251,9 +276,7 @@ class FakeOrgStore:
         group_id: int,
         email: str | None,
     ) -> InvitationIssue:
-        group = self.groups[group_id]
-        if group.group_admin_id != user.id:
-            raise OrganizationAccessDenied("group administrator access required")
+        group = self._require_group_admin(user, group_id)
         return self._issue_invitation(
             user,
             organization_id=group.organization_id,
@@ -281,7 +304,7 @@ class FakeOrgStore:
         record = self.invitations[token]
         self.organization_members.setdefault(record.organization_id, {})[user.id] = "member"
         if record.group_id is not None:
-            self.group_users.setdefault(record.group_id, set()).add(user.id)
+            self.group_users.setdefault(record.group_id, {})[user.id] = "member"
         accepted = InvitationRecord(
             id=record.id,
             token_prefix=record.token_prefix,
@@ -347,12 +370,20 @@ class FakeOrgStore:
         if self.organization_members.get(organization_id, {}).get(user.id) != "admin":
             raise OrganizationAccessDenied("organization administrator access required")
 
+    def _require_group_admin(self, user: User, group_id: int) -> GroupRecord:
+        group = self.groups[group_id]
+        if self.organization_members.get(group.organization_id, {}).get(user.id) == "admin":
+            return group
+        if self.group_users.get(group_id, {}).get(user.id) != "admin":
+            raise OrganizationAccessDenied("group administrator access required")
+        return group
+
     def _org_for_user(self, user: User, organization_id: int) -> OrganizationRecord:
         record = self.organizations[organization_id]
         return OrganizationRecord(
             **{
                 **record.__dict__,
-                "organization_admin_username": self.user_store.users[record.organization_admin_id].username,
+                "admins": self._organization_admins(organization_id),
                 "current_user_role": self.organization_members[organization_id].get(user.id),
                 "member_count": len(self.organization_members.get(organization_id, {})),
             }
@@ -360,17 +391,12 @@ class FakeOrgStore:
 
     def _group_for_user(self, user: User, group_id: int) -> GroupRecord:
         record = self.groups[group_id]
-        current_user_role = None
-        if user.id == record.group_admin_id:
-            current_user_role = "admin"
-        elif user.id in self.group_users.get(group_id, set()):
-            current_user_role = "member"
         return GroupRecord(
             **{
                 **record.__dict__,
-                "group_admin_username": self.user_store.users[record.group_admin_id].username,
-                "current_user_role": current_user_role,
-                "member_count": len(self.group_users.get(group_id, set())),
+                "admins": self._group_admins(group_id),
+                "current_user_role": self.group_users.get(group_id, {}).get(user.id),
+                "member_count": len(self.group_users.get(group_id, {})),
             }
         )
 
@@ -384,8 +410,53 @@ class FakeOrgStore:
             joined_at=datetime.now(timezone.utc),
         )
 
+    def _organization_admins(self, organization_id: int) -> tuple[AdminRecord, ...]:
+        admin_ids = [
+            user_id for user_id, role in self.organization_members.get(organization_id, {}).items() if role == "admin"
+        ]
+        return tuple(
+            AdminRecord(
+                user_id=admin.id,
+                username=admin.username,
+                email=admin.email,
+            )
+            for admin in sorted((self.user_store.users[user_id] for user_id in admin_ids), key=lambda item: item.username)
+        )
+
+    def _group_admins(self, group_id: int) -> tuple[AdminRecord, ...]:
+        admin_ids = [
+            user_id for user_id, role in self.group_users.get(group_id, {}).items() if role == "admin"
+        ]
+        return tuple(
+            AdminRecord(
+                user_id=admin.id,
+                username=admin.username,
+                email=admin.email,
+            )
+            for admin in sorted((self.user_store.users[user_id] for user_id in admin_ids), key=lambda item: item.username)
+        )
+
+    def _upsert_org_member(self, organization_id: int, user_id: int, role: str) -> None:
+        self.organization_members.setdefault(organization_id, {})[user_id] = role
+
+    def _upsert_group_user(self, group_id: int, user_id: int, role: str) -> None:
+        self.group_users.setdefault(group_id, {})[user_id] = role
+
+    def _builtin_admin_user(self) -> User:
+        for user in self.user_store.users.values():
+            if user.username == "AgentGuardAdmin":
+                return user
+        raise AssertionError("AgentGuardAdmin test user is missing")
+
 
 def test_organization_group_admins_invitations_and_profile(monkeypatch):
+    agentguard_admin = User(
+        id=99,
+        username="AgentGuardAdmin",
+        email="admin@example.com",
+        email_verified_at=datetime.now(timezone.utc),
+        profile_json='{"role":"admin"}',
+    )
     alice = User(
         id=1,
         username="alice",
@@ -398,7 +469,7 @@ def test_organization_group_admins_invitations_and_profile(monkeypatch):
         email="bob@example.com",
         email_verified_at=datetime.now(timezone.utc),
     )
-    user_store = FakeUserStore([alice, bob])
+    user_store = FakeUserStore([agentguard_admin, alice, bob])
     org_store = FakeOrgStore(user_store)
     monkeypatch.setattr("backend.user.router.get_user_store", lambda: user_store)
     monkeypatch.setattr("backend.user.router.get_org_store", lambda: org_store)
@@ -424,10 +495,13 @@ def test_organization_group_admins_invitations_and_profile(monkeypatch):
         cookies={"agentguard_user_session": "session-1"},
     )
     assert org.status_code == 200
-    assert org.json()["organization"]["organization_admin_id"] == alice.id
-    assert org.json()["organization"]["organization_admin_username"] == "alice-renamed"
     assert org.json()["organization"]["organization_name"] == "engineering"
     assert org.json()["organization"]["current_user_role"] == "admin"
+    assert org.json()["organization"]["admins"] == [
+        {"user_id": 99, "username": "AgentGuardAdmin", "email": "admin@example.com"},
+        {"user_id": 1, "username": "alice-renamed", "email": "alice-new@example.com"},
+    ]
+    assert "organization_admin_id" not in org.json()["organization"]
 
     updated_org = client.patch(
         "/v1/user/organizations/1",
@@ -444,9 +518,13 @@ def test_organization_group_admins_invitations_and_profile(monkeypatch):
         cookies={"agentguard_user_session": "session-1"},
     )
     assert group.status_code == 200
-    assert group.json()["group"]["group_admin_id"] == alice.id
     assert group.json()["group"]["group_name"] == "platform"
     assert group.json()["group"]["current_user_role"] == "admin"
+    assert group.json()["group"]["admins"] == [
+        {"user_id": 99, "username": "AgentGuardAdmin", "email": "admin@example.com"},
+        {"user_id": 1, "username": "alice-renamed", "email": "alice-new@example.com"},
+    ]
+    assert "group_admin_id" not in group.json()["group"]
 
     updated_group = client.patch(
         "/v1/user/groups/1",
@@ -495,6 +573,7 @@ def test_organization_group_admins_invitations_and_profile(monkeypatch):
     )
     assert org_members.status_code == 200
     assert {item["username"]: item["role"] for item in org_members.json()["members"]} == {
+        "AgentGuardAdmin": "admin",
         "alice-renamed": "admin",
         "bob": "member",
     }
@@ -505,9 +584,56 @@ def test_organization_group_admins_invitations_and_profile(monkeypatch):
     )
     assert group_members.status_code == 200
     assert {item["username"]: item["role"] for item in group_members.json()["members"]} == {
+        "AgentGuardAdmin": "admin",
         "alice-renamed": "admin",
         "bob": "member",
     }
+
+    deleted_group_member = client.delete(
+        "/v1/user/groups/1/members/2",
+        cookies={"agentguard_user_session": "session-1"},
+    )
+    assert deleted_group_member.status_code == 200
+    assert deleted_group_member.json()["removed"] is True
+
+    remaining_group_members = client.get(
+        "/v1/user/groups/1/members",
+        cookies={"agentguard_user_session": "session-1"},
+    )
+    assert remaining_group_members.status_code == 200
+    assert {item["username"]: item["role"] for item in remaining_group_members.json()["members"]} == {
+        "AgentGuardAdmin": "admin",
+        "alice-renamed": "admin",
+    }
+
+    forbidden_admin_group_removal = client.delete(
+        "/v1/user/groups/1/members/1",
+        cookies={"agentguard_user_session": "session-1"},
+    )
+    assert forbidden_admin_group_removal.status_code == 409
+
+    deleted_org_member = client.delete(
+        "/v1/user/organizations/1/members/2",
+        cookies={"agentguard_user_session": "session-1"},
+    )
+    assert deleted_org_member.status_code == 200
+    assert deleted_org_member.json()["removed"] is True
+
+    remaining_org_members = client.get(
+        "/v1/user/organizations/1/members",
+        cookies={"agentguard_user_session": "session-1"},
+    )
+    assert remaining_org_members.status_code == 200
+    assert {item["username"]: item["role"] for item in remaining_org_members.json()["members"]} == {
+        "AgentGuardAdmin": "admin",
+        "alice-renamed": "admin",
+    }
+
+    removed_member_org_visibility = client.get(
+        "/v1/user/organizations/1/members",
+        cookies={"agentguard_user_session": "session-2"},
+    )
+    assert removed_member_org_visibility.status_code == 403
 
     forbidden_group_delete = client.delete(
         "/v1/user/groups/1",

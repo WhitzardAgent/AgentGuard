@@ -460,6 +460,17 @@
         return String(group?.current_user_role || "").toLowerCase() === "admin";
       }
 
+      function isAdminMember(member) {
+        return String(member?.role || "").toLowerCase() === "admin";
+      }
+
+      function adminDisplay(admins) {
+        if (!Array.isArray(admins) || !admins.length) {
+          return "-";
+        }
+        return admins.map((admin) => admin?.username || `User #${admin?.user_id || "?"}`).join(", ");
+      }
+
       function providerLabel(provider) {
         const normalized = String(provider || "").toLowerCase();
         if (normalized === "n8n") {
@@ -570,15 +581,31 @@
           nodes.organizationList.innerHTML = state.organizations.map((organization) => {
             const isSelected = String(organization.id) === String(state.selectedOrganizationId);
             const members = state.organizationMembersById[String(organization.id)] || [];
+            const canManageMembers = canManageOrganization(organization);
             const memberRows = members.length
               ? members.map((member) => `
                 <tr>
                   <td>${escapeHtml(member.username || `User #${member.user_id}`)}</td>
                   <td>${escapeHtml(member.email || "-")}</td>
                   <td>${escapeHtml(member.role || "member")}</td>
+                  <td class="member-action-cell">
+                    ${canManageMembers && !isAdminMember(member)
+                      ? `
+                        <button
+                          class="btn danger"
+                          type="button"
+                          data-organization-member-remove="${escapeHtml(member.user_id)}"
+                          data-organization-id="${escapeHtml(organization.id)}"
+                        >
+                          ${escapeHtml(t("Remove"))}
+                        </button>
+                      `
+                      : '<span class="subtle">-</span>'
+                    }
+                  </td>
                 </tr>
               `).join("")
-              : '<tr><td colspan="3" class="subtle">No members.</td></tr>';
+              : '<tr><td colspan="4" class="subtle">No members.</td></tr>';
             const actions = canManageOrganization(organization)
               ? `
                 <div class="table-action-buttons">
@@ -592,7 +619,7 @@
                 <td><strong>${escapeHtml(organization.organization_name || organization.name)}</strong></td>
                 <td>${escapeHtml(organization.current_user_role || "-")}</td>
                 <td>${escapeHtml(organization.member_count ?? "-")}</td>
-                <td>${escapeHtml(organization.organization_admin_username || organization.admin_username || organization.organization_admin_id || organization.admin_user_id)}</td>
+                <td>${escapeHtml(adminDisplay(organization.admins))}</td>
                 <td class="table-actions">${actions}</td>
               </tr>
               ${isSelected ? `
@@ -605,6 +632,7 @@
                             <th>Name</th>
                             <th>Email</th>
                             <th>Role</th>
+                            <th>Action</th>
                           </tr>
                         </thead>
                         <tbody>${memberRows}</tbody>
@@ -644,15 +672,31 @@
             const isSelected = String(group.id) === String(state.selectedGroupId);
             const groupOrg = groupOrganization(group);
             const members = state.groupMembersById[String(group.id)] || [];
+            const canManageMembers = canManageGroup(group);
             const memberRows = members.length
               ? members.map((member) => `
                 <tr>
                   <td>${escapeHtml(member.username || `User #${member.user_id}`)}</td>
                   <td>${escapeHtml(member.email || "-")}</td>
                   <td>${escapeHtml(member.role || "member")}</td>
+                  <td class="member-action-cell">
+                    ${canManageMembers && !isAdminMember(member)
+                      ? `
+                        <button
+                          class="btn danger"
+                          type="button"
+                          data-group-member-remove="${escapeHtml(member.user_id)}"
+                          data-group-id="${escapeHtml(group.id)}"
+                        >
+                          ${escapeHtml(t("Remove"))}
+                        </button>
+                      `
+                      : '<span class="subtle">-</span>'
+                    }
+                  </td>
                 </tr>
               `).join("")
-              : '<tr><td colspan="3" class="subtle">No members.</td></tr>';
+              : '<tr><td colspan="4" class="subtle">No members.</td></tr>';
             const actions = canManageGroup(group)
               ? `
                 <div class="table-action-buttons">
@@ -667,7 +711,7 @@
                 <td><strong>${escapeHtml(group.group_name || group.name)}</strong></td>
                 <td>${escapeHtml(groupOrg?.organization_name || groupOrg?.name || `Org #${group.organization_id}`)}</td>
                 <td>${escapeHtml(group.current_user_role || "-")}</td>
-                <td>${escapeHtml(group.group_admin_username || group.admin_username || group.group_admin_id || group.admin_user_id)}</td>
+                <td>${escapeHtml(adminDisplay(group.admins))}</td>
                 <td class="table-actions">${actions}</td>
               </tr>
               ${isSelected ? `
@@ -680,6 +724,7 @@
                             <th>Name</th>
                             <th>Email</th>
                             <th>Role</th>
+                            <th>Action</th>
                           </tr>
                         </thead>
                         <tbody>${memberRows}</tbody>
@@ -915,6 +960,37 @@
       });
 
       nodes.organizationList.addEventListener("click", async (event) => {
+        const removeMemberButton = event.target.closest("[data-organization-member-remove]");
+        if (removeMemberButton) {
+          const organizationId = removeMemberButton.dataset.organizationId;
+          const memberUserId = removeMemberButton.dataset.organizationMemberRemove;
+          const confirmed = await openConfirmModal({
+            title: t("Remove Member"),
+            message: t("Remove this member from the organization?"),
+            confirmLabel: t("Remove Member"),
+          });
+          if (!confirmed) {
+            return;
+          }
+          try {
+            await api(`/api/user/organizations/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(memberUserId)}`, {
+              method: "DELETE",
+            });
+            await loadDirectory();
+            if (state.selectedOrganizationId) {
+              await loadOrganizationMembers(state.selectedOrganizationId);
+            }
+            if (state.selectedGroupId) {
+              await loadGroupMembers(state.selectedGroupId);
+            }
+            renderOrganizations();
+            renderGroups();
+            showToast(t("Organization member removed."), "success");
+          } catch (error) {
+            showToast(error.message || t("Failed to remove organization member."), "warning");
+          }
+          return;
+        }
         const editButton = event.target.closest("[data-organization-edit]");
         if (editButton) {
           state.selectedOrganizationId = editButton.dataset.organizationEdit;
@@ -1000,6 +1076,34 @@
       });
 
       nodes.groupList.addEventListener("click", async (event) => {
+        const removeMemberButton = event.target.closest("[data-group-member-remove]");
+        if (removeMemberButton) {
+          const groupId = removeMemberButton.dataset.groupId;
+          const memberUserId = removeMemberButton.dataset.groupMemberRemove;
+          const confirmed = await openConfirmModal({
+            title: t("Remove Member"),
+            message: t("Remove this member from the group?"),
+            confirmLabel: t("Remove Member"),
+          });
+          if (!confirmed) {
+            return;
+          }
+          try {
+            await api(`/api/user/groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(memberUserId)}`, {
+              method: "DELETE",
+            });
+            await loadDirectory();
+            if (state.selectedGroupId) {
+              await loadGroupMembers(state.selectedGroupId);
+            }
+            renderOrganizations();
+            renderGroups();
+            showToast(t("Group member removed."), "success");
+          } catch (error) {
+            showToast(error.message || t("Failed to remove group member."), "warning");
+          }
+          return;
+        }
         const inviteButton = event.target.closest("[data-group-invite]");
         if (inviteButton) {
           const groupId = inviteButton.dataset.groupInvite;
@@ -1619,6 +1723,10 @@
       padding: 10px 12px;
       border-top: 1px solid var(--line);
       text-align: left;
+    }
+
+    .member-action-cell {
+      text-align: right;
     }
 
     .ticket-modal-backdrop {
