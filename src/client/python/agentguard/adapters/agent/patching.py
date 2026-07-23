@@ -629,6 +629,8 @@ def _loopback_llm_args_kwargs(
     owner: Any = None,
 ) -> tuple[tuple[Any, ...], dict[str, Any], dict[str, Any]]:
     payload = _loopback_payload_from_decision(decision)
+    if isinstance(payload, str):
+        payload = {"agentguard_loopback_thought": payload}
     denormalized = normalizer.denormalize_llm_input(
         label=label,
         payload=payload,

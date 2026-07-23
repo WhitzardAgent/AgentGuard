@@ -34,19 +34,35 @@ _UPDATE_PATHS = {PLUGIN_UPDATE_PATH}
 class ClientConfigAPIServer:
     """Small local-only HTTP API bound to one AgentGuard instance."""
 
-    def __init__(self, guard: Any, *, host: str = "127.0.0.1", port: int = 38181) -> None:
+    def __init__(
+        self,
+        guard: Any,
+        *,
+        host: str = "127.0.0.1",
+        port: int = 38181,
+        advertise_host: str | None = None,
+        advertise_port: int | None = None,
+    ) -> None:
         self.guard = guard
         self.host = host
         self.port = port
+        self.advertise_host = _normalize_advertised_host(advertise_host)
+        self.advertise_port = _normalize_port(advertise_port)
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
     @property
     def base_url(self) -> str:
+        if self.advertise_host and self.advertise_port is not None:
+            return f"http://{self.advertise_host}:{self.advertise_port}"
         if self._server is None:
-            return f"http://{self.host}:{self.port}"
+            host = _default_advertised_host(self.host)
+            port = self.advertise_port if self.advertise_port is not None else self.port
+            return f"http://{host}:{port}"
         host, port = self._server.server_address[:2]
-        return f"http://{host}:{port}"
+        advertised_host = self.advertise_host or _default_advertised_host(str(host))
+        advertised_port = self.advertise_port if self.advertise_port is not None else int(port)
+        return f"http://{advertised_host}:{advertised_port}"
 
     @property
     def plugin_config_url(self) -> str:
@@ -236,3 +252,25 @@ def _install_plugin_code(body: dict[str, Any]) -> dict[str, Any]:
         "module": module_name,
         "registered_plugins": sorted(registered_plugins()),
     }
+
+
+def _normalize_advertised_host(host: str | None) -> str | None:
+    value = str(host or "").strip()
+    return value or None
+
+
+def _normalize_port(port: int | str | None) -> int | None:
+    if port in {None, ""}:
+        return None
+    try:
+        normalized = int(port)
+    except (TypeError, ValueError):
+        return None
+    return normalized if normalized >= 0 else None
+
+
+def _default_advertised_host(host: str) -> str:
+    normalized = str(host or "").strip()
+    if normalized in {"", "0.0.0.0", "::"}:
+        return "127.0.0.1"
+    return normalized

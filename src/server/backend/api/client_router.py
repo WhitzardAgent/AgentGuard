@@ -257,6 +257,13 @@ def report_mcps(req: McpReportRequest, request: Request) -> dict[str, Any]:
 def register_session(req: SessionRegisterRequest, request: Request) -> dict[str, Any]:
     auth = _authenticate_runtime(request)
     context = RuntimeContext.from_dict(apply_auth_context_to_context(req.context, auth))
+    original_metadata = dict(req.context.get("metadata") or {})
+    client_session_key = original_metadata.get("client_session_key")
+    if client_session_key:
+        context.metadata = {
+            **(context.metadata or {}),
+            "client_session_key": client_session_key,
+        }
     record = _manager.register_client_session(
         context,
         client_ip=_client_ip(request),

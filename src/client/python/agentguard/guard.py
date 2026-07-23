@@ -59,6 +59,10 @@ class AgentGuard:
         legacy_identity_headers: bool = True,
         auto_register_session: bool = True,
         auto_close_runtime_session: bool = True,
+        client_config_api_host: str = "127.0.0.1",
+        client_config_api_port: int = 0,
+        client_config_api_advertise_host: str | None = None,
+        client_config_api_advertise_port: int | None = None,
     ) -> None:
         _validate_remote_runtime_auth(
             server_url,
@@ -113,6 +117,12 @@ class AgentGuard:
         self._bus = EventBus()
         self._config_api: ClientConfigAPIServer | None = None
         self._auto_close_runtime_session = auto_close_runtime_session
+        self._client_config_api_options = {
+            "host": client_config_api_host,
+            "port": client_config_api_port,
+            "advertise_host": client_config_api_advertise_host,
+            "advertise_port": client_config_api_advertise_port,
+        }
 
         self.runtime = HarnessRuntime(
             context=self.context,
@@ -187,16 +197,40 @@ class AgentGuard:
     def start_config_api(
         self,
         *,
-        host: str = "127.0.0.1",
-        port: int = 38181,
+        host: str | None = None,
+        port: int | None = None,
+        advertise_host: str | None = None,
+        advertise_port: int | None = None,
         sync_remote: bool = True,
     ) -> str:
         """Start a local HTTP API for plugin configuration updates."""
         prev_config_url = self.context.metadata.get("client_config_url")
         prev_plugin_list_url = self.context.metadata.get("client_plugin_list_url")
         prev_health_url = self.context.metadata.get("client_health_url")
+        resolved_host = host or str(self._client_config_api_options["host"] or "127.0.0.1")
+        resolved_port = (
+            port
+            if port is not None
+            else int(self._client_config_api_options["port"] or 0)
+        )
+        resolved_advertise_host = (
+            advertise_host
+            if advertise_host is not None
+            else self._client_config_api_options["advertise_host"]
+        )
+        resolved_advertise_port = (
+            advertise_port
+            if advertise_port is not None
+            else self._client_config_api_options["advertise_port"]
+        )
         if self._config_api is None:
-            self._config_api = ClientConfigAPIServer(self, host=host, port=port)
+            self._config_api = ClientConfigAPIServer(
+                self,
+                host=resolved_host,
+                port=resolved_port,
+                advertise_host=resolved_advertise_host,
+                advertise_port=resolved_advertise_port,
+            )
         url = self._config_api.start()
         plugin_list_url = self._config_api.plugin_list_url
         health_url = self._config_api.health_url
@@ -398,7 +432,7 @@ class AgentGuard:
         if not self._remote.enabled:
             return
         try:
-            self.start_config_api(port=0, sync_remote=False)
+            self.start_config_api(sync_remote=False)
         except Exception:
             pass
         self._sync_remote_session()

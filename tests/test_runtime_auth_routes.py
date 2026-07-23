@@ -345,3 +345,29 @@ def test_dpop_guard_decide_ignores_body_client_session_key(monkeypatch):
 
     assert first.status_code == 200
     assert second.status_code == 200
+
+
+def test_dpop_session_register_preserves_body_client_session_key(monkeypatch):
+    monkeypatch.setattr("backend.auth.dependencies.get_dify_auth_broker", lambda: FakeBroker())
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/v1/server/session/register",
+        headers={"Authorization": "DPoP token", "DPoP": "proof"},
+        json={
+            "context": {
+                "session_id": "self-reported-session",
+                "agent_id": "self-reported-agent",
+                "user_id": "self-reported-user",
+                "metadata": {
+                    "client_session_key": "sk-client-config",
+                    "client_plugin_list_url": "http://host.docker.internal:38181/v1/client/plugins/list",
+                },
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["session"]["client_key"] == "sk-client-config"
+    assert payload["session"]["client_plugin_list_url"] == "http://host.docker.internal:38181/v1/client/plugins/list"

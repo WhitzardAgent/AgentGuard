@@ -128,11 +128,21 @@ class LangChainAgentAdapter(BaseAgentAdapter):
         fn: Any = None,
         owner: Any = None,
     ) -> LLMInputDenormalization:
-        loopback_payload = _build_langchain_loopback_payload(
-            payload=payload,
-            args=args,
-            kwargs=kwargs,
-        )
+        loopback_payload = None
+        if isinstance(payload, dict) and isinstance(payload.get("agentguard_loopback_thought"), str):
+            loopback_payload = _build_langchain_loopback_payload(
+                payload=payload["agentguard_loopback_thought"],
+                args=args,
+                kwargs=kwargs,
+            )
+        elif isinstance(payload, str):
+            rewrite_payload = _build_langchain_text_rewrite_payload(
+                text=payload,
+                args=args,
+                kwargs=kwargs,
+            )
+            if rewrite_payload is not None:
+                payload = rewrite_payload
         denormalized = _denormalize_langchain_request(
             payload=loopback_payload if loopback_payload is not None else payload,
             args=args,
@@ -583,6 +593,25 @@ def _build_langchain_loopback_payload(
     return {"input": rebuilt_input}
 
 
+def _build_langchain_text_rewrite_payload(
+    *,
+    text: str,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> dict[str, Any] | None:
+    model_input = kwargs.get("input")
+    if model_input is None and args:
+        model_input = args[0]
+
+    rewritten_input = _rewrite_langchain_input_content(
+        _normalize_langchain_value(model_input),
+        text,
+    )
+    if rewritten_input is None:
+        return {"input": text}
+    return {"input": rewritten_input}
+
+
 def _inject_langchain_thought_message(
     model_input: Any,
     aligned_thought: str,
@@ -609,6 +638,65 @@ def _inject_langchain_thought_message(
                 return updated
 
     return None
+
+
+def _rewrite_langchain_input_content(
+    model_input: Any,
+    text: str,
+) -> Any | None:
+    if isinstance(model_input, str):
+        return text
+
+    if isinstance(model_input, list):
+        updated = copy.deepcopy(model_input)
+        for idx in range(len(updated) - 1, -1, -1):
+            item = updated[idx]
+            rewritten = _rewrite_langchain_message_content(item, text)
+            if rewritten is not None:
+                updated[idx] = rewritten
+                return updated
+        return text
+
+    if isinstance(model_input, dict):
+        if isinstance(model_input.get("messages"), list):
+            updated = copy.deepcopy(model_input)
+            messages = list(updated.get("messages") or [])
+            rewritten_messages = _rewrite_langchain_input_content(messages, text)
+            updated["messages"] = rewritten_messages if isinstance(rewritten_messages, list) else rewritten_messages
+            return updated
+
+        for key in ("input", "prompt", "query", "request"):
+            nested = model_input.get(key)
+            rewritten_nested = _rewrite_langchain_input_content(nested, text)
+            if rewritten_nested is not None:
+                updated = copy.deepcopy(model_input)
+                updated[key] = rewritten_nested
+                return updated
+
+        rewritten = _rewrite_langchain_message_content(model_input, text)
+        if rewritten is not None:
+            return rewritten
+        return text
+
+    return text
+
+
+def _rewrite_langchain_message_content(
+    value: Any,
+    text: str,
+) -> Any | None:
+    if not isinstance(value, dict):
+        return None
+
+    role = str(value.get("role") or value.get("type") or "").strip().lower()
+    if role in {"system", "tool"}:
+        return None
+    if "content" not in value:
+        return None
+
+    updated = copy.deepcopy(value)
+    updated["content"] = text
+    return updated
 
 
 def _assistant_message_for_sequence(messages: Sequence[Any], aligned_thought: str) -> dict[str, Any]:

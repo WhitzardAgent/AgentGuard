@@ -148,6 +148,47 @@ def test_python_client_resyncs_session_when_config_api_url_changes(monkeypatch):
         guard.close()
 
 
+def test_python_client_registers_advertised_config_api_urls(monkeypatch):
+    calls: list[dict] = []
+
+    def fake_start(self: ClientConfigAPIServer) -> str:
+        if self.port == 0:
+            self.port = 43123
+        return self.plugin_config_url
+
+    def fake_register(self: RemoteGuardClient, context):
+        payload = context.to_dict()
+        calls.append(payload)
+        return {"status": "ok", "session": payload}
+
+    monkeypatch.setattr(ClientConfigAPIServer, "start", fake_start)
+    monkeypatch.setattr(RemoteGuardClient, "register_session", fake_register)
+    monkeypatch.setattr(RemoteGuardClient, "close_runtime_session", lambda self: {"status": "ok"})
+
+    guard = AgentGuard(
+        "sess-py-advertised",
+        server_url="http://server.test",
+        agent_id="agent-py-advertised",
+        user_id="user-py-advertised",
+        session_token="runtime-token-py-advertised",
+        dpop_proof_factory=lambda method, url, access_token=None: "proof",
+        use_dpop_auth=True,
+        legacy_identity_headers=False,
+        client_config_api_host="0.0.0.0",
+        client_config_api_port=39001,
+        client_config_api_advertise_host="host.docker.internal",
+        client_config_api_advertise_port=39001,
+    )
+    try:
+        assert len(calls) == 1
+        context = calls[0]
+        assert context["metadata"]["client_config_url"] == "http://host.docker.internal:39001/v1/client/plugins/config"
+        assert context["metadata"]["client_plugin_list_url"] == "http://host.docker.internal:39001/v1/client/plugins/list"
+        assert context["metadata"]["client_health_url"] == "http://host.docker.internal:39001/v1/client/health"
+    finally:
+        guard.close()
+
+
 def test_python_client_replays_registered_tools_after_remote_resync(monkeypatch):
     register_calls: list[dict] = []
     report_calls: list[tuple[dict, dict]] = []

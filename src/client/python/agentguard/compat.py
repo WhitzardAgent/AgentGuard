@@ -71,6 +71,10 @@ class Guard:
         user_ticket: str | None = None,
         agent_id: str | None = None,
         user_id: str | None = None,
+        client_config_api_host: str = "127.0.0.1",
+        client_config_api_port: int = 0,
+        client_config_api_advertise_host: str | None = None,
+        client_config_api_advertise_port: int | None = None,
     ) -> None:
         resolved_server_url = server_url or remote_url
         if remote_url and server_url and remote_url != server_url:
@@ -93,6 +97,10 @@ class Guard:
             "user_ticket": user_ticket or ticket,
             "agent_id": agent_id,
             "user_id": user_id,
+            "client_config_api_host": client_config_api_host,
+            "client_config_api_port": client_config_api_port,
+            "client_config_api_advertise_host": client_config_api_advertise_host,
+            "client_config_api_advertise_port": client_config_api_advertise_port,
         }
         self.mode = mode
         self.fail_open = fail_open
@@ -191,6 +199,10 @@ class Guard:
             use_dpop_auth=bool(runtime_issue),
             legacy_identity_headers=not bool(runtime_issue),
             auto_register_session=not bool(runtime_issue),
+            client_config_api_host=self._config["client_config_api_host"],
+            client_config_api_port=self._config["client_config_api_port"],
+            client_config_api_advertise_host=self._config["client_config_api_advertise_host"],
+            client_config_api_advertise_port=self._config["client_config_api_advertise_port"],
         )
         if metadata:
             guard.context.metadata.update(metadata)
