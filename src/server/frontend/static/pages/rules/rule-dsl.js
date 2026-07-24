@@ -1,6 +1,6 @@
 (function () {
   const SUPPORTED_ACTIONS = new Set(["DENY", "HUMAN_CHECK", "LLM_CHECK", "ALLOW", "DEGRADE"]);
-  const CONTEXT_PREFIXES = new Set(["tool", "principal"]);
+  const CONTEXT_PREFIXES = new Set(["tool", "principal", "mcp"]);
   const ON_SUBTYPES = ["requested", "completed", "failed"];
 
   function escapeString(value) {
@@ -55,8 +55,7 @@
       return false;
     }
 
-    const ident = "[A-Za-z_][A-Za-z0-9_]*";
-    const toolPattern = `(?:\\*|${ident}(?:\\.${ident})*(?:\\.\\*)?)`;
+    const toolPattern = "(?:\\*|[^()\\s]+)";
     const subtype = `(?:${ON_SUBTYPES.join("|")})`;
     const directPattern = new RegExp(`^tool_call\\(${toolPattern}\\)$`);
     const subtypeOnlyPattern = new RegExp(`^tool_call\\.${subtype}$`);
@@ -124,6 +123,13 @@
       && /^-?\d+(?:\.\d+)?$/.test(rawValue)
     ) {
       return rawValue;
+    }
+    if (
+      sourceType === "context"
+      && String(item?.contextPath || "").trim() === "mcp.remote"
+      && /^(true|false)$/i.test(rawValue)
+    ) {
+      return rawValue.toLowerCase();
     }
     return `"${escapeString(rawValue)}"`;
   }

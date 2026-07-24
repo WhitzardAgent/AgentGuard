@@ -18,7 +18,7 @@
     if (!source) {
       return { subtype: "", toolPattern: "" };
     }
-    const matched = source.match(/^tool_call(?:\.([A-Za-z_][A-Za-z0-9_]*))?(?:\(([A-Za-z_][A-Za-z0-9_.]*|[A-Za-z_][A-Za-z0-9_]*\.\*)\))?$/);
+    const matched = source.match(/^tool_call(?:\.([A-Za-z_][A-Za-z0-9_]*))?(?:\(([^()\s]+)\))?$/);
     if (!matched) {
       return { subtype: "", toolPattern: "" };
     }

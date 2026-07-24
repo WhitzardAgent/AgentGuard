@@ -31,6 +31,13 @@
       { value: "principal.role", label: "user.role", kind: "enum", enumValues: principalRoleValues, operators: ["==", "!=", "IN", "NOT IN"] },
       { value: "principal.trust_level", label: "user.trust_level", kind: "number", operators: ["==", "!=", ">", ">=", "<", "<="] },
     ],
+    mcp: [
+      { value: "mcp.name", label: "mcp.name", kind: "text", operators: ["==", "!=", "IN", "NOT IN"] },
+      { value: "mcp.tool_name", label: "mcp.tool_name", kind: "text", operators: ["==", "!=", "IN", "NOT IN"] },
+      { value: "mcp.unique_id", label: "mcp.unique_id", kind: "text", operators: ["==", "!=", "IN", "NOT IN"] },
+      { value: "mcp.transport", label: "mcp.transport", kind: "text", operators: ["==", "!=", "IN", "NOT IN"] },
+      { value: "mcp.remote", label: "mcp.remote", kind: "enum", enumValues: ["true", "false"], operators: ["==", "!="] },
+    ],
   };
 
   const tracePropertyGroups = [
@@ -41,6 +48,7 @@
 
   const contextPropertyGroups = [
     { value: "tool", label: "tool" },
+    { value: "mcp", label: "mcp" },
     { value: "principal", label: "user" }
   ];
 
@@ -49,10 +57,24 @@
     { value: "principal.trust_level", label: "trust_level" },
   ];
 
+  const mcpContextSubpropertyGroups = [
+    { value: "mcp.name", label: "name" },
+    { value: "mcp.tool_name", label: "tool_name" },
+    { value: "mcp.unique_id", label: "unique_id" },
+    { value: "mcp.transport", label: "transport" },
+    { value: "mcp.remote", label: "remote" },
+  ];
+
   const wizardStages = ["source", "symbol", "property", "comparison", "complete"];
 
   function toolCatalog() {
-    return window.AgentGuardData ? window.AgentGuardData.loadToolCatalog() : [];
+    if (!window.AgentGuardData) {
+      return [];
+    }
+    if (typeof window.AgentGuardData.loadRuleToolCatalog === "function") {
+      return window.AgentGuardData.loadRuleToolCatalog();
+    }
+    return window.AgentGuardData.loadToolCatalog();
   }
 
   function toolOptions() {
@@ -136,6 +158,13 @@
       && /^-?\d+(?:\.\d+)?$/.test(rawValue)
     ) {
       return rawValue;
+    }
+    if (
+      sourceType === "context"
+      && String(item?.contextPath || "").trim() === "mcp.remote"
+      && /^(true|false)$/i.test(rawValue)
+    ) {
+      return rawValue.toLowerCase();
     }
     return `"${rawValue.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
   }
@@ -1480,6 +1509,24 @@
           },
         )));
         return;
+      }
+
+      if (prefix === "mcp") {
+        detailSection.appendChild(createField("Sub-property", createSelect(
+          [{ value: "", label: "Select sub-property" }, ...mcpContextSubpropertyGroups],
+          item.contextField,
+          (event) => {
+            const nextField = event.target.value;
+            updateDraft({
+              contextField: nextField,
+              contextFieldName: "",
+              contextPath: buildContextPath(nextField, ""),
+              syntaxField: "",
+              operator: "",
+              value: "",
+            });
+          },
+        )));
       }
     }
 

@@ -22,8 +22,10 @@
       return "";
     }
 
-    const catalog = typeof toolData?.loadToolCatalog === "function"
-      ? toolData.loadToolCatalog()
+    const catalog = typeof toolData?.loadRuleToolCatalog === "function"
+      ? toolData.loadRuleToolCatalog()
+      : typeof toolData?.loadToolCatalog === "function"
+        ? toolData.loadToolCatalog()
       : [];
     if (typeof toolCatalogHelpers.toolKeyForName === "function") {
       return String(toolCatalogHelpers.toolKeyForName(toolPattern, catalog) || "").trim();

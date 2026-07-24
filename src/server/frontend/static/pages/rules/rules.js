@@ -17,6 +17,21 @@ const ruleParser = window.AgentGuardRuleParser || {};
 const toolCatalogHelpers = window.AgentGuardToolCatalog || {};
 const uiHelpers = window.AgentGuardUIHelpers || {};
 const toolData = window.AgentGuardData;
+const ruleToolData = {
+  ...toolData,
+  loadToolCatalog(agentId) {
+    if (typeof toolData?.loadRuleToolCatalog === "function") {
+      return toolData.loadRuleToolCatalog(agentId);
+    }
+    return toolData?.loadToolCatalog?.(agentId) || [];
+  },
+  refreshToolCatalog(agentId) {
+    if (typeof toolData?.refreshRuleToolCatalog === "function") {
+      return toolData.refreshRuleToolCatalog(agentId);
+    }
+    return toolData?.refreshToolCatalog?.(agentId) || Promise.resolve([]);
+  },
+};
 const api = window.AgentGuardApi;
 const shell = window.AgentGuardShell;
 
@@ -538,7 +553,7 @@ const form = ruleFormControllerModule.create({
   preview: rulePreview,
   shell,
   toolCatalogHelpers,
-  toolData,
+  toolData: ruleToolData,
   uiHelpers,
   validation: ruleValidation,
 });

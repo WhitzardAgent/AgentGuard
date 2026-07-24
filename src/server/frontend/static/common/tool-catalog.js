@@ -19,6 +19,11 @@
     if (!tool) {
       return "";
     }
+    if (String(tool?.source_type || "").trim() === "mcp") {
+      const serverName = String(tool?.mcp_name || "").trim();
+      const toolName = String(tool?.mcp_tool_name || tool?.name || "").trim();
+      return `${serverName && toolName ? `${serverName} / ${toolName}` : String(tool.name || "").trim()} [MCP]`;
+    }
     const counts = nameCounts instanceof Map ? nameCounts : buildNameCounts(catalog);
     const duplicateCount = counts.get(String(tool.name || "").trim()) || 0;
     return duplicateCount > 1

@@ -75,7 +75,7 @@
 
     const contextParsed = core.match(
       new RegExp(
-        `^((?:tool|target|principal|caller|event)\\.[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)*)\\s+${operatorPattern}\\s+(.+)$`,
+        `^((?:tool|target|principal|caller|event|mcp)\\.[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)*)\\s+${operatorPattern}\\s+(.+)$`,
       ),
     );
     if (!contextParsed) {

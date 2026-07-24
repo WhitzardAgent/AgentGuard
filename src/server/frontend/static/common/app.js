@@ -526,7 +526,9 @@
     return {
       name: String(item?.name || "").trim(),
       description: String(item?.description || "").trim(),
-      input_schema: item?.input_schema && typeof item.input_schema === "object" ? item.input_schema : {},
+      input_schema: item?.input_schema && typeof item.input_schema === "object"
+        ? item.input_schema
+        : (item?.inputSchema && typeof item.inputSchema === "object" ? item.inputSchema : {}),
     };
   }
 
@@ -584,6 +586,55 @@
         sdk: mcpResource?.sdk && typeof mcpResource.sdk === "object" ? mcpResource.sdk : {},
       },
     };
+  }
+
+  function mcpToolInputParams(tool) {
+    const schema = tool?.input_schema && typeof tool.input_schema === "object"
+      ? tool.input_schema
+      : {};
+    const properties = schema.properties && typeof schema.properties === "object" && !Array.isArray(schema.properties)
+      ? schema.properties
+      : {};
+    return Object.keys(properties).map(String).filter(Boolean);
+  }
+
+  function mcpRuntimeToolName(mcp, tool) {
+    const serverName = String(mcp?.name || "").trim();
+    const toolName = String(tool?.name || "").trim();
+    return serverName && toolName ? `${serverName}__${toolName}` : "";
+  }
+
+  function mcpToolsForRuleCatalog(mcps) {
+    return (Array.isArray(mcps) ? mcps : []).flatMap((mcp) => {
+      const ownerAgentId = String(mcp?.owner_agent_id || mcp?.agent_id || "").trim();
+      const tools = Array.isArray(mcp?.mcp_resource?.tools) ? mcp.mcp_resource.tools : [];
+      return tools.map((tool) => {
+        const runtimeName = mcpRuntimeToolName(mcp, tool);
+        if (!ownerAgentId || !runtimeName) {
+          return null;
+        }
+        return {
+          owner_agent_id: ownerAgentId,
+          name: runtimeName,
+          tool_key: buildToolKey(ownerAgentId, runtimeName),
+          description: String(tool?.description || mcp?.description || "").trim(),
+          input_params: mcpToolInputParams(tool),
+          source_type: "mcp",
+          mcp_unique_id: String(mcp?.mcp_unique_id || "").trim(),
+          mcp_name: String(mcp?.name || "").trim(),
+          mcp_tool_name: String(tool?.name || "").trim(),
+          mcp_transport: String(mcp?.transport || "").trim(),
+          mcp_remote: mcp?.remote === true,
+          labels: {
+            boundary: "internal",
+            sensitivity: "low",
+            integrity: "trusted",
+            tags: ["mcp"],
+          },
+          ...agentIdentityFromItem(mcp),
+        };
+      }).filter(Boolean);
+    });
   }
 
   function compactMcpForCache(mcp) {
@@ -886,6 +937,13 @@
     }
   }
 
+  function loadScopedRuleToolCatalog(agentId = getSelectedAgentId()) {
+    return [
+      ...loadScopedToolCatalog(agentId),
+      ...mcpToolsForRuleCatalog(loadScopedMcpList(agentId)),
+    ];
+  }
+
   function persistScopedMcpList(agentId, mcps) {
     const normalizedAgentId = String(agentId || "").trim();
     if (!normalizedAgentId) {
@@ -1148,6 +1206,27 @@
     return mcps;
   }
 
+  async function refreshScopedRuleToolCatalog(agentId = getSelectedAgentId()) {
+    const normalizedAgentId = String(agentId || "").trim();
+    if (!normalizedAgentId) {
+      clearScopedAgentCache();
+      return [];
+    }
+    const [toolResult, mcpResult] = await Promise.allSettled([
+      refreshScopedToolCatalog(normalizedAgentId),
+      refreshScopedMcpList(normalizedAgentId),
+    ]);
+    if (toolResult.status === "rejected" && mcpResult.status === "rejected") {
+      throw toolResult.reason;
+    }
+    return [
+      ...(toolResult.status === "fulfilled" && Array.isArray(toolResult.value) ? toolResult.value : []),
+      ...mcpToolsForRuleCatalog(
+        mcpResult.status === "fulfilled" && Array.isArray(mcpResult.value) ? mcpResult.value : [],
+      ),
+    ];
+  }
+
   async function detectScopedSkills(agentId, skillUniqueIds, options = {}) {
     const normalizedAgentId = String(agentId || "").trim();
     const ids = (Array.isArray(skillUniqueIds) ? skillUniqueIds : [])
@@ -1400,6 +1479,10 @@
     },
     refreshToolCatalog(agentId = getSelectedAgentId()) {
       return refreshScopedToolCatalog(agentId);
+    },
+    loadRuleToolCatalog: loadScopedRuleToolCatalog,
+    refreshRuleToolCatalog(agentId = getSelectedAgentId()) {
+      return refreshScopedRuleToolCatalog(agentId);
     },
     updateToolLabels(agentId, toolName, labels) {
       return updateScopedToolLabels(agentId, toolName, labels);

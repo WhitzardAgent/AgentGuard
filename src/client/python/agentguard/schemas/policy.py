@@ -232,6 +232,7 @@ class PolicyRule:
         principal = _principal_view(event)
         tool = _tool_view(event)
         target = _target_view(tool)
+        mcp = _mcp_view(event)
         trace_bindings = _trace_bindings(self.trace_clause, event, trace_window or [])
         if self.trace_clause is not None and trace_bindings is None:
             return False
@@ -240,6 +241,7 @@ class PolicyRule:
             "principal": principal,
             "tool": tool,
             "target": target,
+            "mcp": mcp,
             "_trace_bindings": trace_bindings or {},
         }
         if self.condition_expr.strip():
@@ -314,6 +316,18 @@ def _target_view(tool: dict[str, Any]) -> dict[str, Any]:
         "url": url,
         "domain": domain,
         "raw": raw,
+    }
+
+
+def _mcp_view(event: RuntimeEvent) -> dict[str, Any]:
+    metadata = event.metadata if isinstance(event.metadata, dict) else {}
+    return {
+        "unique_id": metadata.get("mcp_unique_id"),
+        "name": metadata.get("mcp_name"),
+        "tool_name": metadata.get("mcp_tool_name"),
+        "transport": metadata.get("mcp_transport"),
+        "remote": metadata.get("mcp_remote"),
+        "match_confidence": metadata.get("mcp_match_confidence"),
     }
 
 

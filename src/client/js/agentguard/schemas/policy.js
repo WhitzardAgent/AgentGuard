@@ -134,6 +134,11 @@ class PolicyRule {
       }
     }
     const eventDict = event.toDict();
+    const matchRoot = {
+      ...eventDict,
+      tool: toolView(eventDict),
+      mcp: mcpView(eventDict),
+    };
     for (const condition of this.conditions) {
       if (condition.field.startsWith("trace.")) {
         if (!matchTrace(condition, traceWindow)) {
@@ -141,7 +146,7 @@ class PolicyRule {
         }
         continue;
       }
-      if (!applyOp(condition.op, resolve(condition.field, eventDict), condition.value)) {
+      if (!applyOp(condition.op, resolve(condition.field, matchRoot), condition.value)) {
         return false;
       }
     }
@@ -158,6 +163,43 @@ function wildcardMatch(value, patterns) {
     return false;
   }
   return patterns.some((pattern) => pattern === "*" || pattern === value || (pattern.endsWith("*") && String(value).startsWith(pattern.slice(0, -1))));
+}
+
+function toolView(eventDict) {
+  const payload = eventDict.payload || {};
+  const metadata = eventDict.metadata || {};
+  const tool = {};
+  if (payload.tool_name != null) {
+    tool.name = payload.tool_name;
+  }
+  if (payload.arguments && typeof payload.arguments === "object" && !Array.isArray(payload.arguments)) {
+    Object.assign(tool, payload.arguments);
+  }
+  if (payload.result != null) {
+    tool.result = payload.result;
+  }
+  if (Array.isArray(payload.capabilities)) {
+    tool.capabilities = [...payload.capabilities];
+  }
+  const labels = metadata.labels || metadata.tool_labels || {};
+  for (const key of ["boundary", "sensitivity", "integrity"]) {
+    if (labels[key] != null && labels[key] !== "") {
+      tool[key] = labels[key];
+    }
+  }
+  return tool;
+}
+
+function mcpView(eventDict) {
+  const metadata = eventDict.metadata || {};
+  return {
+    unique_id: metadata.mcp_unique_id,
+    name: metadata.mcp_name,
+    tool_name: metadata.mcp_tool_name,
+    transport: metadata.mcp_transport,
+    remote: metadata.mcp_remote,
+    match_confidence: metadata.mcp_match_confidence,
+  };
 }
 
 function matchTrace(condition, window) {
