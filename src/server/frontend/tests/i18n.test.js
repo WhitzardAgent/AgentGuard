@@ -324,6 +324,7 @@ test("i18n translates runtime session headings in Chinese mode", () => {
   const { api } = loadI18n({ language: "zh", body });
 
   assert.equal(api.t("Runtime Sessions"), "运行时会话");
+  assert.equal(api.t("Session"), "会话");
   assert.equal(api.t("External Session"), "外部会话");
   assert.equal(api.t("Account"), "账号");
   assert.equal(api.t("Status"), "状态");

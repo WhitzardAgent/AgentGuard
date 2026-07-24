@@ -96,6 +96,7 @@ class AgentToolRecord:
 class AgentDeletionResult:
     agent_id: str
     deleted: bool
+    audit_run_count: int = 0
     trace_event_count: int = 0
     runtime_token_count: int = 0
     runtime_session_count: int = 0
@@ -110,6 +111,7 @@ class AgentDeletionResult:
         return {
             "agent_id": self.agent_id,
             "deleted": self.deleted,
+            "audit_run_count": self.audit_run_count,
             "trace_event_count": self.trace_event_count,
             "runtime_token_count": self.runtime_token_count,
             "runtime_session_count": self.runtime_session_count,
@@ -957,10 +959,19 @@ def agent_delete_allowed_from_console(record: AgentRecord) -> bool:
         or metadata.get("provider")
         or ""
     ).strip().lower()
-    return provider == "langchain"
+    return provider in {"langchain", "dify"}
 
 
 def _delete_agent_with_execute(execute: Any, agent_id: str) -> AgentDeletionResult:
+    audit_run_count = int(
+        execute(
+            """
+            DELETE FROM agent_audit_runs
+            WHERE agent_id = %s
+            """,
+            (agent_id,),
+        )
+    )
     trace_event_count = int(
         execute(
             """
@@ -1008,6 +1019,7 @@ def _delete_agent_with_execute(execute: Any, agent_id: str) -> AgentDeletionResu
     return AgentDeletionResult(
         agent_id=agent_id,
         deleted=agent_count > 0,
+        audit_run_count=audit_run_count,
         trace_event_count=trace_event_count,
         runtime_token_count=runtime_token_count,
         runtime_session_count=runtime_session_count,

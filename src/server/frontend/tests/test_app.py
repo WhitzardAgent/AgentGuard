@@ -1508,6 +1508,7 @@ def test_agents_page_renders_chinese_template_copy_when_language_cookie_set():
     assert 'id="agentguard-copy-no-tools-registered">尚未注册任何工具。</span>' in body
     assert 'id="agentguard-copy-no-skills-registered">尚未注册任何 Skill。</span>' in body
     assert 'id="agentguard-copy-delete">删除</span>' in body
+    assert 'id="agentguard-copy-only-langchain-delete">此页面仅支持删除 LangChain 和 Dify 智能体记录。</span>' in body
 
 
 

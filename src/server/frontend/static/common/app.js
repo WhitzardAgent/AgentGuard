@@ -702,6 +702,7 @@
       external_agent_id: identity.external_agent_id || "",
       external_provider: identity.external_provider || "",
       agent_type: identity.agent_type || "",
+      can_delete: false,
       tool_count: sortedTools.length,
       tool_names: sortedTools.slice(0, 4),
       skill_count: sortedSkills.length,
@@ -796,6 +797,7 @@
           external_agent_id: existing.external_agent_id || agent.external_agent_id,
           external_provider: existing.external_provider || agent.external_provider,
           agent_type: existing.agent_type || agent.agent_type,
+          can_delete: existing.can_delete === true || agent.can_delete === true,
         });
       });
     return Array.from(merged.values()).sort((a, b) => a.agent_id.localeCompare(b.agent_id));
@@ -809,6 +811,7 @@
       external_agent_id: String(item?.external_agent_id || item?.externalAgentId || "").trim(),
       external_provider: String(item?.external_provider || item?.externalProvider || "").trim(),
       agent_type: String(item?.agent_type || item?.agentType || "").trim(),
+      can_delete: item?.can_delete === true || item?.canDelete === true,
       tool_count: Number.isFinite(Number(item?.tool_count)) ? Number(item.tool_count) : 0,
       tool_names: Array.isArray(item?.tool_names) ? item.tool_names.map(String).filter(Boolean) : [],
       skill_count: Number.isFinite(Number(item?.skill_count)) ? Number(item.skill_count) : 0,

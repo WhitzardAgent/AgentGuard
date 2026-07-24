@@ -8,47 +8,29 @@ not workflow nodes.
 from __future__ import annotations
 
 import contextvars
-import copy
 import functools
-import hashlib
-import json
 import logging
 import os
 import re
 import sys
 import threading
 import time
+from collections.abc import Generator
 from dataclasses import dataclass
 from typing import Any
 
-from agentguard.adapters.agent.dify_legacy_llm import (
-    DifyLegacyLLMCall,
-    DifyLegacyLLMNormalizer,
-    modified_message_llm_output_value,
-    parse_tagged_llm_output,
-    run_dify_legacy_llm_call,
-)
-from agentguard.adapters.agent.dify_flask import (
-    get_dify_flask_app,
-    on_dify_flask_app_ready,
-)
-from agentguard.adapters.agent.dify_flask import (
-    register_dify_flask_app as _register_shared_dify_flask_app,
-)
+from agentguard.adapters.agent import dify_shared as _shared
 from agentguard.schemas import events as ev
-from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.decisions import DecisionType, GuardDecision
 from agentguard.tools.metadata import ToolMetadata
-from agentguard.adapters.agent.dify_runtime_auth import manager as _runtime_auth_manager
-from agentguard.u_guard.agent_keys import agent_identity_key_id, build_agent_registration_payload
 from agentguard.u_guard.remote_client import RemoteGuardClient
 from agentguard.utils.errors import AdapterError
-from agentguard.adapters.agent.normalization import denormalize_tool_result_payload
-from agentguard.utils.json import safe_dumps, safe_loads
+from agentguard.utils.json import safe_dumps
 
 _PATCHED_ATTR = "__agentguard_dify_agent_chat_patched__"
 _ORIGINAL_ATTR = "__agentguard_dify_agent_chat_original__"
 _LOGGER = logging.getLogger(__name__)
+_runtime_auth_manager = _shared.manager
 
 _current_guard: contextvars.ContextVar[Any | None] = contextvars.ContextVar(
     "agentguard_dify_agent_chat_guard",
@@ -72,7 +54,7 @@ _app_update_hook_installed = False
 _app_update_hook_lock = threading.Lock()
 _runtime_agent_registrations: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
 _runtime_agent_registrations_lock = threading.Lock()
-_LEGACY_LLM_NORMALIZER = DifyLegacyLLMNormalizer(
+_LEGACY_LLM_NORMALIZER = _shared.DifyLegacyLLMNormalizer(
     content_list_joiner="",
     stream_text_joiner="",
     preserve_dict_payload=True,
@@ -97,6 +79,23 @@ _TOOL_ARG_NAMES = (
     "conversation_id",
     "app_id",
     "message_id",
+)
+
+_AGENT_CHAT_RUNTIME_SPEC = _shared.DifyRuntimeSpec(
+    adapter_name="dify_agent_chat",
+    runtime_name="agent_chat",
+    agent_type="agent_chat",
+    fallback_agent_id=lambda metadata: f"dify-agent-chat:{metadata.get('app_id') or metadata.get('conversation_id') or 'dify-agent-chat'}",
+    session_id_from_metadata=lambda metadata: _session_id_from_metadata(
+        metadata,
+        metadata.get("app_id") or metadata.get("conversation_id") or "dify-agent-chat",
+    ),
+    external_session_id_from_metadata=lambda metadata: _external_session_id_from_metadata(metadata),
+    internal_session_key_from_metadata=lambda metadata, fallback_session_id: _internal_session_key_from_metadata(
+        metadata,
+        fallback_session_id=fallback_session_id,
+    ),
+    external_agent_id_for_app=lambda app_id: f"dify-agent-chat:{app_id}",
 )
 
 
@@ -193,7 +192,7 @@ def start_dify_agent_chat_catalog_sync() -> dict[str, Any]:
         _catalog_sync_started = True
 
     if _dify_flask_app() is None:
-        on_dify_flask_app_ready(lambda app: _start_catalog_sync_thread(app))
+        _shared.on_dify_flask_app_ready(lambda app: _start_catalog_sync_thread(app))
         return {"enabled": True, "started": False, "reason": "waiting_for_app_factory"}
 
     _start_catalog_sync_thread()
@@ -260,7 +259,7 @@ def _patch_model_invoke_llm(model_instance_cls: Any) -> bool:
 
     @functools.wraps(original)
     def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
-        return run_dify_legacy_llm_call(
+        return _shared.run_dify_legacy_llm_call(
             model=self,
             args=tuple(args),
             kwargs=dict(kwargs),
@@ -270,7 +269,8 @@ def _patch_model_invoke_llm(model_instance_cls: Any) -> bool:
             guard_output=_guard_llm_output,
             blocked_value=_blocked_llm_value,
             normalizer=_LEGACY_LLM_NORMALIZER,
-            modify_output=modified_message_llm_output_value,
+            modify_output=_shared.modified_message_llm_output_value,
+            stream_result_builder=_synthetic_llm_stream,
         )
 
     _mark_patched(wrapper, original)
@@ -348,7 +348,7 @@ def _report_runtime_tools(tool_instances: Any) -> None:
 
 def _guard_llm_input(
     model: Any,
-    call: DifyLegacyLLMCall,
+    call: _shared.DifyLegacyLLMCall,
     extra_metadata: dict[str, Any] | None = None,
 ) -> GuardDecision:
     guard = _active_guard()
@@ -373,7 +373,7 @@ def _guard_llm_input(
 def _guard_llm_output(
     model: Any,
     output: Any,
-    call: DifyLegacyLLMCall,
+    call: _shared.DifyLegacyLLMCall,
     error: str | None = None,
     extra_metadata: dict[str, Any] | None = None,
 ) -> GuardDecision:
@@ -452,13 +452,7 @@ def _wrap_llm_generator(model: Any, result: Any, call: dict[str, Any]) -> Genera
 
 
 def _decision_payload(decision: GuardDecision) -> Any:
-    payload = decision.processed_content
-    if not isinstance(payload, str):
-        return payload
-    text = payload.strip()
-    if not text or text[0] not in {"{", "["}:
-        return payload
-    return safe_loads(text, fallback=payload)
+    return _shared.decision_payload(decision)
 
 
 def _replace_named_argument(
@@ -468,45 +462,15 @@ def _replace_named_argument(
     key: str,
     value: Any,
 ) -> tuple[tuple[Any, ...], dict[str, Any]]:
-    current_args = list(args)
-    current_kwargs = dict(kwargs)
-    if key in current_kwargs:
-        current_kwargs[key] = value
-        return tuple(current_args), current_kwargs
-
-    try:
-        index = names.index(key)
-    except ValueError:
-        current_kwargs[key] = value
-        return tuple(current_args), current_kwargs
-
-    if index < len(current_args):
-        current_args[index] = value
-    else:
-        current_kwargs[key] = value
-    return tuple(current_args), current_kwargs
+    return _shared.replace_named_argument(args, kwargs, names, key, value)
 
 
 def _modified_result_value(payload: Any, result: Any, *, error: str | None = None) -> Any:
-    return denormalize_tool_result_payload(
-        payload=payload,
-        result=result,
-        error=error,
-    ).result
+    return _shared.modified_tool_result_value(payload, result, error=error)
 
 
 def _modified_llm_output_value(payload: Any, result: Any) -> Any:
-    message = _get_attr_or_key(result, "message")
-    if message is not None and hasattr(message, "content"):
-        updated_result = copy.copy(result)
-        updated_message = copy.copy(message)
-        updated_message.content = denormalize_llm_output_payload(
-            payload=payload,
-            output=getattr(message, "content", None),
-        )
-        updated_result.message = updated_message
-        return updated_result
-    return denormalize_llm_output_payload(payload=payload, output=result)
+    return _shared.modified_message_llm_output_value(payload, result)
 
 
 def _replace_response_text(response: Any, value: Any) -> Any:
@@ -518,8 +482,8 @@ def _replace_response_text(response: Any, value: Any) -> Any:
     return value
 
 
-def _llm_call_from_args(args: tuple[Any, ...], kwargs: dict[str, Any]) -> DifyLegacyLLMCall:
-    return DifyLegacyLLMCall.from_args_kwargs(args, kwargs)
+def _llm_call_from_args(args: tuple[Any, ...], kwargs: dict[str, Any]) -> _shared.DifyLegacyLLMCall:
+    return _shared.DifyLegacyLLMCall.from_args_kwargs(args, kwargs)
 
 
 def _tool_call_from_args(args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -565,41 +529,19 @@ def _metadata_from_runner_args(args: tuple[Any, ...], kwargs: dict[str, Any]) ->
 
 
 def _make_guard(metadata: dict[str, Any]) -> Any:
-    from agentguard import AgentGuard
-
-    metadata = _metadata_with_registered_agent_chat_agent(metadata)
-    app_or_agent_id = metadata.get("app_id") or metadata.get("conversation_id") or "dify-agent-chat"
-    fallback_agent_id = f"dify-agent-chat:{app_or_agent_id}"
-    agent_id = _optional_text(metadata.get("agentguard_agent_id")) or fallback_agent_id
-    session_id = _session_id_from_metadata(metadata, app_or_agent_id)
-    runtime_auth = _runtime_auth_for_metadata(metadata, agent_id=agent_id, fallback_session_id=session_id)
-    if runtime_auth is not None:
-        session_id = runtime_auth.session_id or session_id
-        if runtime_auth.canonical_user_id:
-            metadata["agentguard_user_id"] = runtime_auth.canonical_user_id
-            metadata["user_id"] = runtime_auth.canonical_user_id
-        metadata["agentguard_session_id"] = session_id
-    guard = AgentGuard(
-        session_id,
-        user_id=runtime_auth.canonical_user_id if runtime_auth is not None else metadata.get("user_id"),
-        agent_id=agent_id,
-        policy=os.getenv("AGENTGUARD_POLICY") or None,
-        server_url=os.getenv("AGENTGUARD_SERVER_URL") or None,
-        api_key=os.getenv("AGENTGUARD_API_KEY") or None,
-        environment=os.getenv("AGENTGUARD_ENVIRONMENT") or "dify",
-        sandbox="noop",
-        plugin_config=_plugin_config(),
-        session_token=runtime_auth.session_token if runtime_auth is not None else None,
-        dpop_proof_factory=runtime_auth.proof if runtime_auth is not None else None,
-        use_dpop_auth=runtime_auth is not None,
-        legacy_identity_headers=runtime_auth is None,
-        auto_register_session=runtime_auth is None,
-        auto_close_runtime_session=runtime_auth is None,
+    return _shared.make_dify_guard(
+        metadata,
+        spec=_AGENT_CHAT_RUNTIME_SPEC,
+        metadata_enricher=_metadata_with_registered_agent_chat_agent,
+        runtime_auth_loader=lambda current_metadata, agent_id, fallback_session_id: _runtime_auth_for_metadata(
+            current_metadata,
+            agent_id=agent_id,
+            fallback_session_id=fallback_session_id,
+        ),
+        plugin_config_loader=_plugin_config,
+        optional_text_fn=_optional_text,
+        task_id_key="task_id",
     )
-    guard.context.metadata.update(metadata)
-    if metadata.get("task_id"):
-        guard.context.task_id = str(metadata["task_id"])
-    return guard
 
 
 def _session_id_from_metadata(metadata: dict[str, Any], agent_id: str) -> str:
@@ -617,50 +559,18 @@ def _runtime_auth_for_metadata(
     agent_id: str,
     fallback_session_id: str,
 ) -> Any | None:
-    account_email = _runtime_account_email(metadata)
-    external_session_id = _external_session_id_from_metadata(metadata)
-    server_url = os.getenv("AGENTGUARD_SERVER_URL") or None
-    if not server_url or not account_email:
-        return None
-    auth_metadata = {
-        **metadata,
-        "external_provider": "dify",
-        "external_account_email": account_email,
-        "dify_user_email": account_email,
-    }
-    if external_session_id:
-        auth_metadata["external_session_id"] = external_session_id
-    else:
-        auth_metadata["agentguard_internal_session_key"] = _internal_session_key_from_metadata(
-            metadata,
-            fallback_session_id=fallback_session_id,
-        )
-    try:
-        runtime_auth = _runtime_auth_manager.ensure(
-            server_url=server_url,
-            api_key=os.getenv("AGENTGUARD_API_KEY") or None,
-            agent_id=agent_id,
-            agent_identity_key_id=_optional_text(metadata.get("agent_identity_key_id")),
-            external_session_id=external_session_id,
-            cache_key=external_session_id
-            or _internal_session_key_from_metadata(metadata, fallback_session_id=fallback_session_id),
-            account_email=account_email,
-            external_user_id=_optional_text(metadata.get("user_id")),
-            metadata=auth_metadata,
-            timeout_s=_env_float("AGENTGUARD_DIFY_RUNTIME_AUTH_TIMEOUT_S", 5.0),
-            retries=int(_env_float("AGENTGUARD_DIFY_RUNTIME_AUTH_RETRIES", 1.0)),
-        )
-    except Exception as exc:
-        _LOGGER.warning(
-            "AgentGuard Dify Agent Chat runtime auth failed for app_id=%s external_session_id=%s: %s",
-            metadata.get("app_id"),
-            external_session_id,
-            exc,
-        )
-        raise AdapterError(f"AgentGuard Dify runtime auth failed: {exc}") from exc
-    if runtime_auth is None or not getattr(runtime_auth, "session_token", None):
-        raise AdapterError("AgentGuard Dify runtime auth failed: server returned no session token")
-    return runtime_auth
+    return _shared.runtime_auth_for_metadata(
+        metadata,
+        spec=_AGENT_CHAT_RUNTIME_SPEC,
+        agent_id=agent_id,
+        fallback_session_id=fallback_session_id,
+        runtime_auth_manager=_runtime_auth_manager,
+        runtime_account_email=_runtime_account_email,
+        logger=_LOGGER,
+        log_label="Dify Agent Chat",
+        optional_text_fn=_optional_text,
+        env_float_fn=_env_float,
+    )
 
 
 def _external_session_id_from_metadata(metadata: dict[str, Any]) -> str | None:
@@ -677,64 +587,38 @@ def _internal_session_key_from_metadata(metadata: dict[str, Any], *, fallback_se
 
 
 def _runtime_account_email(metadata: dict[str, Any]) -> str | None:
-    for key in ("dify_user_email", "external_account_email", "account_email", "user_email"):
-        email = _optional_text(metadata.get(key))
-        if email and "@" in email:
-            return email.lower()
-    app_id = _optional_text(metadata.get("app_id"))
-    if not app_id:
-        return None
-    try:
-        app = _agent_chat_app_by_id(app_id)
-        return _dify_account_email_for_app(app) if app is not None else None
-    except Exception:
-        return None
+    def _app_info_loader(app_id: str) -> _shared.DifyAppInfo:
+        try:
+            app = _agent_chat_app_by_id(app_id)
+        except Exception:
+            app = None
+        return _shared.DifyAppInfo(
+            app_id=app_id,
+            account_email=_dify_account_email_for_app(app) if app is not None else None,
+        )
+
+    return _shared.runtime_account_email_from_metadata(
+        metadata,
+        optional_text_fn=_optional_text,
+        app_info_loader=_app_info_loader,
+    )
 
 
 def _metadata_with_registered_agent_chat_agent(metadata: dict[str, Any]) -> dict[str, Any]:
-    if _optional_text(metadata.get("agentguard_agent_id")):
-        return metadata
-    registration = _runtime_agent_chat_registration(metadata)
-    if not registration:
-        return metadata
-    registered_agent = registration.get("agent") or {}
-    canonical_agent_id = _optional_text(registered_agent.get("agent_id"))
-    if not canonical_agent_id:
-        return metadata
-    enriched = dict(metadata)
-    app_id = _optional_text(enriched.get("app_id"))
-    enriched["agentguard_agent_id"] = canonical_agent_id
-    if app_id:
-        enriched["external_agent_id"] = f"dify-agent-chat:{app_id}"
-    if registered_agent.get("agent_identity_code"):
-        enriched["agent_identity_code"] = registered_agent.get("agent_identity_code")
-    if registered_agent.get("public_key_thumbprint"):
-        enriched["agent_public_key_thumbprint"] = registered_agent.get("public_key_thumbprint")
-    if registration.get("agent_identity_key_id"):
-        enriched["agent_identity_key_id"] = registration.get("agent_identity_key_id")
-    user_agent = registration.get("user_agent") or {}
-    if "bound" in user_agent:
-        enriched["agentguard_user_bound"] = bool(user_agent.get("bound"))
-    account_email = _runtime_account_email(enriched)
-    if account_email:
-        enriched["external_provider"] = "dify"
-        enriched["external_account_email"] = account_email
-        enriched["dify_user_email"] = account_email
-    return enriched
+    return _shared.metadata_with_registered_agent(
+        metadata,
+        registration_loader=_runtime_agent_chat_registration,
+        external_agent_id_for_app=lambda app_id: f"dify-agent-chat:{app_id}",
+        runtime_account_email=_runtime_account_email,
+        optional_text_fn=_optional_text,
+    )
 
 
 def _runtime_agent_chat_registration(metadata: dict[str, Any]) -> dict[str, Any] | None:
     app_id = _optional_text(metadata.get("app_id"))
     if not app_id or not os.getenv("AGENTGUARD_SERVER_URL"):
         return None
-    agent_type = "agent_chat"
     tenant_id = _optional_text(metadata.get("tenant_id"))
-    provider_instance_id = _dify_provider_instance_id()
-    cache_key = ("dify", provider_instance_id or "", tenant_id or "", app_id, agent_type)
-    with _runtime_agent_registrations_lock:
-        cached = _runtime_agent_registrations.get(cache_key)
-    if cached is not None:
-        return cached
 
     app = None
     try:
@@ -742,16 +626,13 @@ def _runtime_agent_chat_registration(metadata: dict[str, Any]) -> dict[str, Any]
     except Exception:
         app = None
     account_email = _runtime_account_email(metadata)
-    name = _optional_text(getattr(app, "name", None)) or _optional_text(metadata.get("app_name"))
-    description = _optional_text(getattr(app, "description", None)) or _optional_text(metadata.get("app_description"))
-    remote = RemoteGuardClient(
-        os.getenv("AGENTGUARD_SERVER_URL") or None,
-        api_key=os.getenv("AGENTGUARD_API_KEY") or None,
-        timeout_s=_env_float("AGENTGUARD_DIFY_CATALOG_SYNC_TIMEOUT_S", 5.0),
-        retries=int(_env_float("AGENTGUARD_DIFY_CATALOG_SYNC_RETRIES", 1.0)),
+    app_info = _shared.DifyAppInfo(
+        app_id=app_id,
+        tenant_id=tenant_id,
+        name=_optional_text(getattr(app, "name", None)) or _optional_text(metadata.get("app_name")),
+        description=_optional_text(getattr(app, "description", None)) or _optional_text(metadata.get("app_description")),
+        account_email=account_email,
     )
-    if not remote.enabled:
-        return None
     registration_metadata = dict(metadata)
     registration_metadata.update(
         {
@@ -771,25 +652,17 @@ def _runtime_agent_chat_registration(metadata: dict[str, Any]) -> dict[str, Any]
                 "dify_user_email": account_email,
             }
         )
-    try:
-        registration = _register_dify_agent(
-            remote,
-            agent_id=f"dify-agent-chat:{app_id}",
-            agent_type=agent_type,
-            external_agent_id=app_id,
-            tenant_id=tenant_id,
-            account_email=account_email,
-            name=name,
-            description=description,
-            metadata=registration_metadata,
-        )
-    except Exception:
-        return None
-    if not registration:
-        return None
-    with _runtime_agent_registrations_lock:
-        _runtime_agent_registrations[cache_key] = registration
-    return registration
+    return _shared.runtime_agent_registration(
+        metadata,
+        spec=_AGENT_CHAT_RUNTIME_SPEC,
+        app_info=app_info,
+        registration_metadata=registration_metadata,
+        remote_client_cls=RemoteGuardClient,
+        register_agent_fn=_register_dify_agent,
+        registration_cache=_runtime_agent_registrations,
+        registration_lock=_runtime_agent_registrations_lock,
+        env_float_fn=_env_float,
+    )
 
 
 def _flush_guard(guard: Any, *, reason: str) -> None:
@@ -1021,7 +894,7 @@ _FINAL_TAG_RE = re.compile(
 
 
 def _parse_tagged_llm_output(output: str) -> _ParsedLLMOutput:
-    parsed = parse_tagged_llm_output(output)
+    parsed = _shared.parse_tagged_llm_output(output)
     return _ParsedLLMOutput(thought=parsed.thought, final_output=parsed.final_output)
 
 
@@ -1047,6 +920,10 @@ def _blocked_llm_value(decision: GuardDecision) -> str | None:
     if decision.decision_type == DecisionType.SANITIZE:
         return f"AgentGuard sanitized Dify Agent Chat LLM call: {decision.reason}"
     return f"AgentGuard blocked Dify Agent Chat LLM call: {decision.reason}"
+
+
+def _synthetic_llm_stream(text: str | None) -> Generator[Any, None, None]:
+    yield _shared.build_synthetic_llm_stream_chunk(text)
 
 
 def _blocked_tool_value(decision: GuardDecision, tool: str) -> str | None:
@@ -1136,11 +1013,11 @@ def _sync_published_agent_catalog_with_context(app: Any | None = None) -> dict[s
 
 
 def _dify_flask_app() -> Any | None:
-    return get_dify_flask_app()
+    return _shared.get_dify_flask_app()
 
 
 def register_dify_flask_app(app: Any) -> bool:
-    return _register_shared_dify_flask_app(app)
+    return _shared.register_dify_flask_app(app)
 
 
 def _on_app_model_config_updated(sender: Any, **kwargs: Any) -> None:
@@ -1397,10 +1274,8 @@ def _sync_tools_to_agentguard(app: Any, tools: list[dict[str, Any]]) -> dict[str
     if not app_id:
         return None
     config_id = _optional_text(getattr(app, "app_model_config_id", None))
-    agent_id = f"dify-agent-chat:{app_id}"
     account_email = _dify_account_email_for_app(app)
-    fingerprint_key = f"agent_chat:{agent_id}"
-    fingerprint = _catalog_fingerprint(tools, f"{config_id or ''}:{account_email or ''}")
+    fingerprint_key = f"agent_chat:dify-agent-chat:{app_id}"
     session_id = f"dify-agent-chat-catalog:{app_id}:{config_id or 'active'}"
     session_key = _catalog_session_key(app_id, config_id)
     metadata = {
@@ -1420,109 +1295,33 @@ def _sync_tools_to_agentguard(app: Any, tools: list[dict[str, Any]]) -> dict[str
                 "dify_user_email": account_email,
             }
         )
-    context = RuntimeContext(
-        session_id=session_id,
-        agent_id=agent_id,
-        user_id=None,
-        environment=os.getenv("AGENTGUARD_ENVIRONMENT") or "dify",
-        metadata=metadata,
-    )
-    remote = RemoteGuardClient(
-        os.getenv("AGENTGUARD_SERVER_URL") or None,
-        api_key=os.getenv("AGENTGUARD_API_KEY") or None,
-        session_id=session_id,
-        agent_id=agent_id,
-        session_key=session_key,
-        timeout_s=_env_float("AGENTGUARD_DIFY_CATALOG_SYNC_TIMEOUT_S", 5.0),
-        retries=int(_env_float("AGENTGUARD_DIFY_CATALOG_SYNC_RETRIES", 1.0)),
-    )
-    if not remote.enabled:
-        return None
-    registration = _register_dify_agent(
-        remote,
-        agent_id=agent_id,
-        agent_type="agent_chat",
-        external_agent_id=app_id,
+    app_info = _shared.DifyAppInfo(
+        app_id=app_id,
         tenant_id=_optional_text(getattr(app, "tenant_id", None)),
-        account_email=account_email,
         name=_optional_text(getattr(app, "name", None)),
         description=_optional_text(getattr(app, "description", None)),
-        metadata=metadata,
+        account_email=account_email,
     )
-    if registration:
-        registered_agent = registration.get("agent") or {}
-        canonical_agent_id = _optional_text(registered_agent.get("agent_id"))
-        if canonical_agent_id:
-            agent_id = canonical_agent_id
-            context.agent_id = canonical_agent_id
-            remote.agent_id = canonical_agent_id
-            metadata["external_agent_id"] = f"dify-agent-chat:{app_id}"
-        metadata["agent_identity_code"] = registered_agent.get("agent_identity_code")
-        metadata["agent_public_key_thumbprint"] = (
-            registered_agent.get("public_key_thumbprint")
-        )
-        metadata["agentguard_user_bound"] = bool((registration.get("user_agent") or {}).get("bound"))
-    if _catalog_fingerprint_unchanged(fingerprint_key, fingerprint):
-        return {
-            "app_id": app_id,
-            "agent_id": agent_id,
-            "tool_count": len(tools),
-            "skipped": True,
-            "reason": "unchanged",
-        }
-    result = remote.sync_tools(context, tools)
-    _remember_catalog_fingerprint(fingerprint_key, fingerprint)
-    return {"app_id": app_id, "agent_id": agent_id, "tool_count": result.get("tool_count", len(tools))}
+    return _shared.sync_tools_to_agentguard(
+        tools,
+        spec=_AGENT_CHAT_RUNTIME_SPEC,
+        app_info=app_info,
+        metadata=metadata,
+        session_id=session_id,
+        session_key=session_key,
+        fingerprint_key=fingerprint_key,
+        fingerprint_version=f"{config_id or ''}:{account_email or ''}",
+        result_fields={"app_id": app_id},
+        remote_client_cls=RemoteGuardClient,
+        register_agent_fn=_register_dify_agent,
+        fingerprint_cache=_catalog_fingerprints,
+        fingerprint_lock=_catalog_fingerprints_lock,
+        env_float_fn=_env_float,
+    )
 
 
 def _dify_account_email_for_app(app: Any) -> str | None:
-    for attr in ("dify_user_email", "account_email", "user_email", "email"):
-        email = _optional_text(getattr(app, attr, None))
-        if email and "@" in email:
-            return email.lower()
-
-    account_id = (
-        _optional_text(getattr(app, "updated_by", None))
-        or _optional_text(getattr(app, "created_by", None))
-    )
-    if not account_id:
-        return None
-
-    try:
-        from extensions.ext_database import db  # type: ignore
-        from sqlalchemy import select  # type: ignore
-    except Exception:
-        return None
-
-    account_cls = None
-    for module_name in ("models.account", "models.model"):
-        try:
-            module = __import__(module_name, fromlist=["Account"])
-            account_cls = getattr(module, "Account", None)
-        except Exception:
-            account_cls = None
-        if account_cls is not None:
-            break
-    if account_cls is None:
-        return None
-
-    try:
-        stmt = select(account_cls).where(account_cls.id == account_id)
-        session = db.session
-        account = None
-        if hasattr(session, "scalar"):
-            account = session.scalar(stmt)
-        elif hasattr(session, "execute"):
-            result = session.execute(stmt)
-            if hasattr(result, "scalar_one_or_none"):
-                account = result.scalar_one_or_none()
-            elif hasattr(result, "scalars"):
-                scalars = result.scalars()
-                account = scalars.first() if hasattr(scalars, "first") else None
-        email = _optional_text(getattr(account, "email", None))
-    except Exception:
-        return None
-    return email.lower() if email and "@" in email else None
+    return _shared.dify_account_email_for_app(app, optional_text_fn=_optional_text)
 
 
 def _register_dify_agent(
@@ -1537,43 +1336,21 @@ def _register_dify_agent(
     description: str | None,
     metadata: dict[str, Any],
 ) -> dict[str, Any] | None:
-    register = getattr(remote, "register_agent", None)
-    if not callable(register):
-        return None
-    provider_instance_id = _dify_provider_instance_id()
-    key_id = agent_identity_key_id(
-        provider="dify",
-        provider_instance_id=provider_instance_id,
-        tenant_id=tenant_id,
-        external_agent_id=external_agent_id,
+    return _shared.register_dify_agent(
+        remote,
+        agent_id=agent_id,
         agent_type=agent_type,
-    )
-    payload = build_agent_registration_payload(
-        provider="dify",
-        provider_instance_id=provider_instance_id,
-        tenant_id=tenant_id,
         external_agent_id=external_agent_id,
-        agent_type=agent_type,
+        tenant_id=tenant_id,
+        account_email=account_email,
         name=name,
         description=description,
-        account_email=account_email,
         metadata=metadata,
     )
-    registration = register(payload)
-    if isinstance(registration, dict):
-        registration = dict(registration)
-        registration["agent_identity_key_id"] = key_id
-    return registration
 
 
 def _dify_provider_instance_id() -> str:
-    return (
-        os.getenv("AGENTGUARD_DIFY_INSTANCE_ID")
-        or os.getenv("DIFY_DEPLOYMENT_ID")
-        or os.getenv("DIFY_BASE_URL")
-        or os.getenv("CONSOLE_API_URL")
-        or ""
-    ).strip()
+    return _shared.dify_provider_instance_id()
 
 
 def _catalog_session_key(app_id: str, config_id: str | None = None) -> str:
@@ -1584,24 +1361,32 @@ def _catalog_session_key(app_id: str, config_id: str | None = None) -> str:
 
 
 def _catalog_fingerprint(tools: list[dict[str, Any]], version: str | None = None) -> str:
-    payload = {"version": version, "tools": tools}
-    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return _shared.catalog_fingerprint(tools, version)
 
 
 def _catalog_fingerprint_unchanged(key: str, fingerprint: str) -> bool:
-    with _catalog_fingerprints_lock:
-        return _catalog_fingerprints.get(key) == fingerprint
+    return _shared.catalog_fingerprint_unchanged(
+        key,
+        fingerprint,
+        cache=_catalog_fingerprints,
+        lock=_catalog_fingerprints_lock,
+    )
 
 
 def _remember_catalog_fingerprint(key: str, fingerprint: str) -> None:
-    with _catalog_fingerprints_lock:
-        _catalog_fingerprints[key] = fingerprint
+    _shared.remember_catalog_fingerprint(
+        key,
+        fingerprint,
+        cache=_catalog_fingerprints,
+        lock=_catalog_fingerprints_lock,
+    )
 
 
 def _clear_catalog_fingerprints() -> None:
-    with _catalog_fingerprints_lock:
-        _catalog_fingerprints.clear()
+    _shared.clear_catalog_fingerprints(
+        cache=_catalog_fingerprints,
+        lock=_catalog_fingerprints_lock,
+    )
 
 
 def _env_enabled() -> bool:
@@ -1619,37 +1404,19 @@ def _catalog_sync_enabled() -> bool:
 
 
 def _catalog_sync_process_allowed() -> bool:
-    role = (os.getenv("AGENTGUARD_DIFY_CATALOG_SYNC_PROCESS") or "api").strip().lower()
-    if role in {"all", "*"}:
-        return True
-    argv = " ".join(sys.argv).lower()
-    if role == "api":
-        return "gunicorn" in argv and "app:socketio_app" in argv
-    if role == "worker":
-        return "celery" in argv
-    return role in argv
+    return _shared.catalog_sync_process_allowed(sys.argv)
 
 
 def _app_allowed(app_id: Any) -> bool:
-    app_ids = _env_csv("AGENTGUARD_DIFY_APP_IDS")
-    if not app_ids:
-        return True
-    return str(app_id or "").strip() in app_ids
+    return _shared.app_allowed(app_id, env_csv_loader=_env_csv)
 
 
 def _env_csv(name: str) -> set[str]:
-    raw = os.getenv(name, "")
-    return {part.strip() for part in raw.split(",") if part.strip()}
+    return _shared.env_csv(name)
 
 
 def _env_float(name: str, default: float) -> float:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    try:
-        return float(raw)
-    except ValueError:
-        return default
+    return _shared.env_float(name, default)
 
 
 def _plugin_config() -> str | dict[str, Any] | None:

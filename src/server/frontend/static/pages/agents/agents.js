@@ -54,7 +54,7 @@
   }
 
   function canDeleteAgent(agent) {
-    return String(agent?.external_provider || "").trim().toLowerCase() === "langchain";
+    return agent?.can_delete === true;
   }
 
   function renderAgentList() {
@@ -141,11 +141,11 @@
       return;
     }
     if (!canDeleteAgent(agent)) {
-      showToast(copy("only-langchain-delete", "Only LangChain agents can be deleted from this page."), "warning");
+      showToast(copy("only-langchain-delete", "Only LangChain and Dify agent records can be deleted from this page."), "warning");
       return;
     }
     const confirmed = window.confirm(
-      copy("confirm-delete-agent", "Delete {agent}? This unregisters the agent and deletes its sessions.", { agent: displayName || agentId }),
+      copy("confirm-delete-agent", "Delete the local record for {agent}? This removes the agent, its sessions, and local history from AgentGuard.", { agent: displayName || agentId }),
     );
     if (!confirmed) {
       return;
@@ -153,7 +153,7 @@
 
     deletingAgentIds.add(agentId);
     renderAgentList();
-    updateSyncStatus(copy("deleting-agent", "Deleting {agent}...", { agent: displayName || agentId }));
+    updateSyncStatus(copy("deleting-agent", "Deleting local record for {agent}...", { agent: displayName || agentId }));
 
     try {
       await api.fetchJson(`/api/agents/${encodeURIComponent(agentId)}`, {
@@ -165,12 +165,12 @@
         shell?.setSelectedAgent?.("");
       }
       renderAgentList();
-      showToast(copy("deleted-agent", "Deleted {agent}.", { agent: displayName || agentId }), "success");
+      showToast(copy("deleted-agent", "Deleted local record for {agent}.", { agent: displayName || agentId }), "success");
       await refreshAgentCatalog();
     } catch (error) {
       showToast(api.formatErrorMessage(error, "Failed to delete agent."), "warning");
       renderAgentList();
-      updateSyncStatus(copy("delete-agent-failed", "Delete failed. Agent catalog was not changed."));
+      updateSyncStatus(copy("delete-agent-failed", "Delete failed. Local agent records were not changed."));
     } finally {
       deletingAgentIds.delete(agentId);
       renderAgentList();

@@ -21,10 +21,10 @@ def test_dify_app_factory_capture_registers_create_app_result(monkeypatch, tmp_p
     monkeypatch.delitem(sys.modules, "app_factory", raising=False)
 
     import agentguard.adapters.agent.dify_bootstrap as bootstrap
-    import agentguard.adapters.agent.dify_flask as dify_flask
+    import agentguard.adapters.agent.dify_shared as dify_shared
 
     bootstrap = importlib.reload(bootstrap)
-    dify_flask = importlib.reload(dify_flask)
+    dify_shared = importlib.reload(dify_shared)
 
     status = bootstrap.install_dify_app_factory_capture()
 
@@ -34,7 +34,7 @@ def test_dify_app_factory_capture_registers_create_app_result(monkeypatch, tmp_p
     result = module.create_app()
 
     assert isinstance(result, tuple)
-    assert dify_flask.get_dify_flask_app() is result[1]
+    assert dify_shared.get_dify_flask_app() is result[1]
 
 
 def test_dify_app_factory_capture_notifies_app_ready_callbacks(monkeypatch, tmp_path):
@@ -56,13 +56,13 @@ def test_dify_app_factory_capture_notifies_app_ready_callbacks(monkeypatch, tmp_
     monkeypatch.delitem(sys.modules, "app_factory", raising=False)
 
     import agentguard.adapters.agent.dify_bootstrap as bootstrap
-    import agentguard.adapters.agent.dify_flask as dify_flask
+    import agentguard.adapters.agent.dify_shared as dify_shared
 
     bootstrap = importlib.reload(bootstrap)
-    dify_flask = importlib.reload(dify_flask)
+    dify_shared = importlib.reload(dify_shared)
     seen = []
 
-    dify_flask.on_dify_flask_app_ready(lambda app: seen.append(app))
+    dify_shared.on_dify_flask_app_ready(lambda app: seen.append(app))
     bootstrap.install_dify_app_factory_capture()
 
     module = importlib.import_module("app_factory")

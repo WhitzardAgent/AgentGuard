@@ -96,7 +96,7 @@ def delete_agent(
         if agent is None:
             return _err(f"agent '{agent_id}' not found", 404)
         if not agent_delete_allowed_from_console(agent):
-            return _err("only LangChain agents can be deleted from the console", 409)
+            return _err("only LangChain and Dify agent records can be deleted from the console", 409)
         result = store.delete_agent(agent.agent_id)
     except DatabaseUnavailable:
         return _err("database unavailable", 503)
@@ -653,6 +653,7 @@ def _agent_record_to_console_item(record: AgentRecord) -> dict[str, Any]:
         "name": record.name or "",
         "description": record.description or "",
         "status": record.status,
+        "can_delete": agent_delete_allowed_from_console(record),
         "tool_count": 0,
         "tool_names": [],
         "skill_count": 0,

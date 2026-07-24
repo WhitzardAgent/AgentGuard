@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 
-from agentguard.adapters.agent.dify_runtime_auth import DIFY_RUNTIME_AUTH_KEY_DIR_ENV, DifyRuntimeAuthManager
+from agentguard.adapters.agent.dify_shared import DIFY_RUNTIME_AUTH_KEY_DIR_ENV, DifyRuntimeAuthManager
 from agentguard.u_guard.agent_keys import KEY_DIR_ENV
 
 
@@ -36,7 +36,7 @@ def test_dify_runtime_auth_manager_creates_reuses_and_refreshes(monkeypatch, tmp
                 "expires_at": int(time.time()) + 900,
             }
 
-    monkeypatch.setattr("agentguard.adapters.agent.dify_runtime_auth.RemoteGuardClient", FakeRemote)
+    monkeypatch.setattr("agentguard.adapters.agent.dify_shared.RemoteGuardClient", FakeRemote)
     manager = DifyRuntimeAuthManager()
 
     first = manager.ensure(
@@ -107,7 +107,7 @@ def test_dify_runtime_auth_manager_omits_missing_external_session_id(monkeypatch
                 "expires_at": int(time.time()) + 900,
             }
 
-    monkeypatch.setattr("agentguard.adapters.agent.dify_runtime_auth.RemoteGuardClient", FakeRemote)
+    monkeypatch.setattr("agentguard.adapters.agent.dify_shared.RemoteGuardClient", FakeRemote)
     manager = DifyRuntimeAuthManager()
 
     first = manager.ensure(
@@ -167,7 +167,7 @@ def test_dify_runtime_auth_manager_persists_dpop_key_across_managers(monkeypatch
                 "expires_at": int(time.time()) + 900,
             }
 
-    monkeypatch.setattr("agentguard.adapters.agent.dify_runtime_auth.RemoteGuardClient", FakeRemote)
+    monkeypatch.setattr("agentguard.adapters.agent.dify_shared.RemoteGuardClient", FakeRemote)
     first_manager = DifyRuntimeAuthManager()
     second_manager = DifyRuntimeAuthManager()
     kwargs = {

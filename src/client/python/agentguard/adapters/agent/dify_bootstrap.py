@@ -8,6 +8,8 @@ import threading
 from types import ModuleType
 from typing import Any
 
+from agentguard.adapters.agent import dify_shared as _shared
+
 _PATCHED_ATTR = "__agentguard_dify_app_factory_patched__"
 _HOOK_INSTALLED = False
 _HOOK_LOCK = threading.Lock()
@@ -112,9 +114,7 @@ def _app_candidates(result: Any) -> list[Any]:
 
 def _register_app(app: Any) -> bool:
     try:
-        from agentguard.adapters.agent.dify_flask import register_dify_flask_app
-
-        return register_dify_flask_app(app)
+        return _shared.register_dify_flask_app(app)
     except Exception:
         return False
 

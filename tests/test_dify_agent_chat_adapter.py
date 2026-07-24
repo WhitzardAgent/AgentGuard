@@ -384,9 +384,9 @@ def test_agent_chat_app_update_schedules_agent_catalog_sync(monkeypatch):
 
 
 def test_agent_chat_catalog_sync_defaults_to_api_process(monkeypatch):
-    import agentguard.adapters.agent.dify_flask as dify_flask
+    import agentguard.adapters.agent.dify_shared as dify_shared
 
-    importlib.reload(dify_flask)
+    importlib.reload(dify_shared)
     adapter = _fresh_adapter(monkeypatch)
     monkeypatch.setenv("AGENTGUARD_DIFY_CATALOG_SYNC_ENABLED", "true")
     monkeypatch.setenv("AGENTGUARD_SERVER_URL", "http://agentguard.test")
@@ -1214,6 +1214,77 @@ def test_agent_chat_llm_modify_output_rewrites_message_content(monkeypatch):
         adapter._current_guard.reset(token_guard)
 
     assert result.message.content == "rewritten answer"
+
+
+def test_agent_chat_stream_llm_modify_output_replays_synthetic_chunk(monkeypatch):
+    adapter = _fresh_adapter(monkeypatch)
+
+    class ModelInstance:
+        def invoke_llm(
+            self,
+            prompt_messages,
+            model_parameters=None,
+            tools=None,
+            stop=None,
+            stream=True,
+            callbacks=None,
+        ):
+            assert stream is True
+
+            def chunks():
+                yield types.SimpleNamespace(
+                    delta=types.SimpleNamespace(
+                        message=types.SimpleNamespace(content="thinking", tool_calls=[]),
+                        usage=None,
+                    )
+                )
+                yield types.SimpleNamespace(
+                    delta=types.SimpleNamespace(
+                        message=types.SimpleNamespace(content="", tool_calls=[{"name": "weekday"}]),
+                        usage=None,
+                    )
+                )
+
+            return chunks()
+
+    adapter._patch_model_invoke_llm(ModelInstance)
+
+    class ModifyRuntime:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def guard(self, event, phase="before"):
+            self.calls.append((event.event_type.value, phase))
+            if event.event_type.value == "llm_output":
+                return types.SimpleNamespace(
+                    decision=GuardDecision.modify_llm_output(
+                        "rewrite streamed llm output",
+                        processed_content='{"output": "rewritten streamed answer"}',
+                    )
+                )
+            return types.SimpleNamespace(decision=GuardDecision.allow())
+
+    runtime = ModifyRuntime()
+    guard = types.SimpleNamespace(
+        runtime=runtime,
+        context=types.SimpleNamespace(session_id="rewrite-stream-output", agent_id="agent"),
+    )
+    token_guard = adapter._current_guard.set(guard)
+    token_meta = adapter._current_metadata.set({"app_id": "app-1"})
+    try:
+        result = ModelInstance().invoke_llm(
+            prompt_messages=[types.SimpleNamespace(content="original prompt")],
+            stream=True,
+        )
+        assert runtime.calls == [("llm_input", "before"), ("llm_output", "after")]
+        chunks = list(result)
+    finally:
+        adapter._current_metadata.reset(token_meta)
+        adapter._current_guard.reset(token_guard)
+
+    assert len(chunks) == 1
+    assert chunks[0].delta.message.content == "rewritten streamed answer"
+    assert chunks[0].delta.message.tool_calls == []
 
 
 def test_agent_chat_tool_modify_invoke_rewrites_tool_parameters(monkeypatch):

@@ -180,3 +180,50 @@ test("runtime audit expansion formats each event type", () => {
     { label: "Tool Result", body: "done" },
   );
 });
+
+test("runtime sessions render closed state as 0 or 1", async () => {
+  installRuntimeGlobals();
+  global.window.AgentGuardApi.fetchJson = async (url) => {
+    if (url === "/api/health") {
+      return { ok: true };
+    }
+    if (url.includes("/runtime/stats")) {
+      return { total_requests: 0, deny_count: 0, deny_rate: 0, uptime_s: 0 };
+    }
+    if (url.includes("/runtime/sessions")) {
+      return [
+        {
+          session_id: "session-active",
+          provider: "dify",
+          external_session_id: "external-active",
+          external_account_email: "active@example.com",
+          status: "active",
+          closed_at: null,
+          active_token_count: 1,
+          latest_token_expires_at: null,
+        },
+        {
+          session_id: "session-closed",
+          provider: "dify",
+          external_session_id: "external-closed",
+          external_account_email: "closed@example.com",
+          status: "closed",
+          closed_at: "2026-07-24T07:37:26+00:00",
+          active_token_count: 0,
+          latest_token_expires_at: null,
+        },
+      ];
+    }
+    return [];
+  };
+
+  delete require.cache[require.resolve("../static/pages/runtime/runtime.js")];
+  require("../static/pages/runtime/runtime.js");
+
+  await global.window.AgentGuardRuntimeMonitor.refreshAll();
+
+  const sessionBody = global.document.getElementById("runtime-session-body");
+  const renderedRows = sessionBody.children.map((row) => row.innerHTML).join("\n");
+  assert.match(renderedRows, /<td>session-active<\/td>[\s\S]*?<td>0<\/td>/);
+  assert.match(renderedRows, /<td>session-closed<\/td>[\s\S]*?<td>1<\/td>/);
+});

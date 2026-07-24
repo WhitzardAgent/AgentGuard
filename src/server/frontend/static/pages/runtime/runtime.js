@@ -495,13 +495,15 @@
   }
 
   function normalizeSessionItem(item) {
+    const status = String(item?.status || "unknown").toLowerCase();
+    const isClosed = status === "closed" || Boolean(item?.closed_at);
     return {
       sessionId: String(item?.session_id || "-"),
       provider: String(item?.provider || "-"),
       externalSessionId: String(item?.external_session_id || "-"),
       externalAccountEmail: String(item?.external_account_email || "-"),
-      status: String(item?.status || "unknown").toLowerCase(),
-      closedAt: formatDateTime(item?.closed_at),
+      status,
+      closedFlag: isClosed ? "1" : "0",
       activeTokenCount: Number(item?.active_token_count || 0),
       latestTokenExpiresAt: formatDateTime(item?.latest_token_expires_at),
     };
@@ -706,7 +708,7 @@
         <td>${escapeHtml(item.externalSessionId)}</td>
         <td>${escapeHtml(item.externalAccountEmail)}</td>
         <td><span class="pill ${canClose ? "" : "muted"}">${escapeHtml(item.status.toUpperCase())}</span></td>
-        <td>${escapeHtml(item.closedAt)}</td>
+        <td>${escapeHtml(item.closedFlag)}</td>
         <td>${escapeHtml(formatNumber(item.activeTokenCount))}</td>
         <td>${escapeHtml(item.latestTokenExpiresAt)}</td>
         <td>

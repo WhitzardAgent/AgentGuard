@@ -18,11 +18,36 @@ class FakeDB:
         self.runtime_tokens: list[dict[str, Any]] = []
         self.external_runtime_sessions: list[dict[str, Any]] = []
         self.runtime_trace_events: list[dict[str, Any]] = []
+        self.agent_audit_runs: list[dict[str, Any]] = []
+        self.agent_audit_session_results: list[dict[str, Any]] = []
+        self.agent_audit_findings: list[dict[str, Any]] = []
         self.next_id = 1
 
     def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> int:
         if "CREATE TABLE" in sql:
             return 0
+        if "DELETE FROM agent_audit_runs" in sql:
+            agent_id = str(params[0])
+            run_ids = {
+                str(row["run_id"])
+                for row in self.agent_audit_runs
+                if str(row.get("agent_id") or "") == agent_id
+            }
+            before = len(self.agent_audit_runs)
+            self.agent_audit_runs = [
+                row for row in self.agent_audit_runs if str(row.get("agent_id") or "") != agent_id
+            ]
+            self.agent_audit_session_results = [
+                row
+                for row in self.agent_audit_session_results
+                if str(row.get("run_id") or "") not in run_ids
+            ]
+            self.agent_audit_findings = [
+                row
+                for row in self.agent_audit_findings
+                if str(row.get("run_id") or "") not in run_ids
+            ]
+            return before - len(self.agent_audit_runs)
         if "DELETE FROM runtime_trace_events" in sql:
             agent_id = str(params[0])
             session_ids = {
@@ -880,10 +905,29 @@ def test_delete_agent_removes_registry_runtime_sessions_and_traces():
             {"id": 4, "agent_id": other.agent_id, "session_id": "session-2"},
         ]
     )
+    db.agent_audit_runs.extend(
+        [
+            {"run_id": "audit-1", "agent_id": agent.agent_id},
+            {"run_id": "audit-2", "agent_id": other.agent_id},
+        ]
+    )
+    db.agent_audit_session_results.extend(
+        [
+            {"id": 1, "run_id": "audit-1", "session_id": "session-1"},
+            {"id": 2, "run_id": "audit-2", "session_id": "session-2"},
+        ]
+    )
+    db.agent_audit_findings.extend(
+        [
+            {"id": 1, "run_id": "audit-1", "finding_id": "finding-1"},
+            {"id": 2, "run_id": "audit-2", "finding_id": "finding-2"},
+        ]
+    )
 
     result = store.delete_agent(agent.agent_id)
 
     assert result.deleted is True
+    assert result.audit_run_count == 1
     assert result.trace_event_count == 3
     assert result.runtime_token_count == 1
     assert result.runtime_session_count == 1
@@ -898,9 +942,12 @@ def test_delete_agent_removes_registry_runtime_sessions_and_traces():
     assert db.runtime_tokens == [{"token_jti": "token-2", "session_id": "session-2"}]
     assert db.external_runtime_sessions == [{"id": 2, "agent_id": other.agent_id}]
     assert db.runtime_trace_events == [{"id": 4, "agent_id": other.agent_id, "session_id": "session-2"}]
+    assert db.agent_audit_runs == [{"run_id": "audit-2", "agent_id": other.agent_id}]
+    assert db.agent_audit_session_results == [{"id": 2, "run_id": "audit-2", "session_id": "session-2"}]
+    assert db.agent_audit_findings == [{"id": 2, "run_id": "audit-2", "finding_id": "finding-2"}]
 
 
-def test_console_agent_delete_policy_only_allows_langchain_agents():
+def test_console_agent_delete_policy_allows_langchain_and_dify_agents():
     assert agent_delete_allowed_from_console(
         AgentRecord(
             agent_id="ag-langchain",
@@ -908,11 +955,18 @@ def test_console_agent_delete_policy_only_allows_langchain_agents():
             provider="langchain",
         )
     )
-    assert not agent_delete_allowed_from_console(
+    assert agent_delete_allowed_from_console(
         AgentRecord(
             agent_id="ag-dify",
             agent_identity_code="agic-dify",
             provider="dify",
+        )
+    )
+    assert not agent_delete_allowed_from_console(
+        AgentRecord(
+            agent_id="ag-openclaw",
+            agent_identity_code="agic-openclaw",
+            provider="openclaw",
         )
     )
     assert agent_delete_allowed_from_console(

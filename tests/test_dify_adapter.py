@@ -521,7 +521,7 @@ def _event_types(guard) -> list[str]:
 
 
 def test_dify_legacy_llm_call_binds_args_and_kwargs():
-    from agentguard.adapters.agent.dify_legacy_llm import DifyLegacyLLMCall
+    from agentguard.adapters.agent.dify_shared import DifyLegacyLLMCall
 
     call = DifyLegacyLLMCall.from_args_kwargs(
         (["hello"], {"temperature": 0}, ["tool"], ["stop"]),
@@ -537,7 +537,7 @@ def test_dify_legacy_llm_call_binds_args_and_kwargs():
 
 
 def test_dify_legacy_llm_runner_before_deny_skips_execute():
-    from agentguard.adapters.agent.dify_legacy_llm import (
+    from agentguard.adapters.agent.dify_shared import (
         DifyLegacyLLMNormalizer,
         run_dify_legacy_llm_call,
     )
@@ -574,7 +574,7 @@ def test_dify_legacy_llm_runner_before_deny_skips_execute():
 
 
 def test_dify_legacy_llm_runner_guards_generator_after_consumption():
-    from agentguard.adapters.agent.dify_legacy_llm import (
+    from agentguard.adapters.agent.dify_shared import (
         DifyLegacyLLMNormalizer,
         run_dify_legacy_llm_call,
     )
@@ -610,10 +610,100 @@ def test_dify_legacy_llm_runner_guards_generator_after_consumption():
         normalizer=DifyLegacyLLMNormalizer(),
     )
 
-    assert calls == ["before"]
-    assert len(list(result)) == 2
     assert calls == ["before", "after"]
+    assert len(list(result)) == 2
     assert outputs == [{"output": "a\nb", "final_output": "a\nb"}]
+
+
+def test_dify_legacy_llm_runner_stream_modify_releases_synthetic_chunks():
+    from agentguard.adapters.agent import dify_shared
+
+    calls = []
+
+    def guard_input(_model, _call, _extra_metadata):
+        calls.append("before")
+        return GuardDecision.allow()
+
+    def guard_output(_model, _output, _call, _error, _extra_metadata):
+        calls.append("after")
+        return GuardDecision.modify_llm_output(
+            "rewrite streamed llm output",
+            processed_content='{"output": "rewritten answer"}',
+        )
+
+    def execute(_args, _kwargs):
+        def chunks():
+            yield types.SimpleNamespace(
+                delta=types.SimpleNamespace(
+                    message=types.SimpleNamespace(content="raw thinking", tool_calls=[]),
+                    usage=None,
+                )
+            )
+            yield types.SimpleNamespace(
+                delta=types.SimpleNamespace(
+                    message=types.SimpleNamespace(content="raw action", tool_calls=[{"name": "web_search"}]),
+                    usage=None,
+                )
+            )
+
+        return chunks()
+
+    result = dify_shared.run_dify_legacy_llm_call(
+        model=object(),
+        args=(["hello"],),
+        kwargs={},
+        arg_names=("prompt_messages", "model_parameters", "tools", "stop", "stream", "callbacks"),
+        execute=execute,
+        guard_input=guard_input,
+        guard_output=guard_output,
+        blocked_value=lambda _decision: None,
+        normalizer=dify_shared.DifyLegacyLLMNormalizer(include_stream_tool_calls=True),
+        stream_result_builder=lambda text: iter([dify_shared.build_synthetic_llm_stream_chunk(text)]),
+    )
+
+    assert calls == ["before", "after"]
+    chunks = list(result)
+    assert len(chunks) == 1
+    assert chunks[0].delta.message.content == "rewritten answer"
+    assert chunks[0].delta.message.tool_calls == []
+
+
+def test_dify_legacy_llm_runner_stream_deny_releases_blocked_synthetic_chunk():
+    from agentguard.adapters.agent import dify_shared
+
+    def guard_input(_model, _call, _extra_metadata):
+        return GuardDecision.allow()
+
+    def guard_output(_model, _output, _call, _error, _extra_metadata):
+        return GuardDecision.deny("blocked")
+
+    def execute(_args, _kwargs):
+        def chunks():
+            yield types.SimpleNamespace(
+                delta=types.SimpleNamespace(
+                    message=types.SimpleNamespace(content="raw answer", tool_calls=[]),
+                    usage=None,
+                )
+            )
+
+        return chunks()
+
+    result = dify_shared.run_dify_legacy_llm_call(
+        model=object(),
+        args=(["hello"],),
+        kwargs={},
+        arg_names=("prompt_messages", "model_parameters", "tools", "stop", "stream", "callbacks"),
+        execute=execute,
+        guard_input=guard_input,
+        guard_output=guard_output,
+        blocked_value=lambda decision: decision.reason if not decision.is_allow else None,
+        normalizer=dify_shared.DifyLegacyLLMNormalizer(),
+        stream_result_builder=lambda text: iter([dify_shared.build_synthetic_llm_stream_chunk(text)]),
+    )
+
+    chunks = list(result)
+    assert len(chunks) == 1
+    assert chunks[0].delta.message.content == "blocked"
 
 
 def test_install_dify_adapter_disabled_is_noop(monkeypatch):
@@ -654,9 +744,9 @@ def test_install_dify_adapter_is_idempotent(monkeypatch):
 
 
 def test_workflow_catalog_sync_defaults_to_api_process(monkeypatch):
-    import agentguard.adapters.agent.dify_flask as dify_flask
+    import agentguard.adapters.agent.dify_shared as dify_shared
 
-    importlib.reload(dify_flask)
+    importlib.reload(dify_shared)
     dify_adapter = _fresh_adapter(monkeypatch)
     monkeypatch.setenv("AGENTGUARD_DIFY_CATALOG_SYNC_ENABLED", "true")
     monkeypatch.setenv("AGENTGUARD_SERVER_URL", "http://agentguard.test")
@@ -1987,6 +2077,56 @@ def test_workflow_generator_restores_context_during_iteration(monkeypatch):
         ("llm_output", "after", "llm-node-1"),
     ]
     assert guard.closed is True
+
+
+def test_workflow_stream_llm_modify_output_replays_synthetic_chunk(monkeypatch):
+    fake = _install_fake_legacy_dify_modules(monkeypatch)
+    dify_adapter = _fresh_adapter(monkeypatch)
+    dify_adapter.install_dify_adapter()
+
+    class ModifyRuntime:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def guard(self, event, phase="before"):
+            self.calls.append((event.event_type.value, phase))
+            if event.event_type.value == "llm_output":
+                return types.SimpleNamespace(
+                    decision=GuardDecision.modify_llm_output(
+                        "rewrite streamed llm output",
+                        processed_content='{"output": "rewritten workflow answer"}',
+                    )
+                )
+            return types.SimpleNamespace(decision=GuardDecision.allow())
+
+    guard = types.SimpleNamespace(
+        runtime=ModifyRuntime(),
+        context=types.SimpleNamespace(session_id="workflow-stream-rewrite", agent_id="agent"),
+    )
+    token_guard = dify_adapter._current_guard.set(guard)
+    token_meta = dify_adapter._current_metadata.set(
+        {
+            "adapter": "dify",
+            "dify_runtime": "workflow_api",
+            "app_id": "app-1",
+            "workflow_id": "workflow-1",
+            "node_id": "node-1",
+        }
+    )
+    try:
+        result = fake.ModelInstance().invoke_llm(
+            [types.SimpleNamespace(content="query")],
+            stream=True,
+        )
+        assert guard.runtime.calls == [("llm_input", "before"), ("llm_output", "after")]
+        chunks = list(result)
+    finally:
+        dify_adapter._current_metadata.reset(token_meta)
+        dify_adapter._current_guard.reset(token_guard)
+
+    assert len(chunks) == 1
+    assert chunks[0].delta.message.content == "rewritten workflow answer"
+    assert chunks[0].delta.message.tool_calls == []
 
 
 def test_legacy_llm_tool_call_only_output_is_null(monkeypatch):
