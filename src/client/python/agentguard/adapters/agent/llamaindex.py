@@ -5,6 +5,7 @@ import functools
 import inspect
 import json
 import re
+import copy
 from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -150,6 +151,15 @@ class LlamaIndexAgentAdapter(BaseAgentAdapter):
         fn: Callable[..., Any] | None = None,
         owner: Any = None,
     ) -> LLMInputDenormalization:
+        if isinstance(payload, str):
+            rewritten = _rewrite_llamaindex_primary_input(
+                text=payload,
+                args=args,
+                kwargs=kwargs,
+                fn=fn,
+            )
+            if rewritten is not None:
+                payload = rewritten
         denormalized = _denormalize_llamaindex_request(
             payload=payload,
             args=args,
@@ -185,6 +195,13 @@ class LlamaIndexAgentAdapter(BaseAgentAdapter):
         fn: Callable[..., Any] | None = None,
         owner: Any = None,
     ) -> LLMOutputDenormalization:
+        if isinstance(payload, str):
+            rewritten_output = _rewrite_llamaindex_output_content(output, payload)
+            if rewritten_output is not None:
+                return LLMOutputDenormalization(
+                    output=rewritten_output,
+                    metadata=_llamaindex_meta(label=label, owner=owner),
+                )
         denormalized = super().denormalize_llm_output(
             label=label,
             payload=payload,
@@ -914,6 +931,130 @@ def _denormalize_llamaindex_request(
         current_kwargs.update(extra_kwargs)
 
     return LLMInputDenormalization(args=tuple(current_args), kwargs=current_kwargs)
+
+
+def _rewrite_llamaindex_primary_input(
+    *,
+    text: str,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    fn: Callable[..., Any] | None = None,
+) -> dict[str, Any] | None:
+    model_input = kwargs.get("messages")
+    if model_input is None and kwargs.get("prompt") is not None:
+        model_input = kwargs.get("prompt")
+    if model_input is None and args:
+        model_input = args[0]
+
+    rewritten_input = _rewrite_llamaindex_input_value(model_input, text)
+    if rewritten_input is None:
+        return {"input": text}
+    return {"input": rewritten_input}
+
+
+def _rewrite_llamaindex_input_value(value: Any, text: str) -> Any | None:
+    if isinstance(value, str):
+        return text
+
+    if isinstance(value, list):
+        updated = copy.deepcopy(value)
+        for idx in range(len(updated) - 1, -1, -1):
+            rewritten = _rewrite_llamaindex_message_content(updated[idx], text)
+            if rewritten is not None:
+                updated[idx] = rewritten
+                return updated
+        return text
+
+    if isinstance(value, dict):
+        if isinstance(value.get("messages"), list):
+            updated = copy.deepcopy(value)
+            rewritten_messages = _rewrite_llamaindex_input_value(updated.get("messages"), text)
+            updated["messages"] = rewritten_messages
+            return updated
+        for key in ("input", "prompt", "query", "request"):
+            if key not in value:
+                continue
+            rewritten_nested = _rewrite_llamaindex_input_value(value.get(key), text)
+            if rewritten_nested is not None:
+                updated = copy.deepcopy(value)
+                updated[key] = rewritten_nested
+                return updated
+        rewritten = _rewrite_llamaindex_message_content(value, text)
+        if rewritten is not None:
+            return rewritten
+        return text
+
+    rewritten = _rewrite_llamaindex_message_content(value, text)
+    if rewritten is not None:
+        return rewritten
+    return text
+
+
+def _rewrite_llamaindex_message_content(value: Any, text: str) -> Any | None:
+    if isinstance(value, dict):
+        role = str(value.get("role") or value.get("type") or "").strip().lower()
+        if role == "system":
+            return None
+        if "content" not in value:
+            return None
+        updated = copy.deepcopy(value)
+        updated["content"] = text
+        return updated
+
+    role = getattr(value, "role", None)
+    content = getattr(value, "content", None)
+    if content is None:
+        return None
+    if isinstance(role, str) and role.lower() == "system":
+        return None
+    updated = copy.deepcopy(value)
+    if _setattr_if_possible(updated, "content", text):
+        return updated
+    return None
+
+
+def _rewrite_llamaindex_output_content(output: Any, text: str) -> Any | None:
+    if output is None:
+        return text
+    if isinstance(output, str):
+        return text
+    if isinstance(output, dict):
+        updated = copy.deepcopy(output)
+        for key in ("output", "content", "text", "message"):
+            if key in updated:
+                updated[key] = text
+                return updated
+        return {**updated, "output": text}
+
+    updated = copy.deepcopy(output)
+    message = getattr(updated, "message", None)
+    if message is not None:
+        if isinstance(message, dict):
+            message["content"] = text
+            if hasattr(updated, "raw") and isinstance(getattr(updated, "raw", None), dict):
+                getattr(updated, "raw")["content"] = text
+            return updated
+        if _setattr_if_possible(message, "content", text):
+            raw = getattr(updated, "raw", None)
+            if isinstance(raw, dict):
+                raw["content"] = text
+            delta = getattr(updated, "delta", None)
+            if isinstance(delta, str):
+                _setattr_if_possible(updated, "delta", text)
+            return updated
+
+    for attr in ("content", "text", "output"):
+        if _setattr_if_possible(updated, attr, text):
+            return updated
+    return None
+
+
+def _setattr_if_possible(target: Any, attr: str, value: Any) -> bool:
+    try:
+        setattr(target, attr, value)
+        return True
+    except Exception:
+        return False
 
 
 def _drop_llamaindex_positional_kwargs(

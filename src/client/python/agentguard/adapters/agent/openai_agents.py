@@ -14,6 +14,7 @@ from typing import Any
 
 from agentguard.adapters.agent.base import BaseAgentAdapter, LLMBinding, ToolBinding
 from agentguard.adapters.agent.normalization import (
+    LLMInputDenormalization,
     LLMOutputDenormalization,
     LLMOutputNormalization,
     ToolInvokeDenormalization,
@@ -165,6 +166,30 @@ class OpenAIAgentsAdapter(BaseAgentAdapter):
             metadata=self._metadata(label=label, owner=owner),
         )
 
+    def denormalize_llm_input(
+        self,
+        *,
+        label: str,
+        payload: Any,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        fn: Any = None,
+        owner: Any = None,
+    ) -> LLMInputDenormalization:
+        denormalized = super().denormalize_llm_input(
+            label=label,
+            payload=payload,
+            args=args,
+            kwargs=kwargs,
+            fn=fn,
+            owner=owner,
+        )
+        return LLMInputDenormalization(
+            args=denormalized.args,
+            kwargs=denormalized.kwargs,
+            metadata=self._metadata(label=label, owner=owner),
+        )
+
     def denormalize_llm_output(
         self,
         *,
@@ -174,6 +199,13 @@ class OpenAIAgentsAdapter(BaseAgentAdapter):
         fn: Any = None,
         owner: Any = None,
     ) -> LLMOutputDenormalization:
+        if isinstance(payload, str):
+            rewritten_output = _rewrite_openai_agents_output_text(output, payload)
+            if rewritten_output is not None:
+                return LLMOutputDenormalization(
+                    output=rewritten_output,
+                    metadata=self._metadata(label=label, owner=owner),
+                )
         denormalized = super().denormalize_llm_output(
             label=label,
             payload=payload,
@@ -423,6 +455,88 @@ def _coerce_openai_agents_text(value: Any) -> str | None:
         if parts:
             return "\n\n".join(parts)
     return None
+
+
+def _rewrite_openai_agents_output_text(output: Any, text: str) -> Any | None:
+    if output is None:
+        return text
+    if isinstance(output, str):
+        return text
+    if isinstance(output, dict):
+        updated = copy.deepcopy(output)
+        if _rewrite_openai_agents_output_mapping(updated, text):
+            return updated
+        return {**updated, "output": text}
+
+    updated = copy.deepcopy(output)
+    if _rewrite_openai_agents_output_object(updated, text):
+        return updated
+    return None
+
+
+def _rewrite_openai_agents_output_mapping(value: dict[str, Any], text: str) -> bool:
+    for key in ("content", "text", "output", "message"):
+        if key in value and isinstance(value[key], str):
+            value[key] = text
+            return True
+
+    message = value.get("message") or value.get("chat_message")
+    if isinstance(message, dict) and _rewrite_openai_agents_output_mapping(message, text):
+        return True
+
+    output_items = value.get("output")
+    if isinstance(output_items, list):
+        for item in output_items:
+            if _rewrite_openai_agents_output_item(item, text):
+                return True
+    return False
+
+
+def _rewrite_openai_agents_output_item(item: Any, text: str) -> bool:
+    if isinstance(item, dict):
+        content = item.get("content")
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and str(block.get("type") or "").lower() in {"output_text", "text"}:
+                    if "text" in block:
+                        block["text"] = text
+                    else:
+                        block["content"] = text
+                    return True
+        for key in ("text", "content"):
+            if isinstance(item.get(key), str):
+                item[key] = text
+                return True
+        return False
+
+    content = getattr(item, "content", None)
+    if isinstance(content, list):
+        for block in content:
+            if _rewrite_openai_agents_output_item(block, text):
+                return True
+    for attr in ("text", "content"):
+        value = getattr(item, attr, None)
+        if isinstance(value, str):
+            try:
+                setattr(item, attr, text)
+                return True
+            except Exception:
+                return False
+    return False
+
+
+def _rewrite_openai_agents_output_object(value: Any, text: str) -> bool:
+    message = getattr(value, "message", None) or getattr(value, "chat_message", None)
+    if message is not None and _rewrite_openai_agents_output_item(message, text):
+        return True
+
+    output_items = getattr(value, "output", None)
+    if isinstance(output_items, list):
+        for item in output_items:
+            if _rewrite_openai_agents_output_item(item, text):
+                return True
+
+    return _rewrite_openai_agents_output_item(value, text)
 
 
 @dataclasses.dataclass(frozen=True)

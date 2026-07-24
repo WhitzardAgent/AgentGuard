@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import types
+
 import pytest
 from agentguard import AgentGuard
 from agentguard.adapters.agent import metagpt as metagpt_adapter
 from agentguard.adapters.agent.metagpt import MetaGPTAgentAdapter
+from agentguard.schemas.decisions import GuardDecision
 
 
 def _event_types(guard: AgentGuard) -> list[str]:
@@ -65,6 +68,43 @@ async def test_attach_metagpt_patches_llm_aask_and_emits_events():
     assert llm_output.payload.output == "answer:hello"
     assert llm_output.payload.final_output == "answer:hello"
     assert llm_output.payload.thought == "hidden reasoning"
+
+
+@pytest.mark.asyncio
+async def test_attach_metagpt_applies_modify_llm_decisions(monkeypatch):
+    class Agent:
+        __module__ = "metagpt.roles.fake"
+
+        def __init__(self) -> None:
+            self.llm = FakeMetaGPTLLM()
+
+    guard = AgentGuard("metagpt-modify-llm", sandbox="noop")
+    agent = Agent()
+    decisions = iter(
+        [
+            GuardDecision.modify_llm_input(
+                "rewrite llm input",
+                processed_content="rewritten request",
+            ),
+            GuardDecision.modify_llm_output(
+                "rewrite llm output",
+                processed_content="rewritten answer",
+            ),
+        ]
+    )
+
+    monkeypatch.setattr(
+        guard.runtime,
+        "guard",
+        lambda event, **kwargs: types.SimpleNamespace(decision=next(decisions)),
+    )
+
+    patched = guard.attach_metagpt(agent, wrap_tools=False)
+    result = await agent.llm.aask("hello", system_msgs=["sys"], temperature=0)
+
+    assert patched == {"tools": 0, "llm": 1}
+    assert result == "rewritten answer"
+    assert agent.llm.calls == [("rewritten request", ["sys"], None, None, {"temperature": 0})]
 
 
 def test_attach_metagpt_patches_rolezero_tool_execution_map():

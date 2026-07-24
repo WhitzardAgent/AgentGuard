@@ -1185,6 +1185,61 @@ def test_attach_langgraph_patches_compiled_graph_toolnode_and_static_model():
     assert _first_event(guard, "llm_input").metadata["adapter"] == "langgraph"
 
 
+def test_attach_langgraph_applies_modify_llm_string_decisions():
+    class Model:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def invoke(self, state, config=None):
+            self.calls.append(state)
+            return {"messages": [f"reply:{state}"]}
+
+    class RunnableCallable:
+        __module__ = "langgraph._internal._runnable"
+
+        def __init__(self) -> None:
+            static_model = Model()
+
+            def call_model(state, config=None):
+                return static_model.invoke(state, config)
+
+            self.func = call_model
+
+    class PregelNode:
+        __module__ = "langgraph.pregel._read"
+
+        def __init__(self, bound) -> None:
+            self.bound = bound
+
+    class CompiledGraph:
+        __module__ = "langgraph.graph.state"
+
+        def __init__(self) -> None:
+            self.nodes = {"agent": PregelNode(RunnableCallable())}
+
+        def invoke(self, state):
+            return self.nodes["agent"].bound.func(state)
+
+    guard = AgentGuard("attach-langgraph-modify-llm", sandbox="noop")
+    graph = CompiledGraph()
+    model = graph.nodes["agent"].bound.func.__closure__[0].cell_contents
+    decisions = iter(
+        [
+            GuardDecision.modify_llm_input("rewrite llm input", processed_content="rewritten prompt"),
+            GuardDecision.modify_llm_output("rewrite llm output", processed_content="rewritten answer"),
+        ]
+    )
+
+    guard.runtime.guard = lambda event, **kwargs: types.SimpleNamespace(decision=next(decisions))
+
+    patched = guard.attach_langgraph(graph, wrap_tools=False)
+    result = graph.invoke({"messages": [{"role": "user", "content": "original prompt"}]})
+
+    assert patched == {"tools": 0, "llm": 1}
+    assert model.calls == [{"messages": [{"role": "user", "content": "rewritten prompt"}]}]
+    assert result == {"messages": ["rewritten answer"]}
+
+
 def test_attach_langgraph_patches_builder_toolnode():
     class Tool:
         name = "lookup"
@@ -1622,6 +1677,28 @@ def test_llamaindex_denormalize_llm_input_rebuilds_positional_prompt():
     )
 
 
+def test_llamaindex_denormalize_llm_input_rewrites_last_message_content():
+    from agentguard.adapters.agent import llamaindex as llamaindex_adapter
+
+    class LLM:
+        async def achat(self, messages):
+            return messages
+
+    adapter = llamaindex_adapter.LlamaIndexAgentAdapter()
+    llm = LLM()
+    denormalized = adapter.denormalize_llm_input(
+        label="achat",
+        payload="rewritten prompt",
+        args=([_FakeLlamaChatMessage("system", "sys"), _FakeLlamaChatMessage("user", "original")],),
+        kwargs={},
+        fn=llm.achat,
+        owner=llm,
+    )
+
+    assert [item.content for item in denormalized.args[0]] == ["sys", "rewritten prompt"]
+    assert denormalized.kwargs == {}
+
+
 def test_agentguard_exposes_attach_llamaindex():
     guard = AgentGuard("attach-llamaindex-api", sandbox="noop")
 
@@ -1674,6 +1751,47 @@ async def test_attach_llamaindex_patches_workflow_agent_tool_and_llm():
     event = _first_event(guard, "tool_invoke")
     assert event.payload.tool_name == "lookup"
     assert event.payload.arguments == {"value": "abc"}
+
+
+@pytest.mark.asyncio
+async def test_attach_llamaindex_applies_modify_llm_string_decisions(monkeypatch):
+    class LLM:
+        def __init__(self) -> None:
+            self.calls: list[list[_FakeLlamaChatMessage]] = []
+
+        async def achat(self, messages):
+            self.calls.append(messages)
+            return _FakeLlamaChatResponse(f"reply:{messages[0].content}")
+
+    class Agent:
+        def __init__(self) -> None:
+            self.tools = []
+            self.llm = LLM()
+
+        async def _call_tool(self, ctx, tool, tool_input):
+            raise AssertionError("tool should not be called")
+
+    guard = AgentGuard("attach-llamaindex-modify-llm", sandbox="noop")
+    agent = Agent()
+    decisions = iter(
+        [
+            GuardDecision.modify_llm_input("rewrite llm input", processed_content="rewritten prompt"),
+            GuardDecision.modify_llm_output("rewrite llm output", processed_content="rewritten answer"),
+        ]
+    )
+
+    monkeypatch.setattr(
+        guard.runtime,
+        "guard",
+        lambda event, **kwargs: types.SimpleNamespace(decision=next(decisions)),
+    )
+
+    patched = guard.attach_llamaindex(agent, wrap_tools=False)
+    result = await agent.llm.achat([_FakeLlamaChatMessage("user", "original prompt")])
+
+    assert patched == {"tools": 0, "llm": 1}
+    assert [item.content for item in agent.llm.calls[0]] == ["rewritten prompt"]
+    assert result.message.content == "rewritten answer"
 
 
 @pytest.mark.asyncio
@@ -1973,6 +2091,39 @@ async def test_attach_openai_agents_patches_model_get_response_without_double_wr
     assert agent.model._client.responses.calls == 1
     assert _event_types(guard).count("llm_input") == 1
     assert _event_types(guard).count("llm_output") == 1
+
+
+@pytest.mark.asyncio
+async def test_attach_openai_agents_applies_modify_llm_decisions(monkeypatch):
+    class Model:
+        async def get_response(self, prompt: str) -> _FakeOpenAIModelResponse:
+            return _FakeOpenAIModelResponse([_FakeOpenAIResponsesOutputMessage(f"reply:{prompt}")])
+
+    class Agent:
+        def __init__(self) -> None:
+            self.model = Model()
+            self.tools = []
+
+    guard = AgentGuard("attach-openai-modify-llm", sandbox="noop")
+    agent = Agent()
+    decisions = iter(
+        [
+            GuardDecision.modify_llm_input("rewrite llm input", processed_content="rewritten prompt"),
+            GuardDecision.modify_llm_output("rewrite llm output", processed_content="rewritten answer"),
+        ]
+    )
+
+    monkeypatch.setattr(
+        guard.runtime,
+        "guard",
+        lambda event, **kwargs: types.SimpleNamespace(decision=next(decisions)),
+    )
+
+    patched = guard.attach_openai_agents(agent, wrap_tools=False)
+    result = await agent.model.get_response("original prompt")
+
+    assert patched == {"tools": 0, "llm": 1}
+    assert result.output[0].content[0].text == "rewritten answer"
 
 
 @pytest.mark.asyncio
