@@ -334,7 +334,8 @@ def agent_runtime_sessions(
         return _err("login required", 401)
     if not _agent_visible(visible, agent_id):
         return _err("agent not visible", 403)
-    session_user_id = None if visible.get("is_admin") else int(user_id)
+    unrestricted_session_access = _can_access_all_visible_runtime_sessions(visible)
+    session_user_id = None if unrestricted_session_access else int(user_id)
     try:
         summaries = get_runtime_session_store().list_sessions(
             agent_id=agent_id,
@@ -359,15 +360,15 @@ def close_agent_runtime_session(
         return _err("login required", 401)
     if not _agent_visible(visible, agent_id):
         return _err("agent not visible", 403)
-    is_admin = bool(visible.get("is_admin"))
-    session_user_id = None if is_admin else int(user_id)
+    unrestricted_session_access = _can_access_all_visible_runtime_sessions(visible)
+    session_user_id = None if unrestricted_session_access else int(user_id)
     try:
         store = get_runtime_session_store()
         session = store.get_session(session_id)
         if (
             session is None
             or session.agent_id != agent_id
-            or (not is_admin and session.user_id != int(user_id))
+            or (not unrestricted_session_access and session.user_id != int(user_id))
         ):
             return _err("runtime session not found", 404)
         if session.external_session_id:
@@ -495,36 +496,42 @@ def _client_session_control_url(config_url: str) -> str:
 
 def _visible_scope(session_token: str | None) -> dict[str, Any]:
     if not session_token:
-        return {"external_accounts": set(), "agent_ids": set(), "user_id": None, "is_admin": False}
+        return {"external_accounts": set(), "agent_ids": set(), "user_id": None, "is_admin": False, "is_scope_admin": False}
     try:
         store = get_user_store()
         user = store.user_for_session(session_token)
         if user is None:
-            return {"external_accounts": set(), "agent_ids": set(), "user_id": None, "is_admin": False}
+            return {"external_accounts": set(), "agent_ids": set(), "user_id": None, "is_admin": False, "is_scope_admin": False}
         if is_admin_user(user):
-            return {"external_accounts": None, "agent_ids": None, "user_id": user.id, "is_admin": True}
+            return {"external_accounts": None, "agent_ids": None, "user_id": user.id, "is_admin": True, "is_scope_admin": True}
         external_accounts = {
             (item.provider.lower(), item.account_email.lower())
             for item in store.list_external_accounts(user)
         }
+        admin_scope_user_ids = _admin_scope_user_ids(user)
         return {
             "external_accounts": external_accounts,
-            "agent_ids": _visible_agent_ids_for_user(user),
+            "agent_ids": _visible_agent_ids_for_user(user, admin_scope_user_ids=admin_scope_user_ids),
             "user_id": user.id,
             "is_admin": False,
+            "is_scope_admin": bool(admin_scope_user_ids),
         }
     except DatabaseUnavailable:
-        return {"external_accounts": set(), "agent_ids": set(), "user_id": None, "is_admin": False}
+        return {"external_accounts": set(), "agent_ids": set(), "user_id": None, "is_admin": False, "is_scope_admin": False}
 
 
-def _visible_agent_ids_for_user(user: Any) -> set[str]:
+def _visible_agent_ids_for_user(
+    user: Any,
+    *,
+    admin_scope_user_ids: set[int] | None = None,
+) -> set[str]:
     try:
         agent_store = AgentStore()
     except DatabaseUnavailable:
         return set()
 
     user_ids = {int(user.id)}
-    user_ids.update(_admin_scope_user_ids(user))
+    user_ids.update(admin_scope_user_ids or _admin_scope_user_ids(user))
     agent_ids: set[str] = set()
     for user_id in sorted(user_ids):
         try:
@@ -532,6 +539,10 @@ def _visible_agent_ids_for_user(user: Any) -> set[str]:
         except DatabaseUnavailable:
             return agent_ids
     return agent_ids
+
+
+def _can_access_all_visible_runtime_sessions(visible: dict[str, Any]) -> bool:
+    return bool(visible.get("is_admin") or visible.get("is_scope_admin"))
 
 
 def _admin_scope_user_ids(user: Any) -> set[int]:

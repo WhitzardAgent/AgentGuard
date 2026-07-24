@@ -22,19 +22,41 @@ class FakeUserStore:
 
 
 class FakeAgentStore:
-    def __init__(self, agent_ids: set[str]) -> None:
-        self.agent_ids = agent_ids
+    def __init__(self, agent_ids: set[str] | None = None, agent_bindings: dict[int, set[str]] | None = None) -> None:
+        self.agent_ids = set(agent_ids or set())
+        self.agent_bindings = {user_id: set(items) for user_id, items in (agent_bindings or {}).items()}
 
     def agent_ids_for_user(self, user_id: int) -> set[str]:
+        if self.agent_bindings:
+            return set(self.agent_bindings.get(user_id, set()))
         return set(self.agent_ids) if user_id == 7 else set()
 
 
 class FakeOrgStore:
+    def __init__(
+        self,
+        *,
+        organizations: list[SimpleNamespace] | None = None,
+        groups: list[SimpleNamespace] | None = None,
+        organization_members: dict[int, list[SimpleNamespace]] | None = None,
+        group_members: dict[int, list[SimpleNamespace]] | None = None,
+    ) -> None:
+        self.organizations = list(organizations or [])
+        self.groups = list(groups or [])
+        self.organization_members = dict(organization_members or {})
+        self.group_members = dict(group_members or {})
+
     def list_organizations(self, user):
-        return []
+        return list(self.organizations)
 
     def list_groups(self, user):
-        return []
+        return list(self.groups)
+
+    def list_organization_members(self, user, organization_id: int):
+        return list(self.organization_members.get(organization_id, []))
+
+    def list_group_members(self, user, group_id: int):
+        return list(self.group_members.get(group_id, []))
 
 
 class FakeRuntimeSessionStore:
@@ -132,10 +154,20 @@ class FakeConsole:
         return list(self.audit_by_agent.get(agent_id, []))[:n]
 
 
-def _patch_console_dependencies(monkeypatch, store: FakeRuntimeSessionStore, *, agent_ids: set[str]) -> None:
+def _patch_console_dependencies(
+    monkeypatch,
+    store: FakeRuntimeSessionStore,
+    *,
+    agent_ids: set[str],
+    agent_bindings: dict[int, set[str]] | None = None,
+    org_store: FakeOrgStore | None = None,
+) -> None:
     monkeypatch.setattr("backend.api.console_router.get_user_store", lambda: FakeUserStore())
-    monkeypatch.setattr("backend.api.console_router.get_org_store", lambda: FakeOrgStore())
-    monkeypatch.setattr("backend.api.console_router.AgentStore", lambda: FakeAgentStore(agent_ids))
+    monkeypatch.setattr("backend.api.console_router.get_org_store", lambda: org_store or FakeOrgStore())
+    monkeypatch.setattr(
+        "backend.api.console_router.AgentStore",
+        lambda: FakeAgentStore(agent_ids, agent_bindings),
+    )
     monkeypatch.setattr("backend.api.console_router.get_runtime_session_store", lambda: store)
 
 
@@ -227,6 +259,66 @@ def test_admin_runtime_sessions_can_read_and_close_other_user_sessions(monkeypat
 
     assert closed.status_code == 200
     assert closed.json()["session"]["status"] == "closed"
+
+
+def test_group_admin_runtime_sessions_can_read_group_member_sessions(monkeypatch):
+    store = FakeRuntimeSessionStore(user_id=9)
+    org_store = FakeOrgStore(
+        groups=[SimpleNamespace(group_id=20, organization_id=10, current_user_role="admin")],
+        group_members={
+            20: [
+                SimpleNamespace(user_id=7),
+                SimpleNamespace(user_id=9),
+            ]
+        },
+    )
+    _patch_console_dependencies(
+        monkeypatch,
+        store,
+        agent_ids=set(),
+        agent_bindings={9: {"ag_1"}},
+        org_store=org_store,
+    )
+    client = TestClient(create_app())
+
+    response = client.get(
+        "/v1/backend/agents/ag_1/runtime/sessions?status=all",
+        cookies={"agentguard_user_session": "session-1"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload[0]["session_id"] == "ags_dify_1"
+    assert payload[0]["user_id"] == "9"
+
+
+def test_group_admin_runtime_sessions_can_close_group_member_sessions(monkeypatch):
+    store = FakeRuntimeSessionStore(user_id=9)
+    org_store = FakeOrgStore(
+        groups=[SimpleNamespace(group_id=20, organization_id=10, current_user_role="admin")],
+        group_members={
+            20: [
+                SimpleNamespace(user_id=7),
+                SimpleNamespace(user_id=9),
+            ]
+        },
+    )
+    _patch_console_dependencies(
+        monkeypatch,
+        store,
+        agent_ids=set(),
+        agent_bindings={9: {"ag_1"}},
+        org_store=org_store,
+    )
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/v1/backend/agents/ag_1/runtime/sessions/ags_dify_1/close",
+        cookies={"agentguard_user_session": "session-1"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["session"]["status"] == "closed"
 
 
 def test_bound_user_can_read_agent_audit(monkeypatch):
