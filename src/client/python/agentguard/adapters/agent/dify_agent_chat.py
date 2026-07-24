@@ -361,6 +361,9 @@ def _guard_llm_input(
             "stream": bool(call.get("stream")),
             "model": str(getattr(model, "model_name", "") or ""),
             "model_provider": _model_provider(model),
+            "thought_regeneration_supported": _shared.supports_dify_thought_loopback(
+                call.get("prompt_messages")
+            ),
             "tool_names": list(_current_tool_catalog.get([])),
         }
     )
@@ -387,6 +390,9 @@ def _guard_llm_output(
             "stream": bool(call.get("stream")),
             "model": str(getattr(model, "model_name", "") or ""),
             "model_provider": _model_provider(model),
+            "thought_regeneration_supported": _shared.supports_dify_thought_loopback(
+                call.get("prompt_messages")
+            ),
         }
     )
     if error is not None:

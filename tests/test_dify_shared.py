@@ -2,7 +2,10 @@ import sys
 import threading
 import types
 
+import pytest
+
 from agentguard.adapters.agent import dify_shared
+from agentguard.schemas.decisions import DecisionType, GuardDecision
 
 
 def _runtime_spec() -> dify_shared.DifyRuntimeSpec:
@@ -175,3 +178,156 @@ def test_runtime_agent_registration_caches_by_runtime_identity(monkeypatch):
 
     assert first == second
     assert calls == ["dify-workflow:app-1"]
+
+
+def test_supports_dify_thought_loopback_accepts_dict_and_object_messages():
+    assert dify_shared.supports_dify_thought_loopback(
+        [{"role": "user", "content": "hello"}]
+    ) is True
+    assert dify_shared.supports_dify_thought_loopback(
+        [types.SimpleNamespace(content="hello")]
+    ) is True
+    assert dify_shared.supports_dify_thought_loopback("hello") is False
+    assert dify_shared.supports_dify_thought_loopback([]) is False
+
+
+def test_build_dify_thought_loopback_prompt_messages_preserves_native_object_type():
+    original = [types.SimpleNamespace(content="original prompt", role="user", marker="keep")]
+
+    rebuilt = dify_shared.build_dify_thought_loopback_prompt_messages(
+        original,
+        "aligned thought",
+    )
+
+    assert rebuilt is not None
+    assert len(rebuilt) == 2
+    assert isinstance(rebuilt[-1], types.SimpleNamespace)
+    assert rebuilt[-1].content == "aligned thought"
+    assert rebuilt[-1].role == "assistant"
+    assert rebuilt[-1].marker == "keep"
+    assert original[-1].content == "original prompt"
+
+
+def test_loopback_metadata_from_decision_marks_thought_alignment_retry():
+    decision = GuardDecision(
+        decision_type=DecisionType.LOOP_BACK_TO_LLM,
+        reason="retry",
+        processed_content="aligned thought",
+        metadata={"protocol": "thought_alignment_v1"},
+    )
+
+    assert dify_shared.loopback_metadata_from_decision(decision) == {
+        "thought_alignment_attempt": 1
+    }
+
+
+def test_run_dify_legacy_llm_call_retries_loopback_non_stream():
+    outputs = iter(["first result", "second result"])
+    prompt_messages_seen = []
+    metadata_seen = []
+
+    def guard_input(_model, call, extra_metadata):
+        prompt_messages_seen.append(call.prompt_messages)
+        metadata_seen.append(extra_metadata)
+        return GuardDecision.allow()
+
+    def guard_output(_model, output, _call, _error, extra_metadata):
+        metadata_seen.append(extra_metadata)
+        if output == "first result":
+            return GuardDecision(
+                decision_type=DecisionType.LOOP_BACK_TO_LLM,
+                reason="retry",
+                processed_content="aligned thought",
+                metadata={"protocol": "thought_alignment_v1"},
+            )
+        return GuardDecision.allow()
+
+    result = dify_shared.run_dify_legacy_llm_call(
+        model=object(),
+        args=([types.SimpleNamespace(content="original prompt")],),
+        kwargs={"stream": False},
+        arg_names=("prompt_messages", "model_parameters", "tools", "stop", "stream", "callbacks"),
+        execute=lambda current_args, _current_kwargs: next(outputs),
+        guard_input=guard_input,
+        guard_output=guard_output,
+        blocked_value=lambda _decision: None,
+        normalizer=dify_shared.DifyLegacyLLMNormalizer(),
+    )
+
+    assert result == "second result"
+    assert len(prompt_messages_seen) == 2
+    assert prompt_messages_seen[0][-1].content == "original prompt"
+    assert prompt_messages_seen[1][-1].content == "aligned thought"
+    assert metadata_seen == [
+        None,
+        None,
+        {"thought_alignment_attempt": 1},
+        {"thought_alignment_attempt": 1},
+    ]
+
+
+def test_run_dify_legacy_llm_call_retries_loopback_stream():
+    executions = []
+
+    def guard_input(_model, _call, _extra_metadata):
+        return GuardDecision.allow()
+
+    def guard_output(_model, output, _call, _error, extra_metadata):
+        if extra_metadata is None:
+            return GuardDecision(
+                decision_type=DecisionType.LOOP_BACK_TO_LLM,
+                reason="retry",
+                processed_content="aligned thought",
+                metadata={"protocol": "thought_alignment_v1"},
+            )
+        return GuardDecision.allow()
+
+    def execute(current_args, _current_kwargs):
+        prompt_messages = current_args[0]
+        executions.append(prompt_messages)
+        if len(executions) == 1:
+            text = "first thought"
+        else:
+            text = "second answer"
+
+        def chunks():
+            yield dify_shared.build_synthetic_llm_stream_chunk(text)
+
+        return chunks()
+
+    result = dify_shared.run_dify_legacy_llm_call(
+        model=object(),
+        args=([types.SimpleNamespace(content="original prompt")],),
+        kwargs={"stream": True},
+        arg_names=("prompt_messages", "model_parameters", "tools", "stop", "stream", "callbacks"),
+        execute=execute,
+        guard_input=guard_input,
+        guard_output=guard_output,
+        blocked_value=lambda _decision: None,
+        normalizer=dify_shared.DifyLegacyLLMNormalizer(),
+    )
+
+    chunks = list(result)
+
+    assert len(executions) == 2
+    assert executions[0][-1].content == "original prompt"
+    assert executions[1][-1].content == "aligned thought"
+    assert len(chunks) == 1
+    assert chunks[0].delta.message.content == "second answer"
+
+
+def test_run_dify_legacy_llm_call_raises_when_loopback_prompt_messages_cannot_be_rebuilt():
+    decision = GuardDecision(
+        decision_type=DecisionType.LOOP_BACK_TO_LLM,
+        reason="retry",
+        processed_content="aligned thought",
+    )
+
+    with pytest.raises(Exception, match="could not rebuild prompt messages"):
+        dify_shared.loopback_dify_llm_call_args_kwargs(
+            decision=decision,
+            call=dify_shared.DifyLegacyLLMCall(prompt_messages="opaque prompt"),
+            arg_names=("prompt_messages", "model_parameters", "tools", "stop", "stream", "callbacks"),
+            args=("opaque prompt",),
+            kwargs={},
+        )

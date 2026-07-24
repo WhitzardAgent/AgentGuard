@@ -4,7 +4,7 @@ import types
 
 import pytest
 
-from agentguard.schemas.decisions import GuardDecision
+from agentguard.schemas.decisions import DecisionType, GuardDecision
 from agentguard.utils.errors import AdapterError
 
 
@@ -1285,6 +1285,76 @@ def test_agent_chat_stream_llm_modify_output_replays_synthetic_chunk(monkeypatch
     assert len(chunks) == 1
     assert chunks[0].delta.message.content == "rewritten streamed answer"
     assert chunks[0].delta.message.tool_calls == []
+
+
+def test_agent_chat_llm_loopback_retries_with_aligned_thought(monkeypatch):
+    adapter = _fresh_adapter(monkeypatch)
+
+    class ModelInstance:
+        def __init__(self):
+            self.seen_prompt_messages = []
+
+        def invoke_llm(
+            self,
+            prompt_messages,
+            model_parameters=None,
+            tools=None,
+            stop=None,
+            stream=True,
+            callbacks=None,
+        ):
+            self.seen_prompt_messages.append(prompt_messages)
+            content = "first answer" if len(self.seen_prompt_messages) == 1 else "second answer"
+            return types.SimpleNamespace(message=types.SimpleNamespace(content=content, tool_calls=[]))
+
+    adapter._patch_model_invoke_llm(ModelInstance)
+
+    class LoopbackRuntime:
+        def __init__(self) -> None:
+            self.events = []
+
+        def guard(self, event, phase="before"):
+            self.events.append((event.event_type.value, phase, dict(event.metadata)))
+            if (
+                event.event_type.value == "llm_output"
+                and event.metadata.get("thought_alignment_attempt") != 1
+            ):
+                return types.SimpleNamespace(
+                    decision=GuardDecision(
+                        decision_type=DecisionType.LOOP_BACK_TO_LLM,
+                        reason="retry",
+                        processed_content="aligned thought",
+                        metadata={"protocol": "thought_alignment_v1"},
+                    )
+                )
+            return types.SimpleNamespace(decision=GuardDecision.allow())
+
+    runtime = LoopbackRuntime()
+    guard = types.SimpleNamespace(
+        runtime=runtime,
+        context=types.SimpleNamespace(session_id="loopback", agent_id="agent"),
+    )
+    token_guard = adapter._current_guard.set(guard)
+    token_meta = adapter._current_metadata.set({"app_id": "app-1"})
+    try:
+        model = ModelInstance()
+        result = model.invoke_llm(
+            prompt_messages=[types.SimpleNamespace(content="original prompt")],
+            stream=False,
+        )
+    finally:
+        adapter._current_metadata.reset(token_meta)
+        adapter._current_guard.reset(token_guard)
+
+    assert result.message.content == "second answer"
+    assert len(model.seen_prompt_messages) == 2
+    assert model.seen_prompt_messages[0][-1].content == "original prompt"
+    assert model.seen_prompt_messages[1][-1].content == "aligned thought"
+    assert model.seen_prompt_messages[1][-1].role == "assistant"
+    assert runtime.events[0][2]["thought_regeneration_supported"] is True
+    assert runtime.events[1][2]["thought_regeneration_supported"] is True
+    assert runtime.events[2][2]["thought_alignment_attempt"] == 1
+    assert runtime.events[3][2]["thought_alignment_attempt"] == 1
 
 
 def test_agent_chat_tool_modify_invoke_rewrites_tool_parameters(monkeypatch):

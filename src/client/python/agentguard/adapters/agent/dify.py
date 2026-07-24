@@ -715,6 +715,9 @@ def _guard_legacy_llm_input(
             "stream": bool(call.get("stream")),
             "model": str(getattr(model, "model_name", "") or ""),
             "model_provider": _legacy_model_provider(model),
+            "thought_regeneration_supported": _shared.supports_dify_thought_loopback(
+                call.get("prompt_messages")
+            ),
             "tool_names": [
                 str(_get_attr_or_key(tool, "name") or _get_attr_or_key(tool, "tool_name") or "")
                 for tool in call.get("tools") or []
@@ -748,6 +751,9 @@ def _guard_legacy_llm_output(
             "stream": bool(call.get("stream")),
             "model": str(getattr(model, "model_name", "") or ""),
             "model_provider": _legacy_model_provider(model),
+            "thought_regeneration_supported": _shared.supports_dify_thought_loopback(
+                call.get("prompt_messages")
+            ),
         }
     )
     if error is not None:

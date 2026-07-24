@@ -899,6 +899,13 @@ BlockedValue = Callable[[GuardDecision], str | None]
 Executor = Callable[[tuple[Any, ...], dict[str, Any]], Any]
 ModifyOutput = Callable[[Any, Any], Any]
 StreamResultBuilder = Callable[[str | None], Generator[Any, None, None]]
+_MAX_LLM_LOOPBACK_ATTEMPTS = 1
+
+
+@dataclass(frozen=True)
+class _LegacyLLMStreamOutcome:
+    decision: GuardDecision
+    stream: Generator[Any, None, None]
 
 
 def run_dify_legacy_llm_call(
@@ -917,43 +924,86 @@ def run_dify_legacy_llm_call(
 ) -> Any:
     current_args = tuple(args)
     current_kwargs = dict(kwargs)
-    call = DifyLegacyLLMCall.from_args_kwargs(current_args, current_kwargs)
-    decision = guard_input(model, call, None)
-    if decision.decision_type == DecisionType.MODIFY_LLM_INPUT:
-        current_args, current_kwargs = replace_named_argument(
-            current_args,
-            current_kwargs,
-            arg_names,
-            "prompt_messages",
-            decision_payload(decision),
-        )
+    loopback_metadata: dict[str, Any] = {}
+    attempts = 0
+
+    while True:
         call = DifyLegacyLLMCall.from_args_kwargs(current_args, current_kwargs)
-    blocked = blocked_value(decision)
-    if blocked is not None:
-        raise AdapterError(blocked)
-    try:
-        result = execute(current_args, current_kwargs)
-    except Exception as exc:
-        guard_output(model, {"error": str(exc)}, call, str(exc), None)
-        raise
-    if is_generator_like(result):
-        return _finalize_legacy_llm_stream(
-            model=model,
-            result=result,
-            call=call,
-            guard_output=guard_output,
-            blocked_value=blocked_value,
-            normalizer=normalizer,
-            stream_result_builder=stream_result_builder,
-        )
-    decision = guard_output(model, result, call, None, None)
-    if decision.decision_type == DecisionType.MODIFY_LLM_OUTPUT:
-        output_modifier = modify_output or modified_llm_output_value
-        result = output_modifier(decision_payload(decision), result)
-    blocked = blocked_value(decision)
-    if blocked is not None:
-        raise AdapterError(blocked)
-    return result
+        decision = guard_input(model, call, loopback_metadata or None)
+        if decision.decision_type == DecisionType.LOOP_BACK_TO_LLM:
+            if attempts >= _MAX_LLM_LOOPBACK_ATTEMPTS:
+                decision = GuardDecision.allow("llm loopback limit reached; allowing current request")
+            else:
+                current_args, current_kwargs, loopback_metadata = loopback_dify_llm_call_args_kwargs(
+                    decision=decision,
+                    call=call,
+                    arg_names=arg_names,
+                    args=current_args,
+                    kwargs=current_kwargs,
+                )
+                attempts += 1
+                continue
+        if decision.decision_type == DecisionType.MODIFY_LLM_INPUT:
+            current_args, current_kwargs = replace_named_argument(
+                current_args,
+                current_kwargs,
+                arg_names,
+                "prompt_messages",
+                decision_payload(decision),
+            )
+            call = DifyLegacyLLMCall.from_args_kwargs(current_args, current_kwargs)
+        blocked = blocked_value(decision)
+        if blocked is not None:
+            raise AdapterError(blocked)
+        try:
+            result = execute(current_args, current_kwargs)
+        except Exception as exc:
+            guard_output(model, {"error": str(exc)}, call, str(exc), loopback_metadata or None)
+            raise
+        if is_generator_like(result):
+            outcome = _finalize_legacy_llm_stream(
+                model=model,
+                result=result,
+                call=call,
+                guard_output=guard_output,
+                blocked_value=blocked_value,
+                normalizer=normalizer,
+                stream_result_builder=stream_result_builder,
+                extra_metadata=loopback_metadata or None,
+            )
+            if outcome.decision.decision_type == DecisionType.LOOP_BACK_TO_LLM:
+                if attempts >= _MAX_LLM_LOOPBACK_ATTEMPTS:
+                    return outcome.stream
+                current_args, current_kwargs, loopback_metadata = loopback_dify_llm_call_args_kwargs(
+                    decision=outcome.decision,
+                    call=call,
+                    arg_names=arg_names,
+                    args=current_args,
+                    kwargs=current_kwargs,
+                )
+                attempts += 1
+                continue
+            return outcome.stream
+        decision = guard_output(model, result, call, None, loopback_metadata or None)
+        if decision.decision_type == DecisionType.LOOP_BACK_TO_LLM:
+            if attempts >= _MAX_LLM_LOOPBACK_ATTEMPTS:
+                return result
+            current_args, current_kwargs, loopback_metadata = loopback_dify_llm_call_args_kwargs(
+                decision=decision,
+                call=call,
+                arg_names=arg_names,
+                args=current_args,
+                kwargs=current_kwargs,
+            )
+            attempts += 1
+            continue
+        if decision.decision_type == DecisionType.MODIFY_LLM_OUTPUT:
+            output_modifier = modify_output or modified_llm_output_value
+            result = output_modifier(decision_payload(decision), result)
+        blocked = blocked_value(decision)
+        if blocked is not None:
+            raise AdapterError(blocked)
+        return result
 
 
 def _finalize_legacy_llm_stream(
@@ -965,17 +1015,18 @@ def _finalize_legacy_llm_stream(
     blocked_value: BlockedValue,
     normalizer: DifyLegacyLLMNormalizer,
     stream_result_builder: StreamResultBuilder | None = None,
-) -> Generator[Any, None, None]:
+    extra_metadata: dict[str, Any] | None = None,
+) -> _LegacyLLMStreamOutcome:
     chunks: list[Any] = []
     try:
         for chunk in result:
             chunks.append(chunk)
     except Exception as exc:
-        guard_output(model, {"error": str(exc)}, call, str(exc), None)
+        guard_output(model, {"error": str(exc)}, call, str(exc), extra_metadata)
         raise
 
     normalized_output = normalizer.stream_output_payload(chunks)
-    decision = guard_output(model, normalized_output, call, None, None)
+    decision = guard_output(model, normalized_output, call, None, extra_metadata)
     stream_builder = stream_result_builder or _default_stream_result_builder
 
     if decision.decision_type == DecisionType.MODIFY_LLM_OUTPUT:
@@ -985,13 +1036,16 @@ def _finalize_legacy_llm_stream(
             normalizer=normalizer,
             fallback=_stream_result_text(normalized_output, normalizer=normalizer),
         )
-        return stream_builder(text)
+        return _LegacyLLMStreamOutcome(decision=decision, stream=stream_builder(text))
 
     blocked = blocked_value(decision)
     if blocked is not None:
-        return stream_builder(blocked)
+        return _LegacyLLMStreamOutcome(decision=decision, stream=stream_builder(blocked))
 
-    return _replay_legacy_llm_chunks(chunks)
+    return _LegacyLLMStreamOutcome(
+        decision=decision,
+        stream=_replay_legacy_llm_chunks(chunks),
+    )
 
 
 def _replay_legacy_llm_chunks(chunks: list[Any]) -> Generator[Any, None, None]:
@@ -1030,6 +1084,114 @@ def build_synthetic_llm_stream_chunk(text: str | None) -> Any:
 
 def _default_stream_result_builder(text: str | None) -> Generator[Any, None, None]:
     yield build_synthetic_llm_stream_chunk(text)
+
+
+def supports_dify_thought_loopback(prompt_messages: Any) -> bool:
+    if not isinstance(prompt_messages, list) or not prompt_messages:
+        return False
+    if all(isinstance(message, dict) for message in prompt_messages):
+        return True
+    if any(isinstance(message, dict) for message in prompt_messages):
+        return False
+    reference = prompt_messages[-1]
+    return _build_native_dify_assistant_message(reference, "AgentGuard probe") is not None
+
+
+def build_dify_thought_loopback_prompt_messages(
+    prompt_messages: Any,
+    aligned_thought: str,
+) -> list[Any] | None:
+    if not isinstance(prompt_messages, list):
+        return None
+    thought = str(aligned_thought or "").strip()
+    if not thought:
+        return None
+    if all(isinstance(message, dict) for message in prompt_messages):
+        updated = copy.deepcopy(prompt_messages)
+        updated.append({"role": "assistant", "content": thought})
+        return updated
+    if not prompt_messages or any(isinstance(message, dict) for message in prompt_messages):
+        return None
+    assistant_message = _build_native_dify_assistant_message(prompt_messages[-1], thought)
+    if assistant_message is None:
+        return None
+    return list(prompt_messages) + [assistant_message]
+
+
+def loopback_dify_llm_call_args_kwargs(
+    *,
+    decision: GuardDecision,
+    call: DifyLegacyLLMCall,
+    arg_names: tuple[str, ...],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> tuple[tuple[Any, ...], dict[str, Any], dict[str, Any]]:
+    aligned_thought = _loopback_aligned_thought(decision)
+    if aligned_thought is None:
+        raise AdapterError("AgentGuard Dify LLM loopback requires aligned thought text")
+    rebuilt_prompt_messages = build_dify_thought_loopback_prompt_messages(
+        call.prompt_messages,
+        aligned_thought,
+    )
+    if rebuilt_prompt_messages is None:
+        raise AdapterError("AgentGuard Dify LLM loopback could not rebuild prompt messages")
+    current_args, current_kwargs = replace_named_argument(
+        args,
+        kwargs,
+        arg_names,
+        "prompt_messages",
+        rebuilt_prompt_messages,
+    )
+    return current_args, current_kwargs, loopback_metadata_from_decision(decision)
+
+
+def loopback_metadata_from_decision(decision: GuardDecision) -> dict[str, Any]:
+    protocol = str((decision.metadata or {}).get("protocol") or "").strip().lower()
+    if protocol == "thought_alignment_v1":
+        return {"thought_alignment_attempt": 1}
+    return {}
+
+
+def _loopback_aligned_thought(decision: GuardDecision) -> str | None:
+    payload = decision_payload(decision)
+    if isinstance(payload, dict):
+        for key in ("agentguard_loopback_thought", "aligned_thought", "thought", "output"):
+            value = optional_text(payload.get(key))
+            if value:
+                return value
+        return None
+    if payload is None:
+        return None
+    text = str(payload).strip()
+    return text or None
+
+
+def _build_native_dify_assistant_message(reference: Any, aligned_thought: str) -> Any | None:
+    try:
+        updated = copy.copy(reference)
+    except Exception:
+        updated = None
+    if updated is not None and _set_optional_attr(updated, "content", aligned_thought):
+        _set_optional_attr(updated, "role", "assistant")
+        return updated
+    cls = type(reference)
+    for kwargs in (
+        {"role": "assistant", "content": aligned_thought},
+        {"content": aligned_thought},
+    ):
+        try:
+            return cls(**kwargs)
+        except Exception:
+            continue
+    return None
+
+
+def _set_optional_attr(value: Any, attr: str, content: Any) -> bool:
+    try:
+        setattr(value, attr, content)
+        return True
+    except Exception:
+        return False
 
 
 class DifyLegacyLLMNormalizer:
@@ -1449,6 +1611,7 @@ __all__ = [
     "DifyRuntimeSpec",
     "ParsedLLMOutput",
     "app_allowed",
+    "build_dify_thought_loopback_prompt_messages",
     "catalog_fingerprint",
     "catalog_fingerprint_unchanged",
     "catalog_sync_process_allowed",
@@ -1471,6 +1634,8 @@ __all__ = [
     "on_dify_flask_app_ready",
     "optional_text",
     "parse_tagged_llm_output",
+    "loopback_dify_llm_call_args_kwargs",
+    "loopback_metadata_from_decision",
     "register_dify_agent",
     "register_dify_flask_app",
     "remember_catalog_fingerprint",
@@ -1479,5 +1644,6 @@ __all__ = [
     "runtime_account_email_from_metadata",
     "runtime_agent_registration",
     "runtime_auth_for_metadata",
+    "supports_dify_thought_loopback",
     "sync_tools_to_agentguard",
 ]
