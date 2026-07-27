@@ -248,7 +248,11 @@ class ConsoleState:
                 "labels": merged_labels,
                 "input_params": input_params or list(existing.get("input_params") or []),
                 "capabilities": _string_list(tool.get("capabilities") or existing.get("capabilities")),
-                "required_args": _string_list(tool.get("required_args") or input_params or existing.get("required_args")),
+                "required_args": (
+                    _string_list(tool.get("required_args"))
+                    if "required_args" in tool
+                    else _string_list(input_params or existing.get("required_args"))
+                ),
                 "schema": dict(tool.get("schema") or existing.get("schema") or {}),
                 "metadata": dict(tool.get("metadata") or existing.get("metadata") or {}),
             }
@@ -305,7 +309,11 @@ class ConsoleState:
                     "labels": labels,
                     "input_params": input_params,
                     "capabilities": _string_list(tool.get("capabilities") or labels.get("tags")),
-                    "required_args": _string_list(tool.get("required_args") or input_params),
+                    "required_args": (
+                        _string_list(tool.get("required_args"))
+                        if "required_args" in tool
+                        else list(input_params)
+                    ),
                     "schema": dict(tool.get("schema") or {}),
                     "metadata": dict(tool.get("metadata") or {}),
                 }

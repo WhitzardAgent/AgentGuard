@@ -772,6 +772,23 @@ def _tool_schema(tool: Any) -> dict[str, Any]:
     return {}
 
 
+def _schema_property_names(schema: dict[str, Any]) -> list[str]:
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        return []
+    return [str(name) for name in properties if str(name).strip()]
+
+
+def _derived_tool_schema(input_params: list[str], required_args: list[str]) -> dict[str, Any]:
+    if not input_params:
+        return {}
+    return {
+        "type": "object",
+        "properties": {name: {} for name in input_params},
+        "required": list(required_args),
+    }
+
+
 def _tool_required_args(tool: Any) -> list[str]:
     schema = _tool_schema(tool)
     required = schema.get("required")
@@ -1226,6 +1243,9 @@ def _catalog_tool_from_config(app: Any, tool_config: dict[str, Any]) -> dict[str
     if not tool_name:
         return None
     runtime = _tool_runtime_from_config(app, tool_config)
+    runtime_schema = _tool_schema(runtime) if runtime is not None else {}
+    input_params = _schema_property_names(runtime_schema) or _config_input_params(tool_config)
+    required_args = _tool_required_args(runtime) if runtime is not None else _config_required_args(tool_config)
     provider_id = _optional_text(tool_config.get("provider_id"))
     provider_type = _optional_text(tool_config.get("provider_type"))
     label = _optional_text(tool_config.get("tool_label"))
@@ -1236,7 +1256,9 @@ def _catalog_tool_from_config(app: Any, tool_config: dict[str, Any]) -> dict[str
     return {
         "name": tool_name,
         "description": _tool_description(runtime) if runtime is not None else label or tool_name,
-        "input_params": _tool_required_args(runtime) if runtime is not None else _config_required_args(tool_config),
+        "input_params": input_params,
+        "required_args": required_args,
+        "schema": runtime_schema or _derived_tool_schema(input_params, required_args),
         "capabilities": tags,
         "labels": {
             "boundary": "internal",
@@ -1251,6 +1273,13 @@ def _catalog_tool_from_config(app: Any, tool_config: dict[str, Any]) -> dict[str
             "tool_label": label,
         },
     }
+
+
+def _config_input_params(tool_config: dict[str, Any]) -> list[str]:
+    params = tool_config.get("tool_parameters")
+    if not isinstance(params, dict):
+        return []
+    return [str(key) for key, value in params.items() if _config_param_accepts_runtime_input(value)]
 
 
 def _tool_runtime_from_config(app: Any, tool_config: dict[str, Any]) -> Any | None:
@@ -1272,7 +1301,27 @@ def _config_required_args(tool_config: dict[str, Any]) -> list[str]:
     params = tool_config.get("tool_parameters")
     if not isinstance(params, dict):
         return []
-    return [str(key) for key, value in params.items() if value is None]
+    return [str(key) for key, value in params.items() if _config_param_is_required(value)]
+
+
+def _config_param_accepts_runtime_input(value: Any) -> bool:
+    if value is None:
+        return True
+    if not isinstance(value, dict):
+        return False
+    value_type = str(value.get("type") or "").strip()
+    if value.get("required") is True or value_type in {"variable", "mixed"}:
+        return True
+    return value.get("value") is None and "value" in value
+
+
+def _config_param_is_required(value: Any) -> bool:
+    if value is None:
+        return True
+    if not isinstance(value, dict):
+        return False
+    value_type = str(value.get("type") or "").strip()
+    return value.get("required") is True or value_type in {"variable", "mixed"}
 
 
 def _sync_tools_to_agentguard(app: Any, tools: list[dict[str, Any]]) -> dict[str, Any] | None:

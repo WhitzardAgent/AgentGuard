@@ -1609,6 +1609,47 @@ def test_workflow_catalog_sync_dedupes_same_tool_name_by_agent(monkeypatch):
     assert by_name["weekday"]["metadata"]["workflow_node_ids"] == ["tool-node-1", "tool-node-2"]
 
 
+def test_workflow_catalog_sync_includes_nested_legacy_agent_params(monkeypatch):
+    fake = _install_fake_workflow_catalog_modules(monkeypatch)
+    fake.workflow.graph["nodes"][1]["data"]["agent_parameters"]["tools"]["value"].append(
+        {
+            "provider_name": "enterprise",
+            "type": "builtin",
+            "tool_name": "queryEnterpriseMaterials",
+            "parameters": {
+                "company_name": {"auto": 1, "value": None},
+                "credit_code": {"auto": 1, "value": None},
+                "project_name": {"auto": 1, "value": None},
+                "policy_id": {"auto": 1, "value": None},
+                "fixed_scope": {"value": "published"},
+            },
+            "extra": {"description": "Query enterprise materials"},
+        }
+    )
+    dify_adapter = _fresh_adapter(monkeypatch)
+
+    tools = dify_adapter._workflow_catalog_tools(fake.app, fake.workflow)
+    by_name = {tool["name"]: tool for tool in tools}
+
+    assert by_name["queryEnterpriseMaterials"]["input_params"] == [
+        "company_name",
+        "credit_code",
+        "project_name",
+        "policy_id",
+    ]
+    assert by_name["queryEnterpriseMaterials"]["required_args"] == []
+    assert by_name["queryEnterpriseMaterials"]["schema"] == {
+        "type": "object",
+        "properties": {
+            "company_name": {},
+            "credit_code": {},
+            "project_name": {},
+            "policy_id": {},
+        },
+        "required": [],
+    }
+
+
 def test_workflow_catalog_sync_uses_registered_app_context(monkeypatch):
     dify_adapter = _fresh_adapter(monkeypatch)
     calls = []

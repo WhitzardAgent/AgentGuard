@@ -50,6 +50,7 @@ If you prefer to enable it directly in `config/plugins.json`, add `thought_align
             "model": "$THOUGHT_ALIGNER_MODEL"
           },
           "kwargs": {
+            "implementation": "remote",
             "timeout_s": 30,
             "failure_mode": "allow",
             "max_history_items": 8,
@@ -103,10 +104,28 @@ guard.context.metadata["instruction"] = user_instruction
 
 Relevant plugin options:
 
+- `implementation`: `remote` by default. Set `mock` to bypass the real Thought-Aligner endpoint during end-to-end tests. Shortcut values `mock_rewrite` and `mock_passthrough` are also accepted.
+- `mock_mode`: only used when `implementation` is `mock`. `rewrite` returns a mock aligned thought and exercises the client loopback path; `passthrough` returns the original thought so the plugin directly allows the turn.
+- `mock_reply`: optional fixed aligned-thought text returned by the mock implementation in `rewrite` mode. If omitted, the plugin appends a visible mock marker to the original thought.
 - `timeout_s`: Thought-Aligner endpoint timeout; default `30` seconds.
 - `failure_mode`: `deny` by default, which withholds the first action if an attempted alignment fails. `allow` preserves availability but releases the original response after a model failure.
 - `max_history_items`: maximum completed thought/observation pairs; default `8`.
 - `max_instruction_chars`, `max_thought_chars`, `max_observation_chars`: per-field bounds before the external model call.
+
+For a live Dify run without a reachable remote Thought-Aligner server, switch the plugin to mock mode:
+
+```json
+{
+  "name": "thought_aligner",
+  "kwargs": {
+    "implementation": "mock",
+    "mock_mode": "rewrite",
+    "mock_reply": "First confirm the minimum required scope, then regenerate the action."
+  }
+}
+```
+
+To test the direct-pass path instead, keep `implementation: "mock"` and change `mock_mode` to `passthrough`.
 
 ## Supported input and output forms
 

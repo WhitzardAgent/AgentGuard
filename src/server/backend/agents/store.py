@@ -1239,7 +1239,10 @@ def _agent_tool_from_payload(agent_id: str, tool: dict[str, Any]) -> AgentToolRe
         "tags": [str(tag) for tag in (labels.get("tags") or []) if str(tag).strip()],
     }
     input_params = _string_list(tool.get("input_params"))
-    required_args = _string_list(tool.get("required_args") or input_params)
+    if "required_args" in tool:
+        required_args = _string_list(tool.get("required_args"))
+    else:
+        required_args = list(input_params)
     capabilities = _string_list(tool.get("capabilities") or normalized_labels.get("tags"))
     schema = tool.get("schema") if isinstance(tool.get("schema"), dict) else {}
     metadata = tool.get("metadata") if isinstance(tool.get("metadata"), dict) else {}

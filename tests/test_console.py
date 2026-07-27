@@ -352,6 +352,35 @@ def test_sync_tools_replaces_console_catalog_for_agent():
     assert scoped[0]["labels"]["tags"] == ["read_only"]
 
 
+def test_sync_tools_preserves_explicit_empty_required_args():
+    con = _console()
+
+    result = con.sync_tools(
+        {"agent_id": "live-agent"},
+        [
+            {
+                "name": "queryEnterpriseInfo",
+                "input_params": ["company_name", "credit_code"],
+                "required_args": [],
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "company_name": {},
+                        "credit_code": {},
+                    },
+                    "required": [],
+                },
+            }
+        ],
+    )
+
+    assert result is not None
+    scoped = con.tools("live-agent")
+    assert scoped[0]["input_params"] == ["company_name", "credit_code"]
+    assert scoped[0]["required_args"] == []
+    assert scoped[0]["schema"]["required"] == []
+
+
 def test_sync_tools_scopes_dify_catalog_by_external_email():
     con = _console()
     con.sync_tools(

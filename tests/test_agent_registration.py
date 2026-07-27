@@ -823,6 +823,41 @@ def test_sync_agent_tools_persists_and_replaces_catalog():
     assert updated.to_console_dict()["labels"]["tags"] == ["calendar"]
 
 
+def test_sync_agent_tools_preserves_explicit_empty_required_args():
+    db = FakeDB()
+    store = AgentStore(db)
+    agent = store.register_agent(
+        provider="dify",
+        external_agent_id="app-1",
+        agent_type="workflow",
+        public_key_jwk=PUBLIC_JWK,
+    ).agent
+
+    store.sync_agent_tools(
+        agent.agent_id,
+        [
+            {
+                "name": "queryEnterpriseInfo",
+                "input_params": ["company_name", "credit_code"],
+                "required_args": [],
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "company_name": {},
+                        "credit_code": {},
+                    },
+                    "required": [],
+                },
+            }
+        ],
+    )
+
+    tool = store.list_agent_tools(agent_id=agent.agent_id)[0].to_console_dict()
+    assert tool["input_params"] == ["company_name", "credit_code"]
+    assert tool["required_args"] == []
+    assert tool["schema"]["required"] == []
+
+
 def test_provider_agent_sync_deactivates_missing_dify_agents():
     db = FakeDB()
     db.user_external_accounts.append(

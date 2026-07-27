@@ -50,6 +50,7 @@ export AGENTGUARD_SERVER_PLUGIN_CONFIG="./config/plugins.thought-aligner.example
             "model": "$THOUGHT_ALIGNER_MODEL"
           },
           "kwargs": {
+            "implementation": "remote",
             "timeout_s": 30,
             "failure_mode": "allow",
             "max_history_items": 8,
@@ -103,10 +104,28 @@ guard.context.metadata["instruction"] = user_instruction
 
 主要 plugin 参数：
 
+- `implementation`：默认 `remote`。在端到端联调时，如果真实 Thought-Aligner 端点不可用，可以设为 `mock` 跳过远端调用。也支持简写 `mock_rewrite` 和 `mock_passthrough`。
+- `mock_mode`：仅在 `implementation=mock` 时生效。`rewrite` 会返回一段 mock 安全 Thought，并触发 client 回跳；`passthrough` 会原样返回 Thought，让 plugin 直接放行该轮。
+- `mock_reply`：可选。`rewrite` 模式下固定返回这段 mock 安全 Thought；如果不填，会在原 Thought 后追加一个明显的 mock 标记。
 - `timeout_s`：Thought-Aligner 端点超时，默认 `30` 秒。
 - `failure_mode`：默认 `deny`；已经进入对齐的请求如果模型调用失败，会扣住第一次 Action。设置为 `allow` 可优先保证可用性，但模型失败后会释放原响应。
 - `max_history_items`：最多传入的已完成 Thought/Observation 对，默认 `8`。
 - `max_instruction_chars`、`max_thought_chars`、`max_observation_chars`：发送给外部模型前各字段的长度上限。
+
+如果你要在真实 Dify 运行链路里观察 Thought-Aligner 行为，但远端服务暂时不可用，可以先切到 mock：
+
+```json
+{
+  "name": "thought_aligner",
+  "kwargs": {
+    "implementation": "mock",
+    "mock_mode": "rewrite",
+    "mock_reply": "先确认最小必要访问范围，再重新生成后续动作。"
+  }
+}
+```
+
+如果你想测试“直接放行”的分支，保留 `implementation: "mock"`，把 `mock_mode` 改成 `passthrough` 即可。
 
 ## 支持的输入与输出形式
 

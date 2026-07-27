@@ -557,6 +557,55 @@ def test_agent_chat_catalog_sync_skips_unchanged_tools(monkeypatch):
     ]
 
 
+def test_agent_chat_catalog_includes_optional_runtime_schema_params(monkeypatch):
+    adapter = _fresh_adapter(monkeypatch)
+
+    class FakeRuntime:
+        def __init__(self):
+            self.entity = types.SimpleNamespace(
+                identity=types.SimpleNamespace(name="queryEnterpriseInfo", provider="builtin"),
+                description=types.SimpleNamespace(llm="Query enterprise info."),
+            )
+
+        def get_llm_parameters_json_schema(self):
+            return {
+                "type": "object",
+                "properties": {
+                    "company_name": {"type": "string"},
+                    "credit_code": {"type": "string"},
+                },
+                "required": [],
+            }
+
+    monkeypatch.setattr(adapter, "_tool_runtime_from_config", lambda app, tool_config: FakeRuntime())
+
+    payload = adapter._catalog_tool_from_config(
+        types.SimpleNamespace(id="app-1", tenant_id="tenant-1"),
+        {
+            "enabled": True,
+            "provider_id": "builtin",
+            "provider_type": "builtin",
+            "tool_name": "queryEnterpriseInfo",
+            "tool_parameters": {
+                "company_name": None,
+                "credit_code": None,
+            },
+        },
+    )
+
+    assert payload is not None
+    assert payload["input_params"] == ["company_name", "credit_code"]
+    assert payload["required_args"] == []
+    assert payload["schema"] == {
+        "type": "object",
+        "properties": {
+            "company_name": {"type": "string"},
+            "credit_code": {"type": "string"},
+        },
+        "required": [],
+    }
+
+
 def test_agent_chat_catalog_sync_refreshes_agent_metadata_when_tools_unchanged(monkeypatch):
     adapter = _fresh_adapter(monkeypatch)
     monkeypatch.setenv("AGENTGUARD_SERVER_URL", "http://agentguard.test")

@@ -15,6 +15,7 @@
             "model": "$THOUGHT_ALIGNER_MODEL"
           },
           "kwargs": {
+            "implementation": "remote",
             "timeout_s": 30,
             "failure_mode": "allow",
             "max_history_items": 8,

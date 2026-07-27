@@ -2639,7 +2639,8 @@ def _catalog_tool_from_workflow_tool_node(node: dict[str, Any], data: dict[str, 
         node_id=node_id,
         node_type="tool",
         node_title=_optional_text(data.get("title")),
-        input_params=_config_required_args(parameters),
+        input_params=_config_input_params(parameters),
+        required_args=_config_required_args(parameters),
         metadata={
             "source": "dify_workflow_catalog",
             "workflow_node_kind": "tool",
@@ -2694,7 +2695,8 @@ def _catalog_tool_from_legacy_agent_tool(
         node_id=_optional_text(node.get("id")),
         node_type="agent",
         node_title=_optional_text(data.get("title")),
-        input_params=_config_required_args(merged_params),
+        input_params=_config_input_params(merged_params),
+        required_args=_config_required_args(merged_params),
         metadata={
             "source": "dify_workflow_catalog",
             "workflow_node_kind": "legacy_agent",
@@ -2714,6 +2716,7 @@ def _catalog_tool_payload(
     node_type: str | None,
     node_title: str | None,
     input_params: list[str],
+    required_args: list[str],
     metadata: dict[str, Any],
 ) -> dict[str, Any]:
     tags = ["dify_tool", "dify_workflow_tool"]
@@ -2733,6 +2736,8 @@ def _catalog_tool_payload(
         "name": name,
         "description": description or name,
         "input_params": list(input_params),
+        "required_args": list(required_args),
+        "schema": _catalog_tool_schema(input_params, required_args),
         "capabilities": tags,
         "labels": {
             "boundary": "internal",
@@ -2769,6 +2774,17 @@ def _dedupe_catalog_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if param not in existing_params:
                 existing_params.append(param)
         existing["input_params"] = existing_params
+        existing_required = list(existing.get("required_args") or [])
+        for param in tool.get("required_args") or []:
+            if param not in existing_required:
+                existing_required.append(param)
+        existing["required_args"] = existing_required
+        existing["schema"] = _merge_catalog_tool_schema(
+            existing.get("schema"),
+            tool.get("schema"),
+            existing_params,
+            existing_required,
+        )
     return list(by_name.values())
 
 
@@ -2890,19 +2906,82 @@ def _nested_value(value: dict[str, Any], path: tuple[str, ...]) -> Any:
     return current
 
 
+def _config_input_params(config: Any) -> list[str]:
+    if not isinstance(config, dict):
+        return []
+    input_params: list[str] = []
+    for key, value in config.items():
+        if _config_param_accepts_runtime_input(value):
+            input_params.append(str(key))
+    return input_params
+
+
 def _config_required_args(config: Any) -> list[str]:
     if not isinstance(config, dict):
         return []
     required: list[str] = []
     for key, value in config.items():
-        if value is None:
+        if _config_param_is_required(value):
             required.append(str(key))
-            continue
-        if isinstance(value, dict):
-            value_type = str(value.get("type") or "").strip()
-            if value.get("required") is True or value_type in {"variable", "mixed"}:
-                required.append(str(key))
     return required
+
+
+def _config_param_accepts_runtime_input(value: Any) -> bool:
+    if value is None:
+        return True
+    if not isinstance(value, dict):
+        return False
+    value_type = str(value.get("type") or "").strip()
+    if value.get("required") is True or value_type in {"variable", "mixed"}:
+        return True
+    return value.get("value") is None and "value" in value
+
+
+def _config_param_is_required(value: Any) -> bool:
+    if value is None:
+        return True
+    if not isinstance(value, dict):
+        return False
+    value_type = str(value.get("type") or "").strip()
+    return value.get("required") is True or value_type in {"variable", "mixed"}
+
+
+def _catalog_tool_schema(input_params: list[str], required_args: list[str]) -> dict[str, Any]:
+    if not input_params:
+        return {}
+    return {
+        "type": "object",
+        "properties": {name: {} for name in input_params},
+        "required": list(required_args),
+    }
+
+
+def _merge_catalog_tool_schema(
+    existing_schema: Any,
+    incoming_schema: Any,
+    input_params: list[str],
+    required_args: list[str],
+) -> dict[str, Any]:
+    properties: dict[str, Any] = {}
+    for schema in (existing_schema, incoming_schema):
+        if not isinstance(schema, dict):
+            continue
+        current_properties = schema.get("properties")
+        if isinstance(current_properties, dict):
+            for name, spec in current_properties.items():
+                text_name = str(name)
+                if not text_name.strip():
+                    continue
+                properties[text_name] = spec if isinstance(spec, dict) else {}
+    for name in input_params:
+        properties.setdefault(name, {})
+    if not properties:
+        return {}
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": list(required_args),
+    }
 
 
 def _catalog_session_key(app_id: str, workflow_id: str, version: str | None = None) -> str:

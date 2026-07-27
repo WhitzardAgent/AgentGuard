@@ -105,6 +105,12 @@ class ThoughtAlignerPlugin(BasePlugin):
     def _aligner(self) -> Any:
         if self._aligner_override is not None:
             return self._aligner_override
+        implementation, mock_mode = _aligner_implementation_and_mock_mode(self)
+        if implementation == "mock":
+            return _MockThoughtAligner(
+                mock_mode=mock_mode,
+                mock_reply=getattr(self, "mock_reply", None),
+            )
         return ThoughtAlignerClient(
             base_url=getattr(self, "base_url", None),
             api_key=getattr(self, "api_key", None),
@@ -142,6 +148,45 @@ def _as_float(value: Any, default: float) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+class _MockThoughtAligner:
+    def __init__(self, *, mock_mode: str, mock_reply: Any) -> None:
+        self.mock_mode = mock_mode
+        self.mock_reply = mock_reply
+
+    def align(self, _instruction: str, thought: str) -> str:
+        if self.mock_mode == "passthrough":
+            return thought
+        reply = str(self.mock_reply or "").strip()
+        if reply:
+            return reply
+        base = str(thought or "").strip()
+        if not base:
+            return "Mock aligned thought"
+        return f"{base} [mock aligned]"
+
+
+def _aligner_implementation_and_mock_mode(plugin: ThoughtAlignerPlugin) -> tuple[str, str]:
+    raw = str(getattr(plugin, "implementation", "remote") or "remote").strip().lower()
+    if raw in {"remote", "real"}:
+        return "remote", ""
+    if raw in {"mock", "test"}:
+        return "mock", _mock_mode_of(getattr(plugin, "mock_mode", "rewrite"))
+    if raw in {"mock_rewrite", "mock_modify", "mock_aligned"}:
+        return "mock", "rewrite"
+    if raw in {"mock_passthrough", "mock_allow", "mock_unchanged"}:
+        return "mock", "passthrough"
+    raise ThoughtAlignmentError(f"Unsupported Thought-Aligner implementation: {raw}")
+
+
+def _mock_mode_of(value: Any) -> str:
+    raw = str(value or "rewrite").strip().lower()
+    if raw in {"rewrite", "modify", "aligned"}:
+        return "rewrite"
+    if raw in {"passthrough", "allow", "unchanged"}:
+        return "passthrough"
+    raise ThoughtAlignmentError(f"Unsupported Thought-Aligner mock mode: {raw}")
 
 
 __all__ = ["ThoughtAlignerPlugin"]
