@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 430" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 624" role="img" aria-labelledby="title desc">
   <title id="title">AgentGuard contributors</title>
-  <desc id="desc">Contributor grid for AgentGuard with five columns per row.</desc>
+  <desc id="desc">Contributor grid for AgentGuard, ordered and arranged with up to five columns per row.</desc>
   <style>
     text { fill: #24292f; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; text-anchor: middle; }
     .name { font-size: 18px; font-weight: 600; }
@@ -52,6 +52,18 @@
       <text class="role" x="0" y="82">Master Student</text>
       <text class="school" x="0" y="104">Fudan University</text>
     </g>
+    <g id="card-ba">
+      <use href="#avatar" x="0" y="0" />
+      <text class="name" x="0" y="58">Baichao An</text>
+      <text class="role" x="0" y="82">Master Student</text>
+      <text class="school" x="0" y="104">Fudan University</text>
+    </g>
+    <g id="card-cj">
+      <use href="#avatar" x="0" y="0" />
+      <text class="name" x="0" y="58">Changyue Jiang</text>
+      <text class="role" x="0" y="82">PhD Student</text>
+      <text class="school" x="0" y="104">Fudan University</text>
+    </g>
     <g id="card-zs">
       <use href="#avatar" x="0" y="0" />
       <text class="name" x="0" y="58">Zhuoxiang Shen</text>
@@ -79,7 +91,10 @@
   <g transform="translate(1080 82)"><use href="#card-jh" /></g>
 
   <g transform="translate(120 276)"><use href="#card-kw" /></g>
-  <g transform="translate(360 276)"><a href="https://zhxshen.github.io/"><use href="#card-zs" /></a></g>
-  <g transform="translate(600 276)"><a href="https://ravensanstete.github.io/"><use href="#card-xp" /></a></g>
-  <g transform="translate(840 276)"><a href="https://ghong.site/"><use href="#card-gh" /></a></g>
+  <g transform="translate(360 276)"><use href="#card-ba" /></g>
+  <g transform="translate(600 276)"><use href="#card-cj" /></g>
+  <g transform="translate(840 276)"><a href="https://zhxshen.github.io/"><use href="#card-zs" /></a></g>
+  <g transform="translate(1080 276)"><a href="https://ravensanstete.github.io/"><use href="#card-xp" /></a></g>
+
+  <g transform="translate(120 470)"><a href="https://ghong.site/"><use href="#card-gh" /></a></g>
 </svg>

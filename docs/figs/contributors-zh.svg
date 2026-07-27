@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 430" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 624" role="img" aria-labelledby="title desc">
   <title id="title">AgentGuard 贡献者</title>
-  <desc id="desc">AgentGuard 贡献者展示图，每行五列。</desc>
+  <desc id="desc">AgentGuard 贡献者展示图，按顺序排列，最多每行五列。</desc>
   <style>
     text { fill: #24292f; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; text-anchor: middle; }
     .name { font-size: 18px; font-weight: 600; }
@@ -52,6 +52,18 @@
       <text class="role" x="0" y="82">硕士生</text>
       <text class="school" x="0" y="104">复旦大学</text>
     </g>
+    <g id="card-abc">
+      <use href="#avatar" x="0" y="0" />
+      <text class="name" x="0" y="58">安柏超</text>
+      <text class="role" x="0" y="82">硕士生</text>
+      <text class="school" x="0" y="104">复旦大学</text>
+    </g>
+    <g id="card-jcy">
+      <use href="#avatar" x="0" y="0" />
+      <text class="name" x="0" y="58">蒋昌跃</text>
+      <text class="role" x="0" y="82">博士生</text>
+      <text class="school" x="0" y="104">复旦大学</text>
+    </g>
     <g id="card-szx">
       <use href="#avatar" x="0" y="0" />
       <text class="name" x="0" y="58">申卓祥</text>
@@ -79,7 +91,10 @@
   <g transform="translate(1080 82)"><use href="#card-hjr" /></g>
 
   <g transform="translate(120 276)"><use href="#card-wkf" /></g>
-  <g transform="translate(360 276)"><a href="https://zhxshen.github.io/"><use href="#card-szx" /></a></g>
-  <g transform="translate(600 276)"><a href="https://ravensanstete.github.io/"><use href="#card-pxd" /></a></g>
-  <g transform="translate(840 276)"><a href="https://ghong.site/"><use href="#card-hg" /></a></g>
+  <g transform="translate(360 276)"><use href="#card-abc" /></g>
+  <g transform="translate(600 276)"><use href="#card-jcy" /></g>
+  <g transform="translate(840 276)"><a href="https://zhxshen.github.io/"><use href="#card-szx" /></a></g>
+  <g transform="translate(1080 276)"><a href="https://ravensanstete.github.io/"><use href="#card-pxd" /></a></g>
+
+  <g transform="translate(120 470)"><a href="https://ghong.site/"><use href="#card-hg" /></a></g>
 </svg>
