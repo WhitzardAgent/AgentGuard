@@ -200,9 +200,7 @@
         const name = pluginNameFromSpec(spec);
         return !name || !manageableNames.has(name);
       });
-      if (normalized.client.length || normalized.server.length) {
-        phases[phase] = normalized;
-      }
+      phases[phase] = normalized;
     });
 
     const expandedNames = expandPluginSelection(selectedOptions.map((option) => option.name));

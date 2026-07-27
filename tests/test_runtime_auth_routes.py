@@ -14,6 +14,17 @@ from backend.runtime.manager import RuntimeManager
 
 
 class FakeBroker:
+    def authenticate_runtime_request(self, **kwargs):
+        return AuthContext(
+            session_id="ags_dify_auth",
+            agent_id="dify-agent-chat:app-auth",
+            user_id="7",
+            token_jti="rtok-auth",
+            dpop_jkt="jkt-auth",
+            external_provider="dify",
+            external_session_id="conversation-auth",
+        )
+
     def create_session(self, **kwargs):
         return SimpleNamespace(
             session=RuntimeSession(
@@ -542,3 +553,49 @@ def test_dpop_session_register_preserves_body_client_session_key(monkeypatch):
     payload = response.json()
     assert payload["session"]["client_key"] == "sk-client-config"
     assert payload["session"]["client_plugin_list_url"] == "http://host.docker.internal:38181/v1/client/plugins/list"
+
+
+def test_runtime_plugin_config_route_returns_effective_agent_config(monkeypatch):
+    from backend.api import client_router
+
+    monkeypatch.setattr("backend.auth.dependencies.get_dify_auth_broker", lambda: FakeLangChainBroker())
+    original_manager = client_router._manager
+    client_router._manager = RuntimeManager()
+    client_router._manager.set_agent_plugin_config(
+        "dify-agent-chat:app-auth",
+        {
+            "phases": {
+                "llm_before": {"client": [], "server": []},
+                "llm_after": {"client": [], "server": []},
+                "tool_before": {"client": [], "server": []},
+                "tool_after": {"client": [], "server": []},
+                "global": {"client": [], "server": []},
+            }
+        },
+        client_config={
+            "phases": {
+                "llm_before": {"client": ["modify_input_demo"], "server": []},
+                "llm_after": {"client": ["modify_output_demo"], "server": []},
+                "tool_before": {"client": [], "server": []},
+                "tool_after": {"client": [], "server": []},
+                "global": {"client": [], "server": []},
+            }
+        },
+    )
+    client = TestClient(create_app())
+    try:
+        response = client.get(
+            "/v1/server/session/plugin-config",
+            headers={"Authorization": "DPoP token", "DPoP": "proof"},
+        )
+    finally:
+        client_router._manager = original_manager
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert payload["agent_id"] == "dify-agent-chat:app-auth"
+    assert payload["session_id"] == "ags_dify_auth"
+    assert payload["config_source"] == "agent_override"
+    assert payload["plugin_config"]["phases"]["llm_before"]["client"] == ["modify_input_demo"]
+    assert payload["plugin_config"]["phases"]["llm_after"]["client"] == ["modify_output_demo"]

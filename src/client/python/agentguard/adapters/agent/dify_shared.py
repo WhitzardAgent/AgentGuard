@@ -19,6 +19,7 @@ from agentguard.adapters.agent.normalization import (
     denormalize_llm_output_payload,
     denormalize_tool_result_payload,
 )
+from agentguard.plugins.registry import registered_plugins
 from agentguard.schemas.context import RuntimeContext
 from agentguard.schemas.decisions import DecisionType, GuardDecision
 from agentguard.u_guard.agent_keys import load_or_create_agent_key
@@ -34,6 +35,15 @@ _LOGGER = logging.getLogger(__name__)
 _dify_flask_app: Any | None = None
 _app_ready_callbacks: list[Callable[[Any], None]] = []
 _app_registry_lock = threading.Lock()
+_EVENT_PHASE = {
+    "llm_input": "llm_before",
+    "llm_output": "llm_after",
+    "tool_invoke": "tool_before",
+    "tool_result": "tool_after",
+    "llm_thought": "llm_after",
+    "final_response": "llm_after",
+}
+_DEPRECATED_PLUGIN_NAMES = {"memory", "llm_thought", "final_response"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +127,7 @@ def register_dify_agent(
     name: str | None,
     description: str | None,
     metadata: dict[str, Any],
+    client_plugins: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     register = getattr(remote, "register_agent", None)
     if not callable(register):
@@ -140,11 +151,39 @@ def register_dify_agent(
         account_email=account_email,
         metadata=metadata,
     )
+    payload["client_plugins"] = list(client_plugins or [])
     registration = register(payload)
     if isinstance(registration, dict):
         registration = dict(registration)
         registration["agent_identity_key_id"] = key_id
     return registration
+
+
+def build_client_plugin_catalog() -> list[dict[str, Any]]:
+    payloads: list[dict[str, Any]] = []
+    for name, cls in sorted(registered_plugins().items()):
+        clean_name = optional_text(name)
+        if not clean_name or clean_name in _DEPRECATED_PLUGIN_NAMES:
+            continue
+        event_types = [
+            optional_text(getattr(event_type, "value", event_type))
+            for event_type in getattr(cls, "event_types", [])
+        ]
+        normalized_event_types = [item for item in event_types if item]
+        phases: list[str] = []
+        for event_type in normalized_event_types:
+            phase = _EVENT_PHASE.get(event_type)
+            if phase and phase not in phases:
+                phases.append(phase)
+        payloads.append(
+            {
+                "name": clean_name,
+                "description": str(getattr(cls, "description", "") or ""),
+                "event_types": normalized_event_types,
+                "phases": phases,
+            }
+        )
+    return payloads
 
 
 def dify_account_email_for_app(
@@ -381,12 +420,24 @@ def make_dify_guard(
     session_id = spec.session_id_from_metadata(metadata)
     agent_id = optional_text_fn(metadata.get("agentguard_agent_id")) or spec.fallback_agent_id(metadata)
     runtime_auth = runtime_auth_loader(metadata, agent_id, session_id)
+    effective_plugin_config = plugin_config_loader()
     if runtime_auth is not None:
         session_id = runtime_auth.session_id or session_id
         if runtime_auth.canonical_user_id:
             metadata["agentguard_user_id"] = runtime_auth.canonical_user_id
             metadata["user_id"] = runtime_auth.canonical_user_id
         metadata["agentguard_session_id"] = session_id
+        fetched_plugin_config = _fetch_runtime_plugin_config(
+            server_url=os.getenv("AGENTGUARD_SERVER_URL") or None,
+            api_key=os.getenv("AGENTGUARD_API_KEY") or None,
+            session_id=session_id,
+            agent_id=agent_id,
+            user_id=runtime_auth.canonical_user_id,
+            runtime_auth=runtime_auth,
+            log_label=spec.adapter_name,
+        )
+        if isinstance(fetched_plugin_config, dict):
+            effective_plugin_config = fetched_plugin_config
     guard = AgentGuard(
         session_id,
         user_id=runtime_auth.canonical_user_id if runtime_auth is not None else optional_text_fn(metadata.get("user_id")),
@@ -396,7 +447,7 @@ def make_dify_guard(
         api_key=os.getenv("AGENTGUARD_API_KEY") or None,
         environment=os.getenv("AGENTGUARD_ENVIRONMENT") or "dify",
         sandbox="noop",
-        plugin_config=plugin_config_loader(),
+        plugin_config=effective_plugin_config,
         session_token=runtime_auth.session_token if runtime_auth is not None else None,
         dpop_proof_factory=runtime_auth.proof if runtime_auth is not None else None,
         use_dpop_auth=runtime_auth is not None,
@@ -408,6 +459,44 @@ def make_dify_guard(
     if task_id_key and metadata.get(task_id_key):
         guard.context.task_id = str(metadata[task_id_key])
     return guard
+
+
+def _fetch_runtime_plugin_config(
+    *,
+    server_url: str | None,
+    api_key: str | None,
+    session_id: str,
+    agent_id: str,
+    user_id: str | None,
+    runtime_auth: Any,
+    log_label: str,
+) -> dict[str, Any] | None:
+    if not server_url or not getattr(runtime_auth, "session_token", None) or not callable(getattr(runtime_auth, "proof", None)):
+        return None
+    remote = RemoteGuardClient(
+        server_url,
+        api_key=api_key,
+        session_id=session_id,
+        agent_id=agent_id,
+        user_id=user_id,
+        session_token=runtime_auth.session_token,
+        dpop_proof_factory=runtime_auth.proof,
+        use_dpop_auth=True,
+        legacy_identity_headers=False,
+    )
+    try:
+        payload = remote.fetch_runtime_plugin_config()
+    except Exception as exc:
+        _LOGGER.warning(
+            "AgentGuard %s runtime plugin config fetch failed for agent_id=%s session_id=%s: %s",
+            log_label,
+            agent_id,
+            session_id,
+            exc,
+        )
+        return None
+    plugin_config = payload.get("plugin_config") if isinstance(payload, dict) else None
+    return plugin_config if isinstance(plugin_config, dict) else None
 
 
 def runtime_agent_registration(
@@ -750,6 +839,7 @@ def sync_tools_to_agentguard(
     register_agent_fn: Callable[..., dict[str, Any] | None],
     fingerprint_cache: dict[str, str],
     fingerprint_lock: threading.Lock,
+    client_plugins: list[dict[str, Any]] | None = None,
     env_float_fn: Callable[[str, float], float] = env_float,
 ) -> dict[str, Any] | None:
     agent_id = spec.external_agent_id_for_app(app_info.app_id)
@@ -782,6 +872,7 @@ def sync_tools_to_agentguard(
         name=app_info.name,
         description=app_info.description,
         metadata=metadata,
+        client_plugins=client_plugins,
     )
     if registration:
         registered_agent = registration.get("agent") or {}
@@ -946,12 +1037,12 @@ def run_dify_legacy_llm_call(
                 attempts += 1
                 continue
         if decision.decision_type == DecisionType.MODIFY_LLM_INPUT:
-            current_args, current_kwargs = replace_named_argument(
-                current_args,
-                current_kwargs,
-                arg_names,
-                "prompt_messages",
-                decision_payload(decision),
+            current_args, current_kwargs = modify_dify_llm_input_args_kwargs(
+                decision=decision,
+                call=call,
+                arg_names=arg_names,
+                args=current_args,
+                kwargs=current_kwargs,
             )
             call = DifyLegacyLLMCall.from_args_kwargs(current_args, current_kwargs)
         blocked = blocked_value(decision)
@@ -1033,6 +1124,7 @@ def _finalize_legacy_llm_stream(
     decision = guard_output(model, normalized_output, call, None, extra_metadata)
     stream_builder = stream_result_builder or _default_stream_result_builder
     output_template = _stream_loopback_output_template(chunks)
+    chunk_template = _stream_result_chunk_template(chunks)
 
     if decision.decision_type == DecisionType.MODIFY_LLM_OUTPUT:
         payload = decision_payload(decision)
@@ -1043,7 +1135,11 @@ def _finalize_legacy_llm_stream(
         )
         return _LegacyLLMStreamOutcome(
             decision=decision,
-            stream=stream_builder(text),
+            stream=_build_synthetic_stream_result(
+                text,
+                stream_builder=stream_builder,
+                chunk_template=chunk_template,
+            ),
             output_template=output_template,
         )
 
@@ -1051,7 +1147,11 @@ def _finalize_legacy_llm_stream(
     if blocked is not None:
         return _LegacyLLMStreamOutcome(
             decision=decision,
-            stream=stream_builder(blocked),
+            stream=_build_synthetic_stream_result(
+                blocked,
+                stream_builder=stream_builder,
+                chunk_template=chunk_template,
+            ),
             output_template=output_template,
         )
 
@@ -1086,8 +1186,30 @@ def _stream_result_text(
     return fallback
 
 
-def build_synthetic_llm_stream_chunk(text: str | None) -> Any:
+def _build_synthetic_stream_result(
+    text: str | None,
+    *,
+    stream_builder: StreamResultBuilder,
+    chunk_template: Any = None,
+) -> Generator[Any, None, None]:
+    if chunk_template is not None:
+        def synthetic() -> Generator[Any, None, None]:
+            yield build_synthetic_llm_stream_chunk(text, chunk_template=chunk_template)
+
+        return synthetic()
+    return stream_builder(text)
+
+
+def build_synthetic_llm_stream_chunk(
+    text: str | None,
+    *,
+    chunk_template: Any = None,
+) -> Any:
     content = text or ""
+    if chunk_template is not None:
+        updated = _clone_stream_chunk_template(chunk_template)
+        if _rewrite_synthetic_stream_chunk(updated, content):
+            return updated
     return SimpleNamespace(
         delta=SimpleNamespace(
             message=SimpleNamespace(content=content, tool_calls=[]),
@@ -1177,6 +1299,37 @@ def loopback_dify_llm_call_args_kwargs(
     return current_args, current_kwargs, loopback_metadata_from_decision(decision)
 
 
+def modify_dify_llm_input_args_kwargs(
+    *,
+    decision: GuardDecision,
+    call: DifyLegacyLLMCall,
+    arg_names: tuple[str, ...],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    payload = decision_payload(decision)
+    if isinstance(payload, list):
+        rewritten_prompt_messages = payload
+    else:
+        rewritten_content = _modify_llm_input_content(payload)
+        if rewritten_content is None:
+            raise AdapterError("AgentGuard Dify MODIFY_LLM_INPUT requires replacement message content")
+        rewritten_prompt_messages = rewrite_dify_prompt_messages(
+            call.prompt_messages,
+            rewritten_content,
+        )
+        if rewritten_prompt_messages is None:
+            raise AdapterError("AgentGuard Dify MODIFY_LLM_INPUT could not rewrite the last prompt message")
+    current_args, current_kwargs = replace_named_argument(
+        args,
+        kwargs,
+        arg_names,
+        "prompt_messages",
+        rewritten_prompt_messages,
+    )
+    return current_args, current_kwargs
+
+
 def loopback_metadata_from_decision(decision: GuardDecision) -> dict[str, Any]:
     protocol = str((decision.metadata or {}).get("protocol") or "").strip().lower()
     if protocol == "thought_alignment_v1":
@@ -1188,6 +1341,46 @@ def _loopback_aligned_thought(decision: GuardDecision) -> str | None:
     payload = decision_payload(decision)
     if isinstance(payload, dict):
         for key in ("agentguard_loopback_thought", "aligned_thought", "thought", "output"):
+            value = optional_text(payload.get(key))
+            if value:
+                return value
+        return None
+    if payload is None:
+        return None
+    text = str(payload).strip()
+    return text or None
+
+
+def rewrite_dify_prompt_messages(
+    prompt_messages: Any,
+    rewritten_content: str,
+) -> list[Any] | None:
+    if not isinstance(prompt_messages, list) or not prompt_messages:
+        return None
+    updated = copy.deepcopy(prompt_messages)
+    last_index = len(updated) - 1
+    last_message = updated[last_index]
+    if isinstance(last_message, dict):
+        patched = dict(last_message)
+        patched["content"] = rewritten_content
+        updated[last_index] = patched
+        return updated
+    if isinstance(last_message, str):
+        updated[last_index] = rewritten_content
+        return updated
+    try:
+        patched = copy.copy(last_message)
+    except Exception:
+        patched = last_message
+    if _set_optional_attr(patched, "content", rewritten_content):
+        updated[last_index] = patched
+        return updated
+    return None
+
+
+def _modify_llm_input_content(payload: Any) -> str | None:
+    if isinstance(payload, dict):
+        for key in ("content", "input", "text", "message", "output", "final_output", "value"):
             value = optional_text(payload.get(key))
             if value:
                 return value
@@ -1247,6 +1440,15 @@ def _stream_loopback_output_template(chunks: list[Any]) -> Any:
     return None
 
 
+def _stream_result_chunk_template(chunks: list[Any]) -> Any:
+    for chunk in reversed(chunks):
+        delta = get_attr_or_key(chunk, "delta")
+        message = get_attr_or_key(delta, "message")
+        if message is not None:
+            return chunk
+    return None
+
+
 def _normalize_loopback_message_fields(message: Any) -> None:
     if isinstance(message, dict):
         if "tool_calls" in message and message.get("tool_calls") is None:
@@ -1254,6 +1456,40 @@ def _normalize_loopback_message_fields(message: Any) -> None:
         return
     if hasattr(message, "tool_calls") and getattr(message, "tool_calls", None) is None:
         _set_optional_attr(message, "tool_calls", [])
+
+
+def _clone_stream_chunk_template(value: Any) -> Any:
+    try:
+        return copy.deepcopy(value)
+    except Exception:
+        try:
+            return copy.copy(value)
+        except Exception:
+            return value
+
+
+def _set_optional_key_or_attr(target: Any, key: str, value: Any) -> bool:
+    if isinstance(target, dict):
+        target[key] = value
+        return True
+    return _set_optional_attr(target, key, value)
+
+
+def _rewrite_synthetic_stream_chunk(chunk: Any, content: str) -> bool:
+    delta = get_attr_or_key(chunk, "delta")
+    if delta is None:
+        return False
+    message = get_attr_or_key(delta, "message")
+    if message is None:
+        return False
+    if not _set_optional_key_or_attr(message, "content", content):
+        return False
+    _set_optional_key_or_attr(message, "tool_calls", [])
+    _normalize_loopback_message_fields(message)
+    _set_optional_key_or_attr(delta, "message", message)
+    _set_optional_key_or_attr(delta, "usage", None)
+    _set_optional_key_or_attr(chunk, "delta", delta)
+    return True
 
 
 def _set_optional_attr(value: Any, attr: str, content: Any) -> bool:

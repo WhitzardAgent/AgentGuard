@@ -148,6 +148,66 @@ def test_python_client_resyncs_session_when_config_api_url_changes(monkeypatch):
         guard.close()
 
 
+def test_python_client_update_plugin_config_resyncs_remote_plugin_config(monkeypatch):
+    calls: list[dict] = []
+
+    def fake_start(self: ClientConfigAPIServer) -> str:
+        if self.port == 0:
+            self.port = 43123
+        return self.plugin_config_url
+
+    def fake_register(self: RemoteGuardClient, context):
+        payload = context.to_dict()
+        calls.append(payload)
+        return {"status": "ok", "session": payload}
+
+    monkeypatch.setattr(ClientConfigAPIServer, "start", fake_start)
+    monkeypatch.setattr(RemoteGuardClient, "register_session", fake_register)
+    monkeypatch.setattr(RemoteGuardClient, "close_runtime_session", lambda self: {"status": "ok"})
+
+    initial_config = {
+        "phases": {
+            "llm_before": {"client": [], "server": []},
+            "llm_after": {
+                "client": [],
+                "server": [{"name": "thought_aligner", "kwargs": {"implementation": "mock"}}],
+            },
+            "tool_before": {"client": [], "server": []},
+            "tool_after": {"client": [], "server": []},
+        }
+    }
+    updated_config = {
+        "phases": {
+            "llm_before": {"client": [], "server": []},
+            "llm_after": {"client": [], "server": []},
+            "tool_before": {"client": [], "server": []},
+            "tool_after": {"client": [], "server": []},
+        }
+    }
+
+    guard = AgentGuard(
+        "sess-py-plugin-resync",
+        server_url="http://server.test",
+        agent_id="agent-py-plugin-resync",
+        user_id="user-py-plugin-resync",
+        plugin_config=initial_config,
+        session_token="runtime-token-py-plugin-resync",
+        dpop_proof_factory=lambda method, url, access_token=None: "proof",
+        use_dpop_auth=True,
+        legacy_identity_headers=False,
+    )
+    try:
+        assert calls[-1]["metadata"]["client_plugin_config"] == initial_config
+        assert calls[-1]["metadata"]["remote_plugin_config"] == initial_config
+
+        guard.update_plugin_config(updated_config)
+
+        assert calls[-1]["metadata"]["client_plugin_config"] == updated_config
+        assert calls[-1]["metadata"]["remote_plugin_config"] == updated_config
+    finally:
+        guard.close()
+
+
 def test_python_client_registers_advertised_config_api_urls(monkeypatch):
     calls: list[dict] = []
 

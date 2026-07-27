@@ -10,6 +10,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from backend.agents.store import AgentStore
 from backend.api.authz import require_admin_user
 from backend.api.schemas import (
     AgentPluginAvailableResponse,
@@ -22,7 +23,6 @@ from backend.api.schemas import (
 )
 from backend.app_state import get_console, get_manager
 from backend.audit import auditor_descriptions, auditor_manager
-from backend.runtime.plugins.config_utils import merge_plugin_configs
 from backend.runtime.plugins.registry import registered_plugins as registered_server_plugins
 from backend.user.store import User
 from shared.schemas.events import EventType
@@ -255,34 +255,18 @@ def _agent_plugin_config(
     agent_id: str,
     sessions: list[dict[str, Any]],
 ) -> tuple[dict[str, Any] | None, str]:
-    stored = _manager.get_agent_plugin_config(agent_id)
-    if stored and isinstance(stored.get("plugin_config"), dict):
-        return copy.deepcopy(stored["plugin_config"]), "agent_override"
-    for session in sessions:
-        merged = merge_plugin_configs(
-            session.get("remote_plugin_config") if isinstance(session.get("remote_plugin_config"), dict) else None,
-            session.get("client_plugin_config") if isinstance(session.get("client_plugin_config"), dict) else None,
+    if sessions:
+        first = sessions[0]
+        return _manager.resolve_effective_plugin_config(
+            agent_id,
+            session_id=str(first.get("session_id") or "") or None,
+            user_id=str(first.get("user_id") or "") if first.get("user_id") is not None else None,
         )
-        if isinstance(merged, dict):
-            return merged, "agent_override"
-    default_config = _default_plugin_config()
-    if isinstance(default_config, dict):
-        return default_config, "server_default"
-    return None, "none"
+    return _manager.resolve_effective_plugin_config(agent_id)
 
 
 def _default_plugin_config() -> dict[str, Any] | None:
-    source = _manager.plugin_config
-    if source is None:
-        return None
-    if isinstance(source, dict):
-        return copy.deepcopy(source)
-    try:
-        with Path(source).open("r", encoding="utf-8") as fh:
-            payload = json.load(fh)
-    except Exception:
-        return None
-    return copy.deepcopy(payload) if isinstance(payload, dict) else None
+    return _manager.default_plugin_config()
 
 
 def _fetch_client_plugin_list(
@@ -319,6 +303,15 @@ def _fetch_client_plugin_list(
 
 
 def _fetch_agent_local_plugins(agent_id: str) -> list[dict[str, Any]]:
+    try:
+        stored = [
+            _plugin_payload_dict(item.to_console_dict())
+            for item in AgentStore().list_agent_client_plugins(agent_id=agent_id)
+        ]
+    except Exception:
+        stored = []
+    if stored:
+        return stored
     local_map: dict[str, dict[str, Any]] = {}
     for session in _manager.sessions_for_principal({"agent_id": agent_id}):
         list_url = session.get("client_plugin_list_url")

@@ -5,7 +5,7 @@ services:
       AGENTGUARD_ENVIRONMENT: "n8n"
       AGENTGUARD_ROOT: "/agentguard"
       AGENTGUARD_SERVER_URL: "http://host.docker.internal:38080"
-      AGENTGUARD_API_KEY: ""
+      AGENTGUARD_API_KEY: "sk-agentguard-backend-X9m42Vq7Tz8nL3pA6cR0yH5uJ1sWfKdE"
       AGENTGUARD_POLICY: ""
       AGENTGUARD_N8N_NODE_IDS: ""
       AGENTGUARD_N8N_SKIP_NODE_TYPES: ""

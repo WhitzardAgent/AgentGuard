@@ -23,6 +23,8 @@ const PATCHED = Symbol.for("agentguard.n8n.patched");
 const LOADER_PATCHED = Symbol.for("agentguard.n8n.loader_patched");
 const TOOL_INVOKE_PATCHED = Symbol.for("agentguard.n8n.tool_invoke_patched");
 const TOOL_SOURCE_CONTEXT = Symbol.for("agentguard.n8n.tool_source_context");
+const TOOLS_AGENT_RUN_PATCHED = Symbol.for("agentguard.n8n.tools_agent_run_patched");
+const SEMANTIC_EXECUTOR_PATCHED = Symbol.for("agentguard.n8n.semantic_executor_patched");
 const ALS = new AsyncLocalStorage();
 const GUARDS = new Map();
 const REPORTED_TOOLS = new Set();
@@ -274,6 +276,16 @@ function workflowIdentityForWorkflowId(workflowId) {
   return WORKFLOW_IDENTITY_CACHE.get(key) || {};
 }
 
+function mergeWorkflowIdentity(base = {}, override = {}) {
+  const next = { ...(base || {}) };
+  for (const [key, value] of Object.entries(override || {})) {
+    if (value != null && value !== "") {
+      next[key] = value;
+    }
+  }
+  return next;
+}
+
 function cacheWorkflowNodes(workflow = {}) {
   const workflowId = optionalString(workflow.id || workflow.workflowId || workflow.workflow_id);
   if (!workflowId || !Array.isArray(workflow.nodes)) {
@@ -442,14 +454,17 @@ function getGuard(context = {}, runtimeAuth = null) {
 
 async function getGuardForRuntime(context = {}) {
   const effectiveContext = enrichContextWithN8nSession(context);
-  const runtimeAuth = await ensureN8nRuntimeAuth(effectiveContext).catch((error) => {
-    log("warn", "runtime auth unavailable; falling back to legacy session", error && error.message ? error.message : String(error));
-    return {
-      fallback: true,
-      fallback_reason: error && error.message ? error.message : String(error),
-    };
-  });
-  return getGuard(enrichContextWithAuth(effectiveContext, runtimeAuth), runtimeAuth && runtimeAuth.session_token ? runtimeAuth : null);
+  if (!process.env.AGENTGUARD_SERVER_URL) {
+    return getGuard(effectiveContext);
+  }
+  const runtimeAuth = await ensureN8nRuntimeAuth(effectiveContext);
+  if (!runtimeAuth || !runtimeAuth.session_token) {
+    const workflowId = optionalString(effectiveContext.workflow_id) || "unknown_workflow";
+    throw new Error(
+      `AgentGuard n8n runtime auth did not produce a session token for workflow ${workflowId}.`
+    );
+  }
+  return getGuard(enrichContextWithAuth(effectiveContext, runtimeAuth), runtimeAuth);
 }
 
 function refreshGuardMetadata(guard, context = {}, runtimeAuth = null) {
@@ -503,7 +518,10 @@ function currentContext(overrides = {}) {
 function buildRunNodeContext(workflow, executionData, runExecutionData, runIndex, additionalData, mode) {
   const node = executionData && executionData.node ? executionData.node : {};
   const workflowId = workflow && (workflow.id || workflow.workflowId || workflow.workflow_id);
-  const workflowIdentity = workflowIdentityForWorkflowId(workflowId);
+  const workflowIdentity = mergeWorkflowIdentity(
+    workflowIdentityForWorkflowId(workflowId),
+    normalizeWorkflowIdentity(workflow)
+  );
   const executionId = (
     additionalData && (additionalData.executionId || additionalData.execution_id)
   ) || (
@@ -729,15 +747,18 @@ async function ensureN8nRuntimeAuth(context = {}) {
   if (!process.env.AGENTGUARD_SERVER_URL) {
     return null;
   }
+  await hydrateWorkflowIdentityContext(context);
   const accountEmail = n8nAccountEmail(context);
   if (!accountEmail) {
-    return null;
+    const workflowId = optionalString(context.workflow_id) || "unknown_workflow";
+    throw new Error(`n8n workflow ${workflowId} is missing owner email for runtime auth`);
   }
   const registration = await registerN8nWorkflowAgent(context, { reason: "runtime" });
   const registeredAgent = registration && registration.agent;
   const canonicalAgentId = registeredAgent && optionalString(registeredAgent.agent_id);
   if (!canonicalAgentId) {
-    return null;
+    const workflowId = optionalString(context.workflow_id) || "unknown_workflow";
+    throw new Error(`n8n workflow ${workflowId} did not return a registered AgentGuard agent_id`);
   }
   const externalSessionId = optionalString(context.n8n_session_id || context.external_session_id || context.execution_id);
   const cacheKey = [canonicalAgentId, externalSessionId || context.workflow_id || `pid_${process.pid}`].join("\x1f");
@@ -861,7 +882,7 @@ function blockedResultValue(decision, toolName) {
 function blockedLLMResponse(decision, request = {}) {
   const reason = decision && decision.reason ? decision.reason : "blocked by AgentGuard";
   if (request && request.stream) {
-    return syntheticBlockedStream(reason);
+    return syntheticBlockedStream(reason, request && request.model);
   }
   return syntheticResponsesPayload(reason, request && request.model);
 }
@@ -905,8 +926,8 @@ function buildThoughtAlignmentMetadata({ supported = false, retryAttempt = 0 } =
   return metadata;
 }
 
-function supportsThoughtAlignmentForResponsesRequest(request = {}) {
-  return !Boolean(request && request.stream);
+function supportsThoughtAlignmentForResponsesRequest(_request = {}) {
+  return true;
 }
 
 function supportsThoughtAlignmentForRunNode(node = null) {
@@ -985,6 +1006,21 @@ function responseMessageTemplateFromOutput(rawOutput = null) {
         : [];
   for (let index = outputItems.length - 1; index >= 0; index -= 1) {
     const item = outputItems[index];
+    if (item && typeof item === "object" && item.type === "response.completed" && item.response) {
+      const nested = responseMessageTemplateFromOutput(item.response);
+      if (nested) {
+        return nested;
+      }
+    }
+    if (item && typeof item === "object" && item.type === "response.output_item.done" && item.item) {
+      const nested = responseMessageTemplateFromOutput(item.item);
+      if (nested) {
+        return nested;
+      }
+    }
+    if (item && typeof item === "object" && item.delta && item.delta.message) {
+      return normalizeValue(item.delta.message);
+    }
     if (!item || typeof item !== "object" || item.type !== "message") {
       continue;
     }
@@ -1564,6 +1600,95 @@ function applyModifyToResponsesResult(result, processedContent = "") {
   return next;
 }
 
+function modifiedResponsesStreamText(processedContent = "", fallbackOutput = null) {
+  const primary = textFromValue(extractModifiedPrimaryValue(processedContent));
+  if (primary != null && primary !== "") {
+    return primary;
+  }
+  return extractVisibleOutputText(fallbackOutput) || "";
+}
+
+function replayResponsesStream(chunks = []) {
+  return (async function* replay() {
+    for (const chunk of chunks) {
+      yield chunk;
+    }
+  })();
+}
+
+function llmStreamOutputPayload(chunks = [], status = "stream_completed") {
+  return {
+    output_text: "",
+    output: chunks,
+    status,
+  };
+}
+
+async function finalizeResponsesStream(iterable, request, context, thoughtAlignmentAttempt = 0) {
+  const replayChunks = [];
+  const normalizedChunks = [];
+  try {
+    for await (const item of iterable) {
+      replayChunks.push(item);
+      normalizedChunks.push(normalizeValue(item));
+    }
+  } catch (error) {
+    const message = safeString(error && error.message ? error.message : error);
+    await guardLLMAfter(
+      llmStreamOutputPayload(normalizedChunks, "stream_error"),
+      context,
+      llmGuardMetadata(
+        {
+          stream: true,
+          error: message,
+        },
+        {
+          supported: supportsThoughtAlignmentForResponsesRequest(request),
+          retryAttempt: thoughtAlignmentAttempt,
+        }
+      )
+    );
+    throw error;
+  }
+  const rawOutput = llmStreamOutputPayload(normalizedChunks, "stream_completed");
+  const decision = await guardLLMAfter(
+    rawOutput,
+    context,
+    llmGuardMetadata(
+      {
+        stream: true,
+      },
+      {
+        supported: supportsThoughtAlignmentForResponsesRequest(request),
+        retryAttempt: thoughtAlignmentAttempt,
+      }
+    )
+  );
+  if (decision.decision_type === DecisionType.MODIFY_LLM_OUTPUT) {
+    return {
+      decision,
+      rawOutput,
+      stream: syntheticResponsesStream(
+        modifiedResponsesStreamText(decision.processed_content, rawOutput),
+        request && request.model
+      ),
+    };
+  }
+  const blocked = blockedResultValue(decision, "llm");
+  if (blocked) {
+    return {
+      decision,
+      rawOutput,
+      stream: syntheticBlockedStream(blocked.reason || decision.reason, request && request.model),
+    };
+  }
+  return {
+    decision,
+    rawOutput,
+    stream: replayResponsesStream(replayChunks),
+  };
+}
+
 function replaceFirstJsonValue(data = {}, value, connectionTypes = ["main"]) {
   const next = isPlainObject(data) ? { ...data } : {};
   let replaced = false;
@@ -1648,36 +1773,25 @@ function applyModifyToExecutionData(executionData = {}, processedContent = "", c
   };
 }
 
-async function* syntheticBlockedStream(reason) {
-  yield {
-    type: "response.output_text.delta",
-    delta: `[AgentGuard blocked] ${reason}`,
-  };
-  yield {
-    type: "response.completed",
-    response: syntheticResponsesPayload(reason),
-  };
-}
-
-function syntheticResponsesPayload(reason, model = null) {
-  const text = `[AgentGuard blocked] ${reason}`;
+function syntheticResponsesPayloadFromText(text, model = null) {
+  const content = String(text || "");
   return {
-    id: `agentguard_blocked_${Date.now()}`,
+    id: `agentguard_response_${Date.now()}`,
     object: "response",
     created_at: Math.floor(Date.now() / 1000),
     model: model || "agentguard-blocked",
     status: "completed",
-    output_text: text,
+    output_text: content,
     output: [
       {
-        id: "agentguard_blocked_message",
+        id: "agentguard_response_message",
         type: "message",
         status: "completed",
         role: "assistant",
         content: [
           {
             type: "output_text",
-            text,
+            text: content,
             annotations: [],
           },
         ],
@@ -1689,6 +1803,27 @@ function syntheticResponsesPayload(reason, model = null) {
       total_tokens: 0,
     },
   };
+}
+
+async function* syntheticResponsesStream(text, model = null) {
+  const content = String(text || "");
+  yield {
+    type: "response.output_text.delta",
+    delta: content,
+  };
+  yield {
+    type: "response.completed",
+    response: syntheticResponsesPayloadFromText(content, model),
+  };
+}
+
+function syntheticResponsesPayload(reason, model = null) {
+  const text = `[AgentGuard blocked] ${reason}`;
+  return syntheticResponsesPayloadFromText(text, model);
+}
+
+async function* syntheticBlockedStream(reason, model = null) {
+  yield* syntheticResponsesStream(`[AgentGuard blocked] ${reason}`, model);
 }
 
 function extractProviderBuiltInTools(tools = []) {
@@ -2061,6 +2196,33 @@ function llmGuardMetadata(extra = {}, thoughtAlignment = {}) {
   };
 }
 
+function semanticEventMetadata(context = {}, extra = {}) {
+  return eventMetadata(context, {
+    event_source: "n8n_tools_agent_v3",
+    ...(extra || {}),
+  });
+}
+
+async function emitSemanticLLMInput(messages, context, extra = {}) {
+  const normalizedMessages = Array.isArray(messages) ? normalizeValue(messages) : [];
+  if (!normalizedMessages.length) {
+    return null;
+  }
+  const effectiveContext = enrichContextWithN8nSession(context, normalizedMessages, extra);
+  const guard = await getGuardForRuntime(effectiveContext);
+  const metadata = semanticEventMetadata(effectiveContext, extra);
+  return guard.runtime.guard(ev.llm_input(guard.context, normalizedMessages, metadata));
+}
+
+async function emitSemanticLLMOutput(output, context, extra = {}) {
+  const effectiveContext = enrichContextWithN8nSession(context, output, extra);
+  const guard = await getGuardForRuntime(effectiveContext);
+  const metadata = semanticEventMetadata(effectiveContext, extra);
+  return guard.runtime.guard(ev.llm_output(guard.context, normalizeValue(output), metadata), {
+    phase: "after",
+  });
+}
+
 async function guardToolBefore(toolName, args, context, capabilities = [], extraMetadata = {}) {
   const effectiveContext = enrichContextWithN8nSession(context, args, extraMetadata);
   const guard = await getGuardForRuntime(effectiveContext);
@@ -2109,6 +2271,275 @@ function reportToolOnce(guard, name, { description = "", capabilities = [], meta
   } catch (_) {
     // Tool reporting is best-effort; runtime events still carry full metadata.
   }
+}
+
+function semanticRole(value) {
+  const role = String(value || "assistant").toLowerCase();
+  if (role === "human") {
+    return "user";
+  }
+  if (role === "ai") {
+    return "assistant";
+  }
+  return role;
+}
+
+function semanticToolCallText(toolName, input) {
+  return `Calling ${toolName || "tool"} with input: ${JSON.stringify(normalizeValue(input ?? {}))}`;
+}
+
+function semanticToolCallFromValue(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const toolName = firstNonEmptyText(value.name, value.tool_name, value.toolName);
+  const args = (
+    (value.args && typeof value.args === "object") ? value.args :
+      (value.arguments && typeof value.arguments === "object") ? value.arguments :
+        {}
+  );
+  if (!toolName) {
+    return null;
+  }
+  return semanticToolCallText(toolName, args);
+}
+
+function semanticContentFromMessage(message, fallback = "") {
+  const normalized = normalizeValue(message);
+  if (!normalized || typeof normalized !== "object") {
+    return firstNonEmptyText(normalized, fallback) || "";
+  }
+  const toolCalls = Array.isArray(normalized.tool_calls)
+    ? normalized.tool_calls.map((toolCall) => semanticToolCallFromValue(toolCall)).filter(Boolean)
+    : Array.isArray(normalized.toolCalls)
+      ? normalized.toolCalls.map((toolCall) => semanticToolCallFromValue(toolCall)).filter(Boolean)
+      : [];
+  if (toolCalls.length) {
+    return toolCalls.join("\n");
+  }
+  return firstNonEmptyText(
+    normalized.content,
+    normalized.text,
+    normalized.message,
+    normalized.output,
+    fallback,
+  ) || "";
+}
+
+function semanticMessagesFromHistory(history = []) {
+  if (!Array.isArray(history)) {
+    return [];
+  }
+  return history.map((message) => {
+    const normalized = normalizeValue(message);
+    const role = semanticRole(
+      normalized && typeof normalized === "object"
+        ? (
+          normalized.role ||
+          normalized.type ||
+          (typeof normalized.getType === "function" ? normalized.getType() : null) ||
+          (typeof normalized._getType === "function" ? normalized._getType() : null)
+        )
+        : null
+    );
+    return {
+      role,
+      content: semanticContentFromMessage(normalized),
+    };
+  }).filter((message) => message.content !== "");
+}
+
+function semanticMessagesFromSteps(steps = []) {
+  if (!Array.isArray(steps)) {
+    return [];
+  }
+  const messages = [];
+  for (const step of steps) {
+    const action = step && step.action ? step.action : {};
+    const messageLog = Array.isArray(action.messageLog) ? action.messageLog : [];
+    if (messageLog.length) {
+      messages.push(...semanticMessagesFromHistory(messageLog));
+    } else {
+      const fallbackText = firstNonEmptyText(
+        action.log,
+        action.tool && semanticToolCallText(action.tool, action.toolInput || {}),
+      );
+      if (fallbackText) {
+        messages.push({ role: "assistant", content: fallbackText });
+      }
+    }
+    if (step && step.observation != null) {
+      messages.push({
+        role: "tool",
+        content: textFromValue(step.observation) || safeString(step.observation),
+      });
+    }
+  }
+  return messages;
+}
+
+function buildSemanticAgentInputMessages(invokeParams = {}) {
+  const messages = [];
+  const systemParts = [];
+  if (invokeParams.system_message) {
+    systemParts.push(String(invokeParams.system_message));
+  }
+  if (invokeParams.formatting_instructions) {
+    systemParts.push(String(invokeParams.formatting_instructions));
+  }
+  if (systemParts.length) {
+    messages.push({ role: "system", content: systemParts.join("\n\n") });
+  }
+  messages.push(...semanticMessagesFromHistory(invokeParams.chat_history));
+  if (invokeParams.input != null) {
+    messages.push({ role: "user", content: textFromValue(invokeParams.input) || safeString(invokeParams.input) });
+  }
+  messages.push(...semanticMessagesFromSteps(invokeParams.steps));
+  return messages;
+}
+
+function semanticToolActionsOutput(actions = []) {
+  if (!Array.isArray(actions)) {
+    return "";
+  }
+  return actions.map((action) => {
+    if (!action || typeof action !== "object") {
+      return "";
+    }
+    const toolName = firstNonEmptyText(
+      action.metadata && action.metadata.toolName,
+      action.tool_name,
+      action.nodeName,
+      "tool",
+    );
+    const input = isPlainObject(action.input) ? { ...action.input } : normalizeValue(action.input);
+    if (input && typeof input === "object" && !Array.isArray(input) && Object.prototype.hasOwnProperty.call(input, "tool")) {
+      delete input.tool;
+    }
+    return semanticToolCallText(toolName, input);
+  }).filter(Boolean).join("\n");
+}
+
+function toolsAgentModelName(model = null) {
+  if (!model || typeof model !== "object") {
+    return null;
+  }
+  return firstNonEmptyText(
+    model.modelName,
+    model.model,
+    model.modelId,
+    model.model_name,
+    model.model_id,
+    model.modelKwargs && model.modelKwargs.model,
+  );
+}
+
+function toolsAgentProviderName(model = null) {
+  const lowerModel = String(toolsAgentModelName(model) || "").toLowerCase();
+  if (lowerModel.includes("gpt") || lowerModel.includes("openai")) {
+    return "openai";
+  }
+  if (lowerModel.includes("ollama")) {
+    return "ollama";
+  }
+  return "unknown";
+}
+
+function buildToolsAgentRuntimeContext(ctx, itemContext = {}, response = null, model = null, extra = {}) {
+  const runtimeContext = currentContext();
+  const workflow = ctx && typeof ctx.getWorkflow === "function" ? ctx.getWorkflow() : null;
+  const workflowId = optionalString(
+    runtimeContext.workflow_id ||
+    (workflow && (workflow.id || workflow.workflowId || workflow.workflow_id))
+  );
+  const workflowIdentity = mergeWorkflowIdentity(
+    workflowIdentityForWorkflowId(workflowId),
+    normalizeWorkflowIdentity(workflow)
+  );
+  const node = ctx && typeof ctx.getNode === "function" ? ctx.getNode() : null;
+  const inputItems = ctx && typeof ctx.getInputData === "function" ? ctx.getInputData() : [];
+  const itemIndex = itemContext && itemContext.itemIndex != null ? itemContext.itemIndex : 0;
+  const inputItem = Array.isArray(inputItems) ? inputItems[itemIndex] : null;
+  const inputJson = inputItem && inputItem.json && typeof inputItem.json === "object" ? inputItem.json : inputItem;
+  const n8nSessionId = n8nSessionIdFromSources(runtimeContext, inputJson, response, itemContext);
+  return {
+    ...runtimeContext,
+    workflow_id: workflowId,
+    workflow_name: runtimeContext.workflow_name || (workflow && workflow.name ? String(workflow.name) : null),
+    n8n_session_id: n8nSessionId,
+    external_session_id: n8nSessionId || runtimeContext.external_session_id || runtimeContext.execution_id || null,
+    user_id: runtimeContext.user_id || workflowIdentity.user_id || process.env.AGENTGUARD_USER_ID || null,
+    n8n_user_id: runtimeContext.n8n_user_id || workflowIdentity.user_id || null,
+    n8n_user_email: runtimeContext.n8n_user_email || workflowIdentity.user_email || null,
+    n8n_user_name: runtimeContext.n8n_user_name || workflowIdentity.user_name || null,
+    n8n_user_source: runtimeContext.n8n_user_source || workflowIdentity.user_source || null,
+    n8n_project_id: runtimeContext.n8n_project_id || workflowIdentity.project_id || null,
+    n8n_project_name: runtimeContext.n8n_project_name || workflowIdentity.project_name || null,
+    node_id: runtimeContext.node_id || (node && node.id ? node.id : null),
+    node_name: runtimeContext.node_name || (node && node.name ? node.name : null),
+    node_type: runtimeContext.node_type || (node && node.type ? node.type : null),
+    node_version: runtimeContext.node_version || (node && node.typeVersion ? node.typeVersion : null),
+    llm_provider: runtimeContext.llm_provider || toolsAgentProviderName(model),
+    llm_model: runtimeContext.llm_model || toolsAgentModelName(model),
+    ...extra,
+  };
+}
+
+function wrapSemanticExecutor(executor, context, model = null) {
+  if (!executor || typeof executor !== "object" || executor[SEMANTIC_EXECUTOR_PATCHED]) {
+    return executor;
+  }
+  if (typeof executor.invoke === "function") {
+    const originalInvoke = executor.invoke;
+    executor.invoke = async function agentguardSemanticInvoke(invokeParams, ...rest) {
+      if (invokeParams && Array.isArray(invokeParams.steps) && invokeParams.steps.length > 0) {
+        const messages = buildSemanticAgentInputMessages(invokeParams);
+        await emitSemanticLLMInput(messages, context, {
+          llm_turn_kind: "tool_followup",
+          llm_model: toolsAgentModelName(model),
+          step_count: invokeParams.steps.length,
+        });
+      }
+      return originalInvoke.call(this, invokeParams, ...rest);
+    };
+  }
+  if (typeof executor.streamEvents === "function") {
+    const originalStreamEvents = executor.streamEvents;
+    executor.streamEvents = function agentguardSemanticStreamEvents(invokeParams, ...rest) {
+      const inputPromise = (
+        invokeParams && Array.isArray(invokeParams.steps) && invokeParams.steps.length > 0
+      )
+        ? emitSemanticLLMInput(
+          buildSemanticAgentInputMessages(invokeParams),
+          context,
+          {
+            llm_turn_kind: "tool_followup",
+            llm_model: toolsAgentModelName(model),
+            step_count: invokeParams.steps.length,
+            stream: true,
+          }
+        )
+        : null;
+      const iterable = originalStreamEvents.call(this, invokeParams, ...rest);
+      return (async function* semanticWrappedEventStream() {
+        if (inputPromise) {
+          await inputPromise;
+        }
+        for await (const item of iterable) {
+          yield item;
+        }
+      })();
+    };
+  }
+  if (typeof executor.withConfig === "function") {
+    const originalWithConfig = executor.withConfig;
+    executor.withConfig = function agentguardSemanticWithConfig(...args) {
+      const configured = originalWithConfig.apply(this, args);
+      return wrapSemanticExecutor(configured, context, model);
+    };
+  }
+  executor[SEMANTIC_EXECUTOR_PATCHED] = true;
+  return executor;
 }
 
 function aiToolResult(action, value, executionStatus = "success", error = null) {
@@ -2390,7 +2821,20 @@ function patchOpenAI(moduleExports) {
         }
         const raw = await original.call(this, currentRequest, requestOptions);
         if (currentRequest && currentRequest.stream && raw && typeof raw[Symbol.asyncIterator] === "function") {
-          return wrapOpenAIStream(raw, context);
+          const outcome = await finalizeResponsesStream(raw, currentRequest, context, thoughtAlignmentAttempt);
+          const afterDecision = outcome.decision;
+          if (afterDecision.decision_type === DecisionType.LOOP_BACK_TO_LLM) {
+            if (attempts >= MAX_LLM_LOOPBACK_ATTEMPTS) {
+              return blockedLLMResponse(afterDecision, currentRequest);
+            }
+            currentRequest = isThoughtAlignmentLoopbackDecision(afterDecision)
+              ? applyThoughtAlignmentToResponsesRequest(currentRequest, outcome.rawOutput, afterDecision.processed_content)
+              : applyLoopbackToResponsesRequest(currentRequest, afterDecision.processed_content);
+            thoughtAlignmentAttempt = isThoughtAlignmentLoopbackDecision(afterDecision) ? 1 : thoughtAlignmentAttempt;
+            attempts += 1;
+            continue;
+          }
+          return outcome.stream;
         }
         const afterDecision = await guardLLMAfter(
           raw,
@@ -2425,25 +2869,6 @@ function patchOpenAI(moduleExports) {
       }
     };
     Klass.prototype.completionWithRetry[PATCHED] = true;
-  }
-}
-
-async function* wrapOpenAIStream(iterable, context) {
-  const chunks = [];
-  try {
-    for await (const item of iterable) {
-      chunks.push(normalizeValue(item));
-      yield item;
-    }
-    await guardLLMAfter({ output_text: "", output: chunks, status: "stream_completed" }, context, {
-      stream: true,
-    });
-  } catch (error) {
-    await guardLLMAfter({ output_text: "", output: chunks, status: "stream_error" }, context, {
-      stream: true,
-      error: safeString(error && error.message ? error.message : error),
-    });
-    throw error;
   }
 }
 
@@ -3475,6 +3900,9 @@ function configureN8nKeyDir() {
 }
 
 function openSqliteReadOnly() {
+  if (typeof global.__agentguardN8nOpenSqliteReadOnlyForTests === "function") {
+    return global.__agentguardN8nOpenSqliteReadOnlyForTests();
+  }
   const sqlite3 = requireFromN8n("sqlite3").verbose();
   return new sqlite3.Database(n8nDatabasePath(), sqlite3.OPEN_READONLY);
 }
@@ -3534,7 +3962,26 @@ function parseJsonField(raw, fallback) {
 async function scanPublishedWorkflows() {
   const db = openSqliteReadOnly();
   try {
-    const rows = await dbAll(db, `
+    const query = workflowCatalogQuery();
+    const rows = await dbAll(db, query.sql, query.params);
+    return rows.map((row) => ({
+      ...row,
+      active: row.active === true || row.active === 1 || row.active === "1",
+      nodes: parseJsonField(row.nodes, []),
+      connections: parseJsonField(row.connections, {}),
+    })).map((workflow) => {
+      cacheWorkflowIdentity(workflow);
+      cacheWorkflowNodes(workflow);
+      return workflow;
+    });
+  } finally {
+    await closeDb(db);
+  }
+}
+
+function workflowCatalogQuery(whereClause = "", params = []) {
+  return {
+    sql: `
       SELECT
         w.id,
         w.name,
@@ -3559,20 +4006,73 @@ async function scanPublishedWorkflows() {
       LEFT JOIN user u ON u.id = p.creatorId
       WHERE COALESCE(w.isArchived, 0) = 0
         AND (COALESCE(w.active, 0) = 1 OR pv.workflowId IS NOT NULL)
-    `);
-    return rows.map((row) => ({
-      ...row,
-      active: row.active === true || row.active === 1 || row.active === "1",
-      nodes: parseJsonField(row.nodes, []),
-      connections: parseJsonField(row.connections, {}),
-    })).map((workflow) => {
-      cacheWorkflowIdentity(workflow);
-      cacheWorkflowNodes(workflow);
-      return workflow;
-    });
+        ${whereClause}
+    `,
+    params,
+  };
+}
+
+async function loadWorkflowIdentityById(workflowId) {
+  const workflowKey = optionalString(workflowId);
+  if (!workflowKey) {
+    return {};
+  }
+  const cached = workflowIdentityForWorkflowId(workflowKey);
+  if (cached.user_email || cached.user_id || cached.project_id) {
+    return cached;
+  }
+  const db = openSqliteReadOnly();
+  try {
+    const query = workflowCatalogQuery("AND w.id = ?", [workflowKey]);
+    const rows = await dbAll(db, query.sql, query.params);
+    const workflow = rows && rows[0] ? rows[0] : null;
+    if (!workflow) {
+      return {};
+    }
+    return cacheWorkflowIdentity(workflow);
   } finally {
     await closeDb(db);
   }
+}
+
+async function hydrateWorkflowIdentityContext(context = {}) {
+  if (!context || typeof context !== "object") {
+    return context;
+  }
+  const existingEmail = n8nAccountEmail(context);
+  if (existingEmail) {
+    return context;
+  }
+  const workflowId = optionalString(context.workflow_id);
+  if (!workflowId) {
+    return context;
+  }
+  const identity = await loadWorkflowIdentityById(workflowId);
+  if (!identity || typeof identity !== "object") {
+    return context;
+  }
+  if (!context.user_id && identity.user_id) {
+    context.user_id = identity.user_id;
+  }
+  if (!context.n8n_user_id && identity.user_id) {
+    context.n8n_user_id = identity.user_id;
+  }
+  if (!context.n8n_user_email && identity.user_email) {
+    context.n8n_user_email = identity.user_email;
+  }
+  if (!context.n8n_user_name && identity.user_name) {
+    context.n8n_user_name = identity.user_name;
+  }
+  if (!context.n8n_user_source && identity.user_source) {
+    context.n8n_user_source = identity.user_source;
+  }
+  if (!context.n8n_project_id && identity.project_id) {
+    context.n8n_project_id = identity.project_id;
+  }
+  if (!context.n8n_project_name && identity.project_name) {
+    context.n8n_project_name = identity.project_name;
+  }
+  return context;
 }
 
 async function syncPublishedWorkflowCatalogOnce() {
@@ -3754,9 +4254,11 @@ module.exports = {
     enrichContextWithN8nSession,
     enrichContextWithRegistration,
     ensureN8nRuntimeAuth,
+    hydrateWorkflowIdentityContext,
     buildConnectedToolSourceContext,
     eventMetadata,
     inferCapabilitiesFromNode,
+    loadWorkflowIdentityById,
     workflowIdentityForWorkflowId,
     workflowNodeForTool,
     n8nSessionIdFromSources,
@@ -3780,6 +4282,9 @@ module.exports = {
     patchOpenAI,
     patchN8nCore,
     scanPublishedWorkflows,
+    setOpenSqliteReadOnlyForTests(factory = null) {
+      global.__agentguardN8nOpenSqliteReadOnlyForTests = typeof factory === "function" ? factory : null;
+    },
     sourceNodeForToolInvocation,
     registerN8nWorkflowAgent,
     supportsThoughtAlignmentForResponsesRequest,

@@ -8,6 +8,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from backend.audit import AuditTraceEntry
@@ -173,6 +174,61 @@ class RuntimeManager:
             "client_plugin_config": client_config,
             "plugin_config": merge_plugin_configs(remote_config, client_config),
         }
+
+    def default_plugin_config(self) -> dict[str, Any] | None:
+        source = self.plugin_config
+        if source is None:
+            return None
+        if isinstance(source, dict):
+            return copy.deepcopy(source)
+        try:
+            with Path(source).open("r", encoding="utf-8") as fh:
+                payload = json.load(fh)
+        except Exception:
+            return None
+        return copy.deepcopy(payload) if isinstance(payload, dict) else None
+
+    def resolve_effective_plugin_config(
+        self,
+        agent_id: str,
+        *,
+        session_id: str | None = None,
+        user_id: str | None = None,
+    ) -> tuple[dict[str, Any] | None, str]:
+        normalized_agent_id = str(agent_id or "").strip()
+        if not normalized_agent_id:
+            return None, "none"
+
+        stored = self.get_agent_plugin_config(normalized_agent_id)
+        if stored and isinstance(stored.get("plugin_config"), dict):
+            return copy.deepcopy(stored["plugin_config"]), "agent_override"
+
+        session_records: list[dict[str, Any]] = []
+        normalized_session_id = str(session_id or "").strip()
+        normalized_user_id = str(user_id or "").strip()
+        if normalized_session_id:
+            record = self.session_pool.get(
+                normalized_session_id,
+                agent_id=normalized_agent_id,
+                user_id=normalized_user_id or None,
+            )
+            if record is not None:
+                session_records.append(record)
+        if not session_records:
+            session_records = self.sessions_for_principal({"agent_id": normalized_agent_id})
+
+        for session in session_records:
+            merged = merge_plugin_configs(
+                session.get("remote_plugin_config") if isinstance(session.get("remote_plugin_config"), dict) else None,
+                session.get("client_plugin_config") if isinstance(session.get("client_plugin_config"), dict) else None,
+            )
+            if isinstance(merged, dict):
+                return merged, "agent_override"
+
+        default_config = self.default_plugin_config()
+        if isinstance(default_config, dict):
+            return default_config, "server_default"
+        return None, "none"
 
     def update_client_plugin_config(
         self,

@@ -72,6 +72,7 @@ class RemoteGuardClient:
         runtime_session_create_path: str = "/v1/server/session/create",
         runtime_session_refresh_path: str = "/v1/server/session/refresh",
         runtime_session_close_path: str = "/v1/server/session/close",
+        runtime_plugin_config_path: str = "/v1/server/session/plugin-config",
         session_token: str | None = None,
         dpop_proof_factory: Any | None = None,
         use_dpop_auth: bool = False,
@@ -102,6 +103,7 @@ class RemoteGuardClient:
         self.runtime_session_create_path = runtime_session_create_path
         self.runtime_session_refresh_path = runtime_session_refresh_path
         self.runtime_session_close_path = runtime_session_close_path
+        self.runtime_plugin_config_path = runtime_plugin_config_path
         self.session_token = session_token
         self.dpop_proof_factory = dpop_proof_factory
         self.use_dpop_auth = use_dpop_auth
@@ -242,6 +244,12 @@ class RemoteGuardClient:
             raise RemoteGuardError("no server_url configured")
         self._require_runtime_auth("runtime session refresh")
         return self._post(self.runtime_session_refresh_path, {})
+
+    def fetch_runtime_plugin_config(self) -> dict[str, Any]:
+        if not self.enabled:
+            raise RemoteGuardError("no server_url configured")
+        self._require_runtime_auth("runtime plugin-config fetches")
+        return self._get(self.runtime_plugin_config_path)
 
     def close_runtime_session(self) -> dict[str, Any]:
         if not self.enabled:

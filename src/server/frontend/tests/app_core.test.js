@@ -1195,6 +1195,72 @@ test("shared app core preserves object plugin specs when rebuilding config", asy
   assert.deepEqual(config.phases.llm_before.server, [qwenSpec]);
 });
 
+test("shared app core removes deselected client plugins from the same phase", async () => {
+  const listeners = {};
+  global.window = {
+    AgentGuardConfig: { apiBase: "http://127.0.0.1:38080" },
+    AgentGuardShell: {
+      setToolStatus() {},
+      setApiStatus() {},
+    },
+    addEventListener(name, handler) {
+      listeners[name] = handler;
+    },
+  };
+  global.localStorage = createStorage();
+  global.document = {
+    getElementById() {
+      return createToastElement();
+    },
+  };
+  global.fetch = async () => ({
+    ok: true,
+    async json() {
+      return [];
+    },
+  });
+  global.setTimeout = (fn) => {
+    fn();
+    return 1;
+  };
+  global.clearTimeout = () => {};
+
+  delete require.cache[require.resolve("../static/common/app.js")];
+  require("../static/common/app.js");
+
+  const available = [
+    { name: "qwen3guard_input", description: "", event_types: ["llm_input"], phases: ["llm_before"] },
+    { name: "modify_input_demo", description: "", event_types: ["llm_input"], phases: ["llm_before"] },
+  ];
+  const existingConfig = {
+    phases: {
+      llm_before: {
+        client: [
+          { name: "qwen3guard_input", timeout_s: 20 },
+          { name: "modify_input_demo" },
+        ],
+        server: [],
+      },
+    },
+  };
+
+  const config = global.window.AgentGuardData.buildPluginConfig(
+    [available[0]],
+    available,
+    existingConfig,
+    "client",
+  );
+
+  assert.deepEqual(config, {
+    phases: {
+      llm_before: {
+        client: [{ name: "qwen3guard_input", timeout_s: 20 }],
+        server: [],
+      },
+    },
+  });
+});
+
 test("shared app core derives active plugin names and primary plugin from config", async () => {
   const listeners = {};
   global.window = {

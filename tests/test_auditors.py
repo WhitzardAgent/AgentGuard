@@ -148,6 +148,42 @@ def test_frontend_router_lists_registered_auditors():
     assert "Summarize a full trace" in summary["description"]
 
 
+def test_frontend_router_prefers_stored_agent_client_plugins(monkeypatch):
+    seen = {"session_lookup": False}
+
+    class FakeStore:
+        def list_agent_client_plugins(self, *, agent_id=None, agent_ids=None):
+            assert agent_id == "ag_dify"
+            assert agent_ids is None
+            return [
+                type(
+                    "Plugin",
+                    (),
+                    {
+                        "to_console_dict": lambda self: {
+                            "name": "client_prompt_guard",
+                            "description": "Prompt guard",
+                            "event_types": ["llm_input"],
+                            "phases": ["llm_before"],
+                        }
+                    },
+                )()
+            ]
+
+    class FakeManager:
+        def sessions_for_principal(self, principal):
+            seen["session_lookup"] = True
+            return []
+
+    monkeypatch.setattr(frontend_router, "AgentStore", lambda: FakeStore())
+    monkeypatch.setattr(frontend_router, "_manager", FakeManager())
+
+    payload = frontend_router.get_agent_available_plugins("ag_dify")
+
+    assert [item.name for item in payload.local_plugins] == ["client_prompt_guard"]
+    assert seen["session_lookup"] is False
+
+
 def test_auditor_manager_uses_trace_only():
     result = auditor_manager().audit(
         "trace_risk_summary",

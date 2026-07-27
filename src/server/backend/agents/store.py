@@ -93,6 +93,32 @@ class AgentToolRecord:
 
 
 @dataclass(frozen=True)
+class AgentClientPluginRecord:
+    agent_id: str
+    name: str
+    description: str | None = None
+    event_types_json: str | None = None
+    phases_json: str | None = None
+    raw_payload_json: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    last_seen_at: datetime | None = None
+
+    def to_console_dict(self) -> dict[str, Any]:
+        payload = {
+            "owner_agent_id": self.agent_id,
+            "name": self.name,
+            "description": self.description or "",
+            "event_types": _json_list(self.event_types_json),
+            "phases": _json_list(self.phases_json),
+        }
+        raw_payload = _json_dict(self.raw_payload_json)
+        if raw_payload:
+            payload["raw_payload"] = raw_payload
+        return payload
+
+
+@dataclass(frozen=True)
 class AgentDeletionResult:
     agent_id: str
     deleted: bool
@@ -165,6 +191,7 @@ class AgentStore:
         name: str | None = None,
         description: str | None = None,
         metadata: dict[str, Any] | None = None,
+        client_plugins: list[dict[str, Any]] | None = None,
     ) -> AgentRegistrationResult:
         clean_provider = _normalize_provider(provider)
         clean_provider_instance_id = _normalize_optional_key(provider_instance_id)
@@ -290,6 +317,8 @@ class AgentStore:
                 account_email=clean_email,
                 metadata=clean_metadata,
             )
+        if client_plugins is not None:
+            self.sync_agent_client_plugins(agent.agent_id, client_plugins)
         return AgentRegistrationResult(
             agent=agent,
             credential=credential,
@@ -627,6 +656,7 @@ class AgentStore:
         provider_instance_id: str | None = None,
         tenant_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        client_plugins: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         clean_provider = _normalize_provider(provider)
         clean_provider_instance_id = _normalize_optional_key(provider_instance_id)
@@ -673,6 +703,15 @@ class AgentStore:
                 """,
                 (_metadata_json(metadata), *stale_agent_ids),
             )
+        synced_agent_ids = [
+            str(row["agent_id"])
+            for row in rows
+            if str(row.get("status") or "active") == "active"
+            and str(row["external_agent_id"]) in seen_external_ids
+        ]
+        if client_plugins is not None:
+            for agent_id in synced_agent_ids:
+                self.sync_agent_client_plugins(agent_id, client_plugins)
         return {
             "provider": clean_provider,
             "provider_instance_id": clean_provider_instance_id,
@@ -681,6 +720,7 @@ class AgentStore:
             "seen_external_agent_count": len(seen_external_ids),
             "deactivated_count": len(stale_agent_ids),
             "deactivated_agent_ids": stale_agent_ids,
+            "synced_agent_ids": synced_agent_ids,
         }
 
     def upsert_agent_tool(self, agent_id: str, tool: dict[str, Any]) -> AgentToolRecord | None:
@@ -758,6 +798,77 @@ class AgentStore:
         else:
             rows = self.db.fetchall(_AGENT_TOOL_SELECT + " ORDER BY agent_id, name")
         return [_agent_tool_from_row(row) for row in rows]
+
+    def upsert_agent_client_plugin(self, agent_id: str, plugin: dict[str, Any]) -> AgentClientPluginRecord | None:
+        record = _agent_client_plugin_from_payload(agent_id, plugin)
+        if record is None:
+            return None
+        self.db.execute(
+            """
+            INSERT INTO agent_client_plugins (
+              agent_id, name, description, event_types_json, phases_json,
+              raw_payload_json, last_seen_at
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, UTC_TIMESTAMP())
+            ON DUPLICATE KEY UPDATE
+              description = VALUES(description),
+              event_types_json = VALUES(event_types_json),
+              phases_json = VALUES(phases_json),
+              raw_payload_json = VALUES(raw_payload_json),
+              last_seen_at = UTC_TIMESTAMP(),
+              updated_at = CURRENT_TIMESTAMP
+            """,
+            _agent_client_plugin_params(record),
+        )
+        return record
+
+    def sync_agent_client_plugins(self, agent_id: str, plugins: list[dict[str, Any]]) -> list[AgentClientPluginRecord]:
+        synced: list[AgentClientPluginRecord] = []
+        seen_names: set[str] = set()
+        for plugin in plugins:
+            if not isinstance(plugin, dict):
+                continue
+            record = self.upsert_agent_client_plugin(agent_id, plugin)
+            if record is None:
+                continue
+            synced.append(record)
+            seen_names.add(record.name)
+        if seen_names:
+            placeholders = ", ".join(["%s"] * len(seen_names))
+            self.db.execute(
+                f"""
+                DELETE FROM agent_client_plugins
+                WHERE agent_id = %s AND name NOT IN ({placeholders})
+                """,
+                (agent_id, *sorted(seen_names)),
+            )
+        else:
+            self.db.execute("DELETE FROM agent_client_plugins WHERE agent_id = %s", (agent_id,))
+        return synced
+
+    def list_agent_client_plugins(
+        self,
+        *,
+        agent_id: str | None = None,
+        agent_ids: set[str] | None = None,
+    ) -> list[AgentClientPluginRecord]:
+        if agent_id:
+            rows = self.db.fetchall(
+                _AGENT_CLIENT_PLUGIN_SELECT + " WHERE agent_id = %s ORDER BY name",
+                (agent_id,),
+            )
+        elif agent_ids is not None:
+            normalized_agent_ids = sorted(str(item).strip() for item in agent_ids if str(item).strip())
+            if not normalized_agent_ids:
+                return []
+            placeholders = ", ".join(["%s"] * len(normalized_agent_ids))
+            rows = self.db.fetchall(
+                _AGENT_CLIENT_PLUGIN_SELECT + f" WHERE agent_id IN ({placeholders}) ORDER BY agent_id, name",
+                tuple(normalized_agent_ids),
+            )
+        else:
+            rows = self.db.fetchall(_AGENT_CLIENT_PLUGIN_SELECT + " ORDER BY agent_id, name")
+        return [_agent_client_plugin_from_row(row) for row in rows]
 
     def update_agent_tool_labels(
         self,
@@ -1006,6 +1117,7 @@ def _delete_agent_with_execute(execute: Any, agent_id: str) -> AgentDeletionResu
         execute("DELETE FROM external_runtime_sessions WHERE agent_id = %s", (agent_id,))
     )
     tool_count = int(execute("DELETE FROM agent_tools WHERE agent_id = %s", (agent_id,)))
+    execute("DELETE FROM agent_client_plugins WHERE agent_id = %s", (agent_id,))
     user_agent_binding_count = int(
         execute("DELETE FROM user_agents WHERE agent_id = %s", (agent_id,))
     )
@@ -1142,6 +1254,25 @@ _SCHEMA = [
         ON DELETE CASCADE
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS agent_client_plugins (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      agent_id VARCHAR(255) NOT NULL,
+      name VARCHAR(255) NOT NULL,
+      description TEXT NULL,
+      event_types_json JSON NULL,
+      phases_json JSON NULL,
+      raw_payload_json JSON NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      last_seen_at TIMESTAMP NULL,
+      UNIQUE KEY uniq_agent_client_plugins_agent_name (agent_id, name),
+      INDEX idx_agent_client_plugins_agent_id (agent_id),
+      CONSTRAINT fk_agent_client_plugins_agent
+        FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+        ON DELETE CASCADE
+    )
+    """,
 ]
 
 _AGENT_TOOL_SELECT = """
@@ -1149,6 +1280,12 @@ SELECT agent_id, name, description, labels_json, input_params_json,
        capabilities_json, required_args_json, schema_json, metadata_json, raw_payload_json,
        created_at, updated_at, last_seen_at
 FROM agent_tools
+"""
+
+_AGENT_CLIENT_PLUGIN_SELECT = """
+SELECT agent_id, name, description, event_types_json, phases_json, raw_payload_json,
+       created_at, updated_at, last_seen_at
+FROM agent_client_plugins
 """
 
 
@@ -1275,6 +1412,38 @@ def _agent_tool_params(record: AgentToolRecord) -> tuple[Any, ...]:
     )
 
 
+def _agent_client_plugin_from_payload(agent_id: str, plugin: dict[str, Any]) -> AgentClientPluginRecord | None:
+    clean_agent_id = _normalize_required(agent_id, "agent_id")
+    name = _optional_text(plugin.get("name"))
+    if not name:
+        return None
+    normalized = {
+        "name": name,
+        "description": _optional_text(plugin.get("description")) or "",
+        "event_types": _string_list(plugin.get("event_types")),
+        "phases": _string_list(plugin.get("phases")),
+    }
+    return AgentClientPluginRecord(
+        agent_id=clean_agent_id,
+        name=name,
+        description=normalized["description"],
+        event_types_json=_json_dump(normalized["event_types"]),
+        phases_json=_json_dump(normalized["phases"]),
+        raw_payload_json=_json_dump(normalized),
+    )
+
+
+def _agent_client_plugin_params(record: AgentClientPluginRecord) -> tuple[Any, ...]:
+    return (
+        record.agent_id,
+        record.name,
+        record.description,
+        record.event_types_json,
+        record.phases_json,
+        record.raw_payload_json,
+    )
+
+
 def _user_agent_binding_from_row(row: dict[str, Any] | None) -> UserAgentBindingRecord | None:
     if not row:
         return None
@@ -1307,6 +1476,20 @@ def _agent_tool_from_row(row: dict[str, Any]) -> AgentToolRecord:
         required_args_json=_optional_text(row.get("required_args_json")),
         schema_json=_optional_text(row.get("schema_json")),
         metadata_json=_optional_text(row.get("metadata_json")),
+        raw_payload_json=_optional_text(row.get("raw_payload_json")),
+        created_at=_coerce_datetime(row.get("created_at")) if row.get("created_at") else None,
+        updated_at=_coerce_datetime(row.get("updated_at")) if row.get("updated_at") else None,
+        last_seen_at=_coerce_datetime(row.get("last_seen_at")) if row.get("last_seen_at") else None,
+    )
+
+
+def _agent_client_plugin_from_row(row: dict[str, Any]) -> AgentClientPluginRecord:
+    return AgentClientPluginRecord(
+        agent_id=str(row["agent_id"]),
+        name=str(row["name"]),
+        description=_optional_text(row.get("description")),
+        event_types_json=_optional_text(row.get("event_types_json")),
+        phases_json=_optional_text(row.get("phases_json")),
         raw_payload_json=_optional_text(row.get("raw_payload_json")),
         created_at=_coerce_datetime(row.get("created_at")) if row.get("created_at") else None,
         updated_at=_coerce_datetime(row.get("updated_at")) if row.get("updated_at") else None,

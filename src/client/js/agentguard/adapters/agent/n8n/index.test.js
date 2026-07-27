@@ -177,9 +177,9 @@ test("applyLoopbackToResponsesRequest rewrites request input only", () => {
   ]);
 });
 
-test("supportsThoughtAlignmentForResponsesRequest only enables non-stream requests", () => {
+test("supportsThoughtAlignmentForResponsesRequest enables stream and non-stream requests", () => {
   assert.equal(_private.supportsThoughtAlignmentForResponsesRequest({ stream: false }), true);
-  assert.equal(_private.supportsThoughtAlignmentForResponsesRequest({ stream: true }), false);
+  assert.equal(_private.supportsThoughtAlignmentForResponsesRequest({ stream: true }), true);
 });
 
 test("supportsThoughtAlignmentForRunNode only enables OpenAI root nodes", () => {
@@ -825,6 +825,32 @@ test("buildRunNodeContext reads cached n8n workflow owner identity", () => {
   assert.equal(context.execution_id, "exec-1");
 });
 
+test("buildRunNodeContext uses inline workflow owner identity when cache is empty", () => {
+  const context = _private.buildRunNodeContext(
+    {
+      id: "wf-inline-identity-test",
+      name: "Inline identity workflow",
+      projectId: "project-inline",
+      projectName: "Inline Team",
+      ownerUserId: "user-inline",
+      ownerUserEmail: "inline@example.com",
+      ownerUserFirstName: "Inline",
+      ownerUserLastName: "Owner",
+    },
+    { node: { id: "node-inline", name: "HTTP Request", type: "n8n-nodes-base.httpRequest" } },
+    null,
+    0,
+    { executionId: "exec-inline-1" },
+    "manual"
+  );
+
+  assert.equal(context.user_id, "user-inline");
+  assert.equal(context.n8n_user_email, "inline@example.com");
+  assert.equal(context.n8n_user_name, "Inline Owner");
+  assert.equal(context.n8n_project_id, "project-inline");
+  assert.equal(context.n8n_project_name, "Inline Team");
+});
+
 test("buildRunNodeContext uses n8n sessionId as external session", () => {
   _private.cacheWorkflowIdentity({
     id: "wf-session-test",
@@ -915,6 +941,96 @@ test("ensureN8nRuntimeAuth creates session from n8n sessionId before execution i
   });
 
   assert.equal(auth.session_id, "ags_n8n_reused");
+  assert.equal(
+    calls.map((call) => new URL(call.url).pathname).join(","),
+    "/v1/server/agents/register,/v1/server/session/create"
+  );
+});
+
+test("ensureN8nRuntimeAuth loads workflow owner identity on cache miss before creating a session", async (t) => {
+  const calls = [];
+  const oldFetch = global.fetch;
+  const oldServerUrl = process.env.AGENTGUARD_SERVER_URL;
+  const oldApiKey = process.env.AGENTGUARD_API_KEY;
+  const oldKeyDir = process.env.AGENTGUARD_AGENT_KEY_DIR;
+  const keyDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-n8n-lazy-identity-keys-"));
+  process.env.AGENTGUARD_SERVER_URL = "http://agentguard.test";
+  process.env.AGENTGUARD_API_KEY = "test-api-key";
+  process.env.AGENTGUARD_AGENT_KEY_DIR = keyDir;
+  _private.setOpenSqliteReadOnlyForTests(() => ({
+    all(sql, params, callback) {
+      assert.match(sql, /WHERE COALESCE\(w\.isArchived, 0\) = 0/);
+      assert.deepEqual(params, ["wf-lazy-identity-test"]);
+      callback(null, [
+        {
+          id: "wf-lazy-identity-test",
+          projectId: "project-lazy",
+          projectName: "Lazy Team",
+          ownerUserId: "owner-lazy",
+          ownerUserEmail: "lazy-owner@example.com",
+          ownerUserFirstName: "Lazy",
+          ownerUserLastName: "Owner",
+        },
+      ]);
+    },
+    close(callback) {
+      callback();
+    },
+  }));
+  global.fetch = async (url, options = {}) => {
+    const body = options.body ? JSON.parse(options.body) : {};
+    calls.push({ url: String(url), body });
+    if (String(url).endsWith("/v1/server/agents/register")) {
+      assert.equal(body.account_email, "lazy-owner@example.com");
+      return {
+        ok: true,
+        json: async () => ({
+          status: "ok",
+          agent: {
+            agent_id: "ag_n8n_lazy_identity",
+            agent_identity_code: "agic_lazy",
+            public_key_thumbprint: body.metadata.agent_public_key_thumbprint,
+          },
+          credential: {},
+          user_agent: { bound: true, user_id: 7 },
+        }),
+      };
+    }
+    if (String(url).endsWith("/v1/server/session/create")) {
+      assert.equal(body.account_email, "lazy-owner@example.com");
+      return {
+        ok: true,
+        json: async () => ({
+          session_id: "ags_n8n_lazy_identity",
+          session_token: "token-lazy",
+          user_id: "7",
+          expires_at: Math.floor(Date.now() / 1000) + 600,
+        }),
+      };
+    }
+    return { ok: false, status: 404, json: async () => ({}) };
+  };
+  t.after(() => {
+    global.fetch = oldFetch;
+    restoreEnv("AGENTGUARD_SERVER_URL", oldServerUrl);
+    restoreEnv("AGENTGUARD_API_KEY", oldApiKey);
+    restoreEnv("AGENTGUARD_AGENT_KEY_DIR", oldKeyDir);
+    _private.setOpenSqliteReadOnlyForTests(null);
+    fs.rmSync(keyDir, { recursive: true, force: true });
+  });
+
+  const context = {
+    workflow_id: "wf-lazy-identity-test",
+    workflow_name: "Lazy identity workflow",
+    execution_id: "exec-lazy-1",
+    n8n_session_id: "session-lazy-1",
+  };
+  const auth = await _private.ensureN8nRuntimeAuth(context);
+
+  assert.equal(auth.session_id, "ags_n8n_lazy_identity");
+  assert.equal(context.n8n_user_email, "lazy-owner@example.com");
+  assert.equal(context.n8n_user_id, "owner-lazy");
+  assert.equal(context.n8n_project_id, "project-lazy");
   assert.equal(
     calls.map((call) => new URL(call.url).pathname).join(","),
     "/v1/server/agents/register,/v1/server/session/create"
@@ -1058,6 +1174,280 @@ test("patchOpenAI retries with rewritten raw output message and retry metadata",
   assert.equal(llmInputs[1].metadata.thought_alignment_attempt, 1);
   assert.equal(llmOutputs[0].metadata.thought_regeneration_supported, true);
   assert.equal(llmOutputs[1].metadata.thought_alignment_attempt, 1);
+});
+
+test("patchOpenAI buffers streamed output until llm_output guard runs and then replays chunks", async (t) => {
+  const events = [];
+  const requests = [];
+  const emitted = [];
+  const originalEnforce = UGuardEnforcer.prototype.enforce;
+  UGuardEnforcer.prototype.enforce = async function mockEnforce(event) {
+    events.push(event.toDict());
+    return { decision: GuardDecision.allow("ok") };
+  };
+  t.after(() => {
+    UGuardEnforcer.prototype.enforce = originalEnforce;
+  });
+
+  class ChatOpenAIResponses {
+    async completionWithRetry(request) {
+      requests.push(JSON.parse(JSON.stringify(request)));
+      return (async function* stream() {
+        emitted.push("first");
+        yield { type: "response.output_text.delta", delta: "Hello " };
+        emitted.push("second");
+        yield { type: "response.output_text.delta", delta: "world" };
+      })();
+    }
+  }
+
+  _private.patchOpenAI({ ChatOpenAIResponses });
+
+  const client = new ChatOpenAIResponses();
+  const result = await client.completionWithRetry({
+    model: "gpt-4.1",
+    stream: true,
+    sessionId: "stream-replay-test",
+    input: [{ role: "user", content: "say hi" }],
+  });
+
+  assert.deepEqual(emitted, ["first", "second"]);
+  assert.deepEqual(events.map((event) => event.event_type), ["llm_input", "llm_output"]);
+  assert.equal(events[1].metadata.stream, true);
+  assert.equal(requests.length, 1);
+
+  const chunks = [];
+  for await (const chunk of result) {
+    chunks.push(chunk);
+  }
+  assert.deepEqual(chunks, [
+    { type: "response.output_text.delta", delta: "Hello " },
+    { type: "response.output_text.delta", delta: "world" },
+  ]);
+});
+
+test("patchOpenAI stream modify returns rewritten synthetic stream", async (t) => {
+  const events = [];
+  const originalEnforce = UGuardEnforcer.prototype.enforce;
+  UGuardEnforcer.prototype.enforce = async function mockEnforce(event) {
+    events.push(event.toDict());
+    if (event.event_type === "llm_output") {
+      return {
+        decision: GuardDecision.modify_llm_output(
+          "rewrite streamed llm output",
+          { processed_content: '{"output": "rewritten streamed answer"}' },
+        ),
+      };
+    }
+    return { decision: GuardDecision.allow("ok") };
+  };
+  t.after(() => {
+    UGuardEnforcer.prototype.enforce = originalEnforce;
+  });
+
+  class ChatOpenAIResponses {
+    async completionWithRetry() {
+      return (async function* stream() {
+        yield { type: "response.output_text.delta", delta: "unsafe " };
+        yield { type: "response.output_text.delta", delta: "answer" };
+      })();
+    }
+  }
+
+  _private.patchOpenAI({ ChatOpenAIResponses });
+
+  const client = new ChatOpenAIResponses();
+  const result = await client.completionWithRetry({
+    model: "gpt-4.1",
+    stream: true,
+    sessionId: "stream-modify-test",
+    input: [{ role: "user", content: "rewrite this" }],
+  });
+
+  assert.deepEqual(events.map((event) => event.event_type), ["llm_input", "llm_output"]);
+
+  const chunks = [];
+  for await (const chunk of result) {
+    chunks.push(chunk);
+  }
+  assert.equal(chunks.length, 2);
+  assert.equal(chunks[0].delta, "rewritten streamed answer");
+  assert.equal(chunks[1].response.output_text, "rewritten streamed answer");
+});
+
+test("patchOpenAI stream deny returns blocked synthetic stream without replaying original chunks", async (t) => {
+  const events = [];
+  const originalEnforce = UGuardEnforcer.prototype.enforce;
+  UGuardEnforcer.prototype.enforce = async function mockEnforce(event) {
+    events.push(event.toDict());
+    if (event.event_type === "llm_output") {
+      return {
+        decision: new GuardDecision({
+          decision_type: DecisionType.DENY,
+          reason: "unsafe stream output",
+        }),
+      };
+    }
+    return { decision: GuardDecision.allow("ok") };
+  };
+  t.after(() => {
+    UGuardEnforcer.prototype.enforce = originalEnforce;
+  });
+
+  class ChatOpenAIResponses {
+    async completionWithRetry() {
+      return (async function* stream() {
+        yield { type: "response.output_text.delta", delta: "secret " };
+        yield { type: "response.output_text.delta", delta: "data" };
+      })();
+    }
+  }
+
+  _private.patchOpenAI({ ChatOpenAIResponses });
+
+  const client = new ChatOpenAIResponses();
+  const result = await client.completionWithRetry({
+    model: "gpt-4.1",
+    stream: true,
+    sessionId: "stream-deny-test",
+    input: [{ role: "user", content: "leak secret" }],
+  });
+
+  assert.deepEqual(events.map((event) => event.event_type), ["llm_input", "llm_output"]);
+
+  const chunks = [];
+  for await (const chunk of result) {
+    chunks.push(chunk);
+  }
+  assert.equal(chunks.length, 2);
+  assert.equal(chunks[0].delta, "[AgentGuard blocked] unsafe stream output");
+  assert.equal(chunks[1].response.output_text, "[AgentGuard blocked] unsafe stream output");
+});
+
+test("patchOpenAI stream loopback retries without leaking first attempt", async (t) => {
+  const events = [];
+  const requests = [];
+  const originalEnforce = UGuardEnforcer.prototype.enforce;
+  UGuardEnforcer.prototype.enforce = async function mockEnforce(event) {
+    events.push(event.toDict());
+    if (event.event_type === "llm_output" && event.metadata.thought_alignment_attempt !== 1) {
+      return {
+        decision: new GuardDecision({
+          decision_type: DecisionType.LOOP_BACK_TO_LLM,
+          reason: "align thought",
+          processed_content: "对齐后的思维",
+          metadata: { protocol: "thought_alignment_v1" },
+        }),
+      };
+    }
+    return { decision: GuardDecision.allow("ok") };
+  };
+  t.after(() => {
+    UGuardEnforcer.prototype.enforce = originalEnforce;
+  });
+
+  class ChatOpenAIResponses {
+    async completionWithRetry(request) {
+      requests.push(JSON.parse(JSON.stringify(request)));
+      const answer = requests.length === 1 ? "first answer" : "second answer";
+      return (async function* stream() {
+        yield { type: "response.output_text.delta", delta: answer };
+        yield {
+          type: "response.completed",
+          response: {
+            output_text: answer,
+            output: [
+              {
+                type: "message",
+                role: "assistant",
+                content: [{ type: "output_text", text: answer, annotations: [] }],
+              },
+            ],
+          },
+        };
+      })();
+    }
+  }
+
+  _private.patchOpenAI({ ChatOpenAIResponses });
+
+  const client = new ChatOpenAIResponses();
+  const result = await client.completionWithRetry({
+    model: "gpt-4.1",
+    stream: true,
+    sessionId: "stream-loopback-test",
+    input: [{ role: "user", content: "original prompt" }],
+  });
+
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].input.at(-1).content[0].text, "对齐后的思维");
+  assert.equal(requests[1].input.at(-1).role, "assistant");
+
+  const llmInputs = events.filter((event) => event.event_type === "llm_input");
+  const llmOutputs = events.filter((event) => event.event_type === "llm_output");
+  assert.equal(llmInputs[0].metadata.thought_regeneration_supported, true);
+  assert.equal(llmInputs[1].metadata.thought_alignment_attempt, 1);
+  assert.equal(llmOutputs[0].metadata.thought_regeneration_supported, true);
+  assert.equal(llmOutputs[1].metadata.thought_alignment_attempt, 1);
+
+  const chunks = [];
+  for await (const chunk of result) {
+    chunks.push(chunk);
+  }
+  assert.deepEqual(chunks, [
+    { type: "response.output_text.delta", delta: "second answer" },
+    {
+      type: "response.completed",
+      response: {
+        output_text: "second answer",
+        output: [
+          {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "second answer", annotations: [] }],
+          },
+        ],
+      },
+    },
+  ]);
+});
+
+test("patchOpenAI stream errors emit llm_output error metadata and rethrow", async (t) => {
+  const events = [];
+  const originalEnforce = UGuardEnforcer.prototype.enforce;
+  UGuardEnforcer.prototype.enforce = async function mockEnforce(event) {
+    events.push(event.toDict());
+    return { decision: GuardDecision.allow("ok") };
+  };
+  t.after(() => {
+    UGuardEnforcer.prototype.enforce = originalEnforce;
+  });
+
+  class ChatOpenAIResponses {
+    async completionWithRetry() {
+      return (async function* stream() {
+        yield { type: "response.output_text.delta", delta: "partial" };
+        throw new Error("stream boom");
+      })();
+    }
+  }
+
+  _private.patchOpenAI({ ChatOpenAIResponses });
+
+  const client = new ChatOpenAIResponses();
+  await assert.rejects(
+    client.completionWithRetry({
+      model: "gpt-4.1",
+      stream: true,
+      sessionId: "stream-error-test",
+      input: [{ role: "user", content: "explode" }],
+    }),
+    /stream boom/
+  );
+
+  assert.deepEqual(events.map((event) => event.event_type), ["llm_input", "llm_output"]);
+  assert.equal(events[1].metadata.stream, true);
+  assert.equal(events[1].metadata.error, "stream boom");
 });
 
 test("patchN8nCore retries runNode LLMs with rewritten raw output message and retry metadata", async (t) => {

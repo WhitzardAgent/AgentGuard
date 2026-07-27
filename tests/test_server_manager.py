@@ -934,6 +934,74 @@ def test_update_client_plugin_config_updates_both_server_and_client_views():
     assert record["remote_plugin_config"]["phases"]["llm_before"]["server"] == ["jailbreak_check"]
 
 
+def test_resolve_effective_plugin_config_prefers_agent_override_then_session_then_default():
+    m = RuntimeManager(
+        plugin_config={
+            "phases": {
+                "llm_before": {"client": [], "server": ["rule_based_plugin"]},
+                "llm_after": {"client": [], "server": []},
+                "tool_before": {"client": [], "server": []},
+                "tool_after": {"client": [], "server": []},
+                "global": {"client": [], "server": []},
+            }
+        }
+    )
+    m.session_pool.upsert(
+        RuntimeContext(
+            session_id="principal-match",
+            agent_id="agent-1",
+            user_id="user-1",
+            metadata={
+                "client_plugin_config": {
+                    "phases": {
+                        "llm_before": {"client": ["modify_input_demo"], "server": []},
+                    }
+                },
+                "remote_plugin_config": {
+                    "phases": {
+                        "llm_before": {"client": [], "server": ["modify_output_demo"]},
+                    }
+                },
+            },
+        )
+    )
+
+    resolved, source = m.resolve_effective_plugin_config("agent-1", session_id="principal-match", user_id="user-1")
+    assert source == "agent_override"
+    assert resolved["phases"]["llm_before"]["client"] == ["modify_input_demo"]
+    assert resolved["phases"]["llm_before"]["server"] == ["modify_output_demo"]
+
+    m.set_agent_plugin_config(
+        "agent-1",
+        {
+            "phases": {
+                "llm_before": {"client": [], "server": []},
+                "llm_after": {"client": [], "server": []},
+                "tool_before": {"client": [], "server": []},
+                "tool_after": {"client": [], "server": []},
+                "global": {"client": [], "server": []},
+            }
+        },
+        client_config={
+            "phases": {
+                "llm_before": {"client": ["jailbreak_check"], "server": []},
+                "llm_after": {"client": [], "server": []},
+                "tool_before": {"client": [], "server": []},
+                "tool_after": {"client": [], "server": []},
+                "global": {"client": [], "server": []},
+            }
+        },
+    )
+    resolved, source = m.resolve_effective_plugin_config("agent-1", session_id="principal-match", user_id="user-1")
+    assert source == "agent_override"
+    assert resolved["phases"]["llm_before"]["client"] == ["jailbreak_check"]
+    assert resolved["phases"]["llm_before"]["server"] == []
+
+    resolved, source = m.resolve_effective_plugin_config("agent-2")
+    assert source == "server_default"
+    assert resolved["phases"]["llm_before"]["server"] == ["rule_based_plugin"]
+
+
 def test_manager_stops_remote_plugin_chain_on_first_decision():
     m = RuntimeManager(
         plugin_config={

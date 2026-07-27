@@ -929,6 +929,29 @@ def test_workflow_make_guard_uses_dpop_runtime_session(monkeypatch):
         return FakeRuntimeAuth()
 
     monkeypatch.setattr(dify_adapter._runtime_auth_manager, "ensure", ensure)
+    fetch_calls = []
+
+    def fetch_runtime_plugin_config(self):
+        fetch_calls.append((self.session_id, self.agent_id, self.user_id))
+        return {
+            "status": "ok",
+            "plugin_config": {
+                "phases": {
+                    "llm_before": {"client": ["modify_input_demo"], "server": []},
+                    "llm_after": {"client": ["modify_output_demo"], "server": []},
+                    "tool_before": {"client": [], "server": []},
+                    "tool_after": {"client": [], "server": []},
+                    "global": {"client": [], "server": []},
+                }
+            },
+            "config_source": "agent_override",
+        }
+
+    monkeypatch.setattr(
+        dify_adapter._shared.RemoteGuardClient,
+        "fetch_runtime_plugin_config",
+        fetch_runtime_plugin_config,
+    )
 
     guard = dify_adapter._make_guard(
         {
@@ -953,6 +976,10 @@ def test_workflow_make_guard_uses_dpop_runtime_session(monkeypatch):
     assert guard._remote.use_dpop_auth is True
     assert guard._remote.legacy_identity_headers is False
     assert guard._auto_close_runtime_session is False
+    assert fetch_calls == [("ags_dify_workflow", "ag_workflow", "7")]
+    assert guard.context.metadata["client_plugin_config"]["phases"]["llm_before"]["client"] == ["modify_input_demo"]
+    assert guard.context.metadata["client_plugin_config"]["phases"]["llm_after"]["client"] == ["modify_output_demo"]
+    assert guard.context.metadata["remote_plugin_config"]["phases"]["llm_before"]["server"] == []
 
 
 def test_workflow_runtime_auth_failure_blocks_instead_of_legacy_fallback(monkeypatch):
@@ -1320,6 +1347,7 @@ def test_workflow_catalog_sync_reports_published_workflow_tools(monkeypatch):
             "provider_instance_id": "",
             "agent_type": "workflow",
             "external_agent_ids": ["app-1"],
+            "client_plugins": agent_syncs[0]["client_plugins"],
             "metadata": {
                 "adapter": "dify",
                 "dify_runtime": "workflow_api",
@@ -1327,6 +1355,7 @@ def test_workflow_catalog_sync_reports_published_workflow_tools(monkeypatch):
             },
         }
     ]
+    assert any(item["name"] == "tool_invoke" for item in agent_syncs[0]["client_plugins"])
     tools = {tool["name"]: tool for tool in synced[0][1]}
     assert sorted(tools) == ["web_search", "weekday"]
     assert tools["weekday"]["input_params"] == ["year", "month"]
@@ -1388,7 +1417,7 @@ def test_workflow_catalog_sync_refreshes_agent_metadata_when_tools_unchanged(mon
             return {"tool_count": len(tools)}
 
     def register_agent(_remote, **kwargs):
-        registrations.append((kwargs["name"], kwargs["description"]))
+        registrations.append((kwargs["name"], kwargs["description"], list(kwargs.get("client_plugins") or [])))
         return {"agent": {"agent_id": "canonical-workflow"}}
 
     monkeypatch.setattr(dify_adapter, "RemoteGuardClient", FakeRemote)
@@ -1399,7 +1428,9 @@ def test_workflow_catalog_sync_refreshes_agent_metadata_when_tools_unchanged(mon
     second = dify_adapter._sync_workflow_tool_catalog(fake.app, fake.workflow)
 
     assert second["skipped"] is True
-    assert registrations == [("Workflow One", "old"), ("Workflow One", "new")]
+    assert registrations[0][:2] == ("Workflow One", "old")
+    assert registrations[1][:2] == ("Workflow One", "new")
+    assert any(item["name"] == "tool_invoke" for item in registrations[0][2])
     assert sync_calls == [["weekday", "web_search"]]
 
 
@@ -2168,6 +2199,135 @@ def test_workflow_stream_llm_modify_output_replays_synthetic_chunk(monkeypatch):
     assert len(chunks) == 1
     assert chunks[0].delta.message.content == "rewritten workflow answer"
     assert chunks[0].delta.message.tool_calls == []
+
+
+def test_workflow_llm_modify_output_rewrites_message_content(monkeypatch):
+    dify_adapter = _fresh_adapter(monkeypatch)
+
+    class ModelInstance:
+        model_name = "gpt-4o-mini"
+        provider = "langgenius/openai/openai"
+
+        def invoke_llm(
+            self,
+            prompt_messages,
+            model_parameters=None,
+            tools=None,
+            stop=None,
+            stream=True,
+            callbacks=None,
+        ):
+            return types.SimpleNamespace(
+                message=types.SimpleNamespace(content="original answer", tool_calls=[]),
+                prompt_messages=prompt_messages,
+            )
+
+    dify_adapter._patch_legacy_model_invoke_llm(ModelInstance)
+
+    class ModifyRuntime:
+        def guard(self, event, phase="before"):
+            if event.event_type.value == "llm_output":
+                return types.SimpleNamespace(
+                    decision=GuardDecision.modify_llm_output(
+                        "rewrite llm output",
+                        processed_content='{"output": "rewritten workflow answer"}',
+                    )
+                )
+            return types.SimpleNamespace(decision=GuardDecision.allow())
+
+    guard = types.SimpleNamespace(
+        runtime=ModifyRuntime(),
+        context=types.SimpleNamespace(session_id="workflow-rewrite-output", agent_id="agent"),
+    )
+    token_guard = dify_adapter._current_guard.set(guard)
+    token_meta = dify_adapter._current_metadata.set(
+        {
+            "adapter": "dify",
+            "dify_runtime": "workflow_api",
+            "app_id": "app-1",
+            "workflow_id": "workflow-1",
+            "node_id": "node-1",
+        }
+    )
+    try:
+        result = ModelInstance().invoke_llm(
+            [types.SimpleNamespace(content="query")],
+            stream=False,
+        )
+    finally:
+        dify_adapter._current_metadata.reset(token_meta)
+        dify_adapter._current_guard.reset(token_guard)
+
+    assert result.message.content == "rewritten workflow answer"
+    assert result.message.tool_calls == []
+
+
+def test_workflow_llm_modify_input_rewrites_last_prompt_message(monkeypatch):
+    dify_adapter = _fresh_adapter(monkeypatch)
+
+    class ModelInstance:
+        model_name = "gpt-4o-mini"
+        provider = "langgenius/openai/openai"
+
+        def __init__(self):
+            self.seen_prompt_messages = []
+
+        def invoke_llm(
+            self,
+            prompt_messages,
+            model_parameters=None,
+            tools=None,
+            stop=None,
+            stream=True,
+            callbacks=None,
+        ):
+            self.seen_prompt_messages.append(prompt_messages)
+            return types.SimpleNamespace(
+                message=types.SimpleNamespace(content="final answer", tool_calls=[]),
+                prompt_messages=prompt_messages,
+            )
+
+    dify_adapter._patch_legacy_model_invoke_llm(ModelInstance)
+
+    class ModifyRuntime:
+        def guard(self, event, phase="before"):
+            if event.event_type.value == "llm_input":
+                return types.SimpleNamespace(
+                    decision=GuardDecision.modify_llm_input(
+                        "rewrite llm input",
+                        processed_content="rewritten prompt",
+                    )
+                )
+            return types.SimpleNamespace(decision=GuardDecision.allow())
+
+    guard = types.SimpleNamespace(
+        runtime=ModifyRuntime(),
+        context=types.SimpleNamespace(session_id="workflow-rewrite-input", agent_id="agent"),
+    )
+    token_guard = dify_adapter._current_guard.set(guard)
+    token_meta = dify_adapter._current_metadata.set(
+        {
+            "adapter": "dify",
+            "dify_runtime": "workflow_api",
+            "app_id": "app-1",
+            "workflow_id": "workflow-1",
+            "node_id": "node-1",
+        }
+    )
+    try:
+        model = ModelInstance()
+        result = model.invoke_llm(
+            [types.SimpleNamespace(role="system", content="system"), types.SimpleNamespace(role="user", content="query")],
+            stream=False,
+        )
+    finally:
+        dify_adapter._current_metadata.reset(token_meta)
+        dify_adapter._current_guard.reset(token_guard)
+
+    assert result.message.content == "final answer"
+    assert len(model.seen_prompt_messages) == 1
+    assert model.seen_prompt_messages[0][0].content == "system"
+    assert model.seen_prompt_messages[0][1].content == "rewritten prompt"
 
 
 def test_workflow_llm_loopback_retries_with_aligned_thought(monkeypatch):

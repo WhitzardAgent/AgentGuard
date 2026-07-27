@@ -2,7 +2,9 @@ import json
 import os
 import re
 import argparse
+from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from langchain.agents import create_agent
 from langchain.tools import tool
@@ -58,6 +60,57 @@ def get_control_server_url() -> str:
             "with a real URL, for example http://127.0.0.1:38080."
         )
     return url
+
+
+def get_client_plugin_config_path() -> str:
+    configured = os.getenv("AGENTGUARD_CLIENT_PLUGIN_CONFIG", "").strip()
+    if configured:
+        return configured
+    return str(Path(__file__).resolve().parents[1] / "config" / "plugins.json")
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer.") from exc
+
+
+def _env_optional_int(name: str) -> int | None:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer.") from exc
+
+
+def _default_client_config_advertise_host(server_url: str) -> str:
+    host = (urlparse(server_url).hostname or "").strip().lower()
+    if host in {"127.0.0.1", "localhost"}:
+        # AgentGuard commonly runs in Docker while this LangChain demo runs on the host.
+        return "host.docker.internal"
+    return host or "127.0.0.1"
+
+
+def get_client_config_api_options(server_url: str) -> dict[str, Any]:
+    listen_host = os.getenv("AGENTGUARD_CLIENT_CONFIG_API_HOST", "0.0.0.0").strip() or "0.0.0.0"
+    listen_port = _env_int("AGENTGUARD_CLIENT_CONFIG_API_PORT", 0)
+    advertise_host = (
+        os.getenv("AGENTGUARD_CLIENT_CONFIG_API_ADVERTISE_HOST", "").strip()
+        or _default_client_config_advertise_host(server_url)
+    )
+    advertise_port = _env_optional_int("AGENTGUARD_CLIENT_CONFIG_API_ADVERTISE_PORT")
+    return {
+        "client_config_api_host": listen_host,
+        "client_config_api_port": listen_port,
+        "client_config_api_advertise_host": advertise_host,
+        "client_config_api_advertise_port": advertise_port,
+    }
 
 
 def parse_args() -> argparse.Namespace:
@@ -160,13 +213,16 @@ def run(agent, prompt):
 if __name__ == "__main__":
     args = parse_args()
     agent = build_agent()
+    control_server_url = get_control_server_url()
 
     # 🚩 Load the guard client
     guard = Guard(
-        remote_url=get_control_server_url(),
+        remote_url=control_server_url,
         ticket=args.ticket,
         mode="enforce",
         fail_open=False,
+        plugin_config=get_client_plugin_config_path(),
+        **get_client_config_api_options(control_server_url),
     )
 
     # 🚩 Create a principal for the agent
@@ -179,6 +235,9 @@ if __name__ == "__main__":
 
     # 🚩 Start a session with the principal
     guard.start(principal=principal, goal="langchain remote runnable host demo")
+    client_config_url = guard.start_config_api(sync_remote=True)
+    print(f"[AgentGuard Client Config API] {client_config_url}")
+    print(f"[AgentGuard Client Plugin List] {guard.context.metadata.get('client_plugin_list_url')}")
 
     # Print every normalized RuntimeEvent captured by AgentGuard. This is useful
     # for checking whether LLMOutput.output is split into thought/final_output.

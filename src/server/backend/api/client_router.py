@@ -14,6 +14,7 @@ from backend.api.schemas import (
     GuardDecideRequest,
     GuardDecideResponse,
     McpReportRequest,
+    RuntimePluginConfigResponse,
     RuntimeSessionCreateRequest,
     SessionRegisterRequest,
     SkillReportRequest,
@@ -127,6 +128,7 @@ def register_agent(req: AgentRegisterRequest, request: Request) -> dict[str, Any
             account_email=req.account_email,
             public_key_jwk=req.public_key_jwk,
             metadata=req.metadata,
+            client_plugins=[item.model_dump() for item in req.client_plugins],
         )
     except DatabaseUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -219,6 +221,7 @@ def sync_agents(req: AgentCatalogSyncRequest, request: Request) -> dict[str, Any
             agent_type=req.agent_type,
             external_agent_ids=req.external_agent_ids,
             metadata=req.metadata,
+            client_plugins=[item.model_dump() for item in req.client_plugins],
         )
     except DatabaseUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -273,6 +276,23 @@ def register_session(req: SessionRegisterRequest, request: Request) -> dict[str,
         enforce_key=False,
     )
     return {"status": "ok", "session": record}
+
+
+@router.get("/v1/server/session/plugin-config", response_model=RuntimePluginConfigResponse)
+def runtime_plugin_config(request: Request) -> RuntimePluginConfigResponse:
+    auth = _authenticate_runtime(request)
+    plugin_config, config_source = _manager.resolve_effective_plugin_config(
+        auth.agent_id,
+        session_id=auth.session_id,
+        user_id=auth.user_id,
+    )
+    return RuntimePluginConfigResponse(
+        status="ok",
+        agent_id=auth.agent_id,
+        session_id=auth.session_id,
+        plugin_config=plugin_config,
+        config_source=config_source,
+    )
 
 
 @router.post("/v1/server/session/create")

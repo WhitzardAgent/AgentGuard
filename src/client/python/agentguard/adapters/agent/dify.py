@@ -521,6 +521,7 @@ def _run_legacy_llm_call(
         guard_output=_guard_legacy_llm_output,
         blocked_value=_blocked_llm_value,
         normalizer=_LEGACY_LLM_NORMALIZER,
+        modify_output=_shared.modified_message_llm_output_value,
         stream_result_builder=_synthetic_llm_stream,
     )
 
@@ -2483,6 +2484,7 @@ def _sync_dify_agent_catalog_to_agentguard(
             "provider_instance_id": _dify_provider_instance_id(),
             "agent_type": agent_type,
             "external_agent_ids": sorted(set(external_agent_ids)),
+            "client_plugins": _shared.build_client_plugin_catalog(),
             "metadata": {
                 "adapter": "dify",
                 "dify_runtime": "workflow_api",
@@ -2824,6 +2826,7 @@ def _sync_workflow_tools_to_agentguard(app: Any, workflow: Any, tools: list[dict
         description=_optional_text(getattr(app, "description", None)),
         account_email=account_email,
     )
+    client_plugins = _shared.build_client_plugin_catalog()
     return _shared.sync_tools_to_agentguard(
         tools,
         spec=_WORKFLOW_RUNTIME_SPEC,
@@ -2838,6 +2841,7 @@ def _sync_workflow_tools_to_agentguard(app: Any, workflow: Any, tools: list[dict
         register_agent_fn=_register_dify_agent,
         fingerprint_cache=_catalog_fingerprints,
         fingerprint_lock=_catalog_fingerprints_lock,
+        client_plugins=client_plugins,
         env_float_fn=_env_float,
     )
 
@@ -2879,6 +2883,7 @@ def _register_dify_agent(
     name: str | None,
     description: str | None,
     metadata: dict[str, Any],
+    client_plugins: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     return _shared.register_dify_agent(
         remote,
@@ -2890,6 +2895,7 @@ def _register_dify_agent(
         name=name,
         description=description,
         metadata=metadata,
+        client_plugins=client_plugins,
     )
 
 

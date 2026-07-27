@@ -257,6 +257,85 @@ def test_build_dify_thought_loopback_prompt_messages_normalizes_none_tool_calls(
     assert original[-1].tool_calls is None
 
 
+def test_build_synthetic_llm_stream_chunk_preserves_template_type():
+    class Message:
+        def __init__(self, content: str, tool_calls: list[object] | None = None) -> None:
+            self.content = content
+            self.tool_calls = list(tool_calls or [])
+
+    class Delta:
+        def __init__(self, message: Message) -> None:
+            self.message = message
+            self.usage = {"tokens": 3}
+
+    class Chunk:
+        def __init__(self, content: str, tool_calls: list[object] | None = None) -> None:
+            self.delta = Delta(Message(content, tool_calls))
+
+    original = Chunk("", [{"name": "web_search"}])
+
+    rewritten = dify_shared.build_synthetic_llm_stream_chunk(
+        "rewritten answer",
+        chunk_template=original,
+    )
+
+    assert isinstance(rewritten, Chunk)
+    assert rewritten.delta.message.content == "rewritten answer"
+    assert rewritten.delta.message.tool_calls == []
+    assert original.delta.message.content == ""
+    assert original.delta.message.tool_calls == [{"name": "web_search"}]
+
+
+def test_run_dify_legacy_llm_call_stream_modify_reuses_original_chunk_type():
+    class Message:
+        def __init__(self, content: str, tool_calls: list[object] | None = None) -> None:
+            self.content = content
+            self.tool_calls = list(tool_calls or [])
+
+    class Delta:
+        def __init__(self, message: Message) -> None:
+            self.message = message
+            self.usage = None
+
+    class Chunk:
+        def __init__(self, content: str, tool_calls: list[object] | None = None) -> None:
+            self.delta = Delta(Message(content, tool_calls))
+
+    def guard_input(_model, _call, _extra_metadata):
+        return GuardDecision.allow()
+
+    def guard_output(_model, _output, _call, _error, _extra_metadata):
+        return GuardDecision.modify_llm_output(
+            "rewrite streamed llm output",
+            processed_content="rewritten answer",
+        )
+
+    def execute(_args, _kwargs):
+        def chunks():
+            yield Chunk("", [{"name": "web_search"}])
+
+        return chunks()
+
+    result = dify_shared.run_dify_legacy_llm_call(
+        model=object(),
+        args=(["hello"],),
+        kwargs={},
+        arg_names=("prompt_messages", "model_parameters", "tools", "stop", "stream", "callbacks"),
+        execute=execute,
+        guard_input=guard_input,
+        guard_output=guard_output,
+        blocked_value=lambda _decision: None,
+        normalizer=dify_shared.DifyLegacyLLMNormalizer(include_stream_tool_calls=True),
+    )
+
+    chunks = list(result)
+
+    assert len(chunks) == 1
+    assert isinstance(chunks[0], Chunk)
+    assert chunks[0].delta.message.content == "rewritten answer"
+    assert chunks[0].delta.message.tool_calls == []
+
+
 def test_loopback_metadata_from_decision_marks_thought_alignment_retry():
     decision = GuardDecision(
         decision_type=DecisionType.LOOP_BACK_TO_LLM,

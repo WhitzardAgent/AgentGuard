@@ -14,6 +14,7 @@ class FakeDB:
         self.user_agents: list[dict[str, Any]] = []
         self.agent_credentials: list[dict[str, Any]] = []
         self.agent_tools: list[dict[str, Any]] = []
+        self.agent_client_plugins: list[dict[str, Any]] = []
         self.runtime_sessions: list[dict[str, Any]] = []
         self.runtime_tokens: list[dict[str, Any]] = []
         self.external_runtime_sessions: list[dict[str, Any]] = []
@@ -218,6 +219,37 @@ class FakeDB:
             (agent_id,) = params
             self.agent_tools = [row for row in self.agent_tools if row["agent_id"] != agent_id]
             return 1
+        if "INSERT INTO agent_client_plugins" in sql:
+            row = {
+                "agent_id": params[0],
+                "name": params[1],
+                "description": params[2],
+                "event_types_json": params[3],
+                "phases_json": params[4],
+                "raw_payload_json": params[5],
+                "created_at": None,
+                "updated_at": None,
+                "last_seen_at": None,
+            }
+            for index, existing in enumerate(self.agent_client_plugins):
+                if existing["agent_id"] == row["agent_id"] and existing["name"] == row["name"]:
+                    self.agent_client_plugins[index] = {**existing, **row}
+                    return 1
+            self.agent_client_plugins.append(row)
+            return 1
+        if "DELETE FROM agent_client_plugins" in sql and "name NOT IN" in sql:
+            agent_id = params[0]
+            keep = set(params[1:])
+            self.agent_client_plugins = [
+                row
+                for row in self.agent_client_plugins
+                if row["agent_id"] != agent_id or row["name"] in keep
+            ]
+            return 1
+        if "DELETE FROM agent_client_plugins" in sql:
+            (agent_id,) = params
+            self.agent_client_plugins = [row for row in self.agent_client_plugins if row["agent_id"] != agent_id]
+            return 1
         if "UPDATE agents" in sql:
             agent_id = str(params[-1])
             row = self.agents[agent_id]
@@ -393,6 +425,13 @@ class FakeDB:
                 allowed = set(params)
                 return [row for row in self.agent_tools if row["agent_id"] in allowed]
             return list(self.agent_tools)
+        if "FROM agent_client_plugins" in sql:
+            if "WHERE agent_id = %s" in sql:
+                return [row for row in self.agent_client_plugins if row["agent_id"] == params[0]]
+            if "WHERE agent_id IN" in sql:
+                allowed = set(params)
+                return [row for row in self.agent_client_plugins if row["agent_id"] in allowed]
+            return list(self.agent_client_plugins)
         if "FROM user_agents" in sql:
             if "SELECT ua.user_id, ua.agent_id, ua.provider, ua.account_email, ua.source" in sql:
                 user_id = int(params[0])
@@ -858,6 +897,76 @@ def test_sync_agent_tools_preserves_explicit_empty_required_args():
     assert tool["schema"]["required"] == []
 
 
+def test_register_agent_persists_client_plugins():
+    db = FakeDB()
+    store = AgentStore(db)
+
+    agent = store.register_agent(
+        provider="dify",
+        external_agent_id="app-1",
+        agent_type="workflow",
+        public_key_jwk=PUBLIC_JWK,
+        client_plugins=[
+            {
+                "name": "client_prompt_guard",
+                "description": "Prompt guard",
+                "event_types": ["llm_input"],
+                "phases": ["llm_before"],
+            }
+        ],
+    ).agent
+
+    plugins = store.list_agent_client_plugins(agent_id=agent.agent_id)
+    assert [item.name for item in plugins] == ["client_prompt_guard"]
+    assert plugins[0].to_console_dict()["event_types"] == ["llm_input"]
+
+
+def test_sync_agent_client_plugins_persists_and_replaces_catalog():
+    db = FakeDB()
+    store = AgentStore(db)
+    agent = store.register_agent(
+        provider="dify",
+        external_agent_id="app-1",
+        agent_type="workflow",
+        public_key_jwk=PUBLIC_JWK,
+    ).agent
+
+    first = store.sync_agent_client_plugins(
+        agent.agent_id,
+        [
+            {
+                "name": "client_prompt_guard",
+                "description": "Prompt guard",
+                "event_types": ["llm_input"],
+                "phases": ["llm_before"],
+            },
+            {
+                "name": "tool_result",
+                "description": "Result guard",
+                "event_types": ["tool_result"],
+                "phases": ["tool_after"],
+            },
+        ],
+    )
+    assert [item.name for item in first] == ["client_prompt_guard", "tool_result"]
+
+    second = store.sync_agent_client_plugins(
+        agent.agent_id,
+        [
+            {
+                "name": "client_prompt_guard",
+                "event_types": ["llm_input"],
+                "phases": ["llm_before"],
+            }
+        ],
+    )
+    assert [item.name for item in second] == ["client_prompt_guard"]
+
+    plugins = store.list_agent_client_plugins(agent_id=agent.agent_id)
+    assert [item.name for item in plugins] == ["client_prompt_guard"]
+    assert plugins[0].to_console_dict()["phases"] == ["llm_before"]
+
+
 def test_provider_agent_sync_deactivates_missing_dify_agents():
     db = FakeDB()
     db.user_external_accounts.append(
@@ -886,12 +995,21 @@ def test_provider_agent_sync_deactivates_missing_dify_agents():
         provider_instance_id="local-dify",
         agent_type="workflow",
         external_agent_ids=["app-1"],
+        client_plugins=[
+            {
+                "name": "client_prompt_guard",
+                "event_types": ["llm_input"],
+                "phases": ["llm_before"],
+            }
+        ],
     )
 
     assert result["deactivated_agent_ids"] == [stale.agent_id]
+    assert result["synced_agent_ids"] == [first.agent_id]
     assert db.agents[stale.agent_id]["status"] == "deleted"
     assert store.agent_ids_for_user(7) == {first.agent_id}
     assert store.list_agents({first.agent_id, stale.agent_id}) == [first]
+    assert [item.name for item in store.list_agent_client_plugins(agent_id=first.agent_id)] == ["client_prompt_guard"]
 
 
 def test_delete_agent_removes_registry_runtime_sessions_and_traces():
@@ -914,6 +1032,7 @@ def test_delete_agent_removes_registry_runtime_sessions_and_traces():
         public_key_jwk=PUBLIC_JWK,
     ).agent
     store.sync_agent_tools(agent.agent_id, [{"name": "weekday"}])
+    store.sync_agent_client_plugins(agent.agent_id, [{"name": "client_prompt_guard", "event_types": ["llm_input"]}])
     db.runtime_sessions.extend(
         [
             {"session_id": "session-1", "agent_id": agent.agent_id},
@@ -973,6 +1092,7 @@ def test_delete_agent_removes_registry_runtime_sessions_and_traces():
     assert result.tool_count == 1
     assert result.agent_count == 1
     assert agent.agent_id not in db.agents
+    assert db.agent_client_plugins == []
     assert db.runtime_sessions == [{"session_id": "session-2", "agent_id": other.agent_id}]
     assert db.runtime_tokens == [{"token_jti": "token-2", "session_id": "session-2"}]
     assert db.external_runtime_sessions == [{"id": 2, "agent_id": other.agent_id}]

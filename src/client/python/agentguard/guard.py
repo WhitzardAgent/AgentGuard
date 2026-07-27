@@ -189,7 +189,9 @@ class AgentGuard:
         sync_remote: bool = True,
     ) -> None:
         """Replace local plugin configuration for subsequent guarded events."""
-        self.context.metadata["client_plugin_config"] = _plugin_config_payload(plugin_config)
+        plugin_payload = _plugin_config_payload(plugin_config)
+        self.context.metadata["client_plugin_config"] = plugin_payload
+        self.context.metadata["remote_plugin_config"] = plugin_payload
         self._enforcer.update_plugin_config(plugin_config)
         if sync_remote:
             self._sync_remote_session()

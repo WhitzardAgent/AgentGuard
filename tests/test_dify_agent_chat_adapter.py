@@ -497,6 +497,7 @@ def test_agent_chat_catalog_sync_reports_enabled_tools(monkeypatch):
             "provider_instance_id": "",
             "agent_type": "agent_chat",
             "external_agent_ids": ["app-1"],
+            "client_plugins": agent_syncs[0]["client_plugins"],
             "metadata": {
                 "adapter": "dify_agent_chat",
                 "dify_runtime": "agent_chat",
@@ -504,6 +505,7 @@ def test_agent_chat_catalog_sync_reports_enabled_tools(monkeypatch):
             },
         }
     ]
+    assert any(item["name"] == "tool_invoke" for item in agent_syncs[0]["client_plugins"])
     assert [tool["name"] for tool in synced[0][1]] == ["weekday"]
     assert synced[0][1][0]["input_params"] == ["year", "month", "day"]
 
@@ -647,7 +649,7 @@ def test_agent_chat_catalog_sync_refreshes_agent_metadata_when_tools_unchanged(m
             return {"tool_count": len(tools)}
 
     def register_agent(_remote, **kwargs):
-        registrations.append((kwargs["name"], kwargs["description"]))
+        registrations.append((kwargs["name"], kwargs["description"], list(kwargs.get("client_plugins") or [])))
         return {"agent": {"agent_id": "canonical-agent"}}
 
     monkeypatch.setattr(adapter, "RemoteGuardClient", FakeRemote)
@@ -658,7 +660,9 @@ def test_agent_chat_catalog_sync_refreshes_agent_metadata_when_tools_unchanged(m
     second = adapter._sync_app_tool_catalog(app)
 
     assert second["skipped"] is True
-    assert registrations == [("Agent One", "old"), ("Agent One", "new")]
+    assert registrations[0][:2] == ("Agent One", "old")
+    assert registrations[1][:2] == ("Agent One", "new")
+    assert any(item["name"] == "tool_invoke" for item in registrations[0][2])
     assert sync_calls == [["weekday"]]
 
 
@@ -864,6 +868,29 @@ def test_agent_chat_make_guard_uses_dpop_runtime_session(monkeypatch):
         return FakeRuntimeAuth()
 
     monkeypatch.setattr(adapter._runtime_auth_manager, "ensure", ensure)
+    fetch_calls = []
+
+    def fetch_runtime_plugin_config(self):
+        fetch_calls.append((self.session_id, self.agent_id, self.user_id))
+        return {
+            "status": "ok",
+            "plugin_config": {
+                "phases": {
+                    "llm_before": {"client": ["modify_input_demo"], "server": []},
+                    "llm_after": {"client": ["modify_output_demo"], "server": []},
+                    "tool_before": {"client": [], "server": []},
+                    "tool_after": {"client": [], "server": []},
+                    "global": {"client": [], "server": []},
+                }
+            },
+            "config_source": "agent_override",
+        }
+
+    monkeypatch.setattr(
+        adapter._shared.RemoteGuardClient,
+        "fetch_runtime_plugin_config",
+        fetch_runtime_plugin_config,
+    )
 
     guard = adapter._make_guard(
         {
@@ -885,6 +912,10 @@ def test_agent_chat_make_guard_uses_dpop_runtime_session(monkeypatch):
     assert guard._remote.use_dpop_auth is True
     assert guard._remote.legacy_identity_headers is False
     assert guard._auto_close_runtime_session is False
+    assert fetch_calls == [("ags_dify_chat", "ag_agent_chat", "7")]
+    assert guard.context.metadata["client_plugin_config"]["phases"]["llm_before"]["client"] == ["modify_input_demo"]
+    assert guard.context.metadata["client_plugin_config"]["phases"]["llm_after"]["client"] == ["modify_output_demo"]
+    assert guard.context.metadata["remote_plugin_config"]["phases"]["llm_after"]["server"] == []
 
 
 def test_agent_chat_runtime_auth_failure_blocks_instead_of_legacy_fallback(monkeypatch):
@@ -1194,7 +1225,7 @@ def test_agent_chat_llm_modify_input_rewrites_prompt_messages(monkeypatch):
                 return types.SimpleNamespace(
                     decision=GuardDecision.modify_llm_input(
                         "rewrite llm input",
-                        processed_content='[{"role": "user", "content": "rewritten prompt"}]',
+                        processed_content="rewritten prompt",
                     )
                 )
             return types.SimpleNamespace(decision=GuardDecision.allow())
@@ -1216,7 +1247,8 @@ def test_agent_chat_llm_modify_input_rewrites_prompt_messages(monkeypatch):
         adapter._current_guard.reset(token_guard)
 
     assert result.message.content == "final"
-    assert model.seen_prompt_messages == [{"role": "user", "content": "rewritten prompt"}]
+    assert len(model.seen_prompt_messages) == 1
+    assert model.seen_prompt_messages[0].content == "rewritten prompt"
 
 
 def test_agent_chat_llm_modify_output_rewrites_message_content(monkeypatch):

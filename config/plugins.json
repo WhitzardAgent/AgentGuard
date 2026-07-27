@@ -11,6 +11,9 @@
           },
           "temperature": 0,
           "timeout_s": 20
+        },
+        {
+          "name": "modify_input_demo"
         }
       ],
       "server": [
@@ -37,6 +40,9 @@
           },
           "temperature": 0,
           "timeout_s": 20
+        },
+        {
+          "name": "modify_output_demo"
         }
       ],
       "server": [

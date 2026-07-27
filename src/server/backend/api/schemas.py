@@ -45,6 +45,13 @@ class ToolSyncRequest(_ApiModel):
     tools: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class ClientPluginCatalogItem(_ApiModel):
+    name: str
+    description: str = ""
+    event_types: list[str] = Field(default_factory=list)
+    phases: list[str] = Field(default_factory=list)
+
+
 class AgentRegisterRequest(_ApiModel):
     provider: str
     external_agent_id: str
@@ -56,6 +63,7 @@ class AgentRegisterRequest(_ApiModel):
     name: str | None = None
     description: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    client_plugins: list[ClientPluginCatalogItem] = Field(default_factory=list)
 
 
 class AgentCatalogSyncRequest(_ApiModel):
@@ -65,6 +73,7 @@ class AgentCatalogSyncRequest(_ApiModel):
     provider_instance_id: str | None = None
     tenant_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    client_plugins: list[ClientPluginCatalogItem] = Field(default_factory=list)
 
 
 class AgentBootstrapRequest(_ApiModel):
@@ -124,6 +133,14 @@ class AgentPluginConfigUpdateRequest(_ApiModel):
 
 class AgentPluginConfigResponse(_ApiModel):
     agent_id: str
+    plugin_config: dict[str, Any] | None = None
+    config_source: Literal["agent_override", "server_default", "none"] = "none"
+
+
+class RuntimePluginConfigResponse(_ApiModel):
+    status: str
+    agent_id: str
+    session_id: str
     plugin_config: dict[str, Any] | None = None
     config_source: Literal["agent_override", "server_default", "none"] = "none"
 
