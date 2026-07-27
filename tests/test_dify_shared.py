@@ -193,10 +193,17 @@ def test_supports_dify_thought_loopback_accepts_dict_and_object_messages():
 
 def test_build_dify_thought_loopback_prompt_messages_preserves_native_object_type():
     original = [types.SimpleNamespace(content="original prompt", role="user", marker="keep")]
+    output_template = types.SimpleNamespace(
+        content="original answer",
+        role="assistant",
+        tool_calls=[],
+        marker="output",
+    )
 
     rebuilt = dify_shared.build_dify_thought_loopback_prompt_messages(
         original,
         "aligned thought",
+        output_template=output_template,
     )
 
     assert rebuilt is not None
@@ -204,8 +211,50 @@ def test_build_dify_thought_loopback_prompt_messages_preserves_native_object_typ
     assert isinstance(rebuilt[-1], types.SimpleNamespace)
     assert rebuilt[-1].content == "aligned thought"
     assert rebuilt[-1].role == "assistant"
-    assert rebuilt[-1].marker == "keep"
+    assert rebuilt[-1].tool_calls == []
+    assert rebuilt[-1].marker == "output"
     assert original[-1].content == "original prompt"
+
+
+def test_build_dify_thought_loopback_prompt_messages_normalizes_none_tool_calls():
+    original = [
+        types.SimpleNamespace(
+            content="older prompt",
+            role="assistant",
+            tool_calls=None,
+            marker="existing",
+        ),
+        types.SimpleNamespace(
+            content="original prompt",
+            role="assistant",
+            tool_calls=None,
+            marker="keep",
+        )
+    ]
+    output_template = types.SimpleNamespace(
+        content="original answer",
+        role="assistant",
+        tool_calls=None,
+        marker="output",
+    )
+
+    rebuilt = dify_shared.build_dify_thought_loopback_prompt_messages(
+        original,
+        "aligned thought",
+        output_template=output_template,
+    )
+
+    assert rebuilt is not None
+    assert rebuilt[0].tool_calls == []
+    assert rebuilt[0].marker == "existing"
+    assert rebuilt[1].tool_calls == []
+    assert rebuilt[1].marker == "keep"
+    assert rebuilt[-1].content == "aligned thought"
+    assert rebuilt[-1].role == "assistant"
+    assert rebuilt[-1].tool_calls == []
+    assert rebuilt[-1].marker == "output"
+    assert original[0].tool_calls is None
+    assert original[-1].tool_calls is None
 
 
 def test_loopback_metadata_from_decision_marks_thought_alignment_retry():
@@ -258,6 +307,7 @@ def test_run_dify_legacy_llm_call_retries_loopback_non_stream():
     assert len(prompt_messages_seen) == 2
     assert prompt_messages_seen[0][-1].content == "original prompt"
     assert prompt_messages_seen[1][-1].content == "aligned thought"
+    assert prompt_messages_seen[1][-1].role == "assistant"
     assert metadata_seen == [
         None,
         None,
@@ -312,6 +362,7 @@ def test_run_dify_legacy_llm_call_retries_loopback_stream():
     assert len(executions) == 2
     assert executions[0][-1].content == "original prompt"
     assert executions[1][-1].content == "aligned thought"
+    assert executions[1][-1].role == "assistant"
     assert len(chunks) == 1
     assert chunks[0].delta.message.content == "second answer"
 

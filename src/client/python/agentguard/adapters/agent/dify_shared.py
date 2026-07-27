@@ -906,6 +906,7 @@ _MAX_LLM_LOOPBACK_ATTEMPTS = 1
 class _LegacyLLMStreamOutcome:
     decision: GuardDecision
     stream: Generator[Any, None, None]
+    output_template: Any = None
 
 
 def run_dify_legacy_llm_call(
@@ -940,6 +941,7 @@ def run_dify_legacy_llm_call(
                     arg_names=arg_names,
                     args=current_args,
                     kwargs=current_kwargs,
+                    output_template=None,
                 )
                 attempts += 1
                 continue
@@ -980,6 +982,7 @@ def run_dify_legacy_llm_call(
                     arg_names=arg_names,
                     args=current_args,
                     kwargs=current_kwargs,
+                    output_template=outcome.output_template,
                 )
                 attempts += 1
                 continue
@@ -994,6 +997,7 @@ def run_dify_legacy_llm_call(
                 arg_names=arg_names,
                 args=current_args,
                 kwargs=current_kwargs,
+                output_template=_result_loopback_output_template(result),
             )
             attempts += 1
             continue
@@ -1028,6 +1032,7 @@ def _finalize_legacy_llm_stream(
     normalized_output = normalizer.stream_output_payload(chunks)
     decision = guard_output(model, normalized_output, call, None, extra_metadata)
     stream_builder = stream_result_builder or _default_stream_result_builder
+    output_template = _stream_loopback_output_template(chunks)
 
     if decision.decision_type == DecisionType.MODIFY_LLM_OUTPUT:
         payload = decision_payload(decision)
@@ -1036,15 +1041,24 @@ def _finalize_legacy_llm_stream(
             normalizer=normalizer,
             fallback=_stream_result_text(normalized_output, normalizer=normalizer),
         )
-        return _LegacyLLMStreamOutcome(decision=decision, stream=stream_builder(text))
+        return _LegacyLLMStreamOutcome(
+            decision=decision,
+            stream=stream_builder(text),
+            output_template=output_template,
+        )
 
     blocked = blocked_value(decision)
     if blocked is not None:
-        return _LegacyLLMStreamOutcome(decision=decision, stream=stream_builder(blocked))
+        return _LegacyLLMStreamOutcome(
+            decision=decision,
+            stream=stream_builder(blocked),
+            output_template=output_template,
+        )
 
     return _LegacyLLMStreamOutcome(
         decision=decision,
         stream=_replay_legacy_llm_chunks(chunks),
+        output_template=output_template,
     )
 
 
@@ -1091,15 +1105,14 @@ def supports_dify_thought_loopback(prompt_messages: Any) -> bool:
         return False
     if all(isinstance(message, dict) for message in prompt_messages):
         return True
-    if any(isinstance(message, dict) for message in prompt_messages):
-        return False
-    reference = prompt_messages[-1]
-    return _build_native_dify_assistant_message(reference, "AgentGuard probe") is not None
+    return not any(isinstance(message, dict) for message in prompt_messages)
 
 
 def build_dify_thought_loopback_prompt_messages(
     prompt_messages: Any,
     aligned_thought: str,
+    *,
+    output_template: Any = None,
 ) -> list[Any] | None:
     if not isinstance(prompt_messages, list):
         return None
@@ -1108,14 +1121,31 @@ def build_dify_thought_loopback_prompt_messages(
         return None
     if all(isinstance(message, dict) for message in prompt_messages):
         updated = copy.deepcopy(prompt_messages)
-        updated.append({"role": "assistant", "content": thought})
+        assistant_message = _build_dict_dify_assistant_message(
+            output_template if isinstance(output_template, dict) else None,
+            thought,
+        )
+        if assistant_message is None:
+            return None
+        updated.append(assistant_message)
+        for message in updated:
+            _normalize_loopback_message_fields(message)
         return updated
     if not prompt_messages or any(isinstance(message, dict) for message in prompt_messages):
         return None
-    assistant_message = _build_native_dify_assistant_message(prompt_messages[-1], thought)
+    rebuilt_messages: list[Any] = []
+    for message in prompt_messages:
+        try:
+            cloned = copy.copy(message)
+        except Exception:
+            cloned = message
+        _normalize_loopback_message_fields(cloned)
+        rebuilt_messages.append(cloned)
+    assistant_message = _build_native_dify_assistant_message(output_template, thought)
     if assistant_message is None:
         return None
-    return list(prompt_messages) + [assistant_message]
+    rebuilt_messages.append(assistant_message)
+    return rebuilt_messages
 
 
 def loopback_dify_llm_call_args_kwargs(
@@ -1125,6 +1155,7 @@ def loopback_dify_llm_call_args_kwargs(
     arg_names: tuple[str, ...],
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
+    output_template: Any = None,
 ) -> tuple[tuple[Any, ...], dict[str, Any], dict[str, Any]]:
     aligned_thought = _loopback_aligned_thought(decision)
     if aligned_thought is None:
@@ -1132,6 +1163,7 @@ def loopback_dify_llm_call_args_kwargs(
     rebuilt_prompt_messages = build_dify_thought_loopback_prompt_messages(
         call.prompt_messages,
         aligned_thought,
+        output_template=output_template,
     )
     if rebuilt_prompt_messages is None:
         raise AdapterError("AgentGuard Dify LLM loopback could not rebuild prompt messages")
@@ -1166,24 +1198,62 @@ def _loopback_aligned_thought(decision: GuardDecision) -> str | None:
     return text or None
 
 
+def _build_dict_dify_assistant_message(
+    reference: dict[str, Any] | None,
+    aligned_thought: str,
+) -> dict[str, Any]:
+    updated = dict(reference or {})
+    updated["role"] = "assistant"
+    updated["content"] = aligned_thought
+    if "tool_calls" not in updated:
+        updated["tool_calls"] = []
+    _normalize_loopback_message_fields(updated)
+    return updated
+
+
 def _build_native_dify_assistant_message(reference: Any, aligned_thought: str) -> Any | None:
+    if reference is None:
+        return SimpleNamespace(role="assistant", content=aligned_thought, tool_calls=[])
     try:
         updated = copy.copy(reference)
     except Exception:
         updated = None
     if updated is not None and _set_optional_attr(updated, "content", aligned_thought):
         _set_optional_attr(updated, "role", "assistant")
+        _normalize_loopback_message_fields(updated)
         return updated
-    cls = type(reference)
-    for kwargs in (
-        {"role": "assistant", "content": aligned_thought},
-        {"content": aligned_thought},
-    ):
-        try:
-            return cls(**kwargs)
-        except Exception:
-            continue
     return None
+
+
+def _result_loopback_output_template(result: Any) -> Any:
+    message = get_attr_or_key(result, "message")
+    if message is not None:
+        return message
+    if isinstance(result, dict):
+        nested = result.get("message")
+        if nested is not None:
+            return nested
+        if any(key in result for key in ("role", "content", "tool_calls", "name")):
+            return result
+    return None
+
+
+def _stream_loopback_output_template(chunks: list[Any]) -> Any:
+    for chunk in reversed(chunks):
+        delta = get_attr_or_key(chunk, "delta")
+        message = get_attr_or_key(delta, "message")
+        if message is not None:
+            return message
+    return None
+
+
+def _normalize_loopback_message_fields(message: Any) -> None:
+    if isinstance(message, dict):
+        if "tool_calls" in message and message.get("tool_calls") is None:
+            message["tool_calls"] = []
+        return
+    if hasattr(message, "tool_calls") and getattr(message, "tool_calls", None) is None:
+        _set_optional_attr(message, "tool_calls", [])
 
 
 def _set_optional_attr(value: Any, attr: str, content: Any) -> bool:

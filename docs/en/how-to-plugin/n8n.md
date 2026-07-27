@@ -94,6 +94,7 @@ docker run -d --name n8n \
   -e AGENTGUARD_ROOT=/agentguard \
   -e AGENTGUARD_SERVER_URL=http://host.docker.internal:38080 \
   -e AGENTGUARD_API_KEY=<your_agentguard_api_key> \
+  -e AGENTGUARD_PLUGIN_CONFIG='{"phases":{"llm_after":{"server":[{"name":"thought_aligner","params":{"implementation":"mock","mock_mode":"rewrite","mock_reply":"First confirm the minimum required scope, then regenerate the action."}}]}}}' \
   -e AGENTGUARD_N8N_CATALOG_SYNC_ENABLED=true \
   -e AGENTGUARD_N8N_CATALOG_SYNC_INTERVAL_S=5 \
   -e AGENTGUARD_N8N_DB_PATH=/home/node/.n8n/database.sqlite \
@@ -124,6 +125,14 @@ Open an agent to inspect its tool catalog and configure rules before the workflo
 - Ordinary executable nodes, such as HTTP Request and Code.
 
 LLM, Agent, memory, parser, retriever, vector store, trigger, and logic/control nodes such as If / Switch / Merge are not registered as frontend tools. LLM / Agent runtime paths still emit `llm_input` / `llm_output` events.
+
+If you want to test server-side `thought_aligner` without a reachable remote Thought-Aligner endpoint, pass the same `AGENTGUARD_PLUGIN_CONFIG` env var used by the Dify adapter. For example:
+
+```text
+AGENTGUARD_PLUGIN_CONFIG={"phases":{"llm_after":{"server":[{"name":"thought_aligner","params":{"implementation":"mock","mock_mode":"rewrite","mock_reply":"First confirm the minimum required scope, then regenerate the action."}}]}}}
+```
+
+This env var is forwarded into the n8n runtime's AgentGuard session, so the server-side plugin can switch between `implementation=remote` and `implementation=mock` without changing the n8n adapter code.
 
 ### 5. Run n8n And Verify Traces
 

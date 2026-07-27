@@ -11,6 +11,7 @@ SERVER_URL="http://host.docker.internal:38080"
 CONSOLE_URL=""
 API_KEY=""
 POLICY=""
+PLUGIN_CONFIG=""
 NODE_IDS=""
 SKIP_NODE_TYPES=""
 BOOTSTRAP_DIR=""
@@ -28,6 +29,7 @@ Usage:
     [--server-url <agentguard_server_url>] \
     [--api-key <agentguard_api_key>] \
     [--policy <policy_name_or_path>] \
+    [--plugin-config <json_or_path>] \
     [--node-id <n8n_node_id_or_name>] \
     [--console-url <agentguard_console_url>]
 
@@ -36,6 +38,9 @@ Options:
                     Defaults to http://host.docker.internal:38080.
   --api-key         AgentGuard API key. Required when the server has AGENTGUARD_API_KEY set.
   --policy          Optional AgentGuard policy name or mounted rules path.
+  --plugin-config   Optional AgentGuard plugin config passed through as
+                    AGENTGUARD_PLUGIN_CONFIG. Accepts a JSON object string or
+                    a mounted file path.
   --node-id         Optional n8n node id/name filter. Repeat or pass comma-separated values.
                     Omit to guard all eligible nodes.
   --skip-node-type  Optional extra n8n node type to skip as a tool.
@@ -86,6 +91,10 @@ while [ "$#" -gt 0 ]; do
             ;;
         --policy)
             POLICY="${2:-}"
+            shift 2
+            ;;
+        --plugin-config)
+            PLUGIN_CONFIG="${2:-}"
             shift 2
             ;;
         --node-id|--node-ids)
@@ -167,6 +176,7 @@ services:
       AGENTGUARD_SERVER_URL: "$SERVER_URL"
       AGENTGUARD_API_KEY: "$API_KEY"
       AGENTGUARD_POLICY: "$POLICY"
+      AGENTGUARD_PLUGIN_CONFIG: '$PLUGIN_CONFIG'
       AGENTGUARD_N8N_NODE_IDS: "$NODE_IDS"
       AGENTGUARD_N8N_SKIP_NODE_TYPES: "$SKIP_NODE_TYPES"
       AGENTGUARD_N8N_CATALOG_SYNC_ENABLED: "true"
@@ -196,6 +206,7 @@ For a docker run deployment, preserve your existing n8n volume/env settings and 
   -e AGENTGUARD_SERVER_URL=$SERVER_URL \\
   -e AGENTGUARD_API_KEY=$API_KEY \\
   -e AGENTGUARD_POLICY=$POLICY \\
+  -e AGENTGUARD_PLUGIN_CONFIG='$PLUGIN_CONFIG' \\
   -e AGENTGUARD_N8N_NODE_IDS=$NODE_IDS \\
   -e AGENTGUARD_N8N_CATALOG_SYNC_ENABLED=true \\
   -e AGENTGUARD_N8N_CATALOG_SYNC_INTERVAL_S=$CATALOG_SYNC_INTERVAL_S \\
@@ -218,6 +229,7 @@ Minimal local example:
     -e AGENTGUARD_ROOT=/agentguard \\
     -e AGENTGUARD_SERVER_URL=$SERVER_URL \\
     -e AGENTGUARD_API_KEY=$API_KEY \\
+    -e AGENTGUARD_PLUGIN_CONFIG='$PLUGIN_CONFIG' \\
     -e AGENTGUARD_N8N_CATALOG_SYNC_ENABLED=true \\
     -e AGENTGUARD_N8N_CATALOG_SYNC_INTERVAL_S=$CATALOG_SYNC_INTERVAL_S \\
     -e AGENTGUARD_N8N_DB_PATH=$CATALOG_DB_PATH \\

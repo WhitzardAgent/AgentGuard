@@ -35,6 +35,7 @@ const MAX_GUARDS = 128;
 let catalogSyncStarted = false;
 const AI_TOOL_CONNECTION_TYPE = "ai_tool";
 const MAX_LLM_LOOPBACK_ATTEMPTS = 3;
+const THOUGHT_ALIGNMENT_PROTOCOL = "thought_alignment_v1";
 
 const PROVIDER_SIDE_BUILT_IN_TOOLS = new Set([
   "web_search",
@@ -115,6 +116,19 @@ function numberEnv(name, defaultValue) {
   }
   const parsed = Number(raw);
   return Number.isFinite(parsed) ? parsed : defaultValue;
+}
+
+function pluginConfigFromEnv() {
+  const raw = process.env.AGENTGUARD_PLUGIN_CONFIG;
+  if (raw == null || raw === "") {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : raw;
+  } catch (_) {
+    return raw;
+  }
 }
 
 function log(level, message, extra = null) {
@@ -386,6 +400,7 @@ function guardOptions(context, runtimeAuth = null) {
     server_url: process.env.AGENTGUARD_SERVER_URL || null,
     api_key: process.env.AGENTGUARD_API_KEY || null,
     policy: process.env.AGENTGUARD_POLICY || null,
+    plugin_config: pluginConfigFromEnv(),
     user_id: (runtimeAuth && runtimeAuth.canonical_user_id) || context.user_id || process.env.AGENTGUARD_USER_ID || null,
     agent_id: (runtimeAuth && runtimeAuth.agent_id) || context.agentguard_agent_id || agentId(context),
     environment: "n8n",
@@ -866,6 +881,38 @@ function coerceLoopbackPayload(payload) {
   }
 }
 
+function protocolFromDecision(decision) {
+  const protocol = decision && decision.metadata && decision.metadata.protocol;
+  return protocol == null ? "" : String(protocol).trim().toLowerCase();
+}
+
+function isThoughtAlignmentLoopbackDecision(decision) {
+  return Boolean(
+    decision &&
+    decision.decision_type === DecisionType.LOOP_BACK_TO_LLM &&
+    protocolFromDecision(decision) === THOUGHT_ALIGNMENT_PROTOCOL
+  );
+}
+
+function buildThoughtAlignmentMetadata({ supported = false, retryAttempt = 0 } = {}) {
+  const metadata = {};
+  if (supported) {
+    metadata.thought_regeneration_supported = true;
+  }
+  if (retryAttempt > 0) {
+    metadata.thought_alignment_attempt = retryAttempt;
+  }
+  return metadata;
+}
+
+function supportsThoughtAlignmentForResponsesRequest(request = {}) {
+  return !Boolean(request && request.stream);
+}
+
+function supportsThoughtAlignmentForRunNode(node = null) {
+  return providerFromLLMNode(node) === "openai";
+}
+
 function denormalizeResponsesInput(payload) {
   if (Array.isArray(payload)) {
     return payload.map((item) => denormalizeResponsesMessage(item));
@@ -901,11 +948,152 @@ function denormalizeResponsesMessage(message) {
   };
 }
 
+function responseMessageTemplateFromOutput(rawOutput = null) {
+  const normalized = normalizeValue(rawOutput);
+  if (normalized && Array.isArray(normalized.data)) {
+    for (let branchIndex = normalized.data.length - 1; branchIndex >= 0; branchIndex -= 1) {
+      const branch = normalized.data[branchIndex];
+      if (!Array.isArray(branch)) {
+        continue;
+      }
+      for (let itemIndex = branch.length - 1; itemIndex >= 0; itemIndex -= 1) {
+        const item = branch[itemIndex];
+        if (!item || typeof item !== "object" || !isPlainObject(item.json)) {
+          continue;
+        }
+        if (item.json.response) {
+          const nested = responseMessageTemplateFromOutput(item.json.response);
+          if (nested) {
+            return nested;
+          }
+        }
+        if (item.json.output) {
+          const nested = responseMessageTemplateFromOutput({ output: item.json.output });
+          if (nested) {
+            return nested;
+          }
+        }
+      }
+    }
+  }
+  const outputItems = Array.isArray(normalized && normalized.output)
+    ? normalized.output
+    : Array.isArray(normalized && normalized.output_items)
+      ? normalized.output_items
+      : Array.isArray(normalized)
+        ? normalized
+        : [];
+  for (let index = outputItems.length - 1; index >= 0; index -= 1) {
+    const item = outputItems[index];
+    if (!item || typeof item !== "object" || item.type !== "message") {
+      continue;
+    }
+    return normalizeValue(item);
+  }
+  return null;
+}
+
+function replaceResponseMessageContent(message = {}, text = "") {
+  const updated = isPlainObject(message) ? normalizeValue(message) : {};
+  const nextText = String(text || "").trim();
+  if (!nextText) {
+    return updated;
+  }
+  if (Array.isArray(updated.content)) {
+    const template = updated.content.find((part) => part && typeof part === "object" && (
+      part.type === "output_text" ||
+      part.type === "text" ||
+      typeof part.text === "string" ||
+      typeof part.content === "string"
+    ));
+    const nextPart = isPlainObject(template) ? { ...template } : { type: "output_text", annotations: [] };
+    if (!nextPart.type) {
+      nextPart.type = "output_text";
+    }
+    if (Object.prototype.hasOwnProperty.call(nextPart, "content") && !Object.prototype.hasOwnProperty.call(nextPart, "text")) {
+      nextPart.content = nextText;
+    } else {
+      nextPart.text = nextText;
+      if (Object.prototype.hasOwnProperty.call(nextPart, "content")) {
+        delete nextPart.content;
+      }
+    }
+    if (nextPart.type === "output_text" && !Array.isArray(nextPart.annotations)) {
+      nextPart.annotations = [];
+    }
+    updated.content = [nextPart];
+    return updated;
+  }
+  if (typeof updated.content === "string" || updated.content == null) {
+    updated.content = nextText;
+    return updated;
+  }
+  if (typeof updated.text === "string" || updated.text == null) {
+    updated.text = nextText;
+    return updated;
+  }
+  updated.content = [{ type: "output_text", text: nextText, annotations: [] }];
+  return updated;
+}
+
+function thoughtAlignmentRetryMessageForResponses(rawOutput = null, processedContent = "") {
+  const thought = String(processedContent || "").trim();
+  if (!thought) {
+    return null;
+  }
+  const template = responseMessageTemplateFromOutput(rawOutput);
+  if (template) {
+    return replaceResponseMessageContent(template, thought);
+  }
+  return {
+    type: "message",
+    role: "assistant",
+    status: "completed",
+    content: [{ type: "output_text", text: thought, annotations: [] }],
+  };
+}
+
+function thoughtAlignmentRetryMessageForNodeParameters(rawOutput = null, processedContent = "") {
+  const thought = String(processedContent || "").trim();
+  if (!thought) {
+    return null;
+  }
+  const template = thoughtAlignmentRetryMessageForResponses(rawOutput, thought);
+  if (!template) {
+    return null;
+  }
+  return {
+    role: template.role || "assistant",
+    content: firstNonEmptyText(template.content, template.text, template.output_text, thought) || thought,
+  };
+}
+
 function applyLoopbackToResponsesRequest(request = {}, processedContent = "") {
   const payload = coerceLoopbackPayload(processedContent);
   return {
     ...(request || {}),
     input: denormalizeResponsesInput(payload),
+  };
+}
+
+function applyThoughtAlignmentToResponsesRequest(request = {}, rawOutput = null, processedContent = "") {
+  if (typeof rawOutput === "string" && processedContent === "") {
+    processedContent = rawOutput;
+    rawOutput = null;
+  }
+  const retryMessage = thoughtAlignmentRetryMessageForResponses(rawOutput, processedContent);
+  if (!retryMessage) {
+    return { ...(request || {}) };
+  }
+  const currentInput = request && Object.prototype.hasOwnProperty.call(request, "input") ? request.input : [];
+  const messages = Array.isArray(currentInput)
+    ? [...currentInput]
+    : currentInput == null
+      ? []
+      : denormalizeResponsesInput(currentInput);
+  return {
+    ...(request || {}),
+    input: [...messages, retryMessage],
   };
 }
 
@@ -957,14 +1145,80 @@ function applyLoopbackToNodeParameters(parameters = {}, processedContent = "") {
   };
 }
 
+function applyThoughtAlignmentToNodeParameters(parameters = {}, rawOutput = null, processedContent = "", fallbackMessages = []) {
+  if (typeof rawOutput === "string" && processedContent === "") {
+    processedContent = rawOutput;
+    rawOutput = null;
+  }
+  const retryMessage = thoughtAlignmentRetryMessageForNodeParameters(rawOutput, processedContent);
+  if (!retryMessage) {
+    return { ...(parameters || {}) };
+  }
+  const sourceKey = (
+    parameters.responses && Array.isArray(parameters.responses.values)
+      ? "responses"
+      : parameters.messages && Array.isArray(parameters.messages.values)
+        ? "messages"
+        : "responses"
+  );
+  const currentSource = isPlainObject(parameters[sourceKey]) ? parameters[sourceKey] : {};
+  const currentValues = Array.isArray(currentSource.values)
+    ? currentSource.values.map((message) => normalizeValue(message))
+    : (Array.isArray(fallbackMessages) ? fallbackMessages.map((message) => normalizeValue(message)) : []);
+  return {
+    ...parameters,
+    [sourceKey]: {
+      ...currentSource,
+      values: [...currentValues, retryMessage],
+    },
+  };
+}
+
 function applyLoopbackToRunNodeArgs(args = {}, processedContent = "") {
   const node = args && args.node;
   const parameters = isPlainObject(node && node.parameters) ? node.parameters : {};
+  const nextParameters = applyLoopbackToNodeParameters(parameters, processedContent);
   return {
     ...(args || {}),
     node: {
       ...(node || {}),
-      parameters: applyLoopbackToNodeParameters(parameters, processedContent),
+      parameters: nextParameters,
+    },
+    executionData: {
+      ...((args && args.executionData) || {}),
+      node: {
+        ...(((args && args.executionData) || {}).node || {}),
+        parameters: nextParameters,
+      },
+    },
+  };
+}
+
+function applyThoughtAlignmentToRunNodeArgs(args = {}, rawOutput = null, processedContent = "") {
+  if (typeof rawOutput === "string" && processedContent === "") {
+    processedContent = rawOutput;
+    rawOutput = null;
+  }
+  const node = args && args.node;
+  const parameters = isPlainObject(node && node.parameters) ? node.parameters : {};
+  const fallbackMessages = llmRequestFromRunNodeExecution(
+    (args && args.executionData) || {},
+    node,
+    args && args.runExecutionData
+  ).input;
+  const nextParameters = applyThoughtAlignmentToNodeParameters(parameters, rawOutput, processedContent, fallbackMessages);
+  return {
+    ...(args || {}),
+    node: {
+      ...(node || {}),
+      parameters: nextParameters,
+    },
+    executionData: {
+      ...((args && args.executionData) || {}),
+      node: {
+        ...(((args && args.executionData) || {}).node || {}),
+        parameters: nextParameters,
+      },
     },
   };
 }
@@ -972,11 +1226,19 @@ function applyLoopbackToRunNodeArgs(args = {}, processedContent = "") {
 function applyModifiedRunNodeArgs(args = {}, processedContent = "") {
   const node = args && args.node;
   const parameters = isPlainObject(node && node.parameters) ? node.parameters : {};
+  const nextParameters = applyLoopbackToNodeParameters(parameters, processedContent);
   return {
     ...(args || {}),
     node: {
       ...(node || {}),
-      parameters: applyLoopbackToNodeParameters(parameters, processedContent),
+      parameters: nextParameters,
+    },
+    executionData: {
+      ...((args && args.executionData) || {}),
+      node: {
+        ...(((args && args.executionData) || {}).node || {}),
+        parameters: nextParameters,
+      },
     },
   };
 }
@@ -1792,6 +2054,13 @@ async function guardLLMAfter(output, context, extra = {}) {
   return result.decision;
 }
 
+function llmGuardMetadata(extra = {}, thoughtAlignment = {}) {
+  return {
+    ...(extra || {}),
+    ...buildThoughtAlignmentMetadata(thoughtAlignment),
+  };
+}
+
 async function guardToolBefore(toolName, args, context, capabilities = [], extraMetadata = {}) {
   const effectiveContext = enrichContextWithN8nSession(context, args, extraMetadata);
   const guard = await getGuardForRuntime(effectiveContext);
@@ -2088,13 +2357,27 @@ function patchOpenAI(moduleExports) {
       }
       let currentRequest = request;
       let attempts = 0;
+      let thoughtAlignmentAttempt = 0;
       while (true) {
-        const beforeDecision = await guardLLMBefore(currentRequest, context);
+        const beforeDecision = await guardLLMBefore(
+          currentRequest,
+          context,
+          llmGuardMetadata(
+            {},
+            {
+              supported: supportsThoughtAlignmentForResponsesRequest(currentRequest),
+              retryAttempt: thoughtAlignmentAttempt,
+            }
+          )
+        );
         if (beforeDecision.decision_type === DecisionType.LOOP_BACK_TO_LLM) {
           if (attempts >= MAX_LLM_LOOPBACK_ATTEMPTS) {
             return blockedLLMResponse(beforeDecision, currentRequest);
           }
-          currentRequest = applyLoopbackToResponsesRequest(currentRequest, beforeDecision.processed_content);
+          currentRequest = isThoughtAlignmentLoopbackDecision(beforeDecision)
+            ? applyThoughtAlignmentToResponsesRequest(currentRequest, beforeDecision.processed_content)
+            : applyLoopbackToResponsesRequest(currentRequest, beforeDecision.processed_content);
+          thoughtAlignmentAttempt = isThoughtAlignmentLoopbackDecision(beforeDecision) ? 1 : thoughtAlignmentAttempt;
           attempts += 1;
           continue;
         }
@@ -2109,12 +2392,25 @@ function patchOpenAI(moduleExports) {
         if (currentRequest && currentRequest.stream && raw && typeof raw[Symbol.asyncIterator] === "function") {
           return wrapOpenAIStream(raw, context);
         }
-        const afterDecision = await guardLLMAfter(raw, context);
+        const afterDecision = await guardLLMAfter(
+          raw,
+          context,
+          llmGuardMetadata(
+            {},
+            {
+              supported: supportsThoughtAlignmentForResponsesRequest(currentRequest),
+              retryAttempt: thoughtAlignmentAttempt,
+            }
+          )
+        );
         if (afterDecision.decision_type === DecisionType.LOOP_BACK_TO_LLM) {
           if (attempts >= MAX_LLM_LOOPBACK_ATTEMPTS) {
             return blockedLLMResponse(afterDecision, currentRequest);
           }
-          currentRequest = applyLoopbackToResponsesRequest(currentRequest, afterDecision.processed_content);
+          currentRequest = isThoughtAlignmentLoopbackDecision(afterDecision)
+            ? applyThoughtAlignmentToResponsesRequest(currentRequest, raw, afterDecision.processed_content)
+            : applyLoopbackToResponsesRequest(currentRequest, afterDecision.processed_content);
+          thoughtAlignmentAttempt = isThoughtAlignmentLoopbackDecision(afterDecision) ? 1 : thoughtAlignmentAttempt;
           attempts += 1;
           continue;
         }
@@ -2370,6 +2666,7 @@ function patchN8nCore(moduleExports) {
 
 async function guardedRunNodeLLM(original, target, args) {
   const { workflow, runIndex, additionalData, mode, abortSignal, subNodeExecutionResults, context, node } = args;
+  const thoughtAlignmentSupported = supportsThoughtAlignmentForRunNode(node);
   const baseLLMContext = {
     ...context,
     llm_node: true,
@@ -2378,6 +2675,7 @@ async function guardedRunNodeLLM(original, target, args) {
   let currentArgs = { ...(args || {}) };
   let llmContext = baseLLMContext;
   let attempts = 0;
+  let thoughtAlignmentAttempt = 0;
   try {
     while (true) {
       const request = llmRequestFromRunNodeExecution(
@@ -2393,15 +2691,26 @@ async function guardedRunNodeLLM(original, target, args) {
         additionalData
       );
       const beforeDecision = await guardLLMBefore(request, llmContext, {
-        event_source: "n8n_run_node_llm",
-        provider: providerFromLLMNode(currentArgs.node),
-        node_parameters: normalizeValue((currentArgs.node && currentArgs.node.parameters) || {}),
+        ...llmGuardMetadata(
+          {
+            event_source: "n8n_run_node_llm",
+            provider: providerFromLLMNode(currentArgs.node),
+            node_parameters: normalizeValue((currentArgs.node && currentArgs.node.parameters) || {}),
+          },
+          {
+            supported: thoughtAlignmentSupported,
+            retryAttempt: thoughtAlignmentAttempt,
+          }
+        ),
       });
       if (beforeDecision.decision_type === DecisionType.LOOP_BACK_TO_LLM) {
         if (attempts >= MAX_LLM_LOOPBACK_ATTEMPTS) {
           return n8nLLMRunNodeResult(blockedLLMResponse(beforeDecision, request));
         }
-        currentArgs = applyLoopbackToRunNodeArgs(currentArgs, beforeDecision.processed_content);
+        currentArgs = isThoughtAlignmentLoopbackDecision(beforeDecision)
+          ? applyThoughtAlignmentToRunNodeArgs(currentArgs, beforeDecision.processed_content)
+          : applyLoopbackToRunNodeArgs(currentArgs, beforeDecision.processed_content);
+        thoughtAlignmentAttempt = isThoughtAlignmentLoopbackDecision(beforeDecision) ? 1 : thoughtAlignmentAttempt;
         attempts += 1;
         continue;
       }
@@ -2426,15 +2735,26 @@ async function guardedRunNodeLLM(original, target, args) {
       );
       const output = llmOutputFromRunNodeResult(result);
       const afterDecision = await guardLLMAfter(output, llmContext, {
-        event_source: "n8n_run_node_llm",
-        provider: providerFromLLMNode(currentArgs.node),
-        node_parameters: normalizeValue((currentArgs.node && currentArgs.node.parameters) || {}),
+        ...llmGuardMetadata(
+          {
+            event_source: "n8n_run_node_llm",
+            provider: providerFromLLMNode(currentArgs.node),
+            node_parameters: normalizeValue((currentArgs.node && currentArgs.node.parameters) || {}),
+          },
+          {
+            supported: thoughtAlignmentSupported,
+            retryAttempt: thoughtAlignmentAttempt,
+          }
+        ),
       });
       if (afterDecision.decision_type === DecisionType.LOOP_BACK_TO_LLM) {
         if (attempts >= MAX_LLM_LOOPBACK_ATTEMPTS) {
           return n8nLLMRunNodeResult(blockedLLMResponse(afterDecision, request));
         }
-        currentArgs = applyLoopbackToRunNodeArgs(currentArgs, afterDecision.processed_content);
+        currentArgs = isThoughtAlignmentLoopbackDecision(afterDecision)
+          ? applyThoughtAlignmentToRunNodeArgs(currentArgs, result, afterDecision.processed_content)
+          : applyLoopbackToRunNodeArgs(currentArgs, afterDecision.processed_content);
+        thoughtAlignmentAttempt = isThoughtAlignmentLoopbackDecision(afterDecision) ? 1 : thoughtAlignmentAttempt;
         attempts += 1;
         continue;
       }
@@ -2449,9 +2769,17 @@ async function guardedRunNodeLLM(original, target, args) {
     }
   } catch (error) {
     await guardLLMAfter({ output_text: "", output: [], status: "error", error: safeString(error) }, llmContext, {
-      event_source: "n8n_run_node_llm",
-      provider: providerFromLLMNode(currentArgs.node),
-      error: safeString(error && error.message ? error.message : error),
+      ...llmGuardMetadata(
+        {
+          event_source: "n8n_run_node_llm",
+          provider: providerFromLLMNode(currentArgs.node),
+          error: safeString(error && error.message ? error.message : error),
+        },
+        {
+          supported: thoughtAlignmentSupported,
+          retryAttempt: thoughtAlignmentAttempt,
+        }
+      ),
     });
     throw error;
   } finally {
@@ -3405,6 +3733,9 @@ module.exports = {
     applyLoopbackToNodeParameters,
     applyLoopbackToResponsesRequest,
     applyLoopbackToRunNodeArgs,
+    applyThoughtAlignmentToNodeParameters,
+    applyThoughtAlignmentToResponsesRequest,
+    applyThoughtAlignmentToRunNodeArgs,
     applyModifyToNodeParameters,
     applyModifyToResponsesRequest,
     applyModifyToRunNodeArgs,
@@ -3415,6 +3746,7 @@ module.exports = {
     applyModifyToEngineActionResult,
     extractProviderBuiltInTools,
     extractWorkflowTools,
+    guardOptions,
     hasNonMainConnection,
     cacheWorkflowIdentity,
     cacheWorkflowNodes,
@@ -3437,14 +3769,21 @@ module.exports = {
     llmOutputFromRunNodeResult,
     llmRequestFromRunNodeExecution,
     denormalizeResponsesInput,
+    buildThoughtAlignmentMetadata,
+    isThoughtAlignmentLoopbackDecision,
     normalizeLLMOutput,
     normalizeResponsesInput,
     nodeNameToToolName,
+    pluginConfigFromEnv,
     patchAgentToolsCommon,
     patchConnectedToolsHelpers,
+    patchOpenAI,
+    patchN8nCore,
     scanPublishedWorkflows,
     sourceNodeForToolInvocation,
     registerN8nWorkflowAgent,
+    supportsThoughtAlignmentForResponsesRequest,
+    supportsThoughtAlignmentForRunNode,
     syncWorkflowCatalog,
     syncPublishedWorkflowCatalogOnce,
     shouldTreatRunNodeAsTool,

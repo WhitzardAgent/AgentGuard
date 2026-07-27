@@ -94,6 +94,7 @@ docker run -d --name n8n \
   -e AGENTGUARD_ROOT=/agentguard \
   -e AGENTGUARD_SERVER_URL=http://host.docker.internal:38080 \
   -e AGENTGUARD_API_KEY=sk-agentguard-backend-X9m42Vq7Tz8nL3pA6cR0yH5uJ1sWfKdE \
+  -e AGENTGUARD_PLUGIN_CONFIG='{"phases":{"llm_after":{"server":[{"name":"thought_aligner","params":{"implementation":"mock","mock_mode":"rewrite","mock_reply":"先确认最小必要访问范围，再重新生成后续动作。"}}]}}}' \
   -e AGENTGUARD_N8N_CATALOG_SYNC_ENABLED=true \
   -e AGENTGUARD_N8N_CATALOG_SYNC_INTERVAL_S=5 \
   -e AGENTGUARD_N8N_DB_PATH=/home/node/.n8n/database.sqlite \
@@ -137,6 +138,14 @@ n8n:<workflow_id>
 - 普通执行节点，例如 HTTP Request、Code 等。
 
 LLM、Agent、memory、parser、retriever、vector store、trigger 和 If / Switch / Merge 等逻辑控制节点不会作为工具注册到前端；其中 LLM / Agent 运行时仍会产生 `llm_input` / `llm_output` 事件。
+
+如果你想在真实 Thought-Aligner 远端不可达时测试 server 侧 `thought_aligner`，可以像 Dify adapter 一样给 n8n 容器传入 `AGENTGUARD_PLUGIN_CONFIG`。例如：
+
+```text
+AGENTGUARD_PLUGIN_CONFIG={"phases":{"llm_after":{"server":[{"name":"thought_aligner","params":{"implementation":"mock","mock_mode":"rewrite","mock_reply":"先确认最小必要访问范围，再重新生成后续动作。"}}]}}}
+```
+
+这个环境变量会被转发进 n8n runtime 的 AgentGuard session，因此 server 侧 plugin 可以在 `implementation=remote` 和 `implementation=mock` 之间切换，而不需要修改 n8n adapter 代码。
 
 ### 5. 运行 n8n 并验证 trace
 

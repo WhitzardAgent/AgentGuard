@@ -59,6 +59,8 @@
           },
           "kwargs": {
             "timeout_s": 30,
+            "implementation": "mock",
+            "mock_mode": "rewrite",
             "failure_mode": "allow",
             "max_history_items": 8,
             "max_instruction_chars": 12000,

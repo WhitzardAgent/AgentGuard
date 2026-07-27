@@ -6,6 +6,9 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
+const { GuardDecision, DecisionType } = require("../../../schemas/decisions");
+const { UGuardEnforcer } = require("../../../u_guard/enforcer");
+const { RemoteGuardClient } = require("../../../u_guard/remote_client");
 const { _private } = require("./index");
 
 test("extractProviderBuiltInTools only returns provider-side tools", () => {
@@ -174,6 +177,122 @@ test("applyLoopbackToResponsesRequest rewrites request input only", () => {
   ]);
 });
 
+test("supportsThoughtAlignmentForResponsesRequest only enables non-stream requests", () => {
+  assert.equal(_private.supportsThoughtAlignmentForResponsesRequest({ stream: false }), true);
+  assert.equal(_private.supportsThoughtAlignmentForResponsesRequest({ stream: true }), false);
+});
+
+test("supportsThoughtAlignmentForRunNode only enables OpenAI root nodes", () => {
+  assert.equal(
+    _private.supportsThoughtAlignmentForRunNode({ type: "@n8n/n8n-nodes-langchain.openAi" }),
+    true
+  );
+  assert.equal(
+    _private.supportsThoughtAlignmentForRunNode({ type: "@n8n/n8n-nodes-langchain.ollama" }),
+    false
+  );
+});
+
+test("buildThoughtAlignmentMetadata emits capability and retry fields", () => {
+  assert.deepEqual(
+    _private.buildThoughtAlignmentMetadata({ supported: true, retryAttempt: 1 }),
+    {
+      thought_regeneration_supported: true,
+      thought_alignment_attempt: 1,
+    }
+  );
+  assert.deepEqual(_private.buildThoughtAlignmentMetadata({ supported: false, retryAttempt: 0 }), {});
+});
+
+test("pluginConfigFromEnv parses JSON objects and preserves raw strings", () => {
+  const oldValue = process.env.AGENTGUARD_PLUGIN_CONFIG;
+  process.env.AGENTGUARD_PLUGIN_CONFIG = "{\"phases\":{\"llm_after\":{\"server\":[{\"name\":\"thought_aligner\",\"params\":{\"implementation\":\"mock\"}}]}}}";
+  assert.deepEqual(_private.pluginConfigFromEnv(), {
+    phases: {
+      llm_after: {
+        server: [{ name: "thought_aligner", params: { implementation: "mock" } }],
+      },
+    },
+  });
+  process.env.AGENTGUARD_PLUGIN_CONFIG = "/agentguard/config/plugins.thought-aligner.example.json";
+  assert.equal(_private.pluginConfigFromEnv(), "/agentguard/config/plugins.thought-aligner.example.json");
+  restoreEnv("AGENTGUARD_PLUGIN_CONFIG", oldValue);
+});
+
+test("guardOptions forwards AGENTGUARD_PLUGIN_CONFIG to AgentGuard", () => {
+  const oldValue = process.env.AGENTGUARD_PLUGIN_CONFIG;
+  process.env.AGENTGUARD_PLUGIN_CONFIG = "{\"phases\":{\"llm_after\":{\"server\":[\"thought_aligner\"]}}}";
+  const options = _private.guardOptions({ workflow_id: "wf-plugin-config" }, null);
+  assert.deepEqual(options.plugin_config, {
+    phases: {
+      llm_after: {
+        server: ["thought_aligner"],
+      },
+    },
+  });
+  restoreEnv("AGENTGUARD_PLUGIN_CONFIG", oldValue);
+});
+
+test("isThoughtAlignmentLoopbackDecision matches protocol-tagged loopback decisions", () => {
+  assert.equal(
+    _private.isThoughtAlignmentLoopbackDecision(new GuardDecision({
+      decision_type: DecisionType.LOOP_BACK_TO_LLM,
+      processed_content: "aligned thought",
+      metadata: { protocol: "thought_alignment_v1" },
+    })),
+    true
+  );
+  assert.equal(
+    _private.isThoughtAlignmentLoopbackDecision(new GuardDecision({
+      decision_type: DecisionType.LOOP_BACK_TO_LLM,
+      processed_content: "aligned thought",
+      metadata: { protocol: "something_else" },
+    })),
+    false
+  );
+});
+
+test("applyThoughtAlignmentToResponsesRequest appends rewritten raw output message and preserves other fields", () => {
+  const request = _private.applyThoughtAlignmentToResponsesRequest(
+    {
+      model: "gpt-4.1",
+      stream: false,
+      tools: [{ type: "web_search" }],
+      input: [
+        { role: "system", content: "原始 system" },
+        { role: "user", content: "原始 user" },
+      ],
+    },
+    {
+      output: [
+        {
+          id: "msg_1",
+          type: "message",
+          role: "assistant",
+          status: "completed",
+          content: [{ type: "output_text", text: "raw answer", annotations: [] }],
+        },
+      ],
+    },
+    "对齐后的思维"
+  );
+
+  assert.equal(request.model, "gpt-4.1");
+  assert.equal(request.stream, false);
+  assert.deepEqual(request.tools, [{ type: "web_search" }]);
+  assert.deepEqual(request.input, [
+    { role: "system", content: "原始 system" },
+    { role: "user", content: "原始 user" },
+    {
+      id: "msg_1",
+      type: "message",
+      role: "assistant",
+      status: "completed",
+      content: [{ type: "output_text", text: "对齐后的思维", annotations: [] }],
+    },
+  ]);
+});
+
 test("applyModifyToResponsesRequest rewrites request input and keeps other fields", () => {
   const request = _private.applyModifyToResponsesRequest(
     {
@@ -235,6 +354,71 @@ test("applyLoopbackToRunNodeArgs rewrites node response messages only", () => {
     { role: "user", content: "重写 user" },
   ]);
   assert.deepEqual(rewritten.executionData.data.main[0][0].json, { chatInput: "原始输入" });
+});
+
+test("applyThoughtAlignmentToRunNodeArgs appends rewritten raw output message as assistant text and preserves node parameters", () => {
+  const rewritten = _private.applyThoughtAlignmentToRunNodeArgs(
+    {
+      node: {
+        type: "@n8n/n8n-nodes-langchain.openAi",
+        parameters: {
+          modelId: { value: "chatgpt-4o-latest" },
+          responses: {
+            values: [
+              { role: "system", content: "原始 system" },
+              { role: "user", content: "={{ $json.chatInput }}" },
+            ],
+          },
+          builtInTools: { webSearch: true },
+        },
+      },
+      executionData: {
+        data: {
+          main: [[{ json: { chatInput: "原始输入" } }]],
+        },
+      },
+    },
+    {
+      data: [[{ json: { output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "raw answer" }] }] } }]],
+    },
+    "对齐后的思维"
+  );
+
+  assert.equal(rewritten.node.parameters.modelId.value, "chatgpt-4o-latest");
+  assert.deepEqual(rewritten.node.parameters.builtInTools, { webSearch: true });
+  assert.deepEqual(rewritten.node.parameters.responses.values, [
+    { role: "system", content: "原始 system" },
+    { role: "user", content: "={{ $json.chatInput }}" },
+    { role: "assistant", content: "对齐后的思维" },
+  ]);
+});
+
+test("applyThoughtAlignmentToRunNodeArgs creates responses values from fallback messages when missing", () => {
+  const rewritten = _private.applyThoughtAlignmentToRunNodeArgs(
+    {
+      node: {
+        type: "@n8n/n8n-nodes-langchain.openAi",
+        parameters: {
+          modelId: { value: "chatgpt-4o-latest" },
+        },
+      },
+      executionData: {
+        data: {
+          main: [[{ json: { chatInput: "原始输入" } }]],
+        },
+      },
+      runExecutionData: {
+        resultData: {
+          runData: {},
+        },
+      },
+    },
+    "对齐后的思维"
+  );
+
+  assert.deepEqual(rewritten.node.parameters.responses.values, [
+    { role: "assistant", content: "对齐后的思维" },
+  ]);
 });
 
 test("applyModifyToRunNodeArgs rewrites messages and preserves other node parameters", () => {
@@ -531,10 +715,12 @@ test("syncWorkflowCatalog registers n8n workflow agent before syncing tools", as
   const oldServerUrl = process.env.AGENTGUARD_SERVER_URL;
   const oldApiKey = process.env.AGENTGUARD_API_KEY;
   const oldKeyDir = process.env.AGENTGUARD_AGENT_KEY_DIR;
+  const originalRequireRuntimeAuth = RemoteGuardClient.prototype.requireRuntimeAuth;
   const keyDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-n8n-keys-"));
   process.env.AGENTGUARD_SERVER_URL = "http://agentguard.test";
   process.env.AGENTGUARD_API_KEY = "test-api-key";
   process.env.AGENTGUARD_AGENT_KEY_DIR = keyDir;
+  RemoteGuardClient.prototype.requireRuntimeAuth = function noopRequireRuntimeAuth() {};
   global.fetch = async (url, options = {}) => {
     const body = options.body ? JSON.parse(options.body) : {};
     calls.push({ url: String(url), options, body });
@@ -575,6 +761,7 @@ test("syncWorkflowCatalog registers n8n workflow agent before syncing tools", as
     restoreEnv("AGENTGUARD_SERVER_URL", oldServerUrl);
     restoreEnv("AGENTGUARD_API_KEY", oldApiKey);
     restoreEnv("AGENTGUARD_AGENT_KEY_DIR", oldKeyDir);
+    RemoteGuardClient.prototype.requireRuntimeAuth = originalRequireRuntimeAuth;
     fs.rmSync(keyDir, { recursive: true, force: true });
   });
 
@@ -803,6 +990,161 @@ test("normalizeLLMOutput extracts stream deltas", () => {
       final_output: "Final answer",
     }
   );
+});
+
+test("patchOpenAI retries with rewritten raw output message and retry metadata", async (t) => {
+  const events = [];
+  const requests = [];
+  const originalEnforce = UGuardEnforcer.prototype.enforce;
+  UGuardEnforcer.prototype.enforce = async function mockEnforce(event) {
+    events.push(event.toDict());
+    if (event.event_type === "llm_output" && event.metadata.thought_alignment_attempt !== 1) {
+      return {
+        decision: new GuardDecision({
+          decision_type: DecisionType.LOOP_BACK_TO_LLM,
+          reason: "align thought",
+          processed_content: "对齐后的思维",
+          metadata: { protocol: "thought_alignment_v1" },
+        }),
+      };
+    }
+    return { decision: GuardDecision.allow("ok") };
+  };
+  t.after(() => {
+    UGuardEnforcer.prototype.enforce = originalEnforce;
+  });
+
+  class ChatOpenAIResponses {
+    async completionWithRetry(request) {
+      requests.push(JSON.parse(JSON.stringify(request)));
+      return {
+        output_text: "raw answer",
+        output: [
+          {
+            type: "message",
+            content: [{ type: "output_text", text: "raw answer", annotations: [] }],
+          },
+        ],
+      };
+    }
+  }
+
+  _private.patchOpenAI({ ChatOpenAIResponses });
+
+  const client = new ChatOpenAIResponses();
+  await client.completionWithRetry({
+    model: "gpt-4.1",
+    stream: false,
+    sessionId: "thought-align-openai-test",
+    input: [
+      { role: "system", content: "原始 system" },
+      { role: "user", content: "原始 user" },
+    ],
+  });
+
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests[1].input, [
+    { role: "system", content: "原始 system" },
+    { role: "user", content: "原始 user" },
+    {
+      type: "message",
+      content: [{ type: "output_text", text: "对齐后的思维", annotations: [] }],
+    },
+  ]);
+
+  const llmInputs = events.filter((event) => event.event_type === "llm_input");
+  const llmOutputs = events.filter((event) => event.event_type === "llm_output");
+  assert.equal(llmInputs[0].metadata.thought_regeneration_supported, true);
+  assert.equal(llmInputs[1].metadata.thought_alignment_attempt, 1);
+  assert.equal(llmOutputs[0].metadata.thought_regeneration_supported, true);
+  assert.equal(llmOutputs[1].metadata.thought_alignment_attempt, 1);
+});
+
+test("patchN8nCore retries runNode LLMs with rewritten raw output message and retry metadata", async (t) => {
+  const events = [];
+  const invocations = [];
+  const originalEnforce = UGuardEnforcer.prototype.enforce;
+  UGuardEnforcer.prototype.enforce = async function mockEnforce(event) {
+    events.push(event.toDict());
+    if (event.event_type === "llm_output" && event.metadata.thought_alignment_attempt !== 1) {
+      return {
+        decision: new GuardDecision({
+          decision_type: DecisionType.LOOP_BACK_TO_LLM,
+          reason: "align thought",
+          processed_content: "对齐后的思维",
+          metadata: { protocol: "thought_alignment_v1" },
+        }),
+      };
+    }
+    return { decision: GuardDecision.allow("ok") };
+  };
+  t.after(() => {
+    UGuardEnforcer.prototype.enforce = originalEnforce;
+  });
+
+  class WorkflowExecute {
+    async runNode(workflow, executionData) {
+      invocations.push({
+        workflow_id: workflow.id,
+        parameters: JSON.parse(JSON.stringify(executionData.node.parameters)),
+      });
+      return {
+        data: [[{ json: { output: [{ type: "message", content: [{ type: "output_text", text: "raw answer" }] }] } }]],
+        hints: [],
+      };
+    }
+  }
+
+  _private.patchN8nCore({ WorkflowExecute });
+
+  const executor = new WorkflowExecute();
+  await executor.runNode(
+    {
+      id: "wf-thought-align-test",
+      name: "Thought align workflow",
+      nodeTypes: {
+        getByNameAndVersion: () => ({ description: { group: ["transform"], inputs: ["main"], outputs: ["main"] } }),
+      },
+    },
+    {
+      node: {
+        id: "node-1",
+        name: "Message a model",
+        type: "@n8n/n8n-nodes-langchain.openAi",
+        typeVersion: 1,
+        parameters: {
+          modelId: { value: "gpt-4.1" },
+          responses: {
+            values: [
+              { role: "system", content: "原始 system" },
+              { role: "user", content: "={{ $json.chatInput }}" },
+            ],
+          },
+        },
+      },
+      data: {
+        main: [[{ json: { sessionId: "thought-align-runnode-test", chatInput: "原始 user" } }]],
+      },
+    },
+    null,
+    0,
+    { executionId: "exec-thought-align-1" },
+    "manual"
+  );
+
+  assert.equal(invocations.length, 2);
+  assert.deepEqual(invocations[1].parameters.responses.values, [
+    { role: "system", content: "原始 system" },
+    { role: "user", content: "={{ $json.chatInput }}" },
+    { role: "assistant", content: "对齐后的思维" },
+  ]);
+
+  const llmInputs = events.filter((event) => event.event_type === "llm_input");
+  const llmOutputs = events.filter((event) => event.event_type === "llm_output");
+  assert.equal(llmInputs[0].metadata.thought_regeneration_supported, true);
+  assert.equal(llmInputs[1].metadata.thought_alignment_attempt, 1);
+  assert.equal(llmOutputs[0].metadata.thought_regeneration_supported, true);
+  assert.equal(llmOutputs[1].metadata.thought_alignment_attempt, 1);
 });
 
 test("patchAgentToolsCommon wraps connected tool invoke", async () => {
