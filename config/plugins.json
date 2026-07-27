@@ -13,7 +13,7 @@
           "timeout_s": 20
         },
         {
-          "name": "modify_input_demo"
+          "name":"modify_input_demo"
         }
       ],
       "server": [
@@ -42,7 +42,7 @@
           "timeout_s": 20
         },
         {
-          "name": "modify_output_demo"
+          "name":"modify_output_demo"
         }
       ],
       "server": [

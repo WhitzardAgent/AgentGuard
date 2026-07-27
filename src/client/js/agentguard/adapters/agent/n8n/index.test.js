@@ -193,6 +193,29 @@ test("supportsThoughtAlignmentForRunNode only enables OpenAI root nodes", () => 
   );
 });
 
+test("isOpenAiTextMessageOperationNode only matches OpenAI text/message root nodes", () => {
+  assert.equal(
+    _private.isOpenAiTextMessageOperationNode({
+      type: "@n8n/n8n-nodes-langchain.openAi",
+      parameters: {
+        resource: "text",
+        operation: "message",
+      },
+    }),
+    true
+  );
+  assert.equal(
+    _private.isOpenAiTextMessageOperationNode({
+      type: "@n8n/n8n-nodes-langchain.openAi",
+      parameters: {
+        resource: "text",
+        operation: "response",
+      },
+    }),
+    false
+  );
+});
+
 test("buildThoughtAlignmentMetadata emits capability and retry fields", () => {
   assert.deepEqual(
     _private.buildThoughtAlignmentMetadata({ supported: true, retryAttempt: 1 }),
@@ -1739,4 +1762,309 @@ test("wrapConnectedTool is idempotent", async () => {
   assert.equal(tool.invoke, firstInvoke);
   assert.deepEqual(await tool.invoke({ value: 1 }), { value: 1 });
   assert.equal(count, 1);
+});
+
+test("patchOpenAiTextMessageOperation emits llm_output before tool invocation", async (t) => {
+  const events = [];
+  const apiBodies = [];
+  const originalEnforce = UGuardEnforcer.prototype.enforce;
+  UGuardEnforcer.prototype.enforce = async function mockEnforce(event) {
+    events.push(event.toDict());
+    return { decision: GuardDecision.allow("ok") };
+  };
+  t.after(() => {
+    UGuardEnforcer.prototype.enforce = originalEnforce;
+  });
+
+  const tool = {
+    name: "HTTP_Request",
+    description: "Fetch news",
+    invoke: async (input) => ({ ok: true, input }),
+  };
+  _private.wrapConnectedTool(tool, {
+    tool_name: "HTTP_Request",
+    source_node_name: "HTTP Request",
+    source_node_type: "n8n-nodes-base.httpRequestTool",
+  });
+
+  const moduleExports = {
+    async execute() {
+      throw new Error("original execute should not be called");
+    },
+  };
+
+  _private.patchOpenAiTextMessageOperation(moduleExports, __filename, {
+    n8nWorkflow: {
+      NodeOperationError: class NodeOperationError extends Error {},
+      accumulateTokenUsage() {},
+      jsonParse: JSON.parse,
+    },
+    helpers: {
+      async getConnectedTools() {
+        return [tool];
+      },
+    },
+    utils: {
+      formatToOpenAIAssistantTool(currentTool) {
+        return {
+          type: "function",
+          function: {
+            name: currentTool.name,
+          },
+        };
+      },
+    },
+    transport: {
+      async apiRequest(_method, _path, { body }) {
+        apiBodies.push(JSON.parse(JSON.stringify(body)));
+        if (apiBodies.length === 1) {
+          return {
+            choices: [
+              {
+                message: {
+                  role: "assistant",
+                  content: "",
+                  tool_calls: [
+                    {
+                      id: "call-1",
+                      function: {
+                        name: "HTTP_Request",
+                        arguments: JSON.stringify({ q: "today news" }),
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+            usage: { prompt_tokens: 1, completion_tokens: 1 },
+          };
+        }
+        return {
+          choices: [
+            {
+              message: {
+                role: "assistant",
+                content: "final answer after tool",
+                tool_calls: [],
+              },
+            },
+          ],
+          usage: { prompt_tokens: 1, completion_tokens: 1 },
+        };
+      },
+    },
+  });
+
+  const node = {
+    name: "Message a model",
+    type: "@n8n/n8n-nodes-langchain.openAi",
+    typeVersion: 1.5,
+    parameters: {
+      resource: "text",
+      operation: "message",
+    },
+  };
+  const ctx = {
+    getNode: () => node,
+    getExecutionCancelSignal: () => null,
+    getNodeParameter(name) {
+      if (name === "modelId") return "gpt-4.1";
+      if (name === "messages.values") return [{ role: "user", content: "today news" }];
+      if (name === "options") return { maxToolsIterations: 15 };
+      if (name === "options.maxToolsIterations") return 15;
+      if (name === "jsonOutput") return false;
+      if (name === "hideTools") return "show";
+      if (name === "simplify") return true;
+      return "";
+    },
+  };
+
+  const result = await moduleExports.execute.call(ctx, 0);
+
+  assert.deepEqual(
+    events.map((event) => event.event_type),
+    ["llm_input", "llm_output", "tool_invoke", "tool_result", "llm_input", "llm_output"]
+  );
+  assert.equal(events[1].payload.output.includes("HTTP_Request"), true);
+  assert.equal(events[5].payload.final_output, "final answer after tool");
+  assert.equal(apiBodies.length, 2);
+  assert.equal(result[0].json.message.content, "final answer after tool");
+});
+
+test("patchOpenAiTextMessageOperation retries tool-call turns after llm_output thought alignment", async (t) => {
+  const events = [];
+  const apiBodies = [];
+  const invokedTools = [];
+  const originalEnforce = UGuardEnforcer.prototype.enforce;
+  UGuardEnforcer.prototype.enforce = async function mockEnforce(event) {
+    events.push(event.toDict());
+    if (event.event_type === "llm_output" && event.metadata.thought_alignment_attempt !== 1) {
+      return {
+        decision: new GuardDecision({
+          decision_type: DecisionType.LOOP_BACK_TO_LLM,
+          reason: "align thought",
+          processed_content: "重新思考后再决定",
+          metadata: { protocol: "thought_alignment_v1" },
+        }),
+      };
+    }
+    return { decision: GuardDecision.allow("ok") };
+  };
+  t.after(() => {
+    UGuardEnforcer.prototype.enforce = originalEnforce;
+  });
+
+  const unsafeTool = {
+    name: "Unsafe_Tool",
+    description: "Unsafe",
+    invoke: async (input) => {
+      invokedTools.push({ name: "Unsafe_Tool", input });
+      return { ok: true, input };
+    },
+  };
+  const safeTool = {
+    name: "Safe_Tool",
+    description: "Safe",
+    invoke: async (input) => {
+      invokedTools.push({ name: "Safe_Tool", input });
+      return { ok: true, input };
+    },
+  };
+  _private.wrapConnectedTool(unsafeTool, {
+    tool_name: "Unsafe_Tool",
+    source_node_name: "Unsafe Tool",
+    source_node_type: "n8n-nodes-base.httpRequestTool",
+  });
+  _private.wrapConnectedTool(safeTool, {
+    tool_name: "Safe_Tool",
+    source_node_name: "Safe Tool",
+    source_node_type: "n8n-nodes-base.httpRequestTool",
+  });
+
+  const moduleExports = {
+    async execute() {
+      throw new Error("original execute should not be called");
+    },
+  };
+
+  _private.patchOpenAiTextMessageOperation(moduleExports, __filename, {
+    n8nWorkflow: {
+      NodeOperationError: class NodeOperationError extends Error {},
+      accumulateTokenUsage() {},
+      jsonParse: JSON.parse,
+    },
+    helpers: {
+      async getConnectedTools() {
+        return [unsafeTool, safeTool];
+      },
+    },
+    utils: {
+      formatToOpenAIAssistantTool(currentTool) {
+        return {
+          type: "function",
+          function: {
+            name: currentTool.name,
+          },
+        };
+      },
+    },
+    transport: {
+      async apiRequest(_method, _path, { body }) {
+        apiBodies.push(JSON.parse(JSON.stringify(body)));
+        if (apiBodies.length === 1) {
+          return {
+            choices: [
+              {
+                message: {
+                  role: "assistant",
+                  content: "",
+                  tool_calls: [
+                    {
+                      id: "call-unsafe",
+                      function: {
+                        name: "Unsafe_Tool",
+                        arguments: JSON.stringify({ q: "today news" }),
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+            usage: { prompt_tokens: 1, completion_tokens: 1 },
+          };
+        }
+        if (apiBodies.length === 2) {
+          return {
+            choices: [
+              {
+                message: {
+                  role: "assistant",
+                  content: "",
+                  tool_calls: [
+                    {
+                      id: "call-safe",
+                      function: {
+                        name: "Safe_Tool",
+                        arguments: JSON.stringify({ q: "today news" }),
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+            usage: { prompt_tokens: 1, completion_tokens: 1 },
+          };
+        }
+        return {
+          choices: [
+            {
+              message: {
+                role: "assistant",
+                content: "final answer after safe tool",
+                tool_calls: [],
+              },
+            },
+          ],
+          usage: { prompt_tokens: 1, completion_tokens: 1 },
+        };
+      },
+    },
+  });
+
+  const node = {
+    name: "Message a model",
+    type: "@n8n/n8n-nodes-langchain.openAi",
+    typeVersion: 1.5,
+    parameters: {
+      resource: "text",
+      operation: "message",
+    },
+  };
+  const ctx = {
+    getNode: () => node,
+    getExecutionCancelSignal: () => null,
+    getNodeParameter(name) {
+      if (name === "modelId") return "gpt-4.1";
+      if (name === "messages.values") return [{ role: "user", content: "today news" }];
+      if (name === "options") return { maxToolsIterations: 15 };
+      if (name === "options.maxToolsIterations") return 15;
+      if (name === "jsonOutput") return false;
+      if (name === "hideTools") return "show";
+      if (name === "simplify") return true;
+      return "";
+    },
+  };
+
+  const result = await moduleExports.execute.call(ctx, 0);
+
+  assert.equal(apiBodies.length, 3);
+  assert.equal(apiBodies[1].messages.at(-1).content, "重新思考后再决定");
+  assert.deepEqual(
+    events.map((event) => event.event_type),
+    ["llm_input", "llm_output", "llm_input", "llm_output", "tool_invoke", "tool_result", "llm_input", "llm_output"]
+  );
+  assert.equal(events[2].metadata.thought_alignment_attempt, 1);
+  assert.equal(events[3].metadata.thought_alignment_attempt, 1);
+  assert.deepEqual(invokedTools.map((item) => item.name), ["Safe_Tool"]);
+  assert.equal(result[0].json.message.content, "final answer after safe tool");
 });

@@ -23,8 +23,7 @@ const PATCHED = Symbol.for("agentguard.n8n.patched");
 const LOADER_PATCHED = Symbol.for("agentguard.n8n.loader_patched");
 const TOOL_INVOKE_PATCHED = Symbol.for("agentguard.n8n.tool_invoke_patched");
 const TOOL_SOURCE_CONTEXT = Symbol.for("agentguard.n8n.tool_source_context");
-const TOOLS_AGENT_RUN_PATCHED = Symbol.for("agentguard.n8n.tools_agent_run_patched");
-const SEMANTIC_EXECUTOR_PATCHED = Symbol.for("agentguard.n8n.semantic_executor_patched");
+const OPENAI_TEXT_MESSAGE_PATCHED = Symbol.for("agentguard.n8n.openai_text_message_patched");
 const ALS = new AsyncLocalStorage();
 const GUARDS = new Map();
 const REPORTED_TOOLS = new Set();
@@ -1279,6 +1278,161 @@ function applyModifiedRunNodeArgs(args = {}, processedContent = "") {
   };
 }
 
+function isOpenAiTextMessageOperationNode(node = null) {
+  if (!node || node.disabled === true) {
+    return false;
+  }
+  const type = String(node.type || "").toLowerCase();
+  if (type !== "@n8n/n8n-nodes-langchain.openai") {
+    return false;
+  }
+  const parameters = isPlainObject(node.parameters) ? node.parameters : {};
+  return String(parameters.resource || "").toLowerCase() === "text"
+    && String(parameters.operation || "").toLowerCase() === "message";
+}
+
+function applyLoopbackToOpenAiTextMessages(_messages = [], processedContent = "") {
+  return denormalizeResponsesInput(coerceLoopbackPayload(processedContent));
+}
+
+function applyModifyToOpenAiTextMessages(messages = [], processedContent = "") {
+  const payload = coerceLoopbackPayload(processedContent);
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    if (Object.prototype.hasOwnProperty.call(payload, "messages")) {
+      return denormalizeResponsesInput(payload.messages);
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, "input")) {
+      return denormalizeResponsesInput(payload.input);
+    }
+  }
+  return applyLoopbackToOpenAiTextMessages(messages, payload);
+}
+
+function applyThoughtAlignmentToOpenAiTextMessages(messages = [], rawOutput = null, processedContent = "") {
+  if (typeof rawOutput === "string" && processedContent === "") {
+    processedContent = rawOutput;
+    rawOutput = null;
+  }
+  const retryMessage = thoughtAlignmentRetryMessageForNodeParameters(rawOutput, processedContent);
+  if (!retryMessage) {
+    return Array.isArray(messages) ? [...messages] : [];
+  }
+  const currentMessages = Array.isArray(messages) ? messages.map((message) => normalizeValue(message)) : [];
+  return [...currentMessages, retryMessage];
+}
+
+function parseOpenAiToolArguments(argumentsText) {
+  if (typeof argumentsText !== "string" || !argumentsText.trim()) {
+    return argumentsText;
+  }
+  try {
+    return JSON.parse(argumentsText);
+  } catch (_) {
+    return argumentsText;
+  }
+}
+
+function openAiTextMessageToolActions(toolCalls = []) {
+  if (!Array.isArray(toolCalls) || !toolCalls.length) {
+    return [];
+  }
+  return toolCalls.map((toolCall) => {
+    const functionCall = toolCall && typeof toolCall === "object" ? toolCall.function || {} : {};
+    const parsedArgs = parseOpenAiToolArguments(functionCall.arguments);
+    const input = isPlainObject(parsedArgs) && Object.prototype.hasOwnProperty.call(parsedArgs, "input")
+      ? parsedArgs.input
+      : parsedArgs;
+    return {
+      metadata: {
+        toolName: firstNonEmptyText(functionCall.name, toolCall && toolCall.name, "tool"),
+      },
+      input: normalizeValue(input),
+    };
+  });
+}
+
+function openAiTextMessageOutput(response = null) {
+  const choice = response && Array.isArray(response.choices) ? response.choices[0] : null;
+  const message = choice && choice.message ? normalizeValue(choice.message) : {};
+  const toolActions = openAiTextMessageToolActions(message && message.tool_calls);
+  const content = firstNonEmptyText(message && message.content, choice && choice.text);
+  return {
+    output: content || semanticToolActionsOutput(toolActions) || safeString(message),
+    thought: extractThoughtText(message),
+    final_output: content || null,
+    tool_calls: message && message.tool_calls ? normalizeValue(message.tool_calls) : [],
+  };
+}
+
+function syntheticOpenAiTextMessageResponse(text = "", model = null) {
+  const content = String(text || "");
+  return {
+    id: `agentguard_chatcmpl_${Date.now()}`,
+    object: "chat.completion",
+    created: Math.floor(Date.now() / 1000),
+    model: model || "unknown",
+    choices: [
+      {
+        index: 0,
+        finish_reason: "stop",
+        message: {
+          role: "assistant",
+          content,
+          tool_calls: [],
+        },
+      },
+    ],
+  };
+}
+
+function applyModifyToOpenAiTextMessageResponse(response, processedContent = "") {
+  const value = textFromValue(extractModifiedPrimaryValue(processedContent));
+  if (value == null) {
+    return response;
+  }
+  const baseResponse = response && typeof response === "object" ? { ...response } : syntheticOpenAiTextMessageResponse("", null);
+  const choices = Array.isArray(baseResponse.choices) ? [...baseResponse.choices] : [];
+  const firstChoice = choices[0] && typeof choices[0] === "object" ? { ...choices[0] } : { index: 0 };
+  const currentMessage = firstChoice.message && typeof firstChoice.message === "object" ? { ...firstChoice.message } : {};
+  currentMessage.role = currentMessage.role || "assistant";
+  currentMessage.content = value;
+  currentMessage.tool_calls = [];
+  firstChoice.message = currentMessage;
+  firstChoice.finish_reason = firstChoice.finish_reason || "stop";
+  choices[0] = firstChoice;
+  baseResponse.choices = choices;
+  return baseResponse;
+}
+
+function openAiTextMessageReturnData(response, simplify, itemIndex) {
+  const finalResponse = normalizeValue(response || syntheticOpenAiTextMessageResponse("", null));
+  if (simplify) {
+    const returnData = [];
+    const choices = Array.isArray(finalResponse.choices) ? finalResponse.choices : [];
+    for (const entry of choices) {
+      const nextEntry = normalizeValue(entry);
+      if (nextEntry && nextEntry.message && typeof nextEntry.message.content === "string") {
+        try {
+          nextEntry.message.content = JSON.parse(nextEntry.message.content);
+        } catch (_) {
+          // Keep non-JSON content as-is.
+        }
+      }
+      returnData.push({
+        json: nextEntry,
+        pairedItem: { item: itemIndex },
+      });
+    }
+    return returnData;
+  }
+  return [
+    {
+      json: finalResponse,
+      pairedItem: { item: itemIndex },
+    },
+  ];
+}
+
 function responseOutputItemsFromText(text) {
   return [
     {
@@ -2445,6 +2599,99 @@ function toolsAgentProviderName(model = null) {
   return "unknown";
 }
 
+function semanticMessagesFromPayload(payload) {
+  const normalizedPayload = coerceLoopbackPayload(payload);
+  if (Array.isArray(normalizedPayload)) {
+    return normalizeResponsesInput(normalizedPayload);
+  }
+  if (isPlainObject(normalizedPayload)) {
+    if (Array.isArray(normalizedPayload.messages)) {
+      return normalizeResponsesInput(normalizedPayload.messages);
+    }
+    if (Array.isArray(normalizedPayload.input)) {
+      return normalizeResponsesInput(normalizedPayload.input);
+    }
+    if (Object.prototype.hasOwnProperty.call(normalizedPayload, "content") || Object.prototype.hasOwnProperty.call(normalizedPayload, "role")) {
+      return normalizeResponsesInput(normalizedPayload);
+    }
+  }
+  return null;
+}
+
+function applySemanticMessagesToInvokeParams(invokeParams = {}, messages = []) {
+  const normalizedMessages = normalizeResponsesInput(messages);
+  if (!normalizedMessages.length) {
+    return { ...(invokeParams || {}) };
+  }
+  const systemMessages = normalizedMessages
+    .filter((message) => String(message && message.role || "").toLowerCase() === "system")
+    .map((message) => textFromValue(message.content) || "")
+    .filter(Boolean);
+  const nonSystemMessages = normalizedMessages
+    .filter((message) => String(message && message.role || "").toLowerCase() !== "system")
+    .map((message) => ({
+      role: message.role || "user",
+      content: normalizeValue(message.content),
+    }));
+  const next = {
+    ...(invokeParams || {}),
+  };
+  if (systemMessages.length) {
+    next.system_message = systemMessages.join("\n\n");
+  }
+  if (!nonSystemMessages.length) {
+    return next;
+  }
+  const lastMessage = nonSystemMessages[nonSystemMessages.length - 1];
+  next.input = normalizeValue(lastMessage.content);
+  next.chat_history = nonSystemMessages.slice(0, -1).map((message) => ({
+    role: message.role,
+    content: normalizeValue(message.content),
+  }));
+  return next;
+}
+
+function applyModifyToSemanticInvokeParams(invokeParams = {}, processedContent = "") {
+  const payload = coerceLoopbackPayload(processedContent);
+  const messages = semanticMessagesFromPayload(payload);
+  if (messages && messages.length) {
+    return applySemanticMessagesToInvokeParams(invokeParams, messages);
+  }
+  if (isPlainObject(payload) && Object.prototype.hasOwnProperty.call(payload, "input")) {
+    return {
+      ...(invokeParams || {}),
+      input: normalizeValue(payload.input),
+    };
+  }
+  if (typeof payload === "string") {
+    return {
+      ...(invokeParams || {}),
+      input: payload,
+    };
+  }
+  return { ...(invokeParams || {}) };
+}
+
+function applyLoopbackToSemanticInvokeParams(invokeParams = {}, processedContent = "") {
+  return applyModifyToSemanticInvokeParams(invokeParams, processedContent);
+}
+
+function applyThoughtAlignmentToSemanticInvokeParams(invokeParams = {}, _rawOutput = null, processedContent = "") {
+  const thought = String(processedContent || "").trim();
+  if (!thought) {
+    return { ...(invokeParams || {}) };
+  }
+  const chatHistory = Array.isArray(invokeParams && invokeParams.chat_history)
+    ? [...invokeParams.chat_history]
+    : [];
+  return {
+    ...(invokeParams || {}),
+    chat_history: [
+      ...chatHistory,
+      { role: "assistant", content: thought },
+    ],
+  };
+}
 function buildToolsAgentRuntimeContext(ctx, itemContext = {}, response = null, model = null, extra = {}) {
   const runtimeContext = currentContext();
   const workflow = ctx && typeof ctx.getWorkflow === "function" ? ctx.getWorkflow() : null;
@@ -2483,63 +2730,6 @@ function buildToolsAgentRuntimeContext(ctx, itemContext = {}, response = null, m
     llm_model: runtimeContext.llm_model || toolsAgentModelName(model),
     ...extra,
   };
-}
-
-function wrapSemanticExecutor(executor, context, model = null) {
-  if (!executor || typeof executor !== "object" || executor[SEMANTIC_EXECUTOR_PATCHED]) {
-    return executor;
-  }
-  if (typeof executor.invoke === "function") {
-    const originalInvoke = executor.invoke;
-    executor.invoke = async function agentguardSemanticInvoke(invokeParams, ...rest) {
-      if (invokeParams && Array.isArray(invokeParams.steps) && invokeParams.steps.length > 0) {
-        const messages = buildSemanticAgentInputMessages(invokeParams);
-        await emitSemanticLLMInput(messages, context, {
-          llm_turn_kind: "tool_followup",
-          llm_model: toolsAgentModelName(model),
-          step_count: invokeParams.steps.length,
-        });
-      }
-      return originalInvoke.call(this, invokeParams, ...rest);
-    };
-  }
-  if (typeof executor.streamEvents === "function") {
-    const originalStreamEvents = executor.streamEvents;
-    executor.streamEvents = function agentguardSemanticStreamEvents(invokeParams, ...rest) {
-      const inputPromise = (
-        invokeParams && Array.isArray(invokeParams.steps) && invokeParams.steps.length > 0
-      )
-        ? emitSemanticLLMInput(
-          buildSemanticAgentInputMessages(invokeParams),
-          context,
-          {
-            llm_turn_kind: "tool_followup",
-            llm_model: toolsAgentModelName(model),
-            step_count: invokeParams.steps.length,
-            stream: true,
-          }
-        )
-        : null;
-      const iterable = originalStreamEvents.call(this, invokeParams, ...rest);
-      return (async function* semanticWrappedEventStream() {
-        if (inputPromise) {
-          await inputPromise;
-        }
-        for await (const item of iterable) {
-          yield item;
-        }
-      })();
-    };
-  }
-  if (typeof executor.withConfig === "function") {
-    const originalWithConfig = executor.withConfig;
-    executor.withConfig = function agentguardSemanticWithConfig(...args) {
-      const configured = originalWithConfig.apply(this, args);
-      return wrapSemanticExecutor(configured, context, model);
-    };
-  }
-  executor[SEMANTIC_EXECUTOR_PATCHED] = true;
-  return executor;
 }
 
 function aiToolResult(action, value, executionStatus = "success", error = null) {
@@ -2921,6 +3111,237 @@ function patchConnectedToolsHelpers(moduleExports) {
   moduleExports.getConnectedTools[PATCHED] = true;
 }
 
+function patchOpenAiTextMessageOperation(moduleExports, resolved, deps = {}) {
+  if (!moduleExports || typeof moduleExports.execute !== "function" || moduleExports.execute[OPENAI_TEXT_MESSAGE_PATCHED]) {
+    return;
+  }
+  const localRequire = deps.require || createRequire(resolved);
+  const n8nWorkflow = deps.n8nWorkflow || localRequire("n8n-workflow");
+  const helpers = deps.helpers || localRequire("../../../../../../utils/helpers");
+  const utils = deps.utils || localRequire("../../../helpers/utils");
+  const transport = deps.transport || localRequire("../../../transport");
+  const original = moduleExports.execute;
+  moduleExports.execute = async function agentguardOpenAiTextMessageExecute(i) {
+    const node = typeof this.getNode === "function" ? this.getNode() : null;
+    if (!isOpenAiTextMessageOperationNode(node)) {
+      return original.call(this, i);
+    }
+    const context = enrichContextWithN8nSession(currentContext({
+      llm_node: true,
+      llm_provider: "openai",
+      llm_class: "n8n_openai_text_message_operation",
+    }), { item_index: i });
+    if (!matchesConfiguredFilters(context)) {
+      return original.call(this, i);
+    }
+    const { accumulateTokenUsage, jsonParse, NodeOperationError } = n8nWorkflow;
+    const { getConnectedTools } = helpers;
+    const { formatToOpenAIAssistantTool } = utils;
+    const { apiRequest } = transport;
+    const nodeVersion = node.typeVersion;
+    const model = this.getNodeParameter("modelId", i, "", { extractValue: true });
+    let currentMessages = this.getNodeParameter("messages.values", i, []);
+    if (!currentMessages.some((message) => typeof message.content === "string" && message.content.trim() !== "")) {
+      throw new NodeOperationError(this.getNode(), "A non-empty prompt is required.", {
+        itemIndex: i,
+      });
+    }
+    const options = normalizeValue(this.getNodeParameter("options", i, {})) || {};
+    const jsonOutput = this.getNodeParameter("jsonOutput", i, false);
+    const maxToolsIterations = nodeVersion >= 1.5 ? this.getNodeParameter("options.maxToolsIterations", i, 15) : 0;
+    const abortSignal = this.getExecutionCancelSignal();
+    if (options.maxTokens !== undefined) {
+      options.max_completion_tokens = options.maxTokens;
+      delete options.maxTokens;
+    }
+    if (options.topP !== undefined) {
+      options.top_p = options.topP;
+      delete options.topP;
+    }
+    let responseFormat;
+    currentMessages = denormalizeResponsesInput(currentMessages);
+    if (jsonOutput) {
+      responseFormat = { type: "json_object" };
+      currentMessages = [
+        {
+          role: "system",
+          content: "You are a helpful assistant designed to output JSON.",
+        },
+        ...currentMessages,
+      ];
+    }
+    const hideTools = this.getNodeParameter("hideTools", i, "");
+    let tools;
+    let externalTools = [];
+    if (hideTools !== "hide") {
+      externalTools = await getConnectedTools(this, nodeVersion > 1, false);
+    }
+    if (externalTools.length) {
+      tools = externalTools.map(formatToOpenAIAssistantTool);
+    }
+    const baseBody = {
+      model,
+      tools,
+      response_format: responseFormat,
+      ...normalizeValue(options),
+    };
+    delete baseBody.maxToolsIterations;
+
+    const guardMetadata = (retryAttempt) => llmGuardMetadata(
+      {
+        event_source: "n8n_openai_text_message_operation",
+        provider: "openai",
+        node_parameters: normalizeValue((node && node.parameters) || {}),
+      },
+      {
+        supported: true,
+        retryAttempt,
+      }
+    );
+
+    let attempts = 0;
+    let thoughtAlignmentAttempt = 0;
+    let currentIteration = 1;
+    let finalResponse = null;
+    try {
+      while (true) {
+        const beforeDecision = await guardLLMBefore(
+          {
+            model,
+            input: currentMessages,
+            tools,
+            node_parameters: normalizeValue((node && node.parameters) || {}),
+          },
+          context,
+          guardMetadata(thoughtAlignmentAttempt)
+        );
+        if (beforeDecision.decision_type === DecisionType.LOOP_BACK_TO_LLM) {
+          if (attempts >= MAX_LLM_LOOPBACK_ATTEMPTS) {
+            return openAiTextMessageReturnData(
+              syntheticOpenAiTextMessageResponse(beforeDecision.reason || "blocked by AgentGuard", model),
+              this.getNodeParameter("simplify", i),
+              i
+            );
+          }
+          currentMessages = isThoughtAlignmentLoopbackDecision(beforeDecision)
+            ? applyThoughtAlignmentToOpenAiTextMessages(currentMessages, null, beforeDecision.processed_content)
+            : applyLoopbackToOpenAiTextMessages(currentMessages, beforeDecision.processed_content);
+          thoughtAlignmentAttempt = isThoughtAlignmentLoopbackDecision(beforeDecision) ? 1 : thoughtAlignmentAttempt;
+          attempts += 1;
+          continue;
+        }
+        if (beforeDecision.decision_type === DecisionType.MODIFY_LLM_INPUT) {
+          currentMessages = applyModifyToOpenAiTextMessages(currentMessages, beforeDecision.processed_content);
+        }
+        const blockedBefore = blockedToolValue(beforeDecision, "llm");
+        if (blockedBefore) {
+          return openAiTextMessageReturnData(
+            syntheticOpenAiTextMessageResponse(beforeDecision.reason || "blocked by AgentGuard", model),
+            this.getNodeParameter("simplify", i),
+            i
+          );
+        }
+
+        let response = await apiRequest.call(this, "POST", "/chat/completions", {
+          body: {
+            ...baseBody,
+            messages: currentMessages,
+          },
+        });
+        if (!response) {
+          return [];
+        }
+        if (response.usage) {
+          accumulateTokenUsage(this, response.usage.prompt_tokens, response.usage.completion_tokens);
+        }
+        const afterDecision = await guardLLMAfter(
+          openAiTextMessageOutput(response),
+          context,
+          guardMetadata(thoughtAlignmentAttempt)
+        );
+        if (afterDecision.decision_type === DecisionType.LOOP_BACK_TO_LLM) {
+          if (attempts >= MAX_LLM_LOOPBACK_ATTEMPTS) {
+            return openAiTextMessageReturnData(
+              syntheticOpenAiTextMessageResponse(afterDecision.reason || "blocked by AgentGuard", model),
+              this.getNodeParameter("simplify", i),
+              i
+            );
+          }
+          currentMessages = isThoughtAlignmentLoopbackDecision(afterDecision)
+            ? applyThoughtAlignmentToOpenAiTextMessages(currentMessages, response, afterDecision.processed_content)
+            : applyLoopbackToOpenAiTextMessages(currentMessages, afterDecision.processed_content);
+          thoughtAlignmentAttempt = isThoughtAlignmentLoopbackDecision(afterDecision) ? 1 : thoughtAlignmentAttempt;
+          attempts += 1;
+          continue;
+        }
+        if (afterDecision.decision_type === DecisionType.MODIFY_LLM_OUTPUT) {
+          response = applyModifyToOpenAiTextMessageResponse(response, afterDecision.processed_content);
+        }
+        const blockedAfter = blockedResultValue(afterDecision, "llm");
+        if (blockedAfter) {
+          return openAiTextMessageReturnData(
+            syntheticOpenAiTextMessageResponse(blockedAfter.reason || afterDecision.reason || "blocked by AgentGuard", model),
+            this.getNodeParameter("simplify", i),
+            i
+          );
+        }
+
+        finalResponse = response;
+        const toolCalls = response && response.choices && response.choices[0] && response.choices[0].message
+          ? response.choices[0].message.tool_calls
+          : null;
+        if (!Array.isArray(toolCalls) || !toolCalls.length) {
+          break;
+        }
+        if (abortSignal?.aborted || (maxToolsIterations > 0 && currentIteration >= maxToolsIterations)) {
+          break;
+        }
+        currentMessages = [
+          ...currentMessages,
+          normalizeValue(response.choices[0].message),
+        ];
+        for (const toolCall of toolCalls) {
+          const functionName = toolCall && toolCall.function ? toolCall.function.name : null;
+          const functionArgs = toolCall && toolCall.function ? toolCall.function.arguments : null;
+          let functionResponse;
+          for (const tool of externalTools || []) {
+            if (tool.name === functionName) {
+              const parsedArgs = jsonParse(functionArgs);
+              const functionInput = parsedArgs && typeof parsedArgs === "object" && Object.prototype.hasOwnProperty.call(parsedArgs, "input")
+                ? parsedArgs.input
+                : parsedArgs ?? functionArgs;
+              functionResponse = await tool.invoke(functionInput);
+            }
+          }
+          if (typeof functionResponse === "object") {
+            functionResponse = JSON.stringify(functionResponse);
+          }
+          currentMessages.push({
+            tool_call_id: toolCall.id,
+            role: "tool",
+            content: functionResponse,
+          });
+        }
+        currentIteration += 1;
+      }
+      return openAiTextMessageReturnData(finalResponse, this.getNodeParameter("simplify", i), i);
+    } catch (error) {
+      await guardLLMAfter(
+        { output_text: "", output: [], status: "error", error: safeString(error) },
+        context,
+        {
+          ...guardMetadata(thoughtAlignmentAttempt),
+          error: safeString(error && error.message ? error.message : error),
+        }
+      );
+      throw error;
+    } finally {
+      flushGuardAsync(context);
+    }
+  };
+  moduleExports.execute[OPENAI_TEXT_MESSAGE_PATCHED] = true;
+}
+
 function patchCreateEngineRequests(moduleExports) {
   if (!moduleExports || typeof moduleExports.createEngineRequests !== "function" || moduleExports.createEngineRequests[PATCHED]) {
     return;
@@ -3039,6 +3460,9 @@ function patchN8nCore(moduleExports) {
       const node = executionData && executionData.node ? executionData.node : {};
       const nodeType = resolveNodeType(workflow, node);
       if (isRunNodeLLMExecution(node)) {
+        if (isOpenAiTextMessageOperationNode(node)) {
+          return original.call(this, workflow, executionData, runExecutionData, runIndex, additionalData, mode, abortSignal, subNodeExecutionResults);
+        }
         return guardedRunNodeLLM(original, this, {
           workflow,
           executionData,
@@ -4174,6 +4598,13 @@ function patchLoadedModule(request, resolved, moduleExports) {
     ) {
       patchAgentToolsCommon(moduleExports);
     }
+    if (
+      resolved &&
+      resolved.includes("/@n8n/n8n-nodes-langchain/") &&
+      resolved.endsWith("/nodes/vendors/OpenAi/v1/actions/text/message.operation.js")
+    ) {
+      patchOpenAiTextMessageOperation(moduleExports, resolved);
+    }
   } catch (error) {
     log("warn", `failed to patch ${request}`, error && error.stack ? error.stack : String(error));
   }
@@ -4276,6 +4707,9 @@ module.exports = {
     normalizeLLMOutput,
     normalizeResponsesInput,
     nodeNameToToolName,
+    isOpenAiTextMessageOperationNode,
+    openAiTextMessageOutput,
+    patchOpenAiTextMessageOperation,
     pluginConfigFromEnv,
     patchAgentToolsCommon,
     patchConnectedToolsHelpers,
