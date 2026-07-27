@@ -77,7 +77,7 @@ def list_agents(
         records = AgentStore().list_agents(visible["agent_ids"])
     except DatabaseUnavailable:
         return []
-    return [_agent_record_to_console_item(record) for record in records if _agent_record_visible_in_console(record)]
+    return [_agent_record_to_console_item(record) for record in _dedupe_console_agent_records(records)]
 
 
 @router.delete("/v1/backend/agents/{agent_id}")
@@ -647,7 +647,7 @@ def _agent_record_to_console_item(record: AgentRecord) -> dict[str, Any]:
 def _agent_record_visible_in_console(record: AgentRecord) -> bool:
     metadata = _safe_json_object(record.metadata_json)
     provider = str(record.provider or metadata.get("external_provider") or metadata.get("provider") or "").strip()
-    if provider != "openclaw":
+    if provider not in {"openclaw", "opencode"}:
         return True
     agent_type = str(record.agent_type or metadata.get("agent_type") or "").strip()
     external_agent_id = str(record.external_agent_id or metadata.get("external_agent_id") or "").strip()
@@ -656,6 +656,46 @@ def _agent_record_visible_in_console(record: AgentRecord) -> bool:
     if external_agent_id.startswith("ticket-"):
         return False
     return True
+
+
+def _dedupe_console_agent_records(records: list[AgentRecord]) -> list[AgentRecord]:
+    visible = [record for record in records if _agent_record_visible_in_console(record)]
+    scoped_opencode_keys = {
+        _console_agent_identity_key(record, require_provider_instance=True)
+        for record in visible
+    }
+    scoped_opencode_keys.discard(None)
+    deduped = []
+    for record in visible:
+        legacy_key = _console_agent_identity_key(record, require_provider_instance=False)
+        if legacy_key in scoped_opencode_keys and not _record_provider_instance_id(record):
+            continue
+        deduped.append(record)
+    return deduped
+
+
+def _console_agent_identity_key(
+    record: AgentRecord,
+    *,
+    require_provider_instance: bool,
+) -> tuple[str, str, str] | None:
+    metadata = _safe_json_object(record.metadata_json)
+    provider = str(record.provider or metadata.get("external_provider") or metadata.get("provider") or "").strip()
+    if provider != "opencode":
+        return None
+    agent_type = str(record.agent_type or metadata.get("agent_type") or "").strip()
+    external_agent_id = str(record.external_agent_id or metadata.get("external_agent_id") or "").strip()
+    provider_instance_id = _record_provider_instance_id(record)
+    if agent_type != "agent" or not external_agent_id:
+        return None
+    if require_provider_instance and not provider_instance_id:
+        return None
+    return (provider, external_agent_id, agent_type)
+
+
+def _record_provider_instance_id(record: AgentRecord) -> str:
+    metadata = _safe_json_object(record.metadata_json)
+    return str(record.provider_instance_id or metadata.get("provider_instance_id") or "").strip()
 
 
 def _safe_json_object(value: str | None) -> dict[str, Any]:

@@ -5,6 +5,8 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
+from backend.agents.store import AgentStore
+from backend.api.auth import configured_backend_api_key
 from backend.api.schemas import (
     AgentBootstrapRequest,
     AgentCatalogSyncRequest,
@@ -21,8 +23,6 @@ from backend.api.schemas import (
     TraceUploadRequest,
 )
 from backend.app_state import get_console, get_manager, get_skills
-from backend.api.auth import configured_backend_api_key
-from backend.agents.store import AgentStore
 from backend.auth.broker import AuthBrokerError, get_dify_auth_broker
 from backend.auth.dependencies import (
     apply_auth_context_to_context,
@@ -169,10 +169,12 @@ def register_agent(req: AgentRegisterRequest, request: Request) -> dict[str, Any
 @router.post("/v1/server/agents/bootstrap")
 def bootstrap_agents(req: AgentBootstrapRequest, request: Request) -> dict[str, Any]:
     provider = str(req.provider or "").strip().lower()
-    if provider != "openclaw":
-        raise HTTPException(status_code=400, detail="only provider=openclaw is supported for agent bootstrap")
+    if provider not in {"openclaw", "opencode"}:
+        raise HTTPException(status_code=400, detail="only provider=openclaw or provider=opencode is supported for agent bootstrap")
     try:
-        identity, results = get_dify_auth_broker().bootstrap_openclaw_agents(
+        broker = get_dify_auth_broker()
+        bootstrap = broker.bootstrap_openclaw_agents if provider == "openclaw" else broker.bootstrap_opencode_agents
+        identity, results = bootstrap(
             user_ticket=req.user_ticket or request.headers.get("x-agentguard-user-ticket"),
             provider_instance_id=req.provider_instance_id,
             tenant_id=req.tenant_id,
@@ -187,7 +189,7 @@ def bootstrap_agents(req: AgentBootstrapRequest, request: Request) -> dict[str, 
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
         "status": "ok",
-        "provider": "openclaw",
+        "provider": provider,
         "user_id": str(identity.user_id),
         "ticket_prefix": identity.ticket_prefix,
         "agents": [
@@ -290,7 +292,19 @@ def create_runtime_session(req: RuntimeSessionCreateRequest, request: Request) -
                 method=request.method,
                 url=str(request.url),
             )
-        elif provider in {"langchain", "openclaw"}:
+        elif provider == "opencode" and req.agent_id:
+            issue = broker.create_opencode_session(
+                external_session_id=req.external_session_id,
+                agent_id=req.agent_id,
+                external_user_id=req.external_user_id,
+                metadata=req.metadata,
+                dpop_proof=request.headers.get("dpop"),
+                agent_proof=request.headers.get("x-agentguard-agent-proof"),
+                request_body=req.model_dump(exclude_none=True),
+                method=request.method,
+                url=str(request.url),
+            )
+        elif provider in {"langchain", "openclaw", "opencode"}:
             issue = broker.create_ticket_session(
                 provider=provider,
                 user_ticket=req.user_ticket or request.headers.get("x-agentguard-user-ticket"),

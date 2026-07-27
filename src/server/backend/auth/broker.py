@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import secrets
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from backend.agents.store import AgentStore
@@ -44,12 +45,21 @@ class RuntimeSessionIssue:
 
 
 @dataclass(frozen=True)
-class OpenClawAgentBootstrapResult:
+class AgentBootstrapResult:
     agent: Any
     credential: Any
     user_id: int
     user_binding_created: bool
     user_binding_updated: bool
+
+
+@dataclass(frozen=True)
+class TicketSessionAgentIdentity:
+    external_agent_id: str
+    display_agent_id: str
+    agent_type: str
+    name: str | None
+    description: str | None
 
 
 class DifyAuthBroker:
@@ -151,7 +161,7 @@ class DifyAuthBroker:
         provider_instance_id: str | None = None,
         tenant_id: str | None = None,
         metadata: dict[str, Any] | None = None,
-    ) -> tuple[Any, list[OpenClawAgentBootstrapResult]]:
+    ) -> tuple[Any, list[AgentBootstrapResult]]:
         identity = self._resolve_user_ticket(user_ticket)
         if not agents:
             raise BadAuthRequest("agents are required")
@@ -163,7 +173,7 @@ class DifyAuthBroker:
                 "runtime_auth_provider": "openclaw",
             }
         )
-        results: list[OpenClawAgentBootstrapResult] = []
+        results: list[AgentBootstrapResult] = []
         catalog_scopes: dict[tuple[str | None, str | None, str], set[str]] = {}
         for item in agents:
             if not isinstance(item, dict):
@@ -201,7 +211,7 @@ class DifyAuthBroker:
                 metadata=item_metadata,
             )
             results.append(
-                OpenClawAgentBootstrapResult(
+                AgentBootstrapResult(
                     agent=registration.agent,
                     credential=registration.credential,
                     user_id=identity.user_id,
@@ -229,6 +239,95 @@ class DifyAuthBroker:
             user_ticket,
             agent_id=consume_agent_id,
             session_id=f"openclaw-bootstrap:{_optional_text(provider_instance_id) or 'default'}",
+        )
+        return identity, results
+
+    def bootstrap_opencode_agents(
+        self,
+        *,
+        user_ticket: str | None,
+        agents: list[dict[str, Any]],
+        provider_instance_id: str | None = None,
+        tenant_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> tuple[Any, list[AgentBootstrapResult]]:
+        identity = self._resolve_user_ticket(user_ticket)
+        if not agents:
+            raise BadAuthRequest("agents are required")
+        clean_metadata = dict(metadata or {})
+        clean_metadata.update(
+            {
+                "ticket_id": identity.ticket_id,
+                "ticket_prefix": identity.ticket_prefix,
+                "runtime_auth_provider": "opencode",
+            }
+        )
+        results: list[AgentBootstrapResult] = []
+        catalog_scopes: dict[tuple[str | None, str | None, str], set[str]] = {}
+        for item in agents:
+            if not isinstance(item, dict):
+                raise BadAuthRequest("agents entries must be objects")
+            external_agent_id = _required_text(item.get("external_agent_id"), "external_agent_id")
+            agent_type = _optional_text(item.get("agent_type")) or "agent"
+            if agent_type != "agent":
+                raise BadAuthRequest("OpenCode bootstrap only supports agent_type=agent")
+            item_provider_instance_id = _optional_text(item.get("provider_instance_id")) or _optional_text(provider_instance_id)
+            item_tenant_id = _optional_text(item.get("tenant_id")) or _optional_text(tenant_id)
+            item_metadata = {
+                **clean_metadata,
+                **(item.get("metadata") if isinstance(item.get("metadata"), dict) else {}),
+                "external_agent_id": external_agent_id,
+                "opencode_agent_id": external_agent_id,
+                "ticket_prefix": identity.ticket_prefix,
+            }
+            registration = self.agent_store.register_agent(
+                provider="opencode",
+                provider_instance_id=item_provider_instance_id,
+                tenant_id=item_tenant_id,
+                external_agent_id=external_agent_id,
+                agent_type=agent_type,
+                name=_optional_text(item.get("name")) or external_agent_id,
+                description=_optional_text(item.get("description")),
+                public_key_jwk=item.get("public_key_jwk"),
+                metadata=item_metadata,
+            )
+            created, updated = self.agent_store.bind_agent_to_user(
+                user_id=identity.user_id,
+                agent_id=registration.agent.agent_id,
+                provider="opencode",
+                account_email=None,
+                source="user_ticket_bootstrap",
+                metadata=item_metadata,
+            )
+            results.append(
+                AgentBootstrapResult(
+                    agent=registration.agent,
+                    credential=registration.credential,
+                    user_id=identity.user_id,
+                    user_binding_created=created,
+                    user_binding_updated=updated,
+                )
+            )
+            catalog_scopes.setdefault((item_provider_instance_id, item_tenant_id, agent_type), set()).add(external_agent_id)
+        sync_provider_agents = getattr(self.agent_store, "sync_provider_agents", None)
+        if callable(sync_provider_agents):
+            for (scope_provider_instance_id, scope_tenant_id, scope_agent_type), external_agent_ids in catalog_scopes.items():
+                sync_provider_agents(
+                    provider="opencode",
+                    provider_instance_id=scope_provider_instance_id,
+                    tenant_id=scope_tenant_id,
+                    agent_type=scope_agent_type,
+                    external_agent_ids=sorted(external_agent_ids),
+                    metadata={
+                        **clean_metadata,
+                        "sync_source": "opencode_bootstrap",
+                    },
+                )
+        consume_agent_id = results[0].agent.agent_id if results else "opencode-bootstrap"
+        self._consume_user_ticket(
+            user_ticket,
+            agent_id=consume_agent_id,
+            session_id=f"opencode-bootstrap:{_optional_text(provider_instance_id) or 'default'}",
         )
         return identity, results
 
@@ -306,6 +405,80 @@ class DifyAuthBroker:
         )
         return self._issue_token(session)
 
+    def create_opencode_session(
+        self,
+        *,
+        external_session_id: str | None,
+        agent_id: str,
+        external_user_id: str | None,
+        metadata: dict[str, Any] | None,
+        dpop_proof: str | None,
+        agent_proof: str | None,
+        request_body: dict[str, Any],
+        method: str,
+        url: str,
+    ) -> RuntimeSessionIssue:
+        external_session_id = _required_text(external_session_id, "external_session_id")
+        agent_id = _required_text(agent_id, "agent_id")
+        user_ids = self.agent_store.user_ids_for_agent(agent_id)
+        if not user_ids:
+            raise RuntimeAuthForbidden("OpenCode agent is not bound to an AgentGuard user")
+        if len(user_ids) > 1:
+            raise RuntimeAuthForbidden("OpenCode agent is bound to multiple AgentGuard users")
+        user_id = next(iter(user_ids))
+        verification = self._verify_proof(
+            dpop_proof,
+            method=method,
+            url=url,
+            access_token=None,
+            expected_jkt=None,
+        )
+        self._verify_agent_identity_proof(
+            agent_id=agent_id,
+            user_id=user_id,
+            proof=agent_proof,
+            method=method,
+            url=url,
+            body=request_body,
+            dpop_jkt=verification.jkt,
+        )
+        find_external_session = getattr(self.session_store, "find_external_session", None)
+        existing = (
+            find_external_session(
+                provider="opencode",
+                external_session_id=external_session_id,
+                agent_id=agent_id,
+            )
+            if callable(find_external_session)
+            else self.session_store.find_active_external_session(
+                provider="opencode",
+                external_session_id=external_session_id,
+                agent_id=agent_id,
+            )
+        )
+        if existing is not None:
+            if existing.user_id != user_id:
+                raise RuntimeAuthForbidden("OpenCode session belongs to another AgentGuard user")
+            if existing.status != "active":
+                raise RuntimeAuthUnauthorized("OpenCode external session is closed")
+            if existing.dpop_jkt != verification.jkt:
+                raise RuntimeAuthForbidden("OpenCode session is bound to another DPoP key")
+            self.session_store.touch_session(existing.session_id)
+            return self._issue_token(existing)
+        session = self.session_store.create_session(
+            agent_id=agent_id,
+            user_id=user_id,
+            provider="opencode",
+            external_session_id=external_session_id,
+            external_account_email=None,
+            dpop_jkt=verification.jkt,
+            metadata={
+                **(metadata or {}),
+                "external_user_id": external_user_id,
+            },
+        )
+        return self._issue_token(session)
+
     def create_ticket_session(
         self,
         *,
@@ -318,8 +491,8 @@ class DifyAuthBroker:
         url: str,
     ) -> RuntimeSessionIssue:
         provider = _clean_provider(provider)
-        if provider not in {"langchain", "openclaw"}:
-            raise BadAuthRequest("only provider=langchain or provider=openclaw is supported for ticket session create")
+        if provider not in {"langchain", "openclaw", "opencode"}:
+            raise BadAuthRequest("only provider=langchain, provider=openclaw, or provider=opencode is supported for ticket session create")
         identity = self._resolve_user_ticket(user_ticket)
         verification = self._verify_proof(
             dpop_proof,
@@ -337,19 +510,21 @@ class DifyAuthBroker:
                 "request_body_provider": request_body.get("provider"),
             }
         )
-        external_agent_id = f"ticket-{identity.ticket_id}-{secrets.token_urlsafe(12)}"
+        agent_identity = _ticket_session_agent_identity(provider, clean_metadata, identity.ticket_id)
         registration = self.agent_store.register_agent(
             provider=provider,
             provider_instance_id=None,
             tenant_id=None,
-            external_agent_id=external_agent_id,
-            agent_type="runtime",
-            name=_optional_text(clean_metadata.get("name")) or _runtime_agent_name(provider),
-            description=_optional_text(clean_metadata.get("description")),
+            external_agent_id=agent_identity.external_agent_id,
+            agent_type=agent_identity.agent_type,
+            name=agent_identity.name,
+            description=agent_identity.description,
             public_key_jwk=verification.public_jwk,
             metadata={
                 **clean_metadata,
-                "external_agent_id": external_agent_id,
+                "external_agent_id": agent_identity.external_agent_id,
+                "display_agent_id": agent_identity.display_agent_id,
+                "agent_type": agent_identity.agent_type,
                 "ticket_prefix": identity.ticket_prefix,
             },
         )
@@ -638,12 +813,53 @@ def _clean_email(value: str) -> str:
 def _runtime_agent_name(provider: str) -> str:
     if provider == "openclaw":
         return "OpenClaw runtime agent"
+    if provider == "opencode":
+        return "OpenCode runtime agent"
     return "LangChain runtime agent"
 
 
+def _ticket_session_agent_identity(
+    provider: str,
+    metadata: dict[str, Any],
+    ticket_id: int,
+) -> TicketSessionAgentIdentity:
+    if provider == "opencode":
+        opencode_agent = _optional_text(metadata.get("opencode_agent")) or "default"
+        external_agent_id = (
+            _optional_text(metadata.get("external_agent_id"))
+            or f"opencode:{_slug_fragment(opencode_agent)}"
+        )
+        display_agent_id = _optional_text(metadata.get("display_agent_id")) or external_agent_id
+        metadata["opencode_agent"] = opencode_agent
+        metadata["external_agent_id"] = external_agent_id
+        metadata["display_agent_id"] = display_agent_id
+        metadata["agent_type"] = "agent"
+        return TicketSessionAgentIdentity(
+            external_agent_id=external_agent_id,
+            display_agent_id=display_agent_id,
+            agent_type="agent",
+            name=_optional_text(metadata.get("name")) or f"OpenCode {opencode_agent}",
+            description=_optional_text(metadata.get("description")) or f"OpenCode agent '{opencode_agent}' guarded by AgentGuard.",
+        )
+
+    external_agent_id = f"ticket-{ticket_id}-{secrets.token_urlsafe(12)}"
+    return TicketSessionAgentIdentity(
+        external_agent_id=external_agent_id,
+        display_agent_id=external_agent_id,
+        agent_type="runtime",
+        name=_optional_text(metadata.get("name")) or _runtime_agent_name(provider),
+        description=_optional_text(metadata.get("description")),
+    )
+
+
+def _slug_fragment(value: str) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9_.:-]+", "-", str(value or "").strip()).strip("-")
+    return slug[:120] or "default"
+
+
 def _expired(value: datetime) -> bool:
-    dt = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc).timestamp() <= datetime.now(timezone.utc).timestamp()
+    dt = value if value.tzinfo else value.replace(tzinfo=UTC)
+    return dt.astimezone(UTC).timestamp() <= datetime.now(UTC).timestamp()
 
 
 def _agent_proof_kid(proof: str | None) -> str | None:

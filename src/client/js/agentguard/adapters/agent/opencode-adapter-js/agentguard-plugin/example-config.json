@@ -1,0 +1,20 @@
+{
+  "serverUrl": "http://127.0.0.1:38080",
+  "userTicketEnvVar": "AGENTGUARD_USER_TICKET",
+  "policy": "builtin",
+  "providerInstanceId": "opencode-local",
+  "opencodeAgent": "agentguard",
+  "opencodeAgents": [
+    {
+      "id": "agentguard",
+      "name": "OpenCode agentguard",
+      "description": "Default OpenCode agent guarded by AgentGuard."
+    }
+  ],
+  "auditPath": "./tmp/opencode-agentguard-audit.jsonl",
+  "remoteUnavailableMode": "fail_closed",
+  "remoteTimeoutS": 5,
+  "remoteRetries": 1,
+  "runtimeRefreshLeadS": 45,
+  "windowSize": 8
+}

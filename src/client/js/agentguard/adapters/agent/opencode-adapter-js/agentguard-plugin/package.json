@@ -1,0 +1,8 @@
+{
+  "name": "@agentguard/opencode-agentguard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OpenCode hook plugin that routes llm/tool phases through AgentGuard.",
+  "type": "module",
+  "main": "./index.js"
+}

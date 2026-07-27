@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-
 from agentguard.u_guard.agent_keys import AgentIdentityKey
 from agentguard.u_guard.dpop import DPoPKey
 from backend.auth.broker import DifyAuthBroker, RuntimeAuthForbidden, RuntimeAuthUnauthorized
@@ -15,7 +12,7 @@ from backend.auth.models import RuntimeSession, RuntimeToken
 from backend.auth.replay_store import DPoPReplayError
 from backend.auth.token_service import RuntimeTokenService
 from backend.user.store import ExternalAccountMapping, InvalidUserTicket, UserTicketIdentity
-
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 CREATE_URL = "http://agentguard.test/v1/server/session/create"
 REFRESH_URL = "http://agentguard.test/v1/server/session/refresh"
@@ -98,6 +95,9 @@ class FakeAgentStore:
             provider=provider,
             external_agent_id=external_agent_id,
             agent_type=kwargs.get("agent_type"),
+            name=kwargs.get("name"),
+            description=kwargs.get("description"),
+            metadata=kwargs.get("metadata"),
             status="active",
             public_key_jwk=json.dumps(kwargs.get("public_key_jwk"), sort_keys=True, separators=(",", ":")),
             public_key_thumbprint=thumbprint,
@@ -142,7 +142,7 @@ class FakeUserStore:
             username="alice",
             ticket_id=99,
             ticket_prefix="agt_fake_ticket",
-            expires_at=datetime.now(timezone.utc),
+            expires_at=datetime.now(UTC),
         )
         self.consumed: list[dict[str, str]] = []
 
@@ -268,7 +268,7 @@ class FakeRuntimeSessionStore:
         token = RuntimeToken(
             token_jti=token_jti,
             session_id=session_id,
-            expires_at=datetime.fromtimestamp(expires_at_epoch, timezone.utc),
+            expires_at=datetime.fromtimestamp(expires_at_epoch, UTC),
             cnf_jkt=cnf_jkt,
             status="active",
         )
@@ -505,6 +505,78 @@ def test_openclaw_ticket_session_create_binds_agentguard_user():
     assert claims["uid"] == "7"
 
 
+def test_opencode_ticket_session_create_binds_agentguard_user():
+    session_store = FakeRuntimeSessionStore()
+    replay = FakeReplayStore()
+    user_store = FakeUserStore()
+    agent_store = FakeAgentStore()
+    broker = DifyAuthBroker(
+        session_store=session_store,
+        replay_store=replay,
+        user_store=user_store,
+        agent_store=agent_store,
+        token_service=RuntimeTokenService(secret="test-secret", ttl_seconds=900),
+    )
+    key = DPoPKey()
+    body = {
+        "provider": "opencode",
+        "user_ticket": "agt_valid_ticket",
+        "metadata": {
+            "opencode_session_id": "session-1",
+            "opencode_agent": "agentguard",
+            "opencode_directory": "/repo",
+        },
+    }
+
+    issue = broker.create_ticket_session(
+        provider="opencode",
+        user_ticket="agt_valid_ticket",
+        metadata=body["metadata"],
+        dpop_proof=key.proof("POST", CREATE_URL),
+        request_body=body,
+        method="POST",
+        url=CREATE_URL,
+    )
+
+    assert issue.session.provider == "opencode"
+    assert issue.session.session_id.startswith("ags_opencode_test_")
+    assert issue.session.user_id == 7
+    assert issue.session.external_account_email is None
+    registered = agent_store.registered[issue.session.agent_id]
+    assert registered.provider == "opencode"
+    assert registered.external_agent_id == "opencode:agentguard"
+    assert registered.agent_type == "agent"
+    assert registered.name == "OpenCode agentguard"
+    assert agent_store.bindings == [
+        {
+            "user_id": 7,
+            "agent_id": issue.session.agent_id,
+            "provider": "opencode",
+            "account_email": None,
+            "source": "user_ticket",
+            "metadata": {
+                "opencode_session_id": "session-1",
+                "opencode_agent": "agentguard",
+                "opencode_directory": "/repo",
+                "external_agent_id": "opencode:agentguard",
+                "display_agent_id": "opencode:agentguard",
+                "agent_type": "agent",
+                "ticket_id": 99,
+                "ticket_prefix": "agt_fake_ticket",
+                "runtime_auth_provider": "opencode",
+                "request_body_provider": "opencode",
+            },
+        }
+    ]
+    assert user_store.consumed == [
+        {"agent_id": issue.session.agent_id, "session_id": issue.session.session_id}
+    ]
+    claims = broker.token_service.verify(issue.session_token)
+    assert claims["sid"] == issue.session.session_id
+    assert claims["sub"] == issue.session.agent_id
+    assert claims["uid"] == "7"
+
+
 def test_openclaw_bootstrap_registers_catalog_and_consumes_ticket_once():
     session_store = FakeRuntimeSessionStore()
     replay = FakeReplayStore()
@@ -568,6 +640,72 @@ def test_openclaw_bootstrap_registers_catalog_and_consumes_ticket_once():
     ]
     assert user_store.consumed == [
         {"agent_id": results[0].agent.agent_id, "session_id": "openclaw-bootstrap:local-openclaw"}
+    ]
+
+
+def test_opencode_bootstrap_registers_catalog_and_consumes_ticket_once():
+    session_store = FakeRuntimeSessionStore()
+    replay = FakeReplayStore()
+    user_store = FakeUserStore()
+    agent_store = FakeAgentStore()
+    broker = DifyAuthBroker(
+        session_store=session_store,
+        replay_store=replay,
+        user_store=user_store,
+        agent_store=agent_store,
+        token_service=RuntimeTokenService(secret="test-secret", ttl_seconds=900),
+    )
+    main_key = AgentIdentityKey(Ed25519PrivateKey.generate())
+    review_key = AgentIdentityKey(Ed25519PrivateKey.generate())
+
+    identity, results = broker.bootstrap_opencode_agents(
+        user_ticket="agt_valid_ticket",
+        provider_instance_id="local-opencode",
+        agents=[
+            {
+                "provider": "opencode",
+                "provider_instance_id": "local-opencode",
+                "external_agent_id": "opencode:agentguard",
+                "agent_type": "agent",
+                "name": "OpenCode agentguard",
+                "public_key_jwk": main_key.public_jwk,
+                "metadata": {"agent_public_key_thumbprint": main_key.thumbprint},
+            },
+            {
+                "provider": "opencode",
+                "provider_instance_id": "local-opencode",
+                "external_agent_id": "opencode:reviewer",
+                "agent_type": "agent",
+                "name": "OpenCode reviewer",
+                "public_key_jwk": review_key.public_jwk,
+                "metadata": {"agent_public_key_thumbprint": review_key.thumbprint},
+            },
+        ],
+        metadata={"bootstrap": True},
+    )
+
+    assert identity.user_id == 7
+    assert [item.agent.external_agent_id for item in results] == ["opencode:agentguard", "opencode:reviewer"]
+    assert {item.agent.agent_id for item in results} <= agent_store.user_agent_ids
+    assert len(agent_store.bindings) == 2
+    assert agent_store.syncs == [
+        {
+            "provider": "opencode",
+            "provider_instance_id": "local-opencode",
+            "tenant_id": None,
+            "agent_type": "agent",
+            "external_agent_ids": ["opencode:agentguard", "opencode:reviewer"],
+            "metadata": {
+                "bootstrap": True,
+                "ticket_id": 99,
+                "ticket_prefix": "agt_fake_ticket",
+                "runtime_auth_provider": "opencode",
+                "sync_source": "opencode_bootstrap",
+            },
+        }
+    ]
+    assert user_store.consumed == [
+        {"agent_id": results[0].agent.agent_id, "session_id": "opencode-bootstrap:local-opencode"}
     ]
 
 
@@ -636,6 +774,93 @@ def test_openclaw_runtime_session_uses_canonical_agent_and_external_session():
     second_key = DPoPKey()
     second_body = {**body, "external_session_id": "agent:main:session-2"}
     second = broker.create_openclaw_session(
+        external_session_id=second_body["external_session_id"],
+        agent_id=canonical_agent_id,
+        external_user_id=second_body["external_user_id"],
+        metadata=second_body["metadata"],
+        dpop_proof=second_key.proof("POST", CREATE_URL),
+        agent_proof=agent_key.sign_session_create_proof(
+            agent_id=canonical_agent_id,
+            method="POST",
+            url=CREATE_URL,
+            body=second_body,
+            dpop_jkt=second_key.thumbprint,
+        ),
+        request_body=second_body,
+        method="POST",
+        url=CREATE_URL,
+    )
+
+    assert second.session.agent_id == canonical_agent_id
+    assert second.session.session_id != issue.session.session_id
+    assert len(store.sessions) == 2
+
+
+def test_opencode_runtime_session_uses_canonical_agent_and_external_session():
+    broker, store = _broker()
+    agent_store = broker.agent_store
+    user_store = broker.user_store
+    agent_key = AgentIdentityKey(Ed25519PrivateKey.generate())
+    _, bootstrap = broker.bootstrap_opencode_agents(
+        user_ticket="agt_valid_ticket",
+        provider_instance_id="local-opencode",
+        agents=[
+            {
+                "provider": "opencode",
+                "provider_instance_id": "local-opencode",
+                "external_agent_id": "opencode:agentguard",
+                "agent_type": "agent",
+                "name": "OpenCode agentguard",
+                "public_key_jwk": agent_key.public_jwk,
+                "metadata": {"agent_public_key_thumbprint": agent_key.thumbprint},
+            }
+        ],
+    )
+    canonical_agent_id = bootstrap[0].agent.agent_id
+    key = DPoPKey()
+    body = {
+        "provider": "opencode",
+        "agent_id": canonical_agent_id,
+        "external_session_id": "session-1",
+        "external_user_id": "opencode-user",
+        "metadata": {
+            "opencode_agent": "agentguard",
+            "opencode_session_id": "session-1",
+        },
+    }
+    proof = agent_key.sign_session_create_proof(
+        agent_id=canonical_agent_id,
+        method="POST",
+        url=CREATE_URL,
+        body=body,
+        dpop_jkt=key.thumbprint,
+    )
+
+    issue = broker.create_opencode_session(
+        external_session_id=body["external_session_id"],
+        agent_id=canonical_agent_id,
+        external_user_id=body["external_user_id"],
+        metadata=body["metadata"],
+        dpop_proof=key.proof("POST", CREATE_URL),
+        agent_proof=proof,
+        request_body=body,
+        method="POST",
+        url=CREATE_URL,
+    )
+
+    assert issue.session.provider == "opencode"
+    assert issue.session.agent_id == canonical_agent_id
+    assert issue.session.user_id == 7
+    assert issue.session.external_session_id == "session-1"
+    assert issue.session.external_account_email is None
+    assert canonical_agent_id in agent_store.user_agent_ids
+    assert user_store.consumed
+    claims = broker.token_service.verify(issue.session_token)
+    assert claims["sub"] == canonical_agent_id
+
+    second_key = DPoPKey()
+    second_body = {**body, "external_session_id": "session-2"}
+    second = broker.create_opencode_session(
         external_session_id=second_body["external_session_id"],
         agent_id=canonical_agent_id,
         external_user_id=second_body["external_user_id"],

@@ -2,11 +2,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from fastapi.testclient import TestClient
-
 from backend.api.app import create_app
-from backend.auth.models import RuntimeSession
-from backend.auth.models import AuthContext
+from backend.auth.models import AuthContext, RuntimeSession
+from fastapi.testclient import TestClient
 
 
 class FakeBroker:
@@ -54,6 +52,32 @@ class FakeBroker:
             ],
         )
 
+    def bootstrap_opencode_agents(self, **kwargs):
+        agent = SimpleNamespace(
+            external_agent_id="opencode:agentguard",
+            agent_id="ag_opencode_agentguard",
+            agent_identity_code="agic_opencode_agentguard",
+            public_key_thumbprint="thumb-opencode-agentguard",
+            status="active",
+        )
+        credential = SimpleNamespace(
+            credential_id="agcred_opencode_agentguard",
+            agent_id="ag_opencode_agentguard",
+            public_key_thumbprint="thumb-opencode-agentguard",
+        )
+        return (
+            SimpleNamespace(user_id=7, ticket_prefix="agt-ticket"),
+            [
+                SimpleNamespace(
+                    agent=agent,
+                    credential=credential,
+                    user_id=7,
+                    user_binding_created=True,
+                    user_binding_updated=False,
+                )
+            ],
+        )
+
     def create_openclaw_session(self, **kwargs):
         return SimpleNamespace(
             session=RuntimeSession(
@@ -70,6 +94,24 @@ class FakeBroker:
             token_jti="rtok-openclaw-canonical",
             issued_at=102,
             expires_at=1002,
+        )
+
+    def create_opencode_session(self, **kwargs):
+        return SimpleNamespace(
+            session=RuntimeSession(
+                session_id="ags_opencode_canonical",
+                agent_id=kwargs["agent_id"],
+                user_id=7,
+                provider="opencode",
+                external_session_id=kwargs.get("external_session_id"),
+                external_account_email=None,
+                dpop_jkt="jkt-opencode",
+                status="active",
+            ),
+            session_token="runtime-token-opencode-canonical",
+            token_jti="rtok-opencode-canonical",
+            issued_at=103,
+            expires_at=1003,
         )
 
 
@@ -201,6 +243,29 @@ def test_session_create_route_dispatches_openclaw_ticket_provider(monkeypatch):
     assert payload["auth_method"] == "openclaw_dpop"
 
 
+def test_session_create_route_dispatches_opencode_ticket_provider(monkeypatch):
+    monkeypatch.setattr("backend.api.client_router.get_dify_auth_broker", lambda: FakeLangChainBroker())
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/v1/server/session/create",
+        headers={"DPoP": "proof"},
+        json={
+            "provider": "opencode",
+            "user_ticket": "agt-ticket",
+            "metadata": {"opencode_session_id": "session-1"},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["session_id"] == "ags_opencode_created"
+    assert payload["agent_id"] == "ag_opencode_created"
+    assert payload["user_id"] == "8"
+    assert payload["session_token"] == "runtime-token-opencode"
+    assert payload["auth_method"] == "opencode_dpop"
+
+
 def test_agent_bootstrap_route_registers_openclaw_catalog(monkeypatch):
     monkeypatch.setattr("backend.api.client_router.get_dify_auth_broker", lambda: FakeBroker())
     client = TestClient(create_app())
@@ -233,6 +298,38 @@ def test_agent_bootstrap_route_registers_openclaw_catalog(monkeypatch):
     assert payload["agents"][0]["user_bound"] is True
 
 
+def test_agent_bootstrap_route_registers_opencode_catalog(monkeypatch):
+    monkeypatch.setattr("backend.api.client_router.get_dify_auth_broker", lambda: FakeBroker())
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/v1/server/agents/bootstrap",
+        json={
+            "provider": "opencode",
+            "user_ticket": "agt-ticket",
+            "provider_instance_id": "local-opencode",
+            "agents": [
+                {
+                    "provider": "opencode",
+                    "provider_instance_id": "local-opencode",
+                    "external_agent_id": "opencode:agentguard",
+                    "agent_type": "agent",
+                    "name": "OpenCode agentguard",
+                    "public_key_jwk": {"kty": "OKP", "crv": "Ed25519", "x": "abc"},
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "opencode"
+    assert payload["user_id"] == "7"
+    assert payload["agents"][0]["external_agent_id"] == "opencode:agentguard"
+    assert payload["agents"][0]["agent_id"] == "ag_opencode_agentguard"
+    assert payload["agents"][0]["user_bound"] is True
+
+
 def test_session_create_route_dispatches_openclaw_canonical_provider(monkeypatch):
     monkeypatch.setattr("backend.api.client_router.get_dify_auth_broker", lambda: FakeBroker())
     client = TestClient(create_app())
@@ -255,6 +352,30 @@ def test_session_create_route_dispatches_openclaw_canonical_provider(monkeypatch
     assert payload["external_session_id"] == "agent:main:session-1"
     assert payload["session_token"] == "runtime-token-openclaw-canonical"
     assert payload["auth_method"] == "openclaw_dpop"
+
+
+def test_session_create_route_dispatches_opencode_canonical_provider(monkeypatch):
+    monkeypatch.setattr("backend.api.client_router.get_dify_auth_broker", lambda: FakeBroker())
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/v1/server/session/create",
+        headers={"DPoP": "proof", "X-AgentGuard-Agent-Proof": "agent-proof"},
+        json={
+            "provider": "opencode",
+            "agent_id": "ag_opencode_agentguard",
+            "external_session_id": "session-1",
+            "metadata": {"opencode_agent": "agentguard"},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["session_id"] == "ags_opencode_canonical"
+    assert payload["agent_id"] == "ag_opencode_agentguard"
+    assert payload["external_session_id"] == "session-1"
+    assert payload["session_token"] == "runtime-token-opencode-canonical"
+    assert payload["auth_method"] == "opencode_dpop"
 
 
 def test_session_create_route_keeps_dify_required_fields(monkeypatch):

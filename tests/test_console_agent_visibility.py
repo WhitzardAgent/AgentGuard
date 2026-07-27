@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 
 from backend.agents.store import AgentRecord
-from backend.api.console_router import _agent_record_visible_in_console
+from backend.api.console_router import (
+    _agent_record_visible_in_console,
+    _dedupe_console_agent_records,
+)
 
 
 def _agent_record(**kwargs) -> AgentRecord:
@@ -38,3 +41,33 @@ def test_console_shows_openclaw_catalog_agents() -> None:
 
     assert _agent_record_visible_in_console(record) is True
 
+
+def test_console_hides_legacy_unscoped_opencode_duplicate_when_scoped_agent_exists() -> None:
+    legacy = _agent_record(
+        agent_id="ag_legacy",
+        provider="opencode",
+        provider_instance_id="",
+        external_agent_id="opencode:agentguard",
+        name="opencode:agentguard",
+    )
+    scoped = _agent_record(
+        agent_id="ag_scoped",
+        provider="opencode",
+        provider_instance_id="opencode-local",
+        external_agent_id="opencode:agentguard",
+        name="OpenCode agentguard",
+    )
+
+    assert [record.agent_id for record in _dedupe_console_agent_records([legacy, scoped])] == ["ag_scoped"]
+
+
+def test_console_keeps_unscoped_opencode_agent_without_scoped_duplicate() -> None:
+    legacy = _agent_record(
+        agent_id="ag_legacy",
+        provider="opencode",
+        provider_instance_id="",
+        external_agent_id="opencode:agentguard",
+        name="opencode:agentguard",
+    )
+
+    assert [record.agent_id for record in _dedupe_console_agent_records([legacy])] == ["ag_legacy"]
