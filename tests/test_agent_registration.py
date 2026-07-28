@@ -251,6 +251,13 @@ class FakeDB:
             self.agent_client_plugins = [row for row in self.agent_client_plugins if row["agent_id"] != agent_id]
             return 1
         if "UPDATE agents" in sql:
+            if "SET location_tag = %s" in sql:
+                location_tag, agent_id = params
+                row = self.agents.get(str(agent_id))
+                if row is None:
+                    return 0
+                row["location_tag"] = location_tag
+                return 1
             agent_id = str(params[-1])
             row = self.agents[agent_id]
             row["name"] = params[0] or row.get("name")
@@ -283,12 +290,13 @@ class FakeDB:
             row = {
                 "agent_id": params[0],
                 "agent_identity_code": params[1],
-                "name": params[2],
-                "description": params[3],
-                "public_key_jwk": params[4],
-                "public_key_thumbprint": params[5],
+                "location_tag": params[2],
+                "name": params[3],
+                "description": params[4],
+                "public_key_jwk": params[5],
+                "public_key_thumbprint": params[6],
                 "status": "active",
-                "metadata_json": params[6],
+                "metadata_json": params[7],
                 "created_at": None,
                 "updated_at": None,
                 "last_seen_at": None,
@@ -553,6 +561,7 @@ def test_register_agent_creates_user_agent_binding_for_bound_dify_email():
     assert db.user_agents[0]["agent_id"] == result.agent.agent_id
     assert store.agent_ids_for_user(7) == {result.agent.agent_id}
     assert store.list_agents({result.agent.agent_id})[0].external_agent_id == "app-1"
+    assert result.agent.location_tag is None
 
 
 def test_register_agent_without_bound_email_does_not_create_user_binding():
@@ -572,6 +581,30 @@ def test_register_agent_without_bound_email_does_not_create_user_binding():
     assert db.user_agents == []
     metadata = json.loads(db.agent_external_identities[0]["metadata_json"])
     assert metadata["external_account_email"] == "bob@example.com"
+
+
+def test_update_agent_location_tag_persists_and_validates():
+    db = FakeDB()
+    store = AgentStore(db)
+    registered = store.register_agent(
+        provider="dify",
+        external_agent_id="app-9",
+        agent_type="workflow",
+        public_key_jwk=PUBLIC_JWK,
+    ).agent
+
+    updated = store.update_agent_location_tag(registered.agent_id, "domestic")
+
+    assert updated is not None
+    assert updated.location_tag == "domestic"
+    assert store.get_agent(registered.agent_id).location_tag == "domestic"
+
+    try:
+        store.update_agent_location_tag(registered.agent_id, "moon")
+    except ValueError as exc:
+        assert "location_tag" in str(exc)
+    else:
+        raise AssertionError("expected ValueError for invalid location_tag")
 
 
 def test_bind_existing_agents_for_external_account_backfills_registered_agent():

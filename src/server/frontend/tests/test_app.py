@@ -996,6 +996,42 @@ def test_tool_label_patch_proxy_forwards_request():
     assert json.loads(str(observed["body"]))["boundary"] == "internal"
 
 
+def test_agent_location_tag_patch_proxy_forwards_request():
+    observed: dict[str, object] = {}
+
+    class UpstreamHandler(BaseHTTPRequestHandler):
+        def do_PATCH(self) -> None:
+            observed["path"] = self.path
+            observed["api_key"] = self.headers.get("X-Api-Key")
+            length = int(self.headers.get("Content-Length", "0"))
+            observed["body"] = self.rfile.read(length).decode("utf-8")
+            body = json.dumps({"ok": True, "agent": {"agent_id": "agent-a", "location_tag": "domestic"}}).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    with _ThreadedServer(UpstreamHandler) as upstream:
+        with patched_proxy_target(upstream.url, api_key="test-secret"):
+            with _ThreadedServer(frontend_app.FrontendPreviewHandler) as preview:
+                status, payload = _json_request(
+                    "PATCH",
+                    preview.url,
+                    "/api/agents/agent-a/location-tag",
+                    {"location_tag": "domestic"},
+                )
+
+    assert status == 200
+    assert payload["ok"] is True
+    assert observed["path"] == "/v1/backend/agents/agent-a/location-tag"
+    assert observed["api_key"] == "test-secret"
+    assert json.loads(str(observed["body"]))["location_tag"] == "domestic"
+
+
 def test_skills_proxy_lists_global_skills():
     observed: dict[str, object] = {}
 

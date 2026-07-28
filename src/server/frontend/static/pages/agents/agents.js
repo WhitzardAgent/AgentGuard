@@ -10,6 +10,7 @@
   let agentCatalog = [];
   let selectedAgentId = shell?.getState?.().selectedAgentId || "";
   const deletingAgentIds = new Set();
+  const updatingLocationTagAgentIds = new Set();
 
 
   function showToast(message, tone) {
@@ -57,6 +58,20 @@
     return agent?.can_delete === true;
   }
 
+  function locationTagLabel(locationTag) {
+    const normalized = String(locationTag || "").trim().toLowerCase();
+    if (normalized === "local") {
+      return copy("agent-location-tag-local", "Local");
+    }
+    if (normalized === "domestic") {
+      return copy("agent-location-tag-domestic", "Domestic");
+    }
+    if (normalized === "overseas") {
+      return copy("agent-location-tag-overseas", "Overseas");
+    }
+    return copy("agent-location-tag-empty", "Unlabeled");
+  }
+
   function renderAgentList() {
     agentList.innerHTML = "";
     const items = Array.isArray(agentCatalog) ? agentCatalog.slice() : [];
@@ -82,6 +97,7 @@
       const mcpPreviewText = Array.isArray(agent?.mcp_names)
         ? agent.mcp_names.join(", ")
         : "";
+      const locationTag = String(agent?.location_tag || "").trim().toLowerCase();
       const showDelete = canDeleteAgent(agent);
       const card = document.createElement("div");
       card.className = "agent-list-card";
@@ -99,6 +115,7 @@
               <strong>${escapeHtml(displayName)}</strong>
             </div>
             <div class="agent-list-counts" aria-label="Agent resource counts">
+              <span class="pill agent-count-pill">${escapeHtml(locationTagLabel(locationTag))}</span>
               <span class="pill agent-count-pill">${toolCount} tool${toolCount === 1 ? "" : "s"}</span>
               <span class="pill agent-count-pill">${skillCount} skill${skillCount === 1 ? "" : "s"}</span>
               <span class="pill agent-count-pill">${mcpCount} MCP${mcpCount === 1 ? "" : "s"}</span>
@@ -109,6 +126,15 @@
           <p class="subtle">${escapeHtml(skillPreviewText ? copy("skills-preview", "Skills: {items}", { items: skillPreviewText }) : copy("no-skills-registered", "No skills registered."))}</p>
           <p class="subtle">${escapeHtml(mcpPreviewText ? copy("mcps-preview", "MCP: {items}", { items: mcpPreviewText }) : copy("no-mcps-registered", "No MCP services registered."))}</p>
         </button>
+        <div class="agent-card-actions">
+          <label class="subtle" for="agent-location-tag-${escapeHtml(agentId)}">${escapeHtml(copy("agent-location-tag", "Location tag"))}</label>
+          <select class="agent-location-tag-select" id="agent-location-tag-${escapeHtml(agentId)}" data-agent-action="location-tag" ${updatingLocationTagAgentIds.has(agentId) ? "disabled" : ""}>
+            <option value="">${escapeHtml(copy("agent-location-tag-empty", "Unlabeled"))}</option>
+            <option value="local" ${locationTag === "local" ? "selected" : ""}>${escapeHtml(copy("agent-location-tag-local", "Local"))}</option>
+            <option value="domestic" ${locationTag === "domestic" ? "selected" : ""}>${escapeHtml(copy("agent-location-tag-domestic", "Domestic"))}</option>
+            <option value="overseas" ${locationTag === "overseas" ? "selected" : ""}>${escapeHtml(copy("agent-location-tag-overseas", "Overseas"))}</option>
+          </select>
+        </div>
         ${showDelete ? `
           <div class="agent-card-actions">
             <button class="link-button danger agent-delete-button" type="button" data-agent-action="delete" ${deletingAgentIds.has(agentId) ? "disabled" : ""}>
@@ -131,8 +157,46 @@
         deleteAgent(agent, displayName);
       });
 
+      const locationTagSelect = card.querySelector('[data-agent-action="location-tag"]');
+      locationTagSelect?.addEventListener("click", (event) => {
+        event.stopPropagation();
+      });
+      locationTagSelect?.addEventListener("change", (event) => {
+        const nextTag = String(event?.target?.value || "").trim().toLowerCase();
+        updateAgentLocationTag(agent, displayName, nextTag);
+      });
+
       agentList.appendChild(card);
     });
+  }
+
+  async function updateAgentLocationTag(agent, displayName, locationTag) {
+    const agentId = String(agent?.agent_id || "").trim();
+    if (!agentId || updatingLocationTagAgentIds.has(agentId)) {
+      return;
+    }
+    updatingLocationTagAgentIds.add(agentId);
+    renderAgentList();
+    updateSyncStatus(copy("updating-agent-location-tag", "Updating location tag for {agent}...", { agent: displayName || agentId }));
+
+    try {
+      const updatedAgent = await toolData.updateAgentLocationTag(agentId, locationTag);
+      agentCatalog = agentCatalog.map((item) => (
+        String(item?.agent_id || "").trim() === agentId
+          ? { ...item, ...updatedAgent }
+          : item
+      ));
+      renderAgentList();
+      showToast(copy("updated-agent-location-tag", "Updated location tag for {agent}.", { agent: displayName || agentId }), "success");
+      const syncedAt = toolData.getLastAgentSyncTime();
+      updateSyncStatus(`Synced ${toolData.listAgentIds(agentCatalog).length} agents. Last updated: ${syncedAt || "just now"}`);
+    } catch (error) {
+      showToast(api.formatErrorMessage(error, copy("update-agent-location-tag-failed", "Failed to update the agent location tag.")), "warning");
+      renderAgentList();
+    } finally {
+      updatingLocationTagAgentIds.delete(agentId);
+      renderAgentList();
+    }
   }
 
   async function deleteAgent(agent, displayName) {

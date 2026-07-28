@@ -15,6 +15,7 @@ from backend.database import MySQLDatabase, get_database
 class AgentRecord:
     agent_id: str
     agent_identity_code: str
+    location_tag: str | None = None
     provider: str | None = None
     provider_instance_id: str | None = None
     tenant_id: str | None = None
@@ -175,6 +176,7 @@ class AgentStore:
     def ensure_schema(self) -> None:
         for statement in _SCHEMA:
             self.db.execute(statement)
+        _ensure_agent_location_tag_column(self.db)
         _ensure_agent_tool_columns(self.db)
         _backfill_agent_credentials_from_agents(self.db)
 
@@ -223,15 +225,16 @@ class AgentStore:
             self.db.insert(
                 """
                 INSERT INTO agents (
-                  agent_id, agent_identity_code, name, description,
+                  agent_id, agent_identity_code, location_tag, name, description,
                   public_key_jwk, public_key_thumbprint, status,
                   metadata_json, last_seen_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, 'active', %s, UTC_TIMESTAMP())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, 'active', %s, UTC_TIMESTAMP())
                 """,
                 (
                     clean_agent_id,
                     agent_identity_code,
+                    None,
                     _optional_text(name),
                     _optional_text(description),
                     json.dumps(clean_public_jwk, sort_keys=True, separators=(",", ":")),
@@ -332,7 +335,7 @@ class AgentStore:
         row = self.db.fetchone(
             """
             SELECT a.agent_id, a.agent_identity_code, e.provider, e.provider_instance_id,
-                   e.tenant_id, e.external_agent_id, e.agent_type, a.name, a.description,
+                   e.tenant_id, e.external_agent_id, e.agent_type, a.location_tag, a.name, a.description,
                    a.public_key_jwk, a.public_key_thumbprint, a.status, a.metadata_json,
                    a.created_at, a.updated_at, a.last_seen_at
             FROM agents a
@@ -628,7 +631,7 @@ class AgentStore:
         rows = self.db.fetchall(
             """
             SELECT a.agent_id, a.agent_identity_code, e.provider, e.provider_instance_id,
-                   e.tenant_id, e.external_agent_id, e.agent_type, a.name, a.description,
+                   e.tenant_id, e.external_agent_id, e.agent_type, a.location_tag, a.name, a.description,
                    a.public_key_jwk, a.public_key_thumbprint, a.status, a.metadata_json,
                    a.created_at, a.updated_at, a.last_seen_at
             FROM agents a
@@ -638,6 +641,26 @@ class AgentStore:
             """,
         )
         return [_agent_from_row(row) for row in rows]
+
+    def update_agent_location_tag(
+        self,
+        agent_id: str,
+        location_tag: str | None,
+    ) -> AgentRecord | None:
+        clean_agent_id = _normalize_required(agent_id, "agent_id")
+        clean_location_tag = _normalize_location_tag(location_tag)
+        changed = self.db.execute(
+            """
+            UPDATE agents
+            SET location_tag = %s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE agent_id = %s
+            """,
+            (clean_location_tag, clean_agent_id),
+        )
+        if int(changed or 0) <= 0:
+            return None
+        return self.get_agent(clean_agent_id)
 
     def delete_agent(self, agent_id: str) -> AgentDeletionResult:
         clean_agent_id = _normalize_required(agent_id, "agent_id")
@@ -898,7 +921,7 @@ class AgentStore:
         row = self.db.fetchone(
             """
             SELECT a.agent_id, a.agent_identity_code, e.provider, e.provider_instance_id,
-                   e.tenant_id, e.external_agent_id, e.agent_type, a.name, a.description,
+                   e.tenant_id, e.external_agent_id, e.agent_type, a.location_tag, a.name, a.description,
                    a.public_key_jwk, a.public_key_thumbprint, a.status, a.metadata_json,
                    a.created_at, a.updated_at, a.last_seen_at
             FROM agent_external_identities e
@@ -1149,6 +1172,7 @@ _SCHEMA = [
     CREATE TABLE IF NOT EXISTS agents (
       agent_id VARCHAR(255) PRIMARY KEY,
       agent_identity_code VARCHAR(255) NOT NULL UNIQUE,
+      location_tag VARCHAR(32) NULL,
       name VARCHAR(255) NULL,
       description TEXT NULL,
       public_key_jwk JSON NOT NULL,
@@ -1298,6 +1322,15 @@ def _ensure_agent_tool_columns(db: MySQLDatabase) -> None:
         db.execute("ALTER TABLE agent_tools ADD COLUMN raw_payload_json JSON NULL AFTER metadata_json")
 
 
+def _ensure_agent_location_tag_column(db: MySQLDatabase) -> None:
+    try:
+        row = db.fetchone("SHOW COLUMNS FROM agents LIKE %s", ("location_tag",))
+    except Exception:
+        return
+    if row is None:
+        db.execute("ALTER TABLE agents ADD COLUMN location_tag VARCHAR(32) NULL AFTER agent_identity_code")
+
+
 def _backfill_agent_credentials_from_agents(db: MySQLDatabase) -> None:
     try:
         db.execute(
@@ -1328,6 +1361,7 @@ def _agent_from_row(row: dict[str, Any]) -> AgentRecord:
     return AgentRecord(
         agent_id=str(row["agent_id"]),
         agent_identity_code=str(row["agent_identity_code"]),
+        location_tag=_normalize_location_tag(row.get("location_tag")),
         provider=_optional_text(row.get("provider")),
         provider_instance_id=_optional_text(row.get("provider_instance_id")),
         tenant_id=_optional_text(row.get("tenant_id")),
@@ -1587,6 +1621,16 @@ def _default_tool_labels() -> dict[str, Any]:
         "integrity": "trusted",
         "tags": [],
     }
+
+
+def _normalize_location_tag(value: Any) -> str | None:
+    text = _optional_text(value)
+    if not text:
+        return None
+    normalized = text.lower()
+    if normalized not in {"local", "domestic", "overseas"}:
+        raise ValueError("location_tag must be one of: local, domestic, overseas")
+    return normalized
 
 
 def _normalize_provider(value: str) -> str:

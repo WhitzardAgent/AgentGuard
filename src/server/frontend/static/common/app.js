@@ -795,6 +795,7 @@
           external_agent_id: existing.external_agent_id || agent.external_agent_id,
           external_provider: existing.external_provider || agent.external_provider,
           agent_type: existing.agent_type || agent.agent_type,
+          location_tag: agent.location_tag || existing.location_tag || "",
           can_delete: existing.can_delete === true || agent.can_delete === true,
         });
       });
@@ -809,6 +810,7 @@
       external_agent_id: String(item?.external_agent_id || item?.externalAgentId || "").trim(),
       external_provider: String(item?.external_provider || item?.externalProvider || "").trim(),
       agent_type: String(item?.agent_type || item?.agentType || "").trim(),
+      location_tag: String(item?.location_tag || item?.locationTag || "").trim().toLowerCase(),
       can_delete: item?.can_delete === true || item?.canDelete === true,
       tool_count: Number.isFinite(Number(item?.tool_count)) ? Number(item.tool_count) : 0,
       tool_names: Array.isArray(item?.tool_names) ? item.tool_names.map(String).filter(Boolean) : [],
@@ -1120,6 +1122,40 @@
     const catalog = mergeAgentCatalogs(registeredCatalog, resourceCatalog);
     persistAgentCatalog(catalog);
     return catalog;
+  }
+
+  async function updateAgentLocationTag(agentId, locationTag) {
+    const normalizedAgentId = String(agentId || "").trim();
+    if (!normalizedAgentId) {
+      throw new Error("agent_id is required.");
+    }
+    const normalizedTag = String(locationTag || "").trim().toLowerCase();
+    if (normalizedTag && !["local", "domestic", "overseas"].includes(normalizedTag)) {
+      throw new Error("location_tag must be local, domestic, or overseas.");
+    }
+    const payload = await fetchJson(`/api/agents/${encodeURIComponent(normalizedAgentId)}/location-tag`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        location_tag: normalizedTag || null,
+      }),
+    });
+    const normalizedAgent = normalizeAgentSummary(payload?.agent || {});
+    const currentCatalog = loadAgentCatalog();
+    const nextCatalog = currentCatalog.slice();
+    const existingIndex = nextCatalog.findIndex((agent) => agent.agent_id === normalizedAgentId);
+    if (existingIndex >= 0) {
+      nextCatalog[existingIndex] = {
+        ...nextCatalog[existingIndex],
+        ...normalizedAgent,
+      };
+    } else if (normalizedAgent.agent_id) {
+      nextCatalog.push(normalizedAgent);
+    }
+    persistAgentCatalog(nextCatalog);
+    return normalizedAgent;
   }
 
   async function refreshScopedToolCatalog(agentId = getSelectedAgentId()) {
@@ -1474,6 +1510,7 @@
     loadAgentCatalog,
     persistAgentCatalog,
     refreshAgentCatalog,
+    updateAgentLocationTag,
     loadToolCatalog: loadScopedToolCatalog,
     persistToolCatalog(catalog, agentId = getSelectedAgentId()) {
       persistScopedToolCatalog(agentId, catalog);

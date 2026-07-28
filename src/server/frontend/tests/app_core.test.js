@@ -379,6 +379,84 @@ test("shared app core updates scoped tool labels through the new patch endpoint"
   assert.equal(global.window.AgentGuardData.loadToolCatalog("agent-a")[0].labels.sensitivity, "low");
 });
 
+test("shared app core updates agent location tag through the new patch endpoint", async () => {
+  const listeners = {};
+  let lastFetchUrl = "";
+  let lastFetchMethod = "";
+  let lastFetchBody = "";
+
+  global.window = {
+    AgentGuardConfig: { apiBase: "http://127.0.0.1:38080" },
+    AgentGuardShell: {
+      setToolStatus() {},
+      setApiStatus() {},
+    },
+    addEventListener(name, handler) {
+      listeners[name] = handler;
+    },
+  };
+  global.localStorage = createStorage();
+  global.localStorage.setItem(
+    "agentguard.agentCatalog",
+    JSON.stringify([{
+      agent_id: "agent-a",
+      display_agent_id: "Agent A",
+      location_tag: "",
+      tool_count: 0,
+      tool_names: [],
+      skill_count: 0,
+      skill_names: [],
+      mcp_count: 0,
+      mcp_names: [],
+    }]),
+  );
+  global.document = {
+    getElementById() {
+      return createToastElement();
+    },
+  };
+  global.fetch = async (url, options = {}) => {
+    lastFetchUrl = String(url);
+    lastFetchMethod = String(options.method || "GET");
+    lastFetchBody = String(options.body || "");
+    return {
+      ok: true,
+      async json() {
+        return {
+          ok: true,
+          agent: {
+            agent_id: "agent-a",
+            display_agent_id: "Agent A",
+            location_tag: "domestic",
+            tool_count: 0,
+            tool_names: [],
+            skill_count: 0,
+            skill_names: [],
+            mcp_count: 0,
+            mcp_names: [],
+          },
+        };
+      },
+    };
+  };
+  global.setTimeout = (fn) => {
+    fn();
+    return 1;
+  };
+  global.clearTimeout = () => {};
+
+  delete require.cache[require.resolve("../static/common/app.js")];
+  require("../static/common/app.js");
+
+  const updated = await global.window.AgentGuardData.updateAgentLocationTag("agent-a", "domestic");
+
+  assert.equal(lastFetchUrl, "/api/agents/agent-a/location-tag");
+  assert.equal(lastFetchMethod, "PATCH");
+  assert.match(lastFetchBody, /"location_tag":"domestic"/);
+  assert.equal(updated.location_tag, "domestic");
+  assert.equal(global.window.AgentGuardData.loadAgentCatalog()[0].location_tag, "domestic");
+});
+
 test("shared app core sends skill LLM concurrency in detect requests", async () => {
   const listeners = {};
   let lastFetchUrl = "";

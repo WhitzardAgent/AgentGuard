@@ -677,6 +677,11 @@ class FrontendPreviewHandler(BaseHTTPRequestHandler):
             self._proxy(upstream_path, method="PATCH", query=query)
             return
 
+        if path.startswith("/api/agents/") and path.endswith("/location-tag"):
+            upstream_path = path.removeprefix("/api/")
+            self._proxy(upstream_path, method="PATCH", query=query)
+            return
+
         if (
             path == "/api/user/me"
             or re.fullmatch(r"/api/user/organizations/\d+", path)
@@ -1019,6 +1024,7 @@ def serve(host: str | None = None, port: int | None = None) -> None:
         print("Proxying /api/agents/{agent_id}/plugins/config to agent-scoped plugin endpoints")
         print("Proxying /api/agents/{agent_id}/plugins/available to agent-scoped plugin catalog endpoints")
         print("Proxying /api/agents/{agent_id}/tools/{tool_name}/labels to tool-label patch endpoint")
+        print("Proxying /api/agents/{agent_id}/location-tag to agent location-tag patch endpoint")
         print(f"Proxying /api/health to {API_BASE_URL}/v1/backend/health")
         print(f"Proxying /api/stats to {API_BASE_URL}/v1/backend/stats")
         print(f"Proxying /api/traffic to {API_BASE_URL}/v1/backend/traffic")

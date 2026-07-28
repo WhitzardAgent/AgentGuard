@@ -37,6 +37,10 @@ class LabelBody(BaseModel):
     tags: list[str] = Field(default_factory=list)
 
 
+class AgentLocationTagBody(BaseModel):
+    location_tag: str | None = None
+
+
 class RuleSourceBody(BaseModel):
     source: str = ""
     keep_builtin: bool | None = None
@@ -104,6 +108,28 @@ def delete_agent(
         return _err(f"agent '{agent_id}' not found", 404)
     get_console().unregister_agent(result.agent_id)
     return {"ok": True, "agent_id": result.agent_id, "deleted": result.to_dict()}
+
+
+@router.patch("/v1/backend/agents/{agent_id}/location-tag")
+def patch_agent_location_tag(
+    agent_id: str,
+    body: AgentLocationTagBody,
+    agentguard_user_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+) -> Any:
+    visible = _visible_scope(agentguard_user_session)
+    if visible.get("user_id") is None:
+        return _err("login required", 401)
+    if not _agent_visible(visible, agent_id):
+        return _err("agent not visible", 403)
+    try:
+        agent = AgentStore().update_agent_location_tag(agent_id, body.location_tag)
+    except DatabaseUnavailable:
+        return _err("database unavailable", 503)
+    except ValueError as exc:
+        return _err(str(exc), 400)
+    if agent is None:
+        return _err(f"agent '{agent_id}' not found", 404)
+    return {"ok": True, "agent": _agent_record_to_console_item(agent)}
 
 
 # ---- tools -------------------------------------------------------------
@@ -650,6 +676,7 @@ def _agent_record_to_console_item(record: AgentRecord) -> dict[str, Any]:
         "external_agent_id": external_agent_id or app_id,
         "external_provider": provider,
         "agent_type": agent_type,
+        "location_tag": record.location_tag or "",
         "name": record.name or "",
         "description": record.description or "",
         "status": record.status,
