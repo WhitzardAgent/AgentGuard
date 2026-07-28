@@ -128,6 +128,100 @@ test("shared app core formats request errors and updates tool sync metadata", as
   );
 });
 
+test("shared app core prefers observed OpenCode MCP tools in the rule catalog", async () => {
+  const listeners = {};
+  global.window = {
+    AgentGuardConfig: { apiBase: "http://127.0.0.1:38080" },
+    AgentGuardShell: {
+      getState() {
+        return { selectedAgentId: "agent-a" };
+      },
+      setToolStatus() {},
+      setApiStatus() {},
+    },
+    addEventListener(name, handler) {
+      listeners[name] = handler;
+    },
+  };
+  global.localStorage = createStorage();
+  global.document = {
+    getElementById() {
+      return createToastElement();
+    },
+  };
+  global.fetch = async (url) => {
+    const requestUrl = String(url);
+    if (requestUrl.endsWith("/api/agents/agent-a/tools")) {
+      return {
+        ok: true,
+        async json() {
+          return [{
+            owner_agent_id: "agent-a",
+            name: "agentguard_local_demo_local_add",
+            labels: {},
+            input_params: ["left", "right"],
+          }];
+        },
+      };
+    }
+    if (requestUrl.endsWith("/api/agents/agent-a/mcps")) {
+      return {
+        ok: true,
+        async json() {
+          return [{
+            owner_agent_id: "agent-a",
+            mcp_unique_id: "agent-a:mcp-sha",
+            name: "agentguard_local_demo",
+            transport: "stdio",
+            mcp_resource: {
+              tools: [{
+                name: "agentguard_local_demo_local_add",
+                runtime_name: "agentguard_local_demo_local_add",
+                mcp_tool_name: "local_add",
+                input_schema: {
+                  type: "object",
+                  properties: {
+                    left: { type: "integer" },
+                    right: { type: "integer" },
+                  },
+                },
+              }],
+            },
+          }];
+        },
+      };
+    }
+    return {
+      ok: true,
+      async json() {
+        return [];
+      },
+    };
+  };
+  global.setTimeout = (fn) => {
+    fn();
+    return 1;
+  };
+  global.clearTimeout = () => {};
+
+  delete require.cache[require.resolve("../static/common/app.js")];
+  require("../static/common/app.js");
+  delete require.cache[require.resolve("../static/common/tool-catalog.js")];
+  require("../static/common/tool-catalog.js");
+
+  const catalog = await global.window.AgentGuardData.refreshRuleToolCatalog("agent-a");
+
+  assert.equal(catalog.length, 1);
+  assert.equal(catalog[0].source_type, "mcp");
+  assert.equal(catalog[0].name, "agentguard_local_demo_local_add");
+  assert.equal(catalog[0].mcp_name, "agentguard_local_demo");
+  assert.equal(catalog[0].mcp_tool_name, "local_add");
+  assert.equal(
+    global.window.AgentGuardToolCatalog.toolDisplayName(catalog[0], catalog),
+    "agentguard_local_demo / local_add [MCP]",
+  );
+});
+
 test("shared app core rejects legacy cached tool catalog entries without agent ownership", async () => {
   const listeners = {};
   global.window = {

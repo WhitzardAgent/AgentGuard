@@ -542,6 +542,8 @@
     }
     return {
       name: String(item?.name || "").trim(),
+      runtime_name: String(item?.runtime_name || item?.runtimeName || "").trim(),
+      mcp_tool_name: String(item?.mcp_tool_name || item?.mcpToolName || "").trim(),
       description: String(item?.description || "").trim(),
       input_schema: item?.input_schema && typeof item.input_schema === "object"
         ? item.input_schema
@@ -616,6 +618,10 @@
   }
 
   function mcpRuntimeToolName(mcp, tool) {
+    const runtimeName = String(tool?.runtime_name || "").trim();
+    if (runtimeName) {
+      return runtimeName;
+    }
     const serverName = String(mcp?.name || "").trim();
     const toolName = String(tool?.name || "").trim();
     return serverName && toolName ? `${serverName}__${toolName}` : "";
@@ -639,7 +645,7 @@
           source_type: "mcp",
           mcp_unique_id: String(mcp?.mcp_unique_id || "").trim(),
           mcp_name: String(mcp?.name || "").trim(),
-          mcp_tool_name: String(tool?.name || "").trim(),
+          mcp_tool_name: String(tool?.mcp_tool_name || tool?.name || "").trim(),
           mcp_transport: String(mcp?.transport || "").trim(),
           mcp_remote: mcp?.remote === true,
           labels: {
@@ -652,6 +658,19 @@
         };
       }).filter(Boolean);
     });
+  }
+
+  function mergeRuleToolCatalog(tools, mcps) {
+    const merged = new Map();
+    for (const tool of Array.isArray(tools) ? tools : []) {
+      if (String(tool?.tool_key || "").trim()) {
+        merged.set(tool.tool_key, tool);
+      }
+    }
+    for (const tool of mcpToolsForRuleCatalog(mcps)) {
+      merged.set(tool.tool_key, tool);
+    }
+    return [...merged.values()];
   }
 
   function compactMcpForCache(mcp) {
@@ -960,10 +979,10 @@
   }
 
   function loadScopedRuleToolCatalog(agentId = getSelectedAgentId()) {
-    return [
-      ...loadScopedToolCatalog(agentId),
-      ...mcpToolsForRuleCatalog(loadScopedMcpList(agentId)),
-    ];
+    return mergeRuleToolCatalog(
+      loadScopedToolCatalog(agentId),
+      loadScopedMcpList(agentId),
+    );
   }
 
   function persistScopedMcpList(agentId, mcps) {
@@ -1275,12 +1294,10 @@
     if (toolResult.status === "rejected" && mcpResult.status === "rejected") {
       throw toolResult.reason;
     }
-    return [
-      ...(toolResult.status === "fulfilled" && Array.isArray(toolResult.value) ? toolResult.value : []),
-      ...mcpToolsForRuleCatalog(
-        mcpResult.status === "fulfilled" && Array.isArray(mcpResult.value) ? mcpResult.value : [],
-      ),
-    ];
+    return mergeRuleToolCatalog(
+      toolResult.status === "fulfilled" && Array.isArray(toolResult.value) ? toolResult.value : [],
+      mcpResult.status === "fulfilled" && Array.isArray(mcpResult.value) ? mcpResult.value : [],
+    );
   }
 
   async function detectScopedSkills(agentId, skillUniqueIds, options = {}) {

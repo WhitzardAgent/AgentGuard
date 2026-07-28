@@ -15,6 +15,7 @@ const {
   resolveScanPath,
   scanMcpConfigFile,
   scanMcpConfigs,
+  scanMcpServerMap,
   scanMcpServerDescriptor,
   scanMcpSourceDirectory,
 } = require("./mcp_scanner.cjs");
@@ -168,6 +169,103 @@ test("scanMcpServerDescriptor records remote HTTP MCP metadata and redacts secre
   assert.equal(descriptor.server_config.headers.Authorization, "[redacted]");
   assert.equal(descriptor.tools[0].input_schema.properties.q.type, "string");
   assert.deepEqual(descriptor.files, []);
+});
+
+test("scanMcpServerMap supports OpenCode command arrays and redacts environment and OAuth", () => {
+  const root = makeTempRoot();
+  const serverDir = path.join(root, "server");
+  writeFile(path.join(serverDir, "package.json"), JSON.stringify({ name: "opencode-mcp" }));
+  writeFile(
+    path.join(serverDir, "server.js"),
+    "import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';\n",
+  );
+
+  const result = scanMcpServerMap({
+    local_demo: {
+      type: "local",
+      command: ["node", "server.js", "--stdio"],
+      cwd: "./server",
+      environment: {
+        MCP_TOKEN: "secret",
+      },
+      oauth: {
+        clientSecret: "also-secret",
+      },
+    },
+  }, {
+    baseDir: root,
+    configDir: root,
+    configKey: "mcp",
+    sourceFramework: "opencode",
+  });
+
+  assert.equal(result.servers.length, 1);
+  const descriptor = result.servers[0];
+  assert.equal(descriptor.source_framework, "opencode");
+  assert.equal(descriptor.command, "node");
+  assert.deepEqual(descriptor.args, ["server.js", "--stdio"]);
+  assert.equal(descriptor.cwd, serverDir);
+  assert.equal(descriptor.source_status, "source_recovered");
+  assert.deepEqual(descriptor.server_config.env_keys, ["MCP_TOKEN"]);
+  assert.equal(descriptor.server_config.env.MCP_TOKEN, "[redacted]");
+  assert.equal(descriptor.server_config.oauth, "[redacted]");
+  assert.equal(JSON.stringify(descriptor).includes("also-secret"), false);
+  assert.equal(JSON.stringify(descriptor).includes('"secret"'), false);
+});
+
+test("scanMcpServerMap treats an absolute Python interpreter as a runtime, not MCP source", () => {
+  const root = makeTempRoot();
+  const runtimeDir = path.join(root, "runtime", "bin");
+  const serverDir = path.join(root, "server");
+  const pythonPath = path.join(runtimeDir, "python3.12");
+  writeFile(pythonPath, "#!/bin/sh\n");
+  writeFile(path.join(runtimeDir, "unrelated-tool"), "#!/bin/sh\n");
+  writeFile(path.join(serverDir, "requirements.txt"), "mcp>=1.0.0\n");
+  writeFile(
+    path.join(serverDir, "server.py"),
+    "from mcp.server.fastmcp import FastMCP\n",
+  );
+
+  const result = scanMcpServerMap({
+    local_python: {
+      type: "local",
+      command: [pythonPath, "server.py"],
+      cwd: serverDir,
+    },
+  }, {
+    baseDir: root,
+    configDir: root,
+    configKey: "mcp",
+    sourceFramework: "opencode",
+  });
+
+  const descriptor = result.servers[0];
+  assert.equal(descriptor.entry_file, path.join(serverDir, "server.py"));
+  assert.equal(descriptor.root_path, serverDir);
+  assert.deepEqual(
+    descriptor.files.map((file) => file.relative_path).sort(),
+    ["requirements.txt", "server.py"],
+  );
+});
+
+test("scanMcpConfigFile reads OpenCode top-level mcp maps", () => {
+  const root = makeTempRoot();
+  const configPath = path.join(root, "opencode.json");
+  writeJson(configPath, {
+    mcp: {
+      remote_demo: {
+        type: "remote",
+        url: "https://mcp.example.test/api",
+      },
+    },
+  });
+
+  const result = scanMcpConfigFile(configPath, { sourceFramework: "opencode" });
+
+  assert.equal(result.servers.length, 1);
+  assert.equal(result.servers[0].name, "remote_demo");
+  assert.equal(result.servers[0].source_framework, "opencode");
+  assert.equal(result.servers[0].transport, "streamable_http");
 });
 
 test("scanMcpConfigFile extracts multiple mcpServers from config", () => {

@@ -23,6 +23,15 @@ const {
   RuntimeEvent,
   UGuardEnforcer,
 } = require("./agentguard-runtime.cjs");
+const {
+  DEFAULT_OPTIONS: DEFAULT_SKILL_SCAN_OPTIONS,
+  resolveScanPath,
+  scanSkillRoots,
+} = require("../../shared/inventory/skill_scanner.cjs");
+const {
+  DEFAULT_OPTIONS: DEFAULT_MCP_SCAN_OPTIONS,
+  scanMcpServerMap,
+} = require("../../shared/inventory/mcp_scanner.cjs");
 
 const DEFAULT_WINDOW_SIZE = 8;
 const DEFAULT_POLICY = "builtin";
@@ -32,6 +41,8 @@ const DEFAULT_SANITIZED_MESSAGE = "Content removed by AgentGuard.";
 const DEFAULT_PHASE_CONFIG_PATH = path.resolve(__dirname, "../../../../../../../../config/plugins.json");
 const DEFAULT_RUNTIME_REFRESH_LEAD_S = 45;
 const DEFAULT_PROVIDER_INSTANCE_ID = "opencode-local";
+const DEFAULT_INVENTORY_MONITOR_DEBOUNCE_MS = 750;
+const DEFAULT_INVENTORY_MONITOR_POLL_INTERVAL_MS = 5_000;
 const AGENT_REGISTRATION_CACHE_FILE = "opencode-agent-registrations.json";
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const PRE_GUARD_PHASES = new Set(["tool_before", "llm_before"]);
@@ -62,9 +73,89 @@ function normalizePluginConfig(raw = {}) {
     opencodeModel: asNonEmptyString(config.opencodeModel || config.openCodeModel),
     agentDisplayName: asNonEmptyString(config.agentDisplayName || config.displayAgentId),
     agentDescription: asNonEmptyString(config.agentDescription),
+    skillScan: normalizeSkillScanConfig(config.skillScan, configDir),
+    mcpScan: normalizeMcpScanConfig(config.mcpScan, configDir),
     windowSize: asPositiveInteger(config.windowSize, DEFAULT_WINDOW_SIZE),
     blockMessage: asNonEmptyString(config.blockMessage) || DEFAULT_BLOCK_MESSAGE,
     hasRemoteConfigured: Boolean(serverUrl),
+  };
+}
+
+function normalizeSkillScanConfig(value, configDir) {
+  const input = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const monitor = input.monitor && typeof input.monitor === "object" && !Array.isArray(input.monitor)
+    ? input.monitor
+    : {};
+  const baseDir = configDir || process.cwd();
+  return {
+    enabled: input.enabled === true,
+    roots: normalizeStringArray(input.roots).map((item) => resolveScanPath(item, baseDir)),
+    agentIds: normalizeStringArray(input.agentIds || input.agents),
+    discoverDefaults: input.discoverDefaults !== false,
+    baseDir,
+    maxFileBytes: asPositiveInteger(input.maxFileBytes, DEFAULT_SKILL_SCAN_OPTIONS.maxFileBytes),
+    maxTotalBytesPerSkill: asPositiveInteger(
+      input.maxTotalBytesPerSkill,
+      DEFAULT_SKILL_SCAN_OPTIONS.maxTotalBytesPerSkill,
+    ),
+    maxFilesPerSkill: asPositiveInteger(
+      input.maxFilesPerSkill,
+      DEFAULT_SKILL_SCAN_OPTIONS.maxFilesPerSkill,
+    ),
+    excludeDirs: normalizeStringArray(input.excludeDirs, DEFAULT_SKILL_SCAN_OPTIONS.excludeDirs),
+    excludeFiles: normalizeStringArray(input.excludeFiles, DEFAULT_SKILL_SCAN_OPTIONS.excludeFiles),
+    textExtensions: normalizeStringArray(
+      input.textExtensions,
+      DEFAULT_SKILL_SCAN_OPTIONS.textExtensions,
+    ),
+    followSymlinks: input.followSymlinks === true,
+    monitor: input.monitor === false ? false : monitor.enabled !== false,
+    monitorDebounceMs: asPositiveInteger(
+      input.monitorDebounceMs ?? input.debounceMs ?? monitor.debounceMs,
+      DEFAULT_INVENTORY_MONITOR_DEBOUNCE_MS,
+    ),
+    monitorPollIntervalMs: asPositiveInteger(
+      input.monitorPollIntervalMs ?? input.pollIntervalMs ?? monitor.pollIntervalMs,
+      DEFAULT_INVENTORY_MONITOR_POLL_INTERVAL_MS,
+    ),
+  };
+}
+
+function normalizeMcpScanConfig(value, configDir) {
+  const input = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const monitor = input.monitor && typeof input.monitor === "object" && !Array.isArray(input.monitor)
+    ? input.monitor
+    : {};
+  const baseDir = configDir || process.cwd();
+  return {
+    enabled: input.enabled === true,
+    agentIds: normalizeStringArray(input.agentIds || input.agents),
+    baseDir,
+    maxFileBytes: asPositiveInteger(input.maxFileBytes, DEFAULT_MCP_SCAN_OPTIONS.maxFileBytes),
+    maxTotalBytesPerServer: asPositiveInteger(
+      input.maxTotalBytesPerServer,
+      DEFAULT_MCP_SCAN_OPTIONS.maxTotalBytesPerServer,
+    ),
+    maxFilesPerServer: asPositiveInteger(
+      input.maxFilesPerServer,
+      DEFAULT_MCP_SCAN_OPTIONS.maxFilesPerServer,
+    ),
+    excludeDirs: normalizeStringArray(input.excludeDirs, DEFAULT_MCP_SCAN_OPTIONS.excludeDirs),
+    excludeFiles: normalizeStringArray(input.excludeFiles, DEFAULT_MCP_SCAN_OPTIONS.excludeFiles),
+    textExtensions: normalizeStringArray(
+      input.textExtensions,
+      DEFAULT_MCP_SCAN_OPTIONS.textExtensions,
+    ),
+    followSymlinks: input.followSymlinks === true,
+    monitor: input.monitor === false ? false : monitor.enabled !== false,
+    monitorDebounceMs: asPositiveInteger(
+      input.monitorDebounceMs ?? input.debounceMs ?? monitor.debounceMs,
+      DEFAULT_INVENTORY_MONITOR_DEBOUNCE_MS,
+    ),
+    monitorPollIntervalMs: asPositiveInteger(
+      input.monitorPollIntervalMs ?? input.pollIntervalMs ?? monitor.pollIntervalMs,
+      DEFAULT_INVENTORY_MONITOR_POLL_INTERVAL_MS,
+    ),
   };
 }
 
@@ -142,6 +233,15 @@ function resolveOptionalPath(value, configDir) {
   return path.resolve(configDir || process.cwd(), text);
 }
 
+function normalizeStringArray(value, fallback = []) {
+  if (!Array.isArray(value)) {
+    return [...fallback];
+  }
+  return value
+    .filter((item) => typeof item === "string" && item.trim())
+    .map((item) => item.trim());
+}
+
 function buildPluginConfigPayload(config) {
   return { phases: config.phases };
 }
@@ -199,6 +299,17 @@ function resetRemoteBreaker(remote) {
   }
   remote.breaker.failures = 0;
   remote.breaker.opened_at = 0;
+}
+
+function isRuntimeAuthUnavailableError(error) {
+  const message = String(error && error.message ? error.message : error || "");
+  return (
+    /remote guard call failed:\s*HTTP 401/i.test(message) ||
+    /runtime token expired/i.test(message) ||
+    /runtime token is not active/i.test(message) ||
+    /runtime session is not active/i.test(message) ||
+    /DPoP key does not match runtime token/i.test(message)
+  );
 }
 
 function buildRuntimeAuthState(config, key, identity = {}) {
@@ -333,6 +444,14 @@ function normalizeOpenCodeCatalogAgent(item) {
     directory: asNonEmptyString(source.directory),
     worktree: asNonEmptyString(source.worktree),
     isDefault: source.isDefault === true,
+    permission:
+      source.permission && typeof source.permission === "object" && !Array.isArray(source.permission)
+        ? { ...source.permission }
+        : {},
+    tools:
+      source.tools && typeof source.tools === "object" && !Array.isArray(source.tools)
+        ? { ...source.tools }
+        : {},
   };
 }
 
@@ -511,6 +630,793 @@ function persistAgentRegistrations(config, registrations, logger = console) {
   }
 }
 
+function emptySkillScanResult(config, roots = [], diagnostics = []) {
+  return {
+    enabled: Boolean(config && config.enabled),
+    skills: [],
+    diagnostics,
+    summary: {
+      roots,
+      skill_count: 0,
+      diagnostic_count: diagnostics.length,
+    },
+  };
+}
+
+function emptyMcpScanResult(config, diagnostics = []) {
+  return {
+    enabled: Boolean(config && config.enabled),
+    mcps: [],
+    diagnostics,
+    summary: {
+      mcp_count: 0,
+      diagnostic_count: diagnostics.length,
+    },
+  };
+}
+
+function pathContains(parentPath, childPath) {
+  const parent = asNonEmptyString(parentPath);
+  const child = asNonEmptyString(childPath);
+  if (!parent || !child) {
+    return false;
+  }
+  const relative = path.relative(path.resolve(parent), path.resolve(child));
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function ancestorDirectories(startPath, stopPath) {
+  const start = asNonEmptyString(startPath);
+  if (!start) {
+    return [];
+  }
+  const resolvedStart = path.resolve(start);
+  const resolvedStop = asNonEmptyString(stopPath) ? path.resolve(stopPath) : resolvedStart;
+  if (!pathContains(resolvedStop, resolvedStart)) {
+    return [resolvedStart];
+  }
+  const directories = [];
+  let current = resolvedStart;
+  while (true) {
+    directories.push(current);
+    if (current === resolvedStop) {
+      break;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) {
+      break;
+    }
+    current = parent;
+  }
+  return directories;
+}
+
+function isDirectory(filePath) {
+  try {
+    return fs.statSync(filePath).isDirectory();
+  } catch (_) {
+    return false;
+  }
+}
+
+function uniqueExistingDirectories(items) {
+  const seen = new Set();
+  const result = [];
+  for (const item of items) {
+    const resolved = asNonEmptyString(item) ? path.resolve(item) : null;
+    if (!resolved || seen.has(resolved) || !isDirectory(resolved)) {
+      continue;
+    }
+    seen.add(resolved);
+    result.push(resolved);
+  }
+  return result.sort((left, right) => left.localeCompare(right));
+}
+
+function discoverOpenCodeSkillRoots(scanConfig, openCodeConfig, opencode) {
+  const config = scanConfig || {};
+  const runtime = opencode && typeof opencode === "object" ? opencode : {};
+  const mergedConfig = openCodeConfig && typeof openCodeConfig === "object" ? openCodeConfig : {};
+  const directory =
+    asNonEmptyString(runtime.directory) ||
+    asNonEmptyString(runtime.worktree) ||
+    config.baseDir ||
+    process.cwd();
+  const worktree = asNonEmptyString(runtime.worktree) || directory;
+  const roots = [...(Array.isArray(config.roots) ? config.roots : [])];
+
+  if (config.discoverDefaults !== false) {
+    for (const ancestor of ancestorDirectories(directory, worktree)) {
+      roots.push(
+        path.join(ancestor, ".opencode", "skill"),
+        path.join(ancestor, ".opencode", "skills"),
+        path.join(ancestor, ".claude", "skills"),
+        path.join(ancestor, ".agents", "skills"),
+      );
+    }
+    const configHome = asNonEmptyString(process.env.XDG_CONFIG_HOME)
+      ? path.resolve(process.env.XDG_CONFIG_HOME)
+      : path.join(os.homedir(), ".config");
+    roots.push(
+      path.join(configHome, "opencode", "skill"),
+      path.join(configHome, "opencode", "skills"),
+      path.join(os.homedir(), ".claude", "skills"),
+      path.join(os.homedir(), ".agents", "skills"),
+    );
+  }
+
+  const customPaths =
+    mergedConfig.skills &&
+    typeof mergedConfig.skills === "object" &&
+    !Array.isArray(mergedConfig.skills)
+      ? normalizeStringArray(mergedConfig.skills.paths)
+      : [];
+  for (const customPath of customPaths) {
+    roots.push(resolveScanPath(customPath, directory));
+  }
+  return uniqueExistingDirectories(roots);
+}
+
+function stripJsoncComments(source) {
+  let output = "";
+  let inString = false;
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    const next = source[index + 1];
+    if (lineComment) {
+      if (character === "\n" || character === "\r") {
+        lineComment = false;
+        output += character;
+      } else {
+        output += " ";
+      }
+      continue;
+    }
+    if (blockComment) {
+      if (character === "*" && next === "/") {
+        output += "  ";
+        index += 1;
+        blockComment = false;
+      } else {
+        output += character === "\n" || character === "\r" ? character : " ";
+      }
+      continue;
+    }
+    if (inString) {
+      output += character;
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+    if (character === "\"") {
+      inString = true;
+      output += character;
+      continue;
+    }
+    if (character === "/" && next === "/") {
+      output += "  ";
+      index += 1;
+      lineComment = true;
+      continue;
+    }
+    if (character === "/" && next === "*") {
+      output += "  ";
+      index += 1;
+      blockComment = true;
+      continue;
+    }
+    output += character;
+  }
+  return output;
+}
+
+function stripJsoncTrailingCommas(source) {
+  let output = "";
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (inString) {
+      output += character;
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+    if (character === "\"") {
+      inString = true;
+      output += character;
+      continue;
+    }
+    if (character === ",") {
+      let cursor = index + 1;
+      while (cursor < source.length && /\s/.test(source[cursor])) {
+        cursor += 1;
+      }
+      if (source[cursor] === "}" || source[cursor] === "]") {
+        continue;
+      }
+    }
+    output += character;
+  }
+  return output;
+}
+
+function parseOpenCodeConfigSource(source, sourcePath) {
+  try {
+    const parsed = JSON.parse(stripJsoncTrailingCommas(stripJsoncComments(source)));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new TypeError("configuration must be a JSON object");
+    }
+    return parsed;
+  } catch (error) {
+    error.message = `Failed to parse OpenCode config at ${sourcePath}: ${error.message}`;
+    throw error;
+  }
+}
+
+function existingOpenCodeConfigFiles(opencode) {
+  const runtime = opencode && typeof opencode === "object" ? opencode : {};
+  const directory =
+    asNonEmptyString(runtime.directory) ||
+    asNonEmptyString(runtime.worktree) ||
+    process.cwd();
+  const worktree = asNonEmptyString(runtime.worktree) || directory;
+  const ancestors = ancestorDirectories(directory, worktree).reverse();
+  const configHome = asNonEmptyString(process.env.XDG_CONFIG_HOME)
+    ? path.resolve(process.env.XDG_CONFIG_HOME)
+    : path.join(os.homedir(), ".config");
+  const candidates = [
+    path.join(configHome, "opencode", "opencode.json"),
+    path.join(configHome, "opencode", "opencode.jsonc"),
+  ];
+  const customConfigPath = asNonEmptyString(process.env.OPENCODE_CONFIG);
+  if (customConfigPath) {
+    candidates.push(resolveScanPath(customConfigPath, directory));
+  }
+  for (const ancestor of ancestors) {
+    candidates.push(
+      path.join(ancestor, "opencode.json"),
+      path.join(ancestor, "opencode.jsonc"),
+    );
+  }
+  for (const ancestor of ancestors) {
+    candidates.push(
+      path.join(ancestor, ".opencode", "opencode.json"),
+      path.join(ancestor, ".opencode", "opencode.jsonc"),
+    );
+  }
+  const seen = new Set();
+  return candidates.filter((candidate) => {
+    const resolved = path.resolve(candidate);
+    if (seen.has(resolved) || !fs.existsSync(resolved)) {
+      return false;
+    }
+    seen.add(resolved);
+    return true;
+  });
+}
+
+function mergeOpenCodeMcpServerMaps(target, source) {
+  const output = { ...(target || {}) };
+  if (!source || typeof source !== "object" || Array.isArray(source)) {
+    return output;
+  }
+  for (const [name, config] of Object.entries(source)) {
+    const previous = output[name];
+    output[name] =
+      previous &&
+      typeof previous === "object" &&
+      !Array.isArray(previous) &&
+      config &&
+      typeof config === "object" &&
+      !Array.isArray(config)
+        ? { ...previous, ...config }
+        : config;
+  }
+  return output;
+}
+
+function loadCurrentOpenCodeMcpConfig(opencode) {
+  const configPaths = existingOpenCodeConfigFiles(opencode);
+  const diagnostics = [];
+  let servers = {};
+  let hasMcpConfig = false;
+  let lastMcpConfigPath = "";
+  for (const configPath of configPaths) {
+    try {
+      const parsed = parseOpenCodeConfigSource(fs.readFileSync(configPath, "utf8"), configPath);
+      if (Object.hasOwn(parsed, "mcp")) {
+        hasMcpConfig = true;
+        lastMcpConfigPath = configPath;
+        servers = mergeOpenCodeMcpServerMaps(servers, parsed.mcp);
+      }
+    } catch (error) {
+      diagnostics.push({
+        level: "error",
+        path: configPath,
+        reason: "opencode_config_parse_failed",
+        message: String(error && error.message ? error.message : error),
+      });
+    }
+  }
+  const inlineSource = asNonEmptyString(process.env.OPENCODE_CONFIG_CONTENT);
+  if (inlineSource) {
+    try {
+      const parsed = parseOpenCodeConfigSource(inlineSource, "OPENCODE_CONFIG_CONTENT");
+      if (Object.hasOwn(parsed, "mcp")) {
+        hasMcpConfig = true;
+        lastMcpConfigPath = "OPENCODE_CONFIG_CONTENT";
+        servers = mergeOpenCodeMcpServerMaps(servers, parsed.mcp);
+      }
+    } catch (error) {
+      diagnostics.push({
+        level: "error",
+        path: "OPENCODE_CONFIG_CONTENT",
+        reason: "opencode_config_parse_failed",
+        message: String(error && error.message ? error.message : error),
+      });
+    }
+  }
+  return {
+    ok: diagnostics.length === 0,
+    hasMcpConfig,
+    servers,
+    names: new Set(Object.keys(servers)),
+    configPaths,
+    lastMcpConfigPath,
+    diagnostics,
+  };
+}
+
+function scanConfiguredOpenCodeSkills(scanConfig, openCodeConfig, opencode, logger = console) {
+  const roots = discoverOpenCodeSkillRoots(scanConfig, openCodeConfig, opencode);
+  if (!scanConfig || !scanConfig.enabled) {
+    return emptySkillScanResult(scanConfig, roots);
+  }
+  try {
+    const result = scanSkillRoots({
+      roots,
+      baseDir: scanConfig.baseDir,
+      maxFileBytes: scanConfig.maxFileBytes,
+      maxTotalBytesPerSkill: scanConfig.maxTotalBytesPerSkill,
+      maxFilesPerSkill: scanConfig.maxFilesPerSkill,
+      excludeDirs: scanConfig.excludeDirs,
+      excludeFiles: scanConfig.excludeFiles,
+      textExtensions: scanConfig.textExtensions,
+      followSymlinks: scanConfig.followSymlinks,
+      sourceFramework: "opencode",
+    });
+    return { enabled: true, ...result };
+  } catch (error) {
+    logger.warn?.("AgentGuard OpenCode adapter failed to scan skills.", error);
+    return emptySkillScanResult(scanConfig, roots, [{
+      level: "error",
+      reason: "skill_scan_failed",
+      message: String(error && error.message ? error.message : error),
+    }]);
+  }
+}
+
+function sanitizeOpenCodeToolName(value) {
+  return String(value || "").replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+function enrichMcpDescriptorsWithTools(mcps, toolDefinitions) {
+  const definitions = toolDefinitions instanceof Map ? [...toolDefinitions.values()] : [];
+  return (Array.isArray(mcps) ? mcps : []).map((descriptor) => {
+    const prefix = `${sanitizeOpenCodeToolName(descriptor.name)}_`;
+    const discovered = definitions
+      .filter((tool) => tool.name.startsWith(prefix))
+      .map((tool) => ({
+        ...tool,
+        runtime_name: tool.name,
+        mcp_tool_name: tool.mcp_tool_name || tool.name.slice(prefix.length),
+      }));
+    const byName = new Map(
+      [...(Array.isArray(descriptor.tools) ? descriptor.tools : []), ...discovered]
+        .map((tool) => [tool.runtime_name || tool.name, tool]),
+    );
+    const tools = [...byName.values()].sort((left, right) => left.name.localeCompare(right.name));
+    return {
+      ...descriptor,
+      tools,
+      tool_count: tools.length,
+    };
+  });
+}
+
+function matchOpenCodeMcpRuntimeTool(mcpScan, runtimeToolName) {
+  const toolName = asNonEmptyString(runtimeToolName);
+  if (!toolName) {
+    return null;
+  }
+  const candidates = (Array.isArray(mcpScan && mcpScan.mcps) ? mcpScan.mcps : [])
+    .map((mcp) => ({
+      mcp,
+      prefix: `${sanitizeOpenCodeToolName(mcp.name)}_`,
+    }))
+    .filter((candidate) => toolName.startsWith(candidate.prefix))
+    .sort((left, right) => right.prefix.length - left.prefix.length);
+  if (!candidates.length) {
+    return null;
+  }
+  const match = candidates[0];
+  return {
+    mcp: match.mcp,
+    runtimeToolName: toolName,
+    mcpToolName: toolName.slice(match.prefix.length),
+  };
+}
+
+function mcpUniqueIdForRuntimeContext(context, mcp) {
+  const explicit = asNonEmptyString(mcp && (mcp.mcp_unique_id || mcp.id));
+  if (explicit) {
+    return explicit;
+  }
+  const agentId = asNonEmptyString(context && context.agent_id);
+  const sha256 = asNonEmptyString(mcp && mcp.sha256);
+  if (agentId && sha256) {
+    return `${agentId}:${sha256}`;
+  }
+  return "";
+}
+
+function buildOpenCodeMcpRuntimeMetadata(state, mcpScan, runtimeToolName) {
+  const match = matchOpenCodeMcpRuntimeTool(mcpScan, runtimeToolName);
+  if (!match) {
+    return {};
+  }
+  const { mcp, mcpToolName } = match;
+  return {
+    toolSource: "mcp",
+    sourceFramework: "opencode",
+    mcp_unique_id: mcpUniqueIdForRuntimeContext(state && state.context, mcp),
+    mcp_name: asNonEmptyString(mcp.name),
+    mcp_tool_name: mcpToolName,
+    mcp_match_confidence: "qualified_tool",
+    mcp_transport: asNonEmptyString(mcp.transport),
+    mcp_remote: Boolean(mcp.remote),
+    mcp_config_path: asNonEmptyString(mcp.config_path),
+    mcp_config_key: asNonEmptyString(mcp.config_key),
+    mcp_root_path: asNonEmptyString(mcp.root_path),
+    mcp_entry_file: asNonEmptyString(mcp.entry_file),
+    mcp_url: asNonEmptyString(mcp.url),
+    mcp_sha256: asNonEmptyString(mcp.sha256),
+    mcp_source_status: asNonEmptyString(mcp.source_status),
+  };
+}
+
+function jsonSchemaForObservedValue(value) {
+  if (Array.isArray(value)) {
+    return { type: "array" };
+  }
+  if (value === null) {
+    return {};
+  }
+  if (typeof value === "number") {
+    return { type: Number.isInteger(value) ? "integer" : "number" };
+  }
+  if (typeof value === "boolean") {
+    return { type: "boolean" };
+  }
+  if (value && typeof value === "object") {
+    return { type: "object" };
+  }
+  return { type: "string" };
+}
+
+function observedToolInputSchema(args) {
+  const input = args && typeof args === "object" && !Array.isArray(args) ? args : {};
+  const properties = Object.fromEntries(
+    Object.entries(input).map(([name, value]) => [name, jsonSchemaForObservedValue(value)]),
+  );
+  return {
+    type: "object",
+    properties,
+    required: Object.keys(properties),
+  };
+}
+
+function scanConfiguredOpenCodeMcps(
+  scanConfig,
+  openCodeConfig,
+  opencode,
+  toolDefinitions,
+  logger = console,
+) {
+  if (!scanConfig || !scanConfig.enabled) {
+    return emptyMcpScanResult(scanConfig);
+  }
+  const runtime = opencode && typeof opencode === "object" ? opencode : {};
+  const mergedConfig = openCodeConfig && typeof openCodeConfig === "object" ? openCodeConfig : {};
+  const directory =
+    asNonEmptyString(runtime.directory) ||
+    asNonEmptyString(runtime.worktree) ||
+    scanConfig.baseDir ||
+    process.cwd();
+  const configuredServers =
+    mergedConfig.mcp && typeof mergedConfig.mcp === "object" && !Array.isArray(mergedConfig.mcp)
+      ? mergedConfig.mcp
+      : {};
+  const enabledServers = Object.fromEntries(
+    Object.entries(configuredServers).filter(([, server]) =>
+      server && typeof server === "object" && !Array.isArray(server) && server.enabled !== false),
+  );
+  try {
+    const result = scanMcpServerMap(enabledServers, {
+      baseDir: directory,
+      configDir: directory,
+      configKey: "mcp",
+      maxFileBytes: scanConfig.maxFileBytes,
+      maxTotalBytesPerServer: scanConfig.maxTotalBytesPerServer,
+      maxFilesPerServer: scanConfig.maxFilesPerServer,
+      excludeDirs: scanConfig.excludeDirs,
+      excludeFiles: scanConfig.excludeFiles,
+      textExtensions: scanConfig.textExtensions,
+      followSymlinks: scanConfig.followSymlinks,
+      sourceFramework: "opencode",
+    });
+    const mcps = enrichMcpDescriptorsWithTools(result.servers, toolDefinitions);
+    return {
+      enabled: true,
+      mcps,
+      diagnostics: result.diagnostics,
+      summary: {
+        mcp_count: mcps.length,
+        diagnostic_count: result.diagnostics.length,
+      },
+    };
+  } catch (error) {
+    logger.warn?.("AgentGuard OpenCode adapter failed to scan MCP servers.", error);
+    return emptyMcpScanResult(scanConfig, [{
+      level: "error",
+      reason: "mcp_scan_failed",
+      message: String(error && error.message ? error.message : error),
+    }]);
+  }
+}
+
+function inventoryDiagnosticsSignature(diagnostics) {
+  return (Array.isArray(diagnostics) ? diagnostics : [])
+    .map((item) => ({
+      level: asNonEmptyString(item && item.level) || "",
+      path: asNonEmptyString(item && item.path) || "",
+      server: asNonEmptyString(item && item.server) || "",
+      reason: asNonEmptyString(item && item.reason) || "",
+      message: asNonEmptyString(item && item.message) || "",
+    }))
+    .sort((left, right) =>
+      `${left.path}\x1f${left.server}\x1f${left.reason}`
+        .localeCompare(`${right.path}\x1f${right.server}\x1f${right.reason}`),
+    );
+}
+
+function skillScanSignature(skillScan) {
+  const skills = (Array.isArray(skillScan && skillScan.skills) ? skillScan.skills : [])
+    .map((skill) => ({
+      name: asNonEmptyString(skill.name) || "",
+      root_path: asNonEmptyString(skill.root_path) || "",
+      sha256: asNonEmptyString(skill.sha256) || "",
+      file_count: Number.isFinite(skill.file_count) ? skill.file_count : 0,
+      total_size: Number.isFinite(skill.total_size) ? skill.total_size : 0,
+    }))
+    .sort((left, right) =>
+      `${left.root_path}\x1f${left.name}`.localeCompare(`${right.root_path}\x1f${right.name}`),
+    );
+  const roots =
+    skillScan && skillScan.summary && Array.isArray(skillScan.summary.roots)
+      ? [...skillScan.summary.roots].sort()
+      : [];
+  return JSON.stringify({
+    enabled: Boolean(skillScan && skillScan.enabled),
+    roots,
+    skills,
+    diagnostics: inventoryDiagnosticsSignature(skillScan && skillScan.diagnostics),
+  });
+}
+
+function mcpScanSignature(mcpScan) {
+  const mcps = (Array.isArray(mcpScan && mcpScan.mcps) ? mcpScan.mcps : [])
+    .map((mcp) => ({
+      name: asNonEmptyString(mcp.name) || "",
+      transport: asNonEmptyString(mcp.transport) || "",
+      root_path: asNonEmptyString(mcp.root_path) || "",
+      url: asNonEmptyString(mcp.url) || "",
+      sha256: asNonEmptyString(mcp.sha256) || "",
+      tool_names: (Array.isArray(mcp.tools) ? mcp.tools : [])
+        .map((tool) => asNonEmptyString(tool && tool.name))
+        .filter(Boolean)
+        .sort(),
+      file_count: Number.isFinite(mcp.file_count) ? mcp.file_count : 0,
+      total_size: Number.isFinite(mcp.total_size) ? mcp.total_size : 0,
+    }))
+    .sort((left, right) =>
+      `${left.root_path}\x1f${left.name}`.localeCompare(`${right.root_path}\x1f${right.name}`),
+    );
+  return JSON.stringify({
+    enabled: Boolean(mcpScan && mcpScan.enabled),
+    mcps,
+    diagnostics: inventoryDiagnosticsSignature(mcpScan && mcpScan.diagnostics),
+  });
+}
+
+function wildcardMatch(value, pattern) {
+  const input = String(value || "").replaceAll("\\", "/");
+  const matcher = String(pattern || "").replaceAll("\\", "/");
+  let escaped = matcher
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, ".*")
+    .replace(/\?/g, ".");
+  if (escaped.endsWith(" .*")) {
+    escaped = `${escaped.slice(0, -3)}( .*)?`;
+  }
+  return new RegExp(`^${escaped}$`, process.platform === "win32" ? "si" : "s").test(input);
+}
+
+function permissionRulesFromConfig(config) {
+  const source = config && typeof config === "object" && !Array.isArray(config) ? config : {};
+  const rules = [];
+  const tools = source.tools && typeof source.tools === "object" && !Array.isArray(source.tools)
+    ? source.tools
+    : {};
+  for (const [permission, enabled] of Object.entries(tools)) {
+    if (typeof enabled === "boolean") {
+      rules.push({ permission, pattern: "*", action: enabled ? "allow" : "deny" });
+    }
+  }
+  const permission =
+    source.permission && typeof source.permission === "object" && !Array.isArray(source.permission)
+      ? source.permission
+      : {};
+  for (const [name, value] of Object.entries(permission)) {
+    if (typeof value === "string") {
+      rules.push({ permission: name, pattern: "*", action: value });
+      continue;
+    }
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      for (const [pattern, action] of Object.entries(value)) {
+        if (typeof action === "string") {
+          rules.push({ permission: name, pattern, action });
+        }
+      }
+    }
+  }
+  return rules;
+}
+
+function permissionAction(permission, pattern, ...configs) {
+  const rules = configs.flatMap(permissionRulesFromConfig);
+  const match = [...rules].reverse().find((rule) =>
+    wildcardMatch(permission, rule.permission) && wildcardMatch(pattern, rule.pattern),
+  );
+  return match ? match.action : "ask";
+}
+
+function openCodeAgentConfig(openCodeConfig, agent) {
+  const agents =
+    openCodeConfig &&
+    typeof openCodeConfig === "object" &&
+    openCodeConfig.agent &&
+    typeof openCodeConfig.agent === "object" &&
+    !Array.isArray(openCodeConfig.agent)
+      ? openCodeConfig.agent
+      : {};
+  const configured = agents[agent.id];
+  return {
+    ...(agent && typeof agent === "object" ? agent : {}),
+    ...(configured && typeof configured === "object" && !Array.isArray(configured) ? configured : {}),
+  };
+}
+
+function filterSkillScanForAgent(skillScan, openCodeConfig, agent) {
+  const globalConfig = openCodeConfig && typeof openCodeConfig === "object" ? openCodeConfig : {};
+  const agentConfig = openCodeAgentConfig(openCodeConfig, agent);
+  const skills = (Array.isArray(skillScan && skillScan.skills) ? skillScan.skills : [])
+    .filter((skill) => permissionAction("skill", skill.name, globalConfig, agentConfig) !== "deny");
+  return {
+    ...skillScan,
+    skills,
+    summary: {
+      ...((skillScan && skillScan.summary) || {}),
+      skill_count: skills.length,
+    },
+  };
+}
+
+function filterMcpScanForAgent(mcpScan, openCodeConfig, agent) {
+  const globalConfig = openCodeConfig && typeof openCodeConfig === "object" ? openCodeConfig : {};
+  const agentConfig = openCodeAgentConfig(openCodeConfig, agent);
+  const mcps = (Array.isArray(mcpScan && mcpScan.mcps) ? mcpScan.mcps : [])
+    .map((mcp) => {
+      const tools = Array.isArray(mcp.tools) ? mcp.tools : [];
+      const allowedTools = tools.filter((tool) =>
+        permissionAction(tool.name, "*", globalConfig, agentConfig) !== "deny",
+      );
+      if (tools.length > 0 && allowedTools.length === 0) {
+        return null;
+      }
+      if (tools.length === 0) {
+        const probe = `${sanitizeOpenCodeToolName(mcp.name)}_agentguard_probe`;
+        if (permissionAction(probe, "*", globalConfig, agentConfig) === "deny") {
+          return null;
+        }
+      }
+      return {
+        ...mcp,
+        tools: allowedTools,
+        tool_count: allowedTools.length,
+      };
+    })
+    .filter(Boolean);
+  return {
+    ...mcpScan,
+    mcps,
+    summary: {
+      ...((mcpScan && mcpScan.summary) || {}),
+      mcp_count: mcps.length,
+    },
+  };
+}
+
+function configuredOpenCodeAgents(openCodeConfig) {
+  const agents =
+    openCodeConfig &&
+    typeof openCodeConfig === "object" &&
+    openCodeConfig.agent &&
+    typeof openCodeConfig.agent === "object" &&
+    !Array.isArray(openCodeConfig.agent)
+      ? openCodeConfig.agent
+      : {};
+  return normalizeOpenCodeAgentCatalog(
+    Object.entries(agents)
+      .filter(([, config]) => !config || config.disable !== true)
+      .map(([id, config]) => ({ id, ...(config || {}) })),
+  );
+}
+
+function isOpenCodeSkillPath(filePath, roots) {
+  const candidate = asNonEmptyString(filePath);
+  if (!candidate) {
+    return false;
+  }
+  if ((Array.isArray(roots) ? roots : []).some((root) => pathContains(root, candidate))) {
+    return true;
+  }
+  const normalized = path.resolve(candidate).split(path.sep).join("/");
+  return [
+    "/.opencode/skill/",
+    "/.opencode/skills/",
+    "/.claude/skills/",
+    "/.agents/skills/",
+  ].some((marker) => normalized.includes(marker));
+}
+
+function isOpenCodeMcpPath(filePath, mcpScan) {
+  const candidate = asNonEmptyString(filePath);
+  if (!candidate) {
+    return false;
+  }
+  const baseName = path.basename(candidate).toLowerCase();
+  if (["opencode.json", "opencode.jsonc"].includes(baseName)) {
+    return true;
+  }
+  return (Array.isArray(mcpScan && mcpScan.mcps) ? mcpScan.mcps : [])
+    .some((mcp) => pathContains(mcp.root_path, candidate));
+}
+
 class AgentGuardOpenCodeBridge {
   constructor(options = {}) {
     this.pluginId = options.pluginId || "agentguard-opencode";
@@ -518,6 +1424,8 @@ class AgentGuardOpenCodeBridge {
     this.opencode = options.opencode || {};
     this.logger = options.logger || console;
     this.openCodeConfig = null;
+    this.openCodeLocalMcpNames = new Set();
+    this.mcpConfigDiagnostics = [];
     this.opencodeAgents = discoverOpenCodeAgents(this.config, this.opencode, this.logger);
     this.agentBootstrap = null;
     this.agentRegistrations = loadPersistedAgentRegistrations(this.config, this.logger);
@@ -526,10 +1434,382 @@ class AgentGuardOpenCodeBridge {
     this.sessions = new Map();
     this.sessionAgents = new Map();
     this.clientRuntimeAuth = null;
+    this.toolDefinitions = new Map();
+    this.skillScan = emptySkillScanResult(this.config.skillScan, this.config.skillScan.roots);
+    this.mcpScan = emptyMcpScanResult(this.config.mcpScan);
+    this.skillScanSignature = skillScanSignature(this.skillScan);
+    this.mcpScanSignature = mcpScanSignature(this.mcpScan);
+    this.inventoryReports = {
+      skills: new Map(),
+      mcps: new Map(),
+    };
+    this.runtimeSessionNonce =
+      asNonEmptyString(options.runtimeSessionNonce) || crypto.randomUUID();
+    this.inventorySessionNonce = crypto.randomUUID();
+    this.inventoryMonitor = {
+      debounceTimer: null,
+      pollTimer: null,
+      pendingKinds: new Set(),
+      pendingForce: false,
+      pendingReason: "",
+      disposed: false,
+    };
   }
 
   async onConfig(config) {
     this.openCodeConfig = config && typeof config === "object" ? { ...config } : config;
+    this.opencodeAgents = normalizeOpenCodeAgentCatalog([
+      ...this.opencodeAgents,
+      ...configuredOpenCodeAgents(this.openCodeConfig),
+    ]);
+    this.startInventoryMonitor();
+    const kinds = [];
+    if (this.config.skillScan.enabled) {
+      kinds.push("skills");
+    }
+    if (this.config.mcpScan.enabled) {
+      kinds.push("mcps");
+    }
+    if (kinds.length) {
+      this.scheduleInventoryRefresh("config_startup", kinds, 0, { forceReport: true });
+    }
+  }
+
+  getSkillScanResult() {
+    return this.skillScan;
+  }
+
+  getMcpScanResult() {
+    return this.mcpScan;
+  }
+
+  startInventoryMonitor() {
+    if (this.inventoryMonitor.disposed || this.inventoryMonitor.pollTimer) {
+      return false;
+    }
+    const monitored = [
+      ["skills", this.config.skillScan],
+      ["mcps", this.config.mcpScan],
+    ].filter(([, config]) => config && config.enabled && config.monitor);
+    if (!monitored.length) {
+      return false;
+    }
+    const intervalMs = Math.min(
+      ...monitored.map(([, config]) =>
+        asPositiveInteger(
+          config.monitorPollIntervalMs,
+          DEFAULT_INVENTORY_MONITOR_POLL_INTERVAL_MS,
+        )),
+    );
+    this.inventoryMonitor.pollTimer = setInterval(() => {
+      this.scheduleInventoryRefresh(
+        "poll",
+        monitored.map(([kind]) => kind),
+        0,
+      );
+    }, intervalMs);
+    this.inventoryMonitor.pollTimer.unref?.();
+    return true;
+  }
+
+  stopInventoryMonitor() {
+    this.inventoryMonitor.disposed = true;
+    if (this.inventoryMonitor.debounceTimer) {
+      clearTimeout(this.inventoryMonitor.debounceTimer);
+      this.inventoryMonitor.debounceTimer = null;
+    }
+    if (this.inventoryMonitor.pollTimer) {
+      clearInterval(this.inventoryMonitor.pollTimer);
+      this.inventoryMonitor.pollTimer = null;
+    }
+    this.inventoryMonitor.pendingKinds.clear();
+    this.inventoryMonitor.pendingForce = false;
+    this.inventoryMonitor.pendingReason = "";
+  }
+
+  scheduleInventoryRefresh(
+    reason = "change",
+    kinds = ["skills", "mcps"],
+    delayMs = DEFAULT_INVENTORY_MONITOR_DEBOUNCE_MS,
+    options = {},
+  ) {
+    if (this.inventoryMonitor.disposed) {
+      return false;
+    }
+    const enabledKinds = new Set();
+    for (const kind of Array.isArray(kinds) ? kinds : [kinds]) {
+      if (kind === "skills" && this.config.skillScan.enabled) {
+        enabledKinds.add(kind);
+      }
+      if (kind === "mcps" && this.config.mcpScan.enabled) {
+        enabledKinds.add(kind);
+      }
+    }
+    if (!enabledKinds.size) {
+      return false;
+    }
+    for (const kind of enabledKinds) {
+      this.inventoryMonitor.pendingKinds.add(kind);
+    }
+    this.inventoryMonitor.pendingForce =
+      this.inventoryMonitor.pendingForce || options.forceReport === true;
+    this.inventoryMonitor.pendingReason =
+      asNonEmptyString(reason) || this.inventoryMonitor.pendingReason || "change";
+    if (this.inventoryMonitor.debounceTimer) {
+      clearTimeout(this.inventoryMonitor.debounceTimer);
+    }
+    const waitMs = Math.max(0, Number.isFinite(Number(delayMs)) ? Number(delayMs) : 0);
+    this.inventoryMonitor.debounceTimer = setTimeout(() => {
+      const pendingKinds = [...this.inventoryMonitor.pendingKinds];
+      const forceReport = this.inventoryMonitor.pendingForce;
+      const pendingReason = this.inventoryMonitor.pendingReason || "change";
+      this.inventoryMonitor.debounceTimer = null;
+      this.inventoryMonitor.pendingKinds.clear();
+      this.inventoryMonitor.pendingForce = false;
+      this.inventoryMonitor.pendingReason = "";
+      try {
+        this.refreshInventories(pendingReason, pendingKinds, { forceReport });
+      } catch (error) {
+        this.logger.warn?.("AgentGuard OpenCode adapter inventory refresh failed.", error);
+      }
+    }, waitMs);
+    this.inventoryMonitor.debounceTimer.unref?.();
+    return true;
+  }
+
+  refreshInventories(reason = "manual", kinds = ["skills", "mcps"], options = {}) {
+    const requested = new Set(Array.isArray(kinds) ? kinds : [kinds]);
+    const result = {};
+    if (requested.has("skills") && this.config.skillScan.enabled) {
+      const next = scanConfiguredOpenCodeSkills(
+        this.config.skillScan,
+        this.openCodeConfig,
+        this.opencode,
+        this.logger,
+      );
+      const signature = skillScanSignature(next);
+      const changed = signature !== this.skillScanSignature;
+      this.skillScan = next;
+      this.skillScanSignature = signature;
+      result.skills = { changed, scan: next };
+      void this.reportInventoryKind("skills", reason, {
+        force: options.forceReport === true || changed,
+      });
+    }
+    if (requested.has("mcps") && this.config.mcpScan.enabled) {
+      const currentMcpConfig = loadCurrentOpenCodeMcpConfig(this.opencode);
+      if (currentMcpConfig.ok && currentMcpConfig.hasMcpConfig) {
+        const mergedConfig =
+          this.openCodeConfig && typeof this.openCodeConfig === "object"
+            ? { ...this.openCodeConfig }
+            : {};
+        const configuredServers =
+          mergedConfig.mcp && typeof mergedConfig.mcp === "object" && !Array.isArray(mergedConfig.mcp)
+            ? { ...mergedConfig.mcp }
+            : {};
+        for (const name of this.openCodeLocalMcpNames) {
+          delete configuredServers[name];
+        }
+        mergedConfig.mcp = mergeOpenCodeMcpServerMaps(
+          configuredServers,
+          currentMcpConfig.servers,
+        );
+        this.openCodeConfig = mergedConfig;
+        this.openCodeLocalMcpNames = currentMcpConfig.names;
+      }
+      this.mcpConfigDiagnostics = currentMcpConfig.diagnostics;
+      const next = scanConfiguredOpenCodeMcps(
+        this.config.mcpScan,
+        this.openCodeConfig,
+        this.opencode,
+        this.toolDefinitions,
+        this.logger,
+      );
+      if (this.mcpConfigDiagnostics.length) {
+        next.diagnostics.push(...this.mcpConfigDiagnostics);
+        next.summary.diagnostic_count = next.diagnostics.length;
+      }
+      const signature = mcpScanSignature(next);
+      const changed = signature !== this.mcpScanSignature;
+      this.mcpScan = next;
+      this.mcpScanSignature = signature;
+      result.mcps = { changed, scan: next };
+      void this.reportInventoryKind("mcps", reason, {
+        force: options.forceReport === true || changed,
+      });
+    }
+    return result;
+  }
+
+  inventoryAgents(kind) {
+    const scanConfig = kind === "skills" ? this.config.skillScan : this.config.mcpScan;
+    const configuredIds = new Set(scanConfig.agentIds || []);
+    const catalog = normalizeOpenCodeAgentCatalog(this.opencodeAgents);
+    if (configuredIds.size) {
+      const byId = new Map(catalog.map((agent) => [agent.id, agent]));
+      return [...configuredIds].map((id) => byId.get(id) || {
+        id,
+        externalAgentId: openCodeExternalAgentId(id),
+        name: `OpenCode ${id}`,
+        description: `OpenCode agent: ${id}`,
+      });
+    }
+    if (catalog.length) {
+      return catalog;
+    }
+    const id = this.config.opencodeAgent || "default";
+    return normalizeOpenCodeAgentCatalog([{ id }]);
+  }
+
+  ensureInventoryStateForAgent(agent, kind) {
+    const agentId = asNonEmptyString(agent && agent.id);
+    if (!agentId) {
+      return null;
+    }
+    return this.getState({
+      agent: agentId,
+      sessionID: [
+        "agentguard-inventory",
+        this.config.providerInstanceId,
+        agentId,
+        this.inventorySessionNonce,
+      ].join(":"),
+      directory: asNonEmptyString(agent.directory) || asNonEmptyString(this.opencode.directory),
+      worktree: asNonEmptyString(agent.worktree) || asNonEmptyString(this.opencode.worktree),
+      projectID: asNonEmptyString(agent.projectID),
+      inventory: true,
+      inventoryKind: kind,
+    });
+  }
+
+  reportInventoryKind(kind, reason = "monitor", options = {}) {
+    const reports = this.inventoryReports[kind];
+    if (!reports) {
+      return Promise.resolve(false);
+    }
+    const promises = this.inventoryAgents(kind).map((agent) => {
+      const state = this.ensureInventoryStateForAgent(agent, kind);
+      if (!state) {
+        return Promise.resolve(false);
+      }
+      const scan = kind === "skills"
+        ? filterSkillScanForAgent(this.skillScan, this.openCodeConfig, agent)
+        : filterMcpScanForAgent(this.mcpScan, this.openCodeConfig, agent);
+      const signature = kind === "skills" ? skillScanSignature(scan) : mcpScanSignature(scan);
+      const reportKey = agent.externalAgentId || openCodeExternalAgentId(agent.id);
+      let report = reports.get(reportKey);
+      if (!report) {
+        report = {
+          lastSignature: null,
+          pending: null,
+          promise: null,
+        };
+        reports.set(reportKey, report);
+      }
+      if (!options.force && report.lastSignature === signature && !report.promise) {
+        return Promise.resolve(true);
+      }
+      report.pending = { scan, signature, reason };
+      if (!report.promise) {
+        report.promise = this.runInventoryReportQueue(kind, state, report)
+          .finally(() => {
+            report.promise = null;
+          });
+      }
+      return report.promise;
+    });
+    return Promise.all(promises).then((values) => values.some(Boolean));
+  }
+
+  async runInventoryReportQueue(kind, state, report) {
+    let reported = false;
+    while (report.pending) {
+      const pending = report.pending;
+      report.pending = null;
+      const remote = state.enforcer && state.enforcer.remote;
+      if (!remote || !remote.enabled || !state.runtimeAuth) {
+        continue;
+      }
+      try {
+        await this.reportWithRuntimeAuthRetry(state, () => {
+          if (kind === "skills") {
+            return remote.report_skills(
+              state.context,
+              pending.scan.skills || [],
+              {
+                source_framework: "opencode",
+                summary: pending.scan.summary || {},
+                diagnostics: pending.scan.diagnostics || [],
+                sync_inventory: true,
+                report_reason: pending.reason,
+              },
+            );
+          }
+          return remote.report_mcps(
+            state.context,
+            pending.scan.mcps || [],
+            {
+              source_framework: "opencode",
+              summary: pending.scan.summary || {},
+              diagnostics: pending.scan.diagnostics || [],
+              sync_inventory: true,
+              report_reason: pending.reason,
+            },
+          );
+        });
+        report.lastSignature = pending.signature;
+        reported = true;
+      } catch (error) {
+        this.logger.warn?.(
+          `AgentGuard OpenCode adapter failed to report ${kind === "skills" ? "skills" : "MCPs"}.`,
+          error,
+        );
+      }
+    }
+    return reported;
+  }
+
+  resetRuntimeAuthAfterReportAuthFailure(state) {
+    if (!state || !state.runtimeAuth) {
+      return;
+    }
+    this.stopRuntimeAuthRefresh(state.runtimeAuth);
+    clearRuntimeAuthSession(state.runtimeAuth);
+    state.runtimeAuth.startup = null;
+    state.runtimeAuthStartup = null;
+    const remote = state.enforcer && state.enforcer.remote;
+    if (remote) {
+      remote.session_token = null;
+      resetRemoteBreaker(remote);
+    }
+  }
+
+  async reportWithRuntimeAuthRetry(state, reportFn) {
+    await this.ensureRuntimeAuth(state);
+    try {
+      await reportFn();
+      return true;
+    } catch (error) {
+      if (!isRuntimeAuthUnavailableError(error) || !state.runtimeAuth) {
+        throw error;
+      }
+      this.resetRuntimeAuthAfterReportAuthFailure(state);
+      await this.ensureRuntimeAuth(state);
+      await reportFn();
+      return true;
+    }
+  }
+
+  async waitForInventoryReports() {
+    const pending = [];
+    for (const reports of Object.values(this.inventoryReports)) {
+      for (const report of reports.values()) {
+        if (report.promise) {
+          pending.push(report.promise);
+        }
+      }
+    }
+    await Promise.allSettled(pending);
   }
 
   async startRuntimeAuthSession(identity = {}) {
@@ -635,10 +1915,12 @@ class AgentGuardOpenCodeBridge {
   }
 
   singleExistingSessionKey() {
-    if (this.sessions.size !== 1) {
+    const eligible = [...this.sessions.entries()]
+      .filter(([, state]) => !(state.identity && state.identity.inventory));
+    if (eligible.length !== 1) {
       return null;
     }
-    return this.sessions.keys().next().value || null;
+    return eligible[0][0];
   }
 
   resolveIdentity(identity = {}) {
@@ -674,6 +1956,8 @@ class AgentGuardOpenCodeBridge {
       worktree: asNonEmptyString(identity.worktree) || asNonEmptyString(this.opencode.worktree),
       projectID,
       projectName: asNonEmptyString(identity.projectName) || asNonEmptyString(project.name),
+      inventory: identity.inventory === true,
+      inventoryKind: asNonEmptyString(identity.inventoryKind),
       fallbackID: stableShortId(fallbackSource),
     };
   }
@@ -940,7 +2224,10 @@ class AgentGuardOpenCodeBridge {
     }
     const forceRefresh = options.forceRefresh === true;
     const allowCreate = options.allowCreate !== false;
-    const desiredExternalSessionId = openCodeExternalSessionId(state);
+    const desiredExternalSessionId = openCodeRuntimeExternalSessionId(
+      state,
+      this.runtimeSessionNonce,
+    );
     if (
       runtimeAuthFresh(runtimeAuth) &&
       runtimeAuth.external_session_id &&
@@ -968,7 +2255,7 @@ class AgentGuardOpenCodeBridge {
     runtimeAuth.startup = (async () => {
       const identity = state.identity || {};
       const bootstrapDpopKeyID = ["opencode", runtimeAuth.key || identity.fallbackID || state.key].join("\x1f");
-      if (runtimeAuth.dpop_key_id !== bootstrapDpopKeyID) {
+      if (!runtimeAuth.dpop_key) {
         runtimeAuth.dpop_key = loadOrCreateDPoPKey(bootstrapDpopKeyID);
         runtimeAuth.dpop_key_id = bootstrapDpopKeyID;
       }
@@ -1000,8 +2287,15 @@ class AgentGuardOpenCodeBridge {
         throw new Error("AgentGuard OpenCode agent bootstrap did not return a canonical AgentGuard agent.");
       }
 
-      const externalSessionId = openCodeExternalSessionId(state);
-      const dpopKeyID = ["opencode", registration.agent_id, externalSessionId].join("\x1f");
+      const externalSessionId = openCodeRuntimeExternalSessionId(
+        state,
+        this.runtimeSessionNonce,
+      );
+      const dpopKeyID = [
+        "opencode",
+        registration.agent_id,
+        openCodeExternalSessionId(state),
+      ].join("\x1f");
       if (runtimeAuth.dpop_key_id !== dpopKeyID) {
         runtimeAuth.dpop_key = loadOrCreateDPoPKey(dpopKeyID);
         runtimeAuth.dpop_key_id = dpopKeyID;
@@ -1232,6 +2526,11 @@ class AgentGuardOpenCodeBridge {
       ...input,
       output,
     });
+    const mcpMetadata = this.observeMcpRuntimeTool(
+      state,
+      input.tool,
+      output.args,
+    );
     const runtimeEvent = createRuntimeEvent({
       eventType: EventType.TOOL_INVOKE,
       context: state.context,
@@ -1245,6 +2544,7 @@ class AgentGuardOpenCodeBridge {
         sourceHook: "tool.execute.before",
         opencode_session_id: input.sessionID || null,
         callID: input.callID || null,
+        ...mcpMetadata,
       },
     });
     const result = await this.enforce(state, runtimeEvent, { phase: "tool_before" });
@@ -1288,6 +2588,7 @@ class AgentGuardOpenCodeBridge {
         opencode_session_id: input.sessionID || null,
         callID: input.callID || null,
         arguments: input.args || {},
+        ...buildOpenCodeMcpRuntimeMetadata(state, this.mcpScan, input.tool),
       },
     });
     const result = await this.enforce(state, runtimeEvent, { phase: "tool_after" });
@@ -1311,6 +2612,29 @@ class AgentGuardOpenCodeBridge {
 
     await this.flushAsync(state);
     return undefined;
+  }
+
+  observeMcpRuntimeTool(state, runtimeToolName, args = {}) {
+    const match = matchOpenCodeMcpRuntimeTool(this.mcpScan, runtimeToolName);
+    if (!match) {
+      return {};
+    }
+    const previous = this.toolDefinitions.get(match.runtimeToolName);
+    if (!previous) {
+      this.toolDefinitions.set(match.runtimeToolName, {
+        name: match.runtimeToolName,
+        runtime_name: match.runtimeToolName,
+        mcp_tool_name: match.mcpToolName,
+        description: "",
+        input_schema: observedToolInputSchema(args),
+      });
+      this.scheduleInventoryRefresh(
+        "mcp_tool_observed",
+        ["mcps"],
+        this.config.mcpScan.monitorDebounceMs,
+      );
+    }
+    return buildOpenCodeMcpRuntimeMetadata(state, this.mcpScan, match.runtimeToolName);
   }
 
   async runChatMessagesTransform({ input = {}, output = {} } = {}) {
@@ -1408,6 +2732,34 @@ class AgentGuardOpenCodeBridge {
     if (!toolID) {
       return undefined;
     }
+    const definition = {
+      name: toolID,
+      description: asText(output.description),
+      input_schema: output.parameters || {},
+    };
+    const previousDefinition = this.toolDefinitions.get(toolID);
+    const definitionChanged =
+      !previousDefinition ||
+      JSON.stringify(previousDefinition) !== JSON.stringify(definition);
+    if (definitionChanged) {
+      this.toolDefinitions.set(toolID, definition);
+      const mcpServers =
+        this.openCodeConfig &&
+        typeof this.openCodeConfig === "object" &&
+        this.openCodeConfig.mcp &&
+        typeof this.openCodeConfig.mcp === "object" &&
+        !Array.isArray(this.openCodeConfig.mcp)
+          ? Object.keys(this.openCodeConfig.mcp)
+          : [];
+      if (this.config.mcpScan.monitor && mcpServers.some((server) =>
+        toolID.startsWith(`${sanitizeOpenCodeToolName(server)}_`))) {
+        this.scheduleInventoryRefresh(
+          "tool_definition",
+          ["mcps"],
+          this.config.mcpScan.monitorDebounceMs,
+        );
+      }
+    }
     const state = this.getState({ ...input, output });
     if (state.reportedTools.has(toolID)) {
       return undefined;
@@ -1435,6 +2787,56 @@ class AgentGuardOpenCodeBridge {
     const event = input && typeof input === "object" ? input.event || input : {};
     const type = asNonEmptyString(event.type);
     if (!type) {
+      return undefined;
+    }
+    if (type === "mcp.tools.changed") {
+      this.scheduleInventoryRefresh(
+        "mcp_tools_changed",
+        ["mcps"],
+        this.config.mcpScan.monitorDebounceMs,
+      );
+      return undefined;
+    }
+    if (type === "file.watcher.updated") {
+      const properties =
+        event.properties && typeof event.properties === "object"
+          ? event.properties
+          : event.data && typeof event.data === "object"
+            ? event.data
+            : {};
+      const filePath = asNonEmptyString(properties.file);
+      const kinds = [];
+      const delays = [];
+      const skillRoots =
+        this.skillScan && this.skillScan.summary && Array.isArray(this.skillScan.summary.roots)
+          ? this.skillScan.summary.roots
+          : [];
+      if (
+        this.config.skillScan.enabled &&
+        this.config.skillScan.monitor &&
+        isOpenCodeSkillPath(filePath, [
+          ...skillRoots,
+          ...(this.config.skillScan.roots || []),
+        ])
+      ) {
+        kinds.push("skills");
+        delays.push(this.config.skillScan.monitorDebounceMs);
+      }
+      if (
+        this.config.mcpScan.enabled &&
+        this.config.mcpScan.monitor &&
+        isOpenCodeMcpPath(filePath, this.mcpScan)
+      ) {
+        kinds.push("mcps");
+        delays.push(this.config.mcpScan.monitorDebounceMs);
+      }
+      if (kinds.length) {
+        this.scheduleInventoryRefresh(
+          `file_${asNonEmptyString(properties.event) || "updated"}`,
+          kinds,
+          Math.min(...delays),
+        );
+      }
       return undefined;
     }
     if (type === "session.created") {
@@ -1473,6 +2875,7 @@ class AgentGuardOpenCodeBridge {
   }
 
   async dispose() {
+    this.stopInventoryMonitor();
     const flushes = [];
     for (const state of this.sessions.values()) {
       flushes.push(this.flushNow(state, "dispose"));
@@ -1786,6 +3189,14 @@ function openCodeExternalSessionId(state) {
   );
 }
 
+function openCodeRuntimeExternalSessionId(state, runtimeSessionNonce) {
+  const externalSessionId = openCodeExternalSessionId(state);
+  const nonce = asNonEmptyString(runtimeSessionNonce);
+  return nonce
+    ? `${externalSessionId}:runtime:${nonce}`
+    : externalSessionId;
+}
+
 function withoutEmpty(value) {
   return Object.fromEntries(
     Object.entries(value || {}).filter(([, item]) => item !== null && item !== undefined && item !== ""),
@@ -1852,15 +3263,24 @@ module.exports = {
     buildOpenCodeAgentRegistration,
     buildReplacementText,
     decisionPayload,
+    discoverOpenCodeSkillRoots,
     discoverOpenCodeAgents,
+    filterMcpScanForAgent,
+    filterSkillScanForAgent,
     normalizeOpenCodeAgentCatalog,
     findSessionId,
     isRemoteUnavailableDecision,
     normalizeOpenCodeMessages,
     normalizePhaseConfig,
     normalizePluginConfig,
+    mcpScanSignature,
+    openCodeRuntimeExternalSessionId,
     replaceLatestUserText,
     runtimeAuthRefreshDelayMs,
+    scanConfiguredOpenCodeMcps,
+    scanConfiguredOpenCodeSkills,
     shouldFailClosed,
+    skillScanSignature,
+    wildcardMatch,
   },
 };

@@ -106,6 +106,23 @@ Copy it to a project-local path, then edit it for your deployment:
   "remoteTimeoutS": 5,
   "remoteRetries": 1,
   "runtimeRefreshLeadS": 45,
+  "skillScan": {
+    "enabled": false,
+    "discoverDefaults": true,
+    "monitor": {
+      "enabled": true,
+      "debounceMs": 750,
+      "pollIntervalMs": 5000
+    }
+  },
+  "mcpScan": {
+    "enabled": false,
+    "monitor": {
+      "enabled": true,
+      "debounceMs": 750,
+      "pollIntervalMs": 5000
+    }
+  },
   "windowSize": 8
 }
 ```
@@ -118,12 +135,57 @@ Important fields:
 - `opencodeAgent`: fallback/default OpenCode agent name used when a hook event does not include an agent name.
 - `opencodeAgents`: catalog of OpenCode agents to register in AgentGuard. Each `id` must match a configured OpenCode agent name.
 - `remoteUnavailableMode`: use `fail_closed` when missing runtime auth should block guarded LLM/tool phases.
+- `skillScan` / `mcpScan`: optional Skill and MCP inventory synchronization. Both are disabled by default because reports can contain local source files.
 
 The adapter reads phase wiring from the shared AgentGuard plugin config at:
 
 - `config/plugins.json`
 
-The OpenCode adapter config only needs runtime connection settings and the OpenCode agent catalog.
+The OpenCode adapter config contains runtime connection settings, the OpenCode agent catalog, and optional inventory scan settings.
+
+## Skill And MCP Inventory
+
+OpenCode exposes Skills through its `skill` tool and MCP tools as normal tool definitions. AgentGuard's existing tool hooks already enforce and trace those calls. The optional inventory scanner adds server-side visibility into which Skills and MCP servers are available to each configured OpenCode agent.
+
+Enable inventory reporting explicitly:
+
+```json
+{
+  "skillScan": {
+    "enabled": true,
+    "discoverDefaults": true,
+    "monitor": {
+      "enabled": true,
+      "debounceMs": 750,
+      "pollIntervalMs": 5000
+    }
+  },
+  "mcpScan": {
+    "enabled": true,
+    "monitor": {
+      "enabled": true,
+      "debounceMs": 750,
+      "pollIntervalMs": 5000
+    }
+  }
+}
+```
+
+Skill discovery follows OpenCode's local conventions:
+
+- project `.opencode/skill` and `.opencode/skills`
+- project and global `.claude/skills` and `.agents/skills`
+- global `~/.config/opencode/skill` and `~/.config/opencode/skills`
+- additional paths from OpenCode's merged `skills.paths`
+- optional extra `skillScan.roots` resolved relative to the AgentGuard adapter config
+
+MCP discovery starts from OpenCode's merged `config.mcp` and rereads global, custom, project, `.opencode`, and inline JSON/JSONC config sources on monitor refreshes. This lets the AgentGuard inventory react to MCP config edits even when a long-running OpenCode project instance has not reloaded its runtime config. It does not make OpenCode hot-load a newly configured MCP server; rebuild the OpenCode project instance or restart `opencode serve` before invoking its tools. Local `command` arrays and remote servers are supported. Secret environment values, headers, and OAuth settings are redacted before reporting. MCP tool definitions observed through OpenCode's `tool.definition` hook or an actual MCP tool call are attached to the matching server descriptor. Qualified runtime tool names are also attributed back to the MCP server so traces and the rule builder expose MCP metadata.
+
+The monitor performs one startup scan, coalesces filesystem and MCP events with a 750 ms debounce, and uses a 5 second signature poll as a fallback. It reports only a changed canonical inventory, including an empty snapshot after deletion. Inventory reporting uses dedicated runtime states and does not share the trace buffer, so a slow or failed inventory request cannot delay LLM/tool trace upload.
+
+OpenCode agent `permission` and deprecated `tools` rules are applied before each agent's inventory is reported. By default, inventory is reported separately for every configured OpenCode agent. The optional `agentIds` setting restricts all reports of that inventory kind to a fixed subset and should only be used when that is explicitly required.
+
+Inventory reports may include local Skill or MCP source content. Keep the feature disabled unless the AgentGuard server is trusted. The scanner bounds each file, file count, and total bytes; these limits can be overridden with `maxFileBytes`, `maxFilesPerSkill`, `maxTotalBytesPerSkill`, `maxFilesPerServer`, and `maxTotalBytesPerServer`.
 
 ## Runtime Auth And Agent Bootstrap
 
@@ -146,6 +208,16 @@ Generate a fresh ticket in the AgentGuard console, then start OpenCode with that
 export AGENTGUARD_USER_TICKET="agt_xxx"
 opencode serve --hostname 0.0.0.0 --port 4096 --print-logs --log-level INFO
 ```
+
+`opencode serve` is a headless server and creates project instances lazily. Starting the process does not load a project-local `opencode.json` or its plugins until the UI or an API client requests that project. To bootstrap AgentGuard and report inventory immediately, request the project config once from another terminal:
+
+```bash
+curl --noproxy '*' -fsSG \
+  --data-urlencode 'directory=/absolute/path/to/opencode-project' \
+  http://127.0.0.1:4096/config >/dev/null
+```
+
+Running the interactive `opencode` client from the project directory loads that project as part of client startup, so this extra request is specific to headless `serve` workflows.
 
 For long-running development sessions, run OpenCode under a process manager or `tmux`, but still inject a fresh ticket before the process starts. Do not reuse an old ticket after it has expired or has already been consumed.
 

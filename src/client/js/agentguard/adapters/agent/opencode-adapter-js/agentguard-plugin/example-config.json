@@ -16,5 +16,22 @@
   "remoteTimeoutS": 5,
   "remoteRetries": 1,
   "runtimeRefreshLeadS": 45,
+  "skillScan": {
+    "enabled": false,
+    "discoverDefaults": true,
+    "monitor": {
+      "enabled": true,
+      "debounceMs": 750,
+      "pollIntervalMs": 5000
+    }
+  },
+  "mcpScan": {
+    "enabled": false,
+    "monitor": {
+      "enabled": true,
+      "debounceMs": 750,
+      "pollIntervalMs": 5000
+    }
+  },
   "windowSize": 8
 }
