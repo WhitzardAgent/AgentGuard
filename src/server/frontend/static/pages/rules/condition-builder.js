@@ -9,6 +9,7 @@
   };
 
   const principalRoleValues = ["basic", "default", "privileged", "system"];
+  const modelTagValues = ["local", "domestic", "overseas"];
 
   const traceFeatureOperators = {
     name: ["==", "!=", "IN", "NOT IN"],
@@ -46,6 +47,9 @@
       { value: "mcp.transport", label: "mcp.transport", kind: "text", operators: ["==", "!=", "IN", "NOT IN"] },
       { value: "mcp.remote", label: "mcp.remote", kind: "enum", enumValues: ["true", "false"], operators: ["==", "!="] },
     ],
+    model: [
+      { value: "model.tag", label: "model.tag", kind: "enum", enumValues: modelTagValues, operators: ["==", "!=", "IN", "NOT IN"] },
+    ],
   };
 
   const tracePropertyGroups = [
@@ -58,7 +62,8 @@
     { value: "tool", label: "tool" },
     { value: "payload", label: "payload" },
     { value: "mcp", label: "mcp" },
-    { value: "principal", label: "user" }
+    { value: "principal", label: "user" },
+    { value: "model", label: "model" },
   ];
 
   const principalContextSubpropertyGroups = [
@@ -81,6 +86,10 @@
     { value: "payload.final_output", label: "final_output" },
     { value: "payload.tool_name", label: "tool_name" },
     { value: "payload.result", label: "result" },
+  ];
+
+  const modelContextSubpropertyGroups = [
+    { value: "model.tag", label: "tag" },
   ];
 
   const wizardStages = ["source", "symbol", "property", "comparison", "complete"];
@@ -916,6 +925,15 @@
   }
 
   function normalizeSavedConditionEntry(entry, symbols, options) {
+    if (entry?.alwaysMatch || String(entry?.expression || "").trim() === "*") {
+      return {
+        conditionId: String(entry?.conditionId || ""),
+        expression: "*",
+        items: [],
+        tree: createGroupNode("AND", []),
+        alwaysMatch: true,
+      };
+    }
     const preferredItems = Array.isArray(entry?.items) && entry.items.length
       ? entry.items
       : entry?.tree
@@ -939,6 +957,15 @@
   }
 
   function normalizeItems(value, symbols, options = {}) {
+    if (value?.alwaysMatch || String(value?.expression || "").trim() === "*") {
+      return {
+        items: [],
+        symbolToolMap: {},
+        tree: createGroupNode("AND", []),
+        expression: "*",
+        alwaysMatch: true,
+      };
+    }
     const nextSymbols = Array.isArray(symbols) && symbols.length ? symbols : ["A"];
     const preferredItems = Array.isArray(value?.items)
       ? value.items
@@ -971,6 +998,7 @@
       symbolToolMap,
       tree,
       expression: expressionForItems(finalItems),
+      alwaysMatch: false,
     };
   }
 
@@ -1017,6 +1045,17 @@
       const saved = Array.isArray(value?.savedConditions)
         ? value.savedConditions.map((entry) => normalizeSavedConditionEntry(entry, symbols, { currentCallToolKey, allowedSourceTypes }))
         : [];
+      if (value?.alwaysMatch || String(value?.expression || "").trim() === "*") {
+        return {
+          items: [],
+          symbolToolMap: {},
+          tree: stampNodeIds(createGroupNode("AND", [])),
+          savedConditions: saved,
+          draftItem: null,
+          expression: "*",
+          alwaysMatch: true,
+        };
+      }
       return {
         items: normalized.items,
         symbolToolMap: normalized.symbolToolMap,
@@ -1024,12 +1063,20 @@
         savedConditions: saved,
         draftItem: null,
         expression: normalized.expression,
+        alwaysMatch: Boolean(normalized.alwaysMatch),
       };
     }
 
     let state = normalizeState(options.value || {});
 
     function syncFromTree() {
+      if (state.alwaysMatch) {
+        state.items = [];
+        state.symbolToolMap = {};
+        state.expression = "*";
+        state.tree = stampNodeIds(createGroupNode("AND", []));
+        return;
+      }
       const rawItems = flattenGroup(state.tree, false);
       const normalized = normalizeItems({ items: rawItems }, symbols, {
         currentCallToolKey,
@@ -1039,6 +1086,7 @@
       state.symbolToolMap = normalized.symbolToolMap;
       state.expression = normalized.expression;
       state.tree = stampNodeIds(assignNormalizedItemsToTree(state.tree, normalized.items));
+      state.alwaysMatch = false;
     }
 
     function emit() {
@@ -1059,6 +1107,10 @@
       }
       if (state.draftItem) {
         hint.textContent = "Finish the guided single-condition builder, then save it into the library.";
+        return;
+      }
+      if (state.alwaysMatch) {
+        hint.textContent = "CONDITION is set to * and will always match.";
         return;
       }
       if (!state.savedConditions.length) {
@@ -1313,6 +1365,7 @@
     }
 
     function openDraft(item) {
+      state.alwaysMatch = false;
       state.draftItem = item ? { ...cloneItem(item), confirmed: false, stepStage: "comparison" } : buildDefaultDraft();
       render();
       updateHint("Complete the single condition builder, then save it to the library.");
@@ -1551,6 +1604,25 @@
       if (prefix === "mcp") {
         detailSection.appendChild(createField("Sub-property", createSelect(
           [{ value: "", label: "Select sub-property" }, ...mcpContextSubpropertyGroups],
+          item.contextField,
+          (event) => {
+            const nextField = event.target.value;
+            updateDraft({
+              contextField: nextField,
+              contextFieldName: "",
+              contextPath: buildContextPath(nextField, ""),
+              syntaxField: "",
+              operator: "",
+              value: "",
+            });
+          },
+        )));
+        return;
+      }
+
+      if (prefix === "model") {
+        detailSection.appendChild(createField("Sub-property", createSelect(
+          [{ value: "", label: "Select sub-property" }, ...modelContextSubpropertyGroups],
           item.contextField,
           (event) => {
             const nextField = event.target.value;
@@ -1995,6 +2067,19 @@
       if (addButton) {
         header.appendChild(addButton);
       }
+      const alwaysButton = document.createElement("button");
+      alwaysButton.type = "button";
+      alwaysButton.className = `btn${state.alwaysMatch ? " primary" : ""}`;
+      alwaysButton.textContent = "*";
+      alwaysButton.setAttribute("aria-label", state.alwaysMatch ? "Disable unconditional match" : "Enable unconditional match");
+      alwaysButton.addEventListener("click", () => {
+        state.draftItem = null;
+        state.alwaysMatch = !state.alwaysMatch;
+        syncFromTree();
+        render();
+        emit();
+      });
+      header.appendChild(alwaysButton);
       section.appendChild(header);
 
       const list = document.createElement("div");
@@ -2192,7 +2277,9 @@
         root.appendChild(renderDraftBuilder());
       }
       root.appendChild(renderLibrary());
-      root.appendChild(renderCanvas());
+      if (!state.alwaysMatch) {
+        root.appendChild(renderCanvas());
+      }
       root.appendChild(renderPreview());
       updateHint();
     }
@@ -2219,6 +2306,7 @@
           })),
           tree: cloneNode(state.tree),
           expression: state.expression,
+          alwaysMatch: Boolean(state.alwaysMatch),
         };
       },
       getMode() {
@@ -2268,11 +2356,15 @@
           items: [],
           tree: createGroupNode("AND", []),
           savedConditions: [],
+          alwaysMatch: false,
         });
         render();
         emit();
       },
       validate() {
+        if (state.alwaysMatch) {
+          return { ok: true, message: "CONDITION is valid." };
+        }
         if (!state.items.length) {
           return { ok: false, message: "At least one condition is required." };
         }

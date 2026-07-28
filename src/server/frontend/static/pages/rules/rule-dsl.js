@@ -1,6 +1,6 @@
 (function () {
   const SUPPORTED_ACTIONS = new Set(["DENY", "HUMAN_CHECK", "LLM_CHECK", "ALLOW", "DEGRADE"]);
-  const CONTEXT_PREFIXES = new Set(["tool", "principal", "mcp", "payload"]);
+  const CONTEXT_PREFIXES = new Set(["tool", "principal", "mcp", "payload", "model"]);
   const RULE_PHASES = ["llm_before", "llm_after", "tool_before", "tool_after"];
 
   function escapeString(value) {
@@ -142,6 +142,11 @@
   }
 
   function serializeConditionItem(item) {
+    if (String(item?.sourceType || "").trim() === "wildcard") {
+      const openParen = item.openParen || "";
+      const closeParen = item.closeParen || "";
+      return `${openParen}*${closeParen}`;
+    }
     const path = conditionPath(item);
     const operator = serializeOperator(item.operator);
     if (!operator) {
@@ -156,7 +161,10 @@
     return `${openParen}${path} ${operator} ${serializeValue(item)}${closeParen}`;
   }
 
-  function serializeConditionItems(items) {
+  function serializeConditionItems(items, rule = {}) {
+    if (rule?.conditionAlwaysMatch || String(rule?.condition || "").trim() === "*") {
+      return "*";
+    }
     if (!Array.isArray(items) || !items.length) {
       throw new Error("At least one condition is required before publishing.");
     }
@@ -179,12 +187,9 @@
     const onClause = normalizeOnClause(rule);
     const phases = normalizePhases(rule);
     const path = normalizePath(rawPath);
-    const condition = serializeConditionItems(rule?.conditionItems || []);
+    const condition = serializeConditionItems(rule?.conditionItems || [], rule || {});
     if (!phases.length) {
       throw new Error("At least one runtime phase is required before publishing.");
-    }
-    if (phases.some((phase) => phase.startsWith("tool_")) && !path && !onClause) {
-      throw new Error("At least one formal match is required before publishing.");
     }
     if (onClause && !isValidOnClause(onClause)) {
       throw new Error(`ON clause "${onClause}" is not a supported tool_call expression.`);

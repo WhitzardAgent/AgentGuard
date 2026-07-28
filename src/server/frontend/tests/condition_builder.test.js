@@ -330,7 +330,7 @@ test("condition builder coerces existing items when trace source becomes unavail
   assert.equal(value.items[0].contextPath, "tool.name");
 });
 
-test("single tool builder offers only tool and user properties", () => {
+test("single tool builder offers the available context property groups", () => {
   const root = createElement("div");
   const hint = createElement("p");
   const addButton = createElement("button");
@@ -348,11 +348,11 @@ test("single tool builder offers only tool and user properties", () => {
   assert.ok(propertySelect);
   assert.deepEqual(
     propertySelect.options.map((option) => option.value),
-    ["", "tool", "principal"],
+    ["", "tool", "payload", "mcp", "principal", "model"],
   );
   assert.deepEqual(
     propertySelect.options.map((option) => option.textContent),
-    ["Select property", "tool", "user"],
+    ["Select property", "tool", "payload", "mcp", "user", "model"],
   );
 });
 
@@ -531,6 +531,67 @@ test("membership target values use checkboxes for enum-based IN comparisons", ()
 
   assert.equal(builder.getValue().savedConditions[0].items[0].value, '{"basic", "system"}');
   assert.equal(builder.getValue().savedConditions[0].expression, 'principal.role IN {"basic", "system"}');
+});
+
+test("condition builder supports model.tag with fixed location choices", () => {
+  const root = createElement("div");
+  const hint = createElement("p");
+  const addButton = createElement("button");
+  const builder = createConditionBuilder({
+    root,
+    hint,
+    addButton,
+    pathSymbols: ["A"],
+    allowedSourceTypes: ["context"],
+    value: { items: [] },
+  });
+
+  addButton.dispatchEvent("click");
+  let selects = collectElements(root, (element) => element.tagName === "SELECT");
+  assert.equal(selects[0].options.some((option) => option.value === "model"), true);
+  selects[0].value = "model";
+  selects[0].dispatchEvent("change");
+
+  selects = collectElements(root, (element) => element.tagName === "SELECT");
+  selects[1].value = "model.tag";
+  selects[1].dispatchEvent("change");
+  buttonByText(root, ">").dispatchEvent("click");
+
+  selects = collectElements(root, (element) => element.tagName === "SELECT");
+  selects[0].value = "==";
+  selects[0].dispatchEvent("change");
+  selects = collectElements(root, (element) => element.tagName === "SELECT");
+  assert.deepEqual(
+    selects[1].options.map((option) => option.value),
+    ["", "local", "domestic", "overseas"],
+  );
+  selects[1].value = "domestic";
+  selects[1].dispatchEvent("change");
+  buttonByText(root, "Create >").dispatchEvent("click");
+
+  assert.equal(builder.getValue().savedConditions[0].expression, 'model.tag == "domestic"');
+});
+
+test("condition builder supports unconditional always-match via *", () => {
+  const root = createElement("div");
+  const hint = createElement("p");
+  const addButton = createElement("button");
+  const builder = createConditionBuilder({
+    root,
+    hint,
+    addButton,
+    pathSymbols: ["A"],
+    allowedSourceTypes: ["context"],
+    value: { items: [] },
+  });
+
+  buttonByText(root, "*").dispatchEvent("click");
+
+  const value = builder.getValue();
+  assert.equal(value.alwaysMatch, true);
+  assert.equal(value.expression, "*");
+  assert.equal(value.items.length, 0);
+  assert.equal(builder.validate().ok, true);
 });
 
 test("trace name IN comparisons keep a set literal in the live preview and saved expression", () => {

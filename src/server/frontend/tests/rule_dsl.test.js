@@ -213,6 +213,59 @@ test("serializeRule preserves IN and MATCHES operators with expected right-hand 
   assert.match(dsl, /AND tool\.url MATCHES ".*127\\\\\\\\\.0\\\\\\\\\.0\\\\\\\\\.1\.\*"/);
 });
 
+test("serializeRule supports model tag context conditions", () => {
+  const dsl = serializeRule({
+    name: "review_domestic_model",
+    phases: ["llm_before"],
+    action: "HUMAN_CHECK",
+    conditionItems: [
+      {
+        connector: "",
+        openParen: "",
+        closeParen: "",
+        sourceType: "context",
+        contextPrefix: "model",
+        contextField: "model.tag",
+        contextFieldName: "",
+        contextPath: "model.tag",
+        operator: "==",
+        value: "domestic",
+      },
+    ],
+  });
+
+  assert.equal(
+    dsl,
+    [
+      "RULE: review_domestic_model",
+      "PHASES: llm_before",
+      'CONDITION: model.tag == "domestic"',
+      "POLICY: HUMAN_CHECK",
+    ].join("\n"),
+  );
+});
+
+test("serializeRule supports unconditional always-match condition", () => {
+  const dsl = serializeRule({
+    name: "always_before_llm",
+    phases: ["llm_before"],
+    action: "ALLOW",
+    condition: "*",
+    conditionAlwaysMatch: true,
+    conditionItems: [],
+  });
+
+  assert.equal(
+    dsl,
+    [
+      "RULE: always_before_llm",
+      "PHASES: llm_before",
+      "CONDITION: *",
+      "POLICY: ALLOW",
+    ].join("\n"),
+  );
+});
+
 test("serializeRule appends prompt only for llm_check rules", () => {
   const dsl = serializeRule({
     name: "review_external_http",

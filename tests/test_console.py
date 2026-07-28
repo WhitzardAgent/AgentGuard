@@ -118,6 +118,64 @@ def test_dsl_parse_preserves_multiline_and_boolean_condition_expression():
     assert any(cond.field == "principal.trust_level" for cond in rule.conditions)
 
 
+def test_dsl_parse_supports_model_tag_condition():
+    parsed, report = parse_source(
+        "RULE: review_domestic_model\n"
+        "PHASES: llm_before\n"
+        'CONDITION: model.tag == "domestic"\n'
+        "POLICY: HUMAN_CHECK\n"
+    )
+
+    assert report.ok and len(parsed) == 1
+    rule = parsed[0].rule
+    assert rule.condition_expr == 'model.tag == "domestic"'
+    assert any(cond.field == "model.tag" for cond in rule.conditions)
+
+
+def test_dsl_parse_supports_unconditional_wildcard_condition():
+    parsed, report = parse_source(
+        "RULE: always_before_llm\n"
+        "PHASES: llm_before\n"
+        "CONDITION: *\n"
+        "POLICY: ALLOW\n"
+    )
+
+    assert report.ok and len(parsed) == 1
+    rule = parsed[0].rule
+    assert rule.condition_expr == "*"
+    assert rule.conditions == []
+
+
+def test_published_llm_before_wildcard_deny_blocks_llm_input():
+    con = _console()
+    source = (
+        "RULE: deny_all_before_llm\n"
+        "PHASES: llm_before\n"
+        "CONDITION: *\n"
+        "POLICY: DENY\n"
+        'Reason: "block all model input"'
+    )
+
+    publish = con.publish_rule("agent-alpha", source)
+    assert publish["ok"] is True
+
+    res = con.manager.decide(
+        {
+            "context": {"session_id": "s-llm", "agent_id": "agent-alpha"},
+            "current_event": {
+                "event_type": "llm_input",
+                "payload": {"messages": [{"role": "user", "content": "hello"}]},
+                "risk_signals": [],
+            },
+            "trajectory_window": [],
+            "local_signals": [],
+        }
+    )
+
+    assert res["decision"]["decision_type"] == "deny"
+    assert res["plugin_result"]["metadata"]["rule_based_plugin"]["rule_id"] == "deny_all_before_llm"
+
+
 def test_dsl_parse_and_roundtrip_preserves_llm_prompt():
     parsed, report = parse_source(_LLM_RULE)
 

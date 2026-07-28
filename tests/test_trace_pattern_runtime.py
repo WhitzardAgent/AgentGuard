@@ -152,3 +152,48 @@ def test_trace_rule_supports_not_expression():
     current.context = RuntimeContext(session_id="s1", agent_id="a1", user_id="u1", metadata={"role": "basic"})
 
     assert rule.matches(current, trace_window=[previous]) is True
+
+
+def test_rule_matches_model_tag_from_location_tag_metadata():
+    rule = PolicyRule(
+        rule_id="domestic_model_rule",
+        effect=PolicyEffect.DENY,
+        reason="domestic model only",
+        priority=90,
+        event_types=["tool_invoke"],
+        conditions=[RuleCondition(field="model.tag", op="eq", value="domestic")],
+        condition_expr='model.tag == "domestic"',
+    )
+
+    current = _tool_invoke("email_send", {"to": "partner@example.com"})
+    current.context = RuntimeContext(
+        session_id="s1",
+        agent_id="a1",
+        user_id="u1",
+        metadata={"location_tag": "domestic"},
+    )
+
+    assert rule.matches(current, trace_window=[]) is True
+
+
+def test_rule_matches_unconditional_wildcard_expression():
+    rule = PolicyRule(
+        rule_id="always_before_llm",
+        effect=PolicyEffect.ALLOW,
+        reason="always",
+        priority=10,
+        event_types=["llm_input"],
+        conditions=[],
+        condition_expr="*",
+    )
+
+    event = RuntimeEvent.from_dict(
+        {
+            "event_type": "llm_input",
+            "context": {"session_id": "s1", "agent_id": "a1", "user_id": "u1"},
+            "payload": {"messages": [{"role": "user", "content": "hello"}]},
+            "metadata": {},
+        }
+    )
+
+    assert rule.matches(event, trace_window=[]) is True

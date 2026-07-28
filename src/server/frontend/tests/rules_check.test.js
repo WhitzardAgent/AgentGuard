@@ -8,13 +8,14 @@ let pathState = { path: "", pathSlots: [], finished: false };
 let conditionState = { items: [], symbolToolMap: {}, expression: "" };
 
 function createElement() {
-  return {
+  let innerHTML = "";
+  const element = {
     value: "",
     textContent: "",
-    innerHTML: "",
     disabled: false,
     hidden: false,
     options: [],
+    children: [],
     classList: {
       add() {},
       remove() {},
@@ -30,12 +31,29 @@ function createElement() {
     },
     addEventListener() {},
     appendChild(child) {
+      this.children.push(child);
       if (child && Object.prototype.hasOwnProperty.call(child, "value")) {
         this.options.push(child);
+        if (child.selected) {
+          this.value = child.value;
+        }
       }
     },
     setAttribute() {},
   };
+  Object.defineProperty(element, "innerHTML", {
+    configurable: true,
+    enumerable: true,
+    get() {
+      return innerHTML;
+    },
+    set(value) {
+      innerHTML = String(value || "");
+      element.options = [];
+      element.children = [];
+    },
+  });
+  return element;
 }
 
 const elements = new Map();

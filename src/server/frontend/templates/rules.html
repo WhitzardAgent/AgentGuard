@@ -49,6 +49,10 @@
         <span id="agentguard-copy-rules-rule-editor">Rule Editor</span>
         <span id="agentguard-copy-rules-editor-subtitle">The legacy full-form editor is kept for modifying existing rules and drafts.</span>
         <span id="agentguard-copy-rules-create-subtitle">Create a new rule step by step.</span>
+        <span id="agentguard-copy-rules-select-phases">Select runtime phases</span>
+        <span id="agentguard-copy-rules-all-phases">All runtime phases</span>
+        <span id="agentguard-copy-rules-phase-selected">{count} phases selected</span>
+        <span id="agentguard-copy-rules-all-tools">All tools</span>
         <span id="agentguard-copy-rules-select-tool">Select tool</span>
         <span id="agentguard-copy-rules-select-tool-optional">Select tool (optional)</span>
         <span id="agentguard-copy-rules-no-tools">No tools available</span>
@@ -136,9 +140,9 @@
                   </div>
                 </div>
                 <div class="field" id="on-field">
-                  <label>Select Runtime Phases and Target Tool</label>
+                  <label>Select Runtime Phases</label>
                   <p class="subtle" id="trace-on-field-hint" data-i18n-html="Rules Trace On Hint">
-                    When you use <strong>Tool Trace</strong>, the <strong>Tool</strong> and selected <strong>Runtime Phases</strong> here apply to the <strong>last tool</strong> on that trace.
+                    When you use <strong>Tool Trace</strong>, the selected <strong>Runtime Phases</strong> here apply to the <strong>last tool</strong> on that trace.
                   </p>
                   <div class="on-filter-row">
                     <div class="on-filter-help-row">
@@ -150,26 +154,18 @@
                         </div>
                       </div>
                     </div>
-                    <div class="pill-row" id="rule-phase-group">
-                      <label><input type="checkbox" name="rule-phase" value="llm_before"> llm_before</label>
-                      <label><input type="checkbox" name="rule-phase" value="llm_after"> llm_after</label>
-                      <label><input type="checkbox" name="rule-phase" value="tool_before"> tool_before</label>
-                      <label><input type="checkbox" name="rule-phase" value="tool_after"> tool_after</label>
-                    </div>
-                  </div>
-                  <div class="on-filter-row" id="on-tool-filter-row">
-                    <div class="on-filter-help-row">
-                      <span class="subtle">Tool</span>
-                      <div class="hint-wrap">
-                        <span class="hint-dot">i</span>
-                        <div class="hint-bubble">
-                          Optionally narrow tool-phase rules to one specific tool.
-                        </div>
+                    <div class="phase-multiselect" id="rule-phase-group">
+                      <button class="phase-multiselect-button" id="rule-phase-button" type="button" aria-haspopup="true" aria-expanded="false">
+                        <span id="rule-phase-summary">Select runtime phases</span>
+                        <span class="phase-multiselect-arrow" aria-hidden="true">▾</span>
+                      </button>
+                      <div class="phase-multiselect-menu" id="rule-phase-menu" hidden>
+                        <label class="phase-multiselect-option"><span>llm_before</span><input type="checkbox" name="rule-phase" value="llm_before"></label>
+                        <label class="phase-multiselect-option"><span>llm_after</span><input type="checkbox" name="rule-phase" value="llm_after"></label>
+                        <label class="phase-multiselect-option"><span>tool_before</span><input type="checkbox" name="rule-phase" value="tool_before"></label>
+                        <label class="phase-multiselect-option"><span>tool_after</span><input type="checkbox" name="rule-phase" value="tool_after"></label>
                       </div>
                     </div>
-                    <select id="rule-on-input">
-                      <option value="" selected>Select tool (optional)</option>
-                    </select>
                   </div>
                 </div>
                 <div class="field" id="path-field">

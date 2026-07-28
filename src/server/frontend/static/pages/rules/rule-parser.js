@@ -28,6 +28,25 @@
     if (!trimmed) {
       return null;
     }
+    if (trimmed === "*") {
+      return {
+        confirmed: true,
+        connector: "",
+        openParen: "",
+        closeParen: "",
+        sourceType: "wildcard",
+        symbol: "",
+        feature: "",
+        syntaxField: "",
+        operator: "",
+        value: "",
+        selectedToolKey: "",
+        contextPrefix: "",
+        contextField: "",
+        contextFieldName: "",
+        contextPath: "",
+      };
+    }
 
     const leadingParens = trimmed.match(/^\(+/);
     const trailingParens = trimmed.match(/\)+$/);
@@ -76,7 +95,7 @@
 
     const contextParsed = core.match(
       new RegExp(
-        `^((?:tool|target|principal|caller|event|mcp|payload)\\.[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)*)\\s+${operatorPattern}\\s+(.+)$`,
+        `^((?:tool|target|principal|caller|event|mcp|payload|model)\\.[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)*)\\s+${operatorPattern}\\s+(.+)$`,
       ),
     );
     if (!contextParsed) {
@@ -192,14 +211,15 @@
     const metadata = extractRuleMetadata(text);
     const actionLine = text.match(/^POLICY:\s+([A-Z_]+)(?:\(([^)]*)\)|\s+TO\s+"([^"]+)")?/m);
     const conditionMatch = text.match(/^CONDITION:\s+([\s\S]*?)\nPOLICY:/m);
-    const conditionItems = parseConditionItems(conditionMatch?.[1] || "");
+    const conditionText = String(conditionMatch?.[1] || "").trim();
+    const conditionItems = parseConditionItems(conditionText);
 
     const phases = String(metadata.phases || "")
       .split(",")
       .map((item) => String(item || "").trim())
       .filter(Boolean);
 
-    if (!ruleName || !actionLine || !conditionItems.length || !phases.length) {
+    if (!ruleName || !actionLine || (!conditionItems.length && conditionText !== "*") || !phases.length) {
       return null;
     }
 
@@ -211,6 +231,7 @@
       phases,
       onClause: metadata.onClause,
       conditionItems,
+      conditionAlwaysMatch: conditionText === "*",
       action: actionLine[1],
       degradeTarget: actionLine[3] || actionLine[2] || "",
       severity: metadata.severity,

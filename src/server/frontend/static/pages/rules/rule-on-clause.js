@@ -25,13 +25,15 @@
     return { subtype, toolPattern };
   }
 
-  function buildOnClause(toolName, subtype = "") {
+  function buildOnClause(toolName, subtype = "", options = {}) {
     const normalizedToolName = String(toolName || "").trim();
     const normalizedSubtype = String(subtype || "").trim();
-    if (!normalizedToolName) {
+    const wildcardWhenEmpty = Boolean(options?.wildcardWhenEmpty);
+    const effectiveToolName = normalizedToolName || (wildcardWhenEmpty ? "*" : "");
+    if (!effectiveToolName) {
       return "";
     }
-    return normalizedSubtype ? `tool_call.${normalizedSubtype}(${normalizedToolName})` : `tool_call(${normalizedToolName})`;
+    return normalizedSubtype ? `tool_call.${normalizedSubtype}(${effectiveToolName})` : `tool_call(${effectiveToolName})`;
   }
 
   window.AgentGuardRuleOnClause = {

@@ -1889,6 +1889,12 @@ def test_mock_mode_checks_rule_source():
                 "/api/rules/check",
                 {"source": "RULE: broken\nPHASES: tool_before\nTRACE: A -> B\nPOLICY: DENY"},
             )
+            phase_only_status, phase_only_payload = _json_request(
+                "POST",
+                preview.url,
+                "/api/rules/check",
+                {"source": "RULE: phase_only\nPHASES: tool_before\nCONDITION: *\nPOLICY: DENY"},
+            )
 
     assert ok_status == 200
     assert ok_payload["ok"] is True
@@ -1897,6 +1903,9 @@ def test_mock_mode_checks_rule_source():
     assert bad_status == 200
     assert bad_payload["ok"] is False
     assert bad_payload["errors"]
+    assert phase_only_status == 200
+    assert phase_only_payload["ok"] is True
+    assert any("no ON/TRACE match" in item["message"] for item in phase_only_payload["warnings"])
 
 
 def test_mock_mode_reload_updates_published_rules():

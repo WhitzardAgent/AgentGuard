@@ -97,6 +97,13 @@ def _resolve_trace_binding(binding: dict[str, Any], parts: list[str]) -> Any:
     return (binding.get("arguments") or {}).get(head)
 
 
+def _normalize_model_tag(value: Any) -> str | None:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"local", "domestic", "overseas"}:
+        return normalized
+    return None
+
+
 def _apply_op(op: str, actual: Any, expected: Any) -> bool:
     if op == "eq":
         return actual == expected
@@ -233,6 +240,7 @@ class PolicyRule:
         tool = _tool_view(event)
         target = _target_view(tool)
         mcp = _mcp_view(event)
+        model = _model_view(event)
         trace_bindings = _trace_bindings(self.trace_clause, event, trace_window or [])
         if self.trace_clause is not None and trace_bindings is None:
             return False
@@ -242,6 +250,7 @@ class PolicyRule:
             "tool": tool,
             "target": target,
             "mcp": mcp,
+            "model": model,
             "_trace_bindings": trace_bindings or {},
         }
         if self.condition_expr.strip():
@@ -331,6 +340,21 @@ def _mcp_view(event: RuntimeEvent) -> dict[str, Any]:
     }
 
 
+def _model_view(event: RuntimeEvent) -> dict[str, Any]:
+    event_metadata = event.metadata if isinstance(event.metadata, dict) else {}
+    context_metadata = event.context.metadata if isinstance(event.context.metadata, dict) else {}
+    event_model = dict(event_metadata.get("model") or {}) if isinstance(event_metadata.get("model"), dict) else {}
+    context_model = dict(context_metadata.get("model") or {}) if isinstance(context_metadata.get("model"), dict) else {}
+    tag = _normalize_model_tag(event_metadata.get("location_tag")) or _normalize_model_tag(
+        context_metadata.get("location_tag")
+    )
+    return {
+        **context_model,
+        **event_model,
+        "tag": tag,
+    }
+
+
 def _trace_bindings(
     clause: TraceClause | None,
     event: RuntimeEvent,
@@ -393,6 +417,8 @@ def _evaluate_condition_expr(
     match_root: dict[str, Any],
     trace_window: list[RuntimeEvent],
 ) -> bool:
+    if str(expr or "").strip() == "*":
+        return True
     tokens = _tokenize_condition_expr(expr)
     if not tokens:
         return True

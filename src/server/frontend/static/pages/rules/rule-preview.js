@@ -43,7 +43,7 @@
     const hasToolPhase = utils.hasToolPhase ? utils.hasToolPhase(normalized) : false;
     if (
       normalized.name
-      && normalized.conditionItems.length
+      && (normalized.conditionAlwaysMatch || normalized.conditionItems.length)
       && normalized.action
       && normalized.phases?.length
       && (!hasToolPhase || normalized.path || normalized.onClause)

@@ -661,10 +661,9 @@ class FrontendMockBackend:
                 any(phase in FrontendMockBackend._TOOL_PHASES for phase in phases)
                 and not any(line.startswith(("TRACE:", "ON:")) for line in lines)
             ):
-                errors.append({
-                    "message": f"Rule block {index} is missing required line(s): ON or TRACE.",
+                warnings.append({
+                    "message": f"Rule block {index} has no ON/TRACE match; add one for precise targeting.",
                 })
-                continue
 
             tool_pattern = FrontendMockBackend._extract_tool_pattern(normalized)
             if tool_pattern == "*" and any(phase in FrontendMockBackend._TOOL_PHASES for phase in phases):

@@ -2247,6 +2247,126 @@ textarea {
   justify-content: start;
 }
 
+.phase-multiselect {
+  position: relative;
+  width: 260px;
+}
+
+.phase-multiselect-button {
+  width: 100%;
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 18px;
+  border: 1px solid #dbe4d2;
+  border-radius: 18px;
+  background: #ffffff;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+}
+
+.phase-multiselect-button:hover {
+  border-color: #a9c39a;
+}
+
+.phase-multiselect-arrow {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.phase-multiselect-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 100%;
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid #dbe4d2;
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: 0 18px 36px rgba(26, 54, 23, 0.12);
+  z-index: 10;
+}
+
+.phase-multiselect-menu[hidden] {
+  display: none;
+}
+
+.phase-multiselect-menu label {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.phase-multiselect-option {
+  width: 100%;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 16px;
+  padding: 4px 0;
+}
+
+.phase-multiselect-option span {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  text-align: left;
+  justify-self: start;
+}
+
+.phase-multiselect-option input {
+  flex: 0 0 auto;
+  margin: 0;
+  justify-self: end;
+}
+
+.phase-multiselect-button,
+#rule-on-input {
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+#rule-on-input option {
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.tool-single-select-menu {
+  gap: 0;
+}
+
+.tool-single-select-option {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+
+.tool-single-select-option:hover {
+  background: #f5f8f2;
+}
+
+.tool-single-select-check {
+  min-width: 16px;
+  text-align: right;
+  color: #2f6f3d;
+  font-size: 14px;
+  font-weight: 700;
+}
+
 #on-field .on-filter-help-row .subtle {
   line-height: 1;
 }

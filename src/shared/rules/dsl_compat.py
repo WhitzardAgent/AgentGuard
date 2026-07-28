@@ -199,7 +199,7 @@ def _condition_field(path: str) -> str | None:
         return None
     if re.match(r"^[A-Za-z_][A-Za-z0-9_-]*\.", normalized):
         return normalized
-    if normalized.startswith(("principal.", "tool.", "target.", "payload.")):
+    if normalized.startswith(("principal.", "tool.", "target.", "payload.", "model.")):
         return normalized
     return None
 
@@ -241,6 +241,8 @@ def _supports_runtime(fields: dict[str, str]) -> bool:
     on_line = str(fields.get("ON", "")).strip()
     if on_line and "tool_call" not in on_line:
         return False
+    if condition == "*":
+        return True
     unsupported_tokens = (
         "history_arg(",
         "history_result(",
@@ -335,11 +337,7 @@ def parse_legacy_rules(source: str) -> tuple[list[PolicyRule], DSLCompatReport]:
             continue
 
         phases = _phase_names(fields)
-        has_tool_phases = any(phase in _TOOL_PHASES for phase in phases)
-        if has_tool_phases and not fields.get("ON") and not fields.get("TRACE"):
-            report.errors.append({"message": f"Rule block {index} is missing required line(s): ON or TRACE."})
-            continue
-        if not has_tool_phases and not fields.get("ON") and not fields.get("TRACE"):
+        if not fields.get("ON") and not fields.get("TRACE"):
             report.warnings.append(
                 {"message": f"Rule block {index} has no ON/TRACE match; add one for precise targeting."}
             )

@@ -229,6 +229,8 @@ def _parse_conditions(cond_text: str) -> tuple[list[RuleCondition], list[dict[st
     `PolicyRule.matches()` evaluates `condition_expr` itself, not this list.
     """
     raw: list[dict[str, Any]] = []
+    if str(cond_text or "").strip() == "*":
+        return [], [{"expr": "*"}]
     parts = re.split(r"\s+AND\s+", cond_text, flags=re.IGNORECASE)
     for part in parts:
         expr = part.strip()
@@ -266,14 +268,8 @@ def parse_source(source: str) -> tuple[list[ParsedRule], CheckReport]:
         if not phases:
             report.errors.append({"message": f"Rule block {index}: PHASES must include at least one supported phase."})
             continue
-        has_tool_phases = _has_tool_phases(phases)
         has_formal_match = any(ln.startswith(("ON:", "TRACE:")) for ln in lines)
-        if has_tool_phases and not has_formal_match:
-            report.errors.append(
-                {"message": f"Rule block {index} is missing required line(s): ON or TRACE."}
-            )
-            continue
-        if not has_tool_phases and not has_formal_match:
+        if not has_formal_match:
             report.warnings.append(
                 {"message": f"Rule block {index} has no ON/TRACE match; add one for precise targeting."}
             )

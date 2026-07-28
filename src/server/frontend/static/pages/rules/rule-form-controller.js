@@ -26,7 +26,13 @@
       rulePromptInput,
       ruleDegradeTargetInput,
       ruleDescriptionInput,
+      rulePhaseButton,
+      rulePhaseSummary,
+      rulePhaseMenu,
       rulePhaseInputs,
+      ruleOnButton,
+      ruleOnSummary,
+      ruleOnMenu,
       ruleOnInput,
       ruleSeverityInput,
       ruleCategoryInput,
@@ -94,6 +100,9 @@
     }
 
     function toolKeyForName(toolName, catalog = currentToolCatalog()) {
+      if (String(toolName || "").trim() === "*") {
+        return "*";
+      }
       if (typeof toolCatalogHelpers.toolKeyForName === "function") {
         return toolCatalogHelpers.toolKeyForName(toolName, catalog);
       }
@@ -107,11 +116,17 @@
 
     function toolNameForKey(toolKey, catalog = currentToolCatalog()) {
       if (typeof toolCatalogHelpers.toolNameForKey === "function") {
+        if (String(toolKey || "").trim() === "*") {
+          return "*";
+        }
         return toolCatalogHelpers.toolNameForKey(toolKey, catalog, toolData?.findToolByKey);
       }
       const normalizedKey = String(toolKey || "").trim();
       if (!normalizedKey) {
         return "";
+      }
+      if (normalizedKey === "*") {
+        return "*";
       }
       const match = typeof toolData?.findToolByKey === "function"
         ? toolData.findToolByKey(Array.isArray(catalog) ? catalog : [], normalizedKey)
@@ -140,13 +155,22 @@
       return selectedRulePhases().some((phase) => phase === "tool_before" || phase === "tool_after");
     }
 
-    function hasCurrentCallFilter() {
-      const selectedOnTool = String(ruleOnInput.value || "").trim();
-      return Boolean(onClause.buildOnClause(toolNameForKey(selectedOnTool)));
+    function phaseSummaryText() {
+      const selected = selectedRulePhases();
+      if (!selected.length) {
+        return copy("rules-select-phases", "Select runtime phases");
+      }
+      if (selected.length === (rulePhaseInputs || []).length) {
+        return copy("rules-all-phases", "All runtime phases");
+      }
+      if (selected.length <= 2) {
+        return selected.join(", ");
+      }
+      return copy("rules-phase-selected", "{count} phases selected", { count: selected.length });
     }
 
     function currentCallToolKey() {
-      return String(ruleOnInput?.value || "").trim();
+      return "";
     }
 
     function currentCallSubtypeHint() {
@@ -167,20 +191,12 @@
       return hasToolPhaseSelected() && mode === "on";
     }
 
-    function modeShowsOnOptions() {
-      return true;
-    }
-
-    function showsToolFilterOptions() {
-      return hasToolPhaseSelected();
-    }
-
     function allowedConditionSourceTypes(pathState = pathBuilder.getValue()) {
       const nextAllowed = [];
       if (modeNeedsTrace() && hasFinishedTracePath(pathState)) {
         nextAllowed.push("trace");
       }
-      if (!hasToolPhaseSelected() || (modeNeedsOn() && hasCurrentCallFilter())) {
+      if (!hasToolPhaseSelected() || modeNeedsOn()) {
         nextAllowed.push("context");
       }
       return nextAllowed;
@@ -241,18 +257,17 @@
 
     function syncBuilderUI() {
       setFieldVisibility(pathField, modeNeedsTrace());
-      setFieldVisibility(onField, modeShowsOnOptions());
-      setFieldVisibility(onToolFilterRow, showsToolFilterOptions());
+      setFieldVisibility(onField, true);
+      if (rulePhaseSummary) {
+        rulePhaseSummary.textContent = phaseSummaryText();
+      }
+      if (rulePhaseButton) {
+        rulePhaseButton.setAttribute("aria-expanded", rulePhaseMenu?.hidden ? "false" : "true");
+        rulePhaseButton.setAttribute("title", phaseSummaryText());
+      }
       if (traceOnFieldHint) {
         traceOnFieldHint.hidden = !modeNeedsTrace();
       }
-
-      const currentValue = String(ruleOnInput.value || "").trim();
-      const optionCount = Array.isArray(ruleOnInput.options) || typeof ruleOnInput.options?.length === "number"
-        ? ruleOnInput.options.length
-        : 0;
-      ruleOnInput.disabled = !showsToolFilterOptions() || (!currentValue && optionCount <= 1);
-
       syncConditionLock(pathBuilder.getValue());
     }
 
@@ -272,6 +287,51 @@
       }
     }
 
+    function renderOnToolMenu(catalog = currentToolCatalog(), selectedTool = String(ruleOnInput?.value || "").trim()) {
+      if (!ruleOnMenu) {
+        return;
+      }
+      const tools = typeof toolCatalogHelpers.sortCatalogByDisplayName === "function"
+        ? toolCatalogHelpers.sortCatalogByDisplayName(catalog).filter((item) => String(item?.tool_key || "").trim())
+        : (Array.isArray(catalog) ? catalog : []);
+
+      ruleOnMenu.innerHTML = "";
+      const options = [
+        { value: "", label: onToolEmptyLabel() },
+        { value: "*", label: onToolAllLabel() },
+        ...tools.map((tool) => ({
+          value: String(tool.tool_key || "").trim(),
+          label: toolDisplayName(tool, catalog),
+        })),
+      ];
+      const dedupedOptions = options.filter((option, index, source) => (
+        source.findIndex((item) => item.value === option.value) === index
+      ));
+
+      dedupedOptions.forEach((option) => {
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "phase-multiselect-option tool-single-select-option";
+        row.setAttribute("data-value", option.value);
+        row.setAttribute("aria-pressed", option.value === selectedTool ? "true" : "false");
+
+        const text = document.createElement("span");
+        text.textContent = option.label;
+        row.appendChild(text);
+
+        row.addEventListener("click", () => {
+          ruleOnInput.value = option.value;
+          if (ruleOnMenu) {
+            ruleOnMenu.hidden = true;
+          }
+          syncBuilderUI();
+          handleRuleFieldInput();
+        });
+
+        ruleOnMenu.appendChild(row);
+      });
+    }
+
     function renderToolSelectOptions(select, catalog = currentToolCatalog(), selectedTool = "", { emptyLabel, allowEmpty = false } = {}) {
       if (!select) {
         return;
@@ -283,11 +343,11 @@
       select.innerHTML = "";
 
       const placeholder = document.createElement("option");
-      placeholder.value = "";
+      placeholder.value = allowEmpty ? "" : "*";
       placeholder.textContent = tools.length ? (emptyLabel || copy("rules-select-tool", "Select tool")) : copy("rules-no-tools", "No tools available");
-      placeholder.disabled = !allowEmpty;
-      placeholder.hidden = !allowEmpty;
-      placeholder.selected = !selectedTool;
+      placeholder.disabled = false;
+      placeholder.hidden = false;
+      placeholder.selected = !selectedTool || (!allowEmpty && selectedTool === "*");
       select.appendChild(placeholder);
 
       tools.forEach((tool) => {
@@ -298,7 +358,7 @@
         select.appendChild(option);
       });
 
-      if (selectedTool && !tools.some((tool) => tool.tool_key === selectedTool)) {
+      if (selectedTool && selectedTool !== "*" && !tools.some((tool) => tool.tool_key === selectedTool)) {
         const fallback = document.createElement("option");
         fallback.value = selectedTool;
         fallback.textContent = `${toolNameForKey(selectedTool, catalog) || selectedTool} (unavailable)`;
@@ -307,8 +367,42 @@
       }
     }
 
-    function renderOnToolOptions(catalog = toolData?.loadToolCatalog?.() || [], selectedTool = String(ruleOnInput.value || "").trim()) {
-      renderToolSelectOptions(ruleOnInput, catalog, selectedTool, { emptyLabel: copy("rules-select-tool-optional", "Select tool (optional)"), allowEmpty: true });
+    function renderOnToolOptions(catalog = toolData?.loadToolCatalog?.() || [], selectedTool = String(ruleOnInput?.value || "").trim()) {
+      if (ruleOnInput) {
+        const tools = typeof toolCatalogHelpers.sortCatalogByDisplayName === "function"
+          ? toolCatalogHelpers.sortCatalogByDisplayName(catalog).filter((item) => String(item?.tool_key || "").trim())
+          : (Array.isArray(catalog) ? catalog : []);
+        ruleOnInput.innerHTML = "";
+
+        const noneOption = document.createElement("option");
+        noneOption.value = "";
+        noneOption.textContent = onToolEmptyLabel();
+        noneOption.selected = !selectedTool;
+        ruleOnInput.appendChild(noneOption);
+
+        const allOption = document.createElement("option");
+        allOption.value = "*";
+        allOption.textContent = onToolAllLabel();
+        allOption.selected = selectedTool === "*";
+        ruleOnInput.appendChild(allOption);
+
+        tools.forEach((tool) => {
+          const option = document.createElement("option");
+          option.value = tool.tool_key;
+          option.textContent = toolDisplayName(tool, catalog);
+          option.selected = selectedTool === tool.tool_key;
+          ruleOnInput.appendChild(option);
+        });
+
+        if (selectedTool && selectedTool !== "*" && !tools.some((tool) => tool.tool_key === selectedTool)) {
+          const fallback = document.createElement("option");
+          fallback.value = selectedTool;
+          fallback.textContent = `${toolNameForKey(selectedTool, catalog) || selectedTool} (unavailable)`;
+          fallback.selected = true;
+          ruleOnInput.appendChild(fallback);
+        }
+      }
+      renderOnToolMenu(catalog, String(ruleOnInput.value || selectedTool || "").trim());
       syncBuilderUI();
     }
 
@@ -361,7 +455,7 @@
         description: ruleDescriptionInput.value.trim(),
         prompt: rulePromptInput.value.trim(),
         phases: selectedRulePhases(),
-        onToolKey: String(ruleOnInput.value || "").trim(),
+        onToolKey: "",
         severity: ruleSeverityInput.value,
         category: ruleCategoryInput.value.trim(),
         reason: ruleReasonInput.value.trim(),
@@ -378,9 +472,7 @@
 
     function ruleFromFormState(formState) {
       const effectivePath = normalizedPathForMode(formState);
-      const effectiveOnClause = hasToolPhaseIn(formState.phases)
-        ? onClause.buildOnClause(toolNameForKey(formState.onToolKey))
-        : "";
+      const effectiveOnClause = "";
       return {
         name: formState.name,
         entryMode: formState.entryMode,
@@ -388,6 +480,7 @@
         path: effectivePath.path,
         pathSlots: effectivePath.pathSlots,
         condition: formState.condition.expression,
+        conditionAlwaysMatch: Boolean(formState.condition.alwaysMatch),
         conditionItems: formState.condition.items,
         conditionTree: formState.condition.tree || null,
         symbolToolMap: formState.condition.symbolToolMap,
@@ -406,14 +499,13 @@
 
     function formStateFromRule(rule) {
       const normalized = model.normalizeRule(rule);
-      const onParts = onClause.parseOnClauseParts(normalized.onClause);
       return {
         name: normalized.name,
         action: normalized.action,
         description: normalized.description,
         prompt: normalized.prompt,
         phases: normalized.phases || [],
-        onToolKey: toolKeyForName(onParts.toolPattern),
+        onToolKey: "",
         severity: normalized.severity,
         category: normalized.category,
         reason: normalized.reason,
@@ -431,6 +523,7 @@
           savedConditions: normalized.conditionSavedConditions || [],
           currentConditionId: normalized.conditionCurrentId || "",
           expression: normalized.condition,
+          alwaysMatch: Boolean(normalized.conditionAlwaysMatch),
         },
       };
     }
@@ -444,7 +537,6 @@
       (rulePhaseInputs || []).forEach((input) => {
         input.checked = Array.isArray(formState.phases) && formState.phases.includes(String(input.value || "").trim());
       });
-      renderOnToolOptions(toolData?.loadToolCatalog?.(selectedAgentId) || [], formState.onToolKey || "");
       ruleSeverityInput.value = formState.severity || "";
       ruleCategoryInput.value = formState.category || "";
       ruleReasonInput.value = formState.reason || "";
@@ -457,6 +549,8 @@
         tree: formState.condition?.tree || null,
         savedConditions: formState.condition?.savedConditions || [],
         currentConditionId: formState.condition?.currentConditionId || "",
+        expression: formState.condition?.expression || "",
+        alwaysMatch: Boolean(formState.condition?.alwaysMatch),
       });
       syncConditionLock(pathBuilder.getValue());
       syncWizardUI();
@@ -476,9 +570,6 @@
       }
       if (modeNeedsTrace() && !hasFinishedTracePath()) {
         return { ok: false, message: "Please finish the TRACE builder before continuing." };
-      }
-      if (modeNeedsOn() && !hasCurrentCallFilter()) {
-        return { ok: false, message: "Please configure the ON filter before continuing." };
       }
       return { ok: true, message: "" };
     }
@@ -628,11 +719,6 @@
       } else {
         rulePreviewBlock.textContent = preview.buildPreview(rule);
       }
-      const shouldSyncOnInputs = rule.entryMode === "on" || Boolean(String(rule.onClause || "").trim());
-      if (shouldSyncOnInputs) {
-        const onParts = onClause.parseOnClauseParts(onClause.deriveOnClause(model.normalizeRule(rule)));
-        ruleOnInput.value = toolKeyForName(onParts.toolPattern);
-      }
       const pathState = pathBuilder.getValue();
       const finished = pathState.finished;
       pathFinishButton?.classList?.toggle("primary", finished);
@@ -655,7 +741,6 @@
       (rulePhaseInputs || []).forEach((input) => {
         input.checked = false;
       });
-      renderOnToolOptions(toolData?.loadToolCatalog?.(selectedAgentId) || [], "");
       renderDegradeTargetOptions(toolData?.loadToolCatalog?.(selectedAgentId) || [], "");
       setMatchingMode("trace");
       conditionBuilder.clear();
@@ -717,9 +802,16 @@
       });
       ruleActionInput.addEventListener("input", handleRuleFieldInput);
       ruleDegradeTargetInput.addEventListener("change", handleRuleFieldInput);
-      ruleOnInput.addEventListener("change", () => {
+      ruleOnInput?.addEventListener("change", () => {
         syncBuilderUI();
         handleRuleFieldInput();
+      });
+      ruleOnButton?.addEventListener("click", () => {
+        if (!ruleOnMenu || ruleOnButton?.disabled) {
+          return;
+        }
+        ruleOnMenu.hidden = !ruleOnMenu.hidden;
+        syncBuilderUI();
       });
       ruleSeverityInput.addEventListener("change", handleRuleFieldInput);
       (rulePhaseInputs || []).forEach((input) => {
@@ -727,6 +819,13 @@
           syncBuilderUI();
           handleRuleFieldInput();
         });
+      });
+      rulePhaseButton?.addEventListener("click", () => {
+        if (!rulePhaseMenu) {
+          return;
+        }
+        rulePhaseMenu.hidden = !rulePhaseMenu.hidden;
+        syncBuilderUI();
       });
 
       (matchModeInputs || []).forEach((input) => {
@@ -784,8 +883,13 @@
     }
 
     function initialize() {
-      renderOnToolOptions();
       renderDegradeTargetOptions();
+      if (rulePhaseMenu) {
+        rulePhaseMenu.hidden = true;
+      }
+      if (ruleOnMenu) {
+        ruleOnMenu.hidden = true;
+      }
       syncActionUI();
       syncBuilderUI();
       syncConditionLock(pathBuilder.getValue());

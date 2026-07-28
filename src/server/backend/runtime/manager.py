@@ -526,6 +526,7 @@ class RuntimeManager:
         if ctx_dict:
             event.context = context
         self._attach_identity_to_event(event, context)
+        self._inject_agent_location_tag(event, context)
         self._inject_console_tool_labels(event, context)
         cached_entries = list(request.get("client_cached_entries") or [])
         request_trace_window = _merge_event_window(
@@ -924,6 +925,37 @@ class RuntimeManager:
         metadata["principal"] = principal
         event.metadata = metadata
 
+    @staticmethod
+    def _inject_agent_location_tag(
+        event: RuntimeEvent,
+        context: RuntimeContext,
+    ) -> None:
+        agent_id = str(context.agent_id or event.context.agent_id or "").strip()
+        if not agent_id:
+            return
+        try:
+            from backend.agents.store import AgentStore  # noqa: PLC0415
+        except Exception:
+            return
+        try:
+            record = AgentStore().get_agent(agent_id)
+        except Exception:
+            return
+        tag = _normalize_runtime_location_tag(getattr(record, "location_tag", None))
+        context_metadata = dict(context.metadata or {})
+        if tag is None:
+            context_metadata.pop("location_tag", None)
+        else:
+            context_metadata["location_tag"] = tag
+        context.metadata = context_metadata
+        event.context = context
+        event_metadata = dict(event.metadata or {})
+        if tag is None:
+            event_metadata.pop("location_tag", None)
+        else:
+            event_metadata["location_tag"] = tag
+        event.metadata = event_metadata
+
     def _bind_rule_based_plugins(self) -> None:
         self._bind_rule_based_plugins_for(self.plugins, policy=self.policy)
 
@@ -1019,6 +1051,7 @@ def _audit_safe_plugin_result(plugin_result: dict[str, Any]) -> dict[str, Any]:
     # Normalize through JSON to break shared references before audit/logging.
     return json.loads(json.dumps(plugin_result))
 
+
 def _decision_from_plugin_result(check: CheckResult) -> GuardDecision:
     if check.is_final and check.decision_candidate is not None:
         return check.decision_candidate
@@ -1028,6 +1061,13 @@ def _decision_from_plugin_result(check: CheckResult) -> GuardDecision:
         risk_signals=list(check.risk_signals),
         metadata={"explanation": "no final plugin decision"},
     )
+
+
+def _normalize_runtime_location_tag(value: Any) -> str | None:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"local", "domestic", "overseas"}:
+        return normalized
+    return None
 
 
 def _client_health_url(session: dict[str, Any]) -> str | None:

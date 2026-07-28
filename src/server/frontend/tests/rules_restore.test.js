@@ -288,6 +288,35 @@ test("parsePublishedRuleSource restores IN, NOT IN and MATCHES operators", () =>
   assert.equal(restored.conditionItems[2].value, "denylist.roles");
 });
 
+test("parsePublishedRuleSource restores model tag context conditions", () => {
+  const restored = parsePublishedRuleSource([
+    "RULE: review_domestic_model",
+    "PHASES: llm_before",
+    'CONDITION: model.tag == "domestic"',
+    "POLICY: HUMAN_CHECK",
+  ].join("\n"));
+
+  assert.ok(restored);
+  assert.equal(restored.conditionItems[0].sourceType, "context");
+  assert.equal(restored.conditionItems[0].contextPrefix, "model");
+  assert.equal(restored.conditionItems[0].contextField, "model.tag");
+  assert.equal(restored.conditionItems[0].contextPath, "model.tag");
+  assert.equal(restored.conditionItems[0].value, "domestic");
+});
+
+test("parsePublishedRuleSource restores unconditional always-match condition", () => {
+  const restored = parsePublishedRuleSource([
+    "RULE: always_before_llm",
+    "PHASES: llm_before",
+    "CONDITION: *",
+    "POLICY: ALLOW",
+  ].join("\n"));
+
+  assert.ok(restored);
+  assert.equal(restored.conditionAlwaysMatch, true);
+  assert.equal(restored.conditionItems.length, 0);
+});
+
 test("parsePublishedRuleSource restores llm_check prompt metadata", () => {
   const restored = parsePublishedRuleSource([
     "RULE: review_external_http",

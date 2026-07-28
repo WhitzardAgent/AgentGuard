@@ -33,11 +33,24 @@
   }
 
   function normalizeRuleCondition(rule, symbols, options = {}) {
+    if (Boolean(rule?.conditionAlwaysMatch) || String(rule?.condition || "").trim() === "*") {
+      return {
+        condition: "*",
+        conditionAlwaysMatch: true,
+        conditionItems: [],
+        symbolToolMap: {},
+        conditionTree: rule?.conditionTree || null,
+        conditionSavedConditions: Array.isArray(rule?.conditionSavedConditions) ? rule.conditionSavedConditions : [],
+        conditionCurrentId: String(rule?.conditionCurrentId || "").trim(),
+      };
+    }
     const normalizedCondition = typeof normalizeConditionItems === "function"
       ? normalizeConditionItems(
         {
           items: rule?.conditionItems || (rule?.conditionState ? [rule.conditionState] : []),
           tree: rule?.conditionTree || null,
+          expression: rule?.condition || "",
+          alwaysMatch: rule?.conditionAlwaysMatch,
         },
         symbols.length ? symbols : ["A"],
         options,
@@ -49,9 +62,12 @@
       };
 
     return {
-      condition: normalizedCondition.items
+      condition: normalizedCondition.alwaysMatch
+        ? "*"
+        : normalizedCondition.items
         .map((item, index) => index === 0 ? item.expression : `${item.connector} ${item.expression}`)
         .join(" "),
+      conditionAlwaysMatch: Boolean(normalizedCondition.alwaysMatch),
       conditionItems: normalizedCondition.items.map((item, index) => ({
         conditionId: item.conditionId || "",
         confirmed: Boolean(item.confirmed),
