@@ -28,7 +28,8 @@
   };
   const PLUGIN_PHASE_ORDER = ["llm_before", "llm_after", "tool_before", "tool_after", "global"];
   const PLUGIN_SCOPES = new Set(["client", "server"]);
-  const HIDDEN_PLUGIN_NAMES = new Set(["demo_tripwire", "llm_output", "tool_invoke", "tool_result"]);
+  const HIDDEN_PLUGIN_NAMES = new Set(["demo_tripwire", "llm_output", "tool_invoke", "tool_result", "rule_based_plugin"]);
+  const INTERNAL_SERVER_PLUGIN_NAMES = new Set(["rule_based_plugin"]);
 
   function buildQuery(params) {
     const search = new URLSearchParams();
@@ -60,11 +61,12 @@
   }
 
   function normalizeAgentPluginConfig(item) {
+    const rawConfig = item?.plugin_config && typeof item.plugin_config === "object"
+      ? item.plugin_config
+      : null;
     return {
       agent_id: String(item?.agent_id || "").trim(),
-      plugin_config: item?.plugin_config && typeof item.plugin_config === "object"
-        ? item.plugin_config
-        : null,
+      plugin_config: rawConfig ? sanitizePluginConfig(rawConfig) : null,
       config_source: String(item?.config_source || "none").trim() || "none",
     };
   }
@@ -98,9 +100,29 @@
         ? [...phaseConfig.client]
         : (Array.isArray(phaseConfig?.local) ? [...phaseConfig.local] : []),
       server: Array.isArray(phaseConfig?.server)
-        ? [...phaseConfig.server]
-        : (Array.isArray(phaseConfig?.remote) ? [...phaseConfig.remote] : []),
+        ? phaseConfig.server.filter((spec) => !INTERNAL_SERVER_PLUGIN_NAMES.has(pluginNameFromSpec(spec)))
+        : (
+          Array.isArray(phaseConfig?.remote)
+            ? phaseConfig.remote.filter((spec) => !INTERNAL_SERVER_PLUGIN_NAMES.has(pluginNameFromSpec(spec)))
+            : []
+        ),
     };
+  }
+
+  function sanitizePluginConfig(config) {
+    const phases = config?.phases;
+    if (!phases || typeof phases !== "object") {
+      return null;
+    }
+    const sanitizedPhases = {};
+    Object.entries(phases).forEach(([phase, phaseConfig]) => {
+      const normalized = normalizePhaseConfig(phaseConfig);
+      if (!normalized.client.length && !normalized.server.length) {
+        return;
+      }
+      sanitizedPhases[phase] = normalized;
+    });
+    return { phases: sanitizedPhases };
   }
 
   function normalizePluginScope(scope) {
@@ -123,9 +145,6 @@
 
   function primaryPluginName(names) {
     const activeNames = uniquePluginNames(names);
-    if (activeNames.includes("rule_based_plugin")) {
-      return "rule_based_plugin";
-    }
     return activeNames.find((name) => name !== "tool_invoke") || activeNames[0] || "";
   }
 
@@ -189,7 +208,7 @@
       .filter((option) => option.name);
     const catalogByName = new Map(catalog.map((option) => [option.name, option]));
     const manageableNames = new Set(catalog.map((option) => option.name));
-    const baseConfig = existingConfig && typeof existingConfig === "object" ? existingConfig : null;
+    const baseConfig = existingConfig && typeof existingConfig === "object" ? sanitizePluginConfig(existingConfig) : null;
     const basePhases = baseConfig?.phases && typeof baseConfig.phases === "object" ? baseConfig.phases : {};
     const existingSpecs = existingPluginSpecsByName(basePhases, targetScope);
     const phases = {};

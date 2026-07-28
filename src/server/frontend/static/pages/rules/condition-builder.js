@@ -31,6 +31,14 @@
       { value: "principal.role", label: "user.role", kind: "enum", enumValues: principalRoleValues, operators: ["==", "!=", "IN", "NOT IN"] },
       { value: "principal.trust_level", label: "user.trust_level", kind: "number", operators: ["==", "!=", ">", ">=", "<", "<="] },
     ],
+    payload: [
+      { value: "payload.messages", label: "payload.messages", kind: "text", operators: ["==", "!=", "MATCHES"] },
+      { value: "payload.output", label: "payload.output", kind: "text", operators: ["==", "!=", "IN", "NOT IN", "MATCHES", "contains"] },
+      { value: "payload.thought", label: "payload.thought", kind: "text", operators: ["==", "!=", "IN", "NOT IN", "MATCHES", "contains"] },
+      { value: "payload.final_output", label: "payload.final_output", kind: "text", operators: ["==", "!=", "IN", "NOT IN", "MATCHES", "contains"] },
+      { value: "payload.tool_name", label: "payload.tool_name", kind: "text", operators: ["==", "!=", "IN", "NOT IN"] },
+      { value: "payload.result", label: "payload.result", kind: "text", operators: ["==", "!=", "IN", "NOT IN", "MATCHES", "contains"] },
+    ],
     mcp: [
       { value: "mcp.name", label: "mcp.name", kind: "text", operators: ["==", "!=", "IN", "NOT IN"] },
       { value: "mcp.tool_name", label: "mcp.tool_name", kind: "text", operators: ["==", "!=", "IN", "NOT IN"] },
@@ -48,6 +56,7 @@
 
   const contextPropertyGroups = [
     { value: "tool", label: "tool" },
+    { value: "payload", label: "payload" },
     { value: "mcp", label: "mcp" },
     { value: "principal", label: "user" }
   ];
@@ -63,6 +72,15 @@
     { value: "mcp.unique_id", label: "unique_id" },
     { value: "mcp.transport", label: "transport" },
     { value: "mcp.remote", label: "remote" },
+  ];
+
+  const payloadContextSubpropertyGroups = [
+    { value: "payload.messages", label: "messages" },
+    { value: "payload.output", label: "output" },
+    { value: "payload.thought", label: "thought" },
+    { value: "payload.final_output", label: "final_output" },
+    { value: "payload.tool_name", label: "tool_name" },
+    { value: "payload.result", label: "result" },
   ];
 
   const wizardStages = ["source", "symbol", "property", "comparison", "complete"];
@@ -1495,6 +1513,25 @@
       if (prefix === "principal") {
         detailSection.appendChild(createField("Sub-property", createSelect(
           [{ value: "", label: "Select sub-property" }, ...principalContextSubpropertyGroups],
+          item.contextField,
+          (event) => {
+            const nextField = event.target.value;
+            updateDraft({
+              contextField: nextField,
+              contextFieldName: "",
+              contextPath: buildContextPath(nextField, ""),
+              syntaxField: "",
+              operator: "",
+              value: "",
+            });
+          },
+        )));
+        return;
+      }
+
+      if (prefix === "payload") {
+        detailSection.appendChild(createField("Sub-property", createSelect(
+          [{ value: "", label: "Select sub-property" }, ...payloadContextSubpropertyGroups],
           item.contextField,
           (event) => {
             const nextField = event.target.value;

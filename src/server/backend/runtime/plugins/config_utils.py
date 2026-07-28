@@ -5,6 +5,7 @@ import copy
 from typing import Any
 
 PHASE_ORDER = ("llm_before", "llm_after", "tool_before", "tool_after", "global")
+_INTERNAL_SERVER_PLUGIN_NAMES = {"rule_based_plugin"}
 
 
 def normalize_plugin_config(
@@ -44,8 +45,8 @@ def normalize_phase_config(value: Any) -> dict[str, list[Any]]:
     if not isinstance(client, list) or not isinstance(server, list):
         raise ValueError("plugin phase config must include list-valued 'client' and 'server'")
     return {
-        "client": copy.deepcopy(client),
-        "server": copy.deepcopy(server),
+        "client": _sanitize_plugin_specs(client, scope="client"),
+        "server": _sanitize_plugin_specs(server, scope="server"),
     }
 
 
@@ -168,6 +169,16 @@ def _plugin_name(spec: Any) -> str:
             if isinstance(value, str) and value.strip():
                 return value.strip()
     return ""
+
+
+def _sanitize_plugin_specs(specs: list[Any], *, scope: str) -> list[Any]:
+    sanitized: list[Any] = []
+    for spec in specs:
+        name = _plugin_name(spec)
+        if scope == "server" and name in _INTERNAL_SERVER_PLUGIN_NAMES:
+            continue
+        sanitized.append(copy.deepcopy(spec))
+    return sanitized
 
 
 def _hydrate_plugin_spec(spec: Any, base_spec: Any) -> Any:

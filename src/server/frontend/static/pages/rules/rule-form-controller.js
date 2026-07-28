@@ -26,7 +26,7 @@
       rulePromptInput,
       ruleDegradeTargetInput,
       ruleDescriptionInput,
-      ruleOnSubtypeInput,
+      rulePhaseInputs,
       ruleOnInput,
       ruleSeverityInput,
       ruleCategoryInput,
@@ -126,33 +126,48 @@
       return Boolean(pathState?.finished && Array.isArray(pathState?.pathSlots) && pathState.pathSlots.length);
     }
 
+    function selectedRulePhases() {
+      return Array.isArray(rulePhaseInputs)
+        ? rulePhaseInputs
+          .filter((input) => input.checked)
+          .map((input) => String(input.value || "").trim())
+          .filter(Boolean)
+        : [];
+    }
+
+    function hasToolPhaseSelected() {
+      return selectedRulePhases().some((phase) => phase === "tool_before" || phase === "tool_after");
+    }
+
     function hasCurrentCallFilter() {
-      const selectedOnSubtype = String(ruleOnSubtypeInput?.value || "").trim();
       const selectedOnTool = String(ruleOnInput.value || "").trim();
-      return Boolean(onClause.buildOnClause(selectedOnSubtype, toolNameForKey(selectedOnTool)));
+      return Boolean(onClause.buildOnClause(toolNameForKey(selectedOnTool)));
     }
 
     function currentCallToolKey() {
       return String(ruleOnInput?.value || "").trim();
     }
 
-    function currentCallSubtype() {
-      return String(ruleOnSubtypeInput?.value || "").trim();
+    function currentCallSubtypeHint() {
+      return selectedRulePhases().includes("tool_after") ? "completed" : "";
+    }
+
+    function hasToolPhaseIn(phases) {
+      return (Array.isArray(phases) ? phases : []).some((phase) => phase === "tool_before" || phase === "tool_after");
     }
 
     function modeNeedsTrace() {
       const mode = matchingMode();
-      return mode === "trace";
+      return hasToolPhaseSelected() && mode === "trace";
     }
 
     function modeNeedsOn() {
       const mode = matchingMode();
-      return mode === "on";
+      return hasToolPhaseSelected() && mode === "on";
     }
 
     function modeShowsOnOptions() {
-      const mode = matchingMode();
-      return mode === "on" || mode === "trace";
+      return hasToolPhaseSelected();
     }
 
     function allowedConditionSourceTypes(pathState = pathBuilder.getValue()) {
@@ -160,7 +175,7 @@
       if (modeNeedsTrace() && hasFinishedTracePath(pathState)) {
         nextAllowed.push("trace");
       }
-      if (modeNeedsOn() && hasCurrentCallFilter()) {
+      if (!hasToolPhaseSelected() || (modeNeedsOn() && hasCurrentCallFilter())) {
         nextAllowed.push("context");
       }
       return nextAllowed;
@@ -188,7 +203,7 @@
       defaultMode: "step",
       pathSymbols: currentPathSymbols(),
       currentCallToolKey: currentCallToolKey(),
-      currentCallSubtype: currentCallSubtype(),
+      currentCallSubtype: currentCallSubtypeHint(),
       locked: allowedConditionSourceTypes(pathBuilder.getValue()).length === 0,
       allowedSourceTypes: allowedConditionSourceTypes(pathBuilder.getValue()),
       onChange() {
@@ -230,10 +245,7 @@
       const optionCount = Array.isArray(ruleOnInput.options) || typeof ruleOnInput.options?.length === "number"
         ? ruleOnInput.options.length
         : 0;
-      ruleOnInput.disabled = !currentValue && optionCount <= 1;
-      if (ruleOnSubtypeInput) {
-        ruleOnSubtypeInput.disabled = false;
-      }
+      ruleOnInput.disabled = !modeShowsOnOptions() || (!currentValue && optionCount <= 1);
 
       syncConditionLock(pathBuilder.getValue());
     }
@@ -244,7 +256,7 @@
         conditionBuilder.setCurrentCallToolKey(currentCallToolKey());
       }
       if (typeof conditionBuilder.setCurrentCallSubtype === "function") {
-        conditionBuilder.setCurrentCallSubtype(currentCallSubtype());
+        conditionBuilder.setCurrentCallSubtype(currentCallSubtypeHint());
       }
       if (typeof conditionBuilder.setAllowedSourceTypes === "function") {
         conditionBuilder.setAllowedSourceTypes(allowedSources);
@@ -342,7 +354,7 @@
         action: ruleActionInput.value || "",
         description: ruleDescriptionInput.value.trim(),
         prompt: rulePromptInput.value.trim(),
-        onSubtype: String(ruleOnSubtypeInput?.value || "").trim(),
+        phases: selectedRulePhases(),
         onToolKey: String(ruleOnInput.value || "").trim(),
         severity: ruleSeverityInput.value,
         category: ruleCategoryInput.value.trim(),
@@ -360,13 +372,13 @@
 
     function ruleFromFormState(formState) {
       const effectivePath = normalizedPathForMode(formState);
-      const effectiveOnClause = onClause.buildOnClause(
-        formState.onSubtype,
-        toolNameForKey(formState.onToolKey),
-      );
+      const effectiveOnClause = hasToolPhaseIn(formState.phases)
+        ? onClause.buildOnClause(toolNameForKey(formState.onToolKey))
+        : "";
       return {
         name: formState.name,
         entryMode: formState.entryMode,
+        phases: formState.phases,
         path: effectivePath.path,
         pathSlots: effectivePath.pathSlots,
         condition: formState.condition.expression,
@@ -394,7 +406,7 @@
         action: normalized.action,
         description: normalized.description,
         prompt: normalized.prompt,
-        onSubtype: onParts.subtype,
+        phases: normalized.phases || [],
         onToolKey: toolKeyForName(onParts.toolPattern),
         severity: normalized.severity,
         category: normalized.category,
@@ -423,9 +435,9 @@
       renderDegradeTargetOptions(toolData?.loadToolCatalog?.(selectedAgentId) || [], formState.degradeTargetKey || "");
       rulePromptInput.value = formState.prompt || "";
       ruleDescriptionInput.value = formState.description || "";
-      if (ruleOnSubtypeInput) {
-        ruleOnSubtypeInput.value = formState.onSubtype || "";
-      }
+      (rulePhaseInputs || []).forEach((input) => {
+        input.checked = Array.isArray(formState.phases) && formState.phases.includes(String(input.value || "").trim());
+      });
       renderOnToolOptions(toolData?.loadToolCatalog?.(selectedAgentId) || [], formState.onToolKey || "");
       ruleSeverityInput.value = formState.severity || "";
       ruleCategoryInput.value = formState.category || "";
@@ -450,6 +462,12 @@
     }
 
     function matchingStepIsReady() {
+      if (!selectedRulePhases().length) {
+        return { ok: false, message: "Please select at least one runtime phase before continuing." };
+      }
+      if (!hasToolPhaseSelected()) {
+        return { ok: true, message: "" };
+      }
       if (modeNeedsTrace() && !hasFinishedTracePath()) {
         return { ok: false, message: "Please finish the TRACE builder before continuing." };
       }
@@ -599,7 +617,7 @@
 
     function renderPreview() {
       const rule = currentRule();
-      if (!rule.name && !rule.path && !rule.onClause && !rule.condition && !rule.action && !rule.description) {
+      if (!rule.name && !(rule.phases || []).length && !rule.path && !rule.onClause && !rule.condition && !rule.action && !rule.description) {
         rulePreviewBlock.textContent = "";
       } else {
         rulePreviewBlock.textContent = preview.buildPreview(rule);
@@ -607,9 +625,6 @@
       const shouldSyncOnInputs = rule.entryMode === "on" || Boolean(String(rule.onClause || "").trim());
       if (shouldSyncOnInputs) {
         const onParts = onClause.parseOnClauseParts(onClause.deriveOnClause(model.normalizeRule(rule)));
-        if (ruleOnSubtypeInput) {
-          ruleOnSubtypeInput.value = onParts.subtype;
-        }
         ruleOnInput.value = toolKeyForName(onParts.toolPattern);
       }
       const pathState = pathBuilder.getValue();
@@ -631,9 +646,9 @@
       ruleSeverityInput.value = "";
       ruleCategoryInput.value = "";
       ruleReasonInput.value = "";
-      if (ruleOnSubtypeInput) {
-        ruleOnSubtypeInput.value = "";
-      }
+      (rulePhaseInputs || []).forEach((input) => {
+        input.checked = false;
+      });
       renderOnToolOptions(toolData?.loadToolCatalog?.(selectedAgentId) || [], "");
       renderDegradeTargetOptions(toolData?.loadToolCatalog?.(selectedAgentId) || [], "");
       setMatchingMode("trace");
@@ -696,15 +711,17 @@
       });
       ruleActionInput.addEventListener("input", handleRuleFieldInput);
       ruleDegradeTargetInput.addEventListener("change", handleRuleFieldInput);
-      ruleOnSubtypeInput?.addEventListener("change", () => {
-        syncBuilderUI();
-        handleRuleFieldInput();
-      });
       ruleOnInput.addEventListener("change", () => {
         syncBuilderUI();
         handleRuleFieldInput();
       });
       ruleSeverityInput.addEventListener("change", handleRuleFieldInput);
+      (rulePhaseInputs || []).forEach((input) => {
+        input.addEventListener("change", () => {
+          syncBuilderUI();
+          handleRuleFieldInput();
+        });
+      });
 
       (matchModeInputs || []).forEach((input) => {
         input.addEventListener("change", () => {

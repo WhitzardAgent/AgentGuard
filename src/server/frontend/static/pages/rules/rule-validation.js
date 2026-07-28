@@ -48,12 +48,17 @@
     if (!rule.name || !rule.condition || !rule.action) {
       return { ok: false, message: "Please fill RULENAME, CONDITION, and ACTION first." };
     }
+    if (!Array.isArray(rule.phases) || !rule.phases.length) {
+      return { ok: false, message: "Please select at least one runtime phase first." };
+    }
     if (rule.action === "DEGRADE" && !rule.degradeTarget) {
       return { ok: false, message: "DEGRADE target is required for DEGRADE rules." };
     }
     const hasPath = Boolean(String(rule.path || "").trim());
     const hasOnClause = Boolean(String(rule.onClause || "").trim());
-    if (!hasPath && !hasOnClause) {
+    const hasToolPhase = Array.isArray(rule.phases)
+      && rule.phases.some((phase) => phase === "tool_before" || phase === "tool_after");
+    if (hasToolPhase && !hasPath && !hasOnClause) {
       return { ok: false, message: "Please configure ON or TRACE before generating the rule." };
     }
     if (hasPath) {

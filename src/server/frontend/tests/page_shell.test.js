@@ -49,10 +49,6 @@ function bootShell(selectedAgentId = "", options = {}) {
     { hidden: false },
     { hidden: false },
   ];
-  const ruleBasedRequired = [
-    { hidden: false },
-    { hidden: false },
-  ];
 
   function getElement(id) {
     if (!elements[id]) {
@@ -84,9 +80,6 @@ function bootShell(selectedAgentId = "", options = {}) {
       if (selector === "[data-agent-required='true']") {
         return agentRequired;
       }
-      if (selector === "[data-rule-based-required='true']") {
-        return ruleBasedRequired;
-      }
       return [];
     },
     addEventListener() {},
@@ -108,7 +101,6 @@ function bootShell(selectedAgentId = "", options = {}) {
   return {
     elements,
     agentRequired,
-    ruleBasedRequired,
     shell: global.window.AgentGuardShell,
   };
 }
@@ -116,14 +108,12 @@ function bootShell(selectedAgentId = "", options = {}) {
 test("sidebar hides agent-required links until an agent is selected", () => {
   const {
     agentRequired,
-    ruleBasedRequired,
     elements,
     shell,
   } = bootShell("");
 
   assert.equal(elements["sidebar-current-user"].textContent, "Current User");
   assert.equal(agentRequired.every((item) => item.hidden), true);
-  assert.equal(ruleBasedRequired.every((item) => item.hidden), true);
   assert.equal(elements["sidebar-agent-panel"].hidden, true);
   assert.equal(elements["sidebar-selected-agent-wrap"].hidden, true);
   assert.equal(elements["sidebar-selected-agent"].textContent, "");
@@ -131,15 +121,10 @@ test("sidebar hides agent-required links until an agent is selected", () => {
   shell.setSelectedAgent("agent-a");
 
   assert.equal(agentRequired.every((item) => item.hidden === false), true);
-  assert.equal(ruleBasedRequired.every((item) => item.hidden), true);
   assert.equal(elements["sidebar-agent-panel"].hidden, false);
   assert.equal(elements["sidebar-selected-agent-wrap"].hidden, false);
   assert.equal(elements["sidebar-selected-agent"].textContent, "agent-a");
-
-  shell.setSelectedPlugin("rule_based_plugin");
-
   assert.equal(agentRequired.every((item) => item.hidden === false), true);
-  assert.equal(ruleBasedRequired.every((item) => item.hidden === false), true);
 });
 
 

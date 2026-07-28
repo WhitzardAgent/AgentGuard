@@ -2,6 +2,8 @@
   const RULE_STATUS_PUBLISHED = "published";
   const RULE_STATUS_UNPUBLISHED = "unpublished";
   const severityOptions = ["critical", "high", "medium", "low", "info"];
+  const RULE_PHASE_OPTIONS = ["llm_before", "llm_after", "tool_before", "tool_after"];
+  const RULE_TOOL_PHASES = new Set(["tool_before", "tool_after"]);
 
   function ruleKey(rule) {
     return String(rule?.id || rule?.name || rule?.rule_id || "").trim();
@@ -21,6 +23,7 @@
       status: isPublished ? RULE_STATUS_PUBLISHED : RULE_STATUS_UNPUBLISHED,
       source: String(rule?.source || "").trim(),
       onClause: String(rule?.onClause || "").trim(),
+      phases: normalizeRulePhases(rule?.phases),
       severity: String(rule?.severity || "").trim(),
       category: String(rule?.category || "").trim(),
       reason: String(rule?.reason || "").trim(),
@@ -60,6 +63,25 @@
     return "trace";
   }
 
+  function normalizeRulePhases(value) {
+    const raw = Array.isArray(value) ? value : [];
+    const seen = new Set();
+    return raw
+      .map((item) => String(item || "").trim())
+      .filter((item) => RULE_PHASE_OPTIONS.includes(item))
+      .filter((item) => {
+        if (seen.has(item)) {
+          return false;
+        }
+        seen.add(item);
+        return true;
+      });
+  }
+
+  function hasToolPhase(rule) {
+    return normalizeRulePhases(rule?.phases).some((phase) => RULE_TOOL_PHASES.has(phase));
+  }
+
   function filterRuleItems(items, kind) {
     if (kind === RULE_STATUS_PUBLISHED) {
       return items.filter((item) => item.status === RULE_STATUS_PUBLISHED);
@@ -73,8 +95,11 @@
   window.AgentGuardRuleUtils = {
     RULE_STATUS_PUBLISHED,
     RULE_STATUS_UNPUBLISHED,
+    RULE_PHASE_OPTIONS,
     filterRuleItems,
+    hasToolPhase,
     normalizeEntryModeValue,
+    normalizeRulePhases,
     normalizeSeverityValue,
     ruleDisplayName,
     ruleKey,

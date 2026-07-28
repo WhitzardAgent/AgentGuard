@@ -9,6 +9,7 @@ const { isValidOnClause, normalizeOnClause, serializeRule, serializeRules } = gl
 test("serializeRule builds a trace-only deny rule", () => {
   const dsl = serializeRule({
     name: "deny_external_email",
+    phases: ["tool_before"],
     path: "A->B->C",
     action: "DENY",
     conditionItems: [
@@ -30,6 +31,7 @@ test("serializeRule builds a trace-only deny rule", () => {
     dsl,
     [
       "RULE: deny_external_email",
+      "PHASES: tool_before",
       "TRACE: A -> B -> C",
       'CONDITION: A.name == "email.send"',
       "POLICY: DENY",
@@ -40,6 +42,7 @@ test("serializeRule builds a trace-only deny rule", () => {
 test("serializeRule supports TRACE plus optional ON and mixed condition references", () => {
   const dsl = serializeRule({
     name: "review_secret_egress",
+    phases: ["tool_before"],
     path: "A->...->C",
     onClause: "tool_call(http.post)",
     action: "HUMAN_CHECK",
@@ -72,7 +75,7 @@ test("serializeRule supports TRACE plus optional ON and mixed condition referenc
 
   assert.match(
     dsl,
-    /^RULE: review_secret_egress\nON: tool_call\(http\.post\)\nTRACE: A -> \.\.\. -> C\nCONDITION: A\.name == "secret\.read"\n  AND tool\.boundary == "external"\nPOLICY: HUMAN_CHECK$/m,
+    /^RULE: review_secret_egress\nPHASES: tool_before\nON: tool_call\(http\.post\)\nTRACE: A -> \.\.\. -> C\nCONDITION: A\.name == "secret\.read"\n  AND tool\.boundary == "external"\nPOLICY: HUMAN_CHECK$/m,
   );
 });
 
@@ -80,6 +83,7 @@ test("serializeRules keeps multi-condition grouping and supports all runtime act
   const dsl = serializeRules([
     {
       name: "review_high_sensitivity",
+      phases: ["tool_before"],
       path: "A->...->C",
       onClause: "tool_call(email.send)",
       action: "HUMAN_CHECK",
@@ -111,6 +115,7 @@ test("serializeRules keeps multi-condition grouping and supports all runtime act
     },
     {
       name: "degrade_large_export",
+      phases: ["tool_before"],
       path: "A->*->C",
       action: "DEGRADE",
       degradeTarget: "safe_csv_export",
@@ -133,7 +138,7 @@ test("serializeRules keeps multi-condition grouping and supports all runtime act
   ]);
 
   assert.match(dsl, /RULE: review_high_sensitivity/);
-  assert.match(dsl, /RULE: review_high_sensitivity\nON: tool_call\(email\.send\)\nTRACE: A -> \.\.\. -> C/);
+  assert.match(dsl, /RULE: review_high_sensitivity\nPHASES: tool_before\nON: tool_call\(email\.send\)\nTRACE: A -> \.\.\. -> C/);
   assert.match(dsl, /CONDITION: \(A\.sensitivity == "high"\n  OR principal\.trust_level < 2\)/);
   assert.match(dsl, /POLICY: DEGRADE TO "safe_csv_export"/);
   assert.match(dsl, /CONDITION: tool\.row_count > 1000/);
@@ -142,6 +147,7 @@ test("serializeRules keeps multi-condition grouping and supports all runtime act
 test("serializeRule appends severity category and reason when provided", () => {
   const dsl = serializeRule({
     name: "review_external_email",
+    phases: ["tool_before"],
     path: "A->...->C",
     action: "HUMAN_CHECK",
     severity: "high",
@@ -170,6 +176,7 @@ test("serializeRule appends severity category and reason when provided", () => {
 test("serializeRule preserves IN and MATCHES operators with expected right-hand formatting", () => {
   const dsl = serializeRule({
     name: "review_allowlist_and_regex",
+    phases: ["tool_before"],
     path: "A->B",
     action: "HUMAN_CHECK",
     conditionItems: [
@@ -209,6 +216,7 @@ test("serializeRule preserves IN and MATCHES operators with expected right-hand 
 test("serializeRule appends prompt only for llm_check rules", () => {
   const dsl = serializeRule({
     name: "review_external_http",
+    phases: ["tool_before"],
     path: "A->...->C",
     action: "LLM_CHECK",
     prompt: "Escalate ambiguous outbound HTTP requests.",
@@ -233,6 +241,7 @@ test("serializeRule appends prompt only for llm_check rules", () => {
 test("serializeRule ignores prompt for non-llm_check rules", () => {
   const dsl = serializeRule({
     name: "deny_external_http",
+    phases: ["tool_before"],
     path: "A->...->C",
     action: "DENY",
     prompt: "Should not be serialized",
@@ -257,6 +266,7 @@ test("serializeRule ignores prompt for non-llm_check rules", () => {
 test("serializeRule escapes prompt content", () => {
   const dsl = serializeRule({
     name: "review_prompt_escape",
+    phases: ["tool_before"],
     path: "A->...->C",
     action: "LLM_CHECK",
     prompt: 'Review "dangerous" path C:\\temp',
@@ -281,6 +291,7 @@ test("serializeRule escapes prompt content", () => {
 test("serializeRule preserves info severity when selected from the UI enum", () => {
   const dsl = serializeRule({
     name: "audit_low_risk_flow",
+    phases: ["tool_before"],
     path: "A->...->C",
     action: "ALLOW",
     severity: "info",
@@ -305,6 +316,7 @@ test("serializeRule preserves info severity when selected from the UI enum", () 
 test("serializeRule accepts ON-only rules when a formal ON clause is present", () => {
   const dsl = serializeRule({
     name: "deny_shell_call",
+    phases: ["tool_before"],
     onClause: "tool_call(shell.exec)",
     action: "DENY",
     conditionItems: [
@@ -331,6 +343,7 @@ test("serializeRule accepts ON-only rules when a formal ON clause is present", (
 test("serializeRule preserves single-step trace paths for backend v3 compatibility", () => {
   const dsl = serializeRule({
     name: "single_step_rule",
+    phases: ["tool_before"],
     path: "A",
     action: "ALLOW",
     conditionItems: [
@@ -353,15 +366,14 @@ test("serializeRule preserves single-step trace paths for backend v3 compatibili
 
 test("isValidOnClause accepts supported tool_call forms", () => {
   assert.equal(isValidOnClause("tool_call(shell.exec)"), true);
-  assert.equal(isValidOnClause("tool_call.requested"), true);
-  assert.equal(isValidOnClause("tool_call.completed"), true);
-  assert.equal(isValidOnClause("tool_call.failed(http.post)"), true);
+  assert.equal(isValidOnClause("tool_call(*)"), true);
+  assert.equal(isValidOnClause("tool_call(http.post)"), true);
+  assert.equal(isValidOnClause("tool_call.requested"), false);
   assert.equal(isValidOnClause("shell.exec"), false);
 });
 
-test("normalizeOnClause builds ON from optional subtype and tool_pattern selections", () => {
-  assert.equal(normalizeOnClause({ onSubtype: "requested", onToolPattern: "http.post" }), "tool_call.requested(http.post)");
-  assert.equal(normalizeOnClause({ onSubtype: "failed" }), "tool_call.failed");
+test("normalizeOnClause builds ON from direct tool_pattern selections", () => {
+  assert.equal(normalizeOnClause({ onClause: "tool_call(http.post)" }), "tool_call(http.post)");
   assert.equal(normalizeOnClause({ onToolPattern: "shell.exec" }), "tool_call(shell.exec)");
   assert.equal(normalizeOnClause({}), "");
 });
@@ -370,6 +382,7 @@ test("serializeRule rejects unsupported actions", () => {
   assert.throws(
     () => serializeRule({
       name: "bad_action",
+      phases: ["tool_before"],
       path: "A->B",
       action: "BLOCK",
       conditionItems: [

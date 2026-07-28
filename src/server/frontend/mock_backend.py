@@ -36,6 +36,13 @@ class FrontendMockBackend:
     _AGENT_RULES_CREATE_ROUTE = MockRoute("POST", re.compile(r"^/api/agents/(?P<agent_id>[^/]+)/rules$"))
     _AGENT_RULES_GENERATE_ROUTE = MockRoute("POST", re.compile(r"^/api/agents/(?P<agent_id>[^/]+)/rules/generate$"))
     _AGENT_RULE_DELETE_ROUTE = MockRoute("DELETE", re.compile(r"^/api/agents/(?P<agent_id>[^/]+)/rules/(?P<rule_id>[^/]+)$"))
+    _PHASE_TO_EVENT_TYPE = {
+        "llm_before": "llm_input",
+        "llm_after": "llm_output",
+        "tool_before": "tool_invoke",
+        "tool_after": "tool_result",
+    }
+    _TOOL_PHASES = {"tool_before", "tool_after"}
 
     def __init__(self) -> None:
         self._default_tools = self._build_default_tools()
@@ -636,26 +643,31 @@ class FrontendMockBackend:
             normalized = FrontendMockBackend._normalize_rule_header(block)
             lines = [line.strip() for line in normalized.splitlines() if line.strip()]
             missing: list[str] = []
-            missing_path: list[str] = []
-            for prefix in ("RULE:", "CONDITION:", "POLICY:"):
+            for prefix in ("RULE:", "PHASES:", "CONDITION:", "POLICY:"):
                 if not any(line.startswith(prefix) for line in lines):
                     missing.append(prefix.rstrip(":"))
-            for prefix in ("TRACE:", "ON"):
-                if not any(line.startswith(prefix) for line in lines):
-                    missing_path.append(prefix.rstrip(":"))
             if missing:
                 errors.append({
                     "message": f"Rule block {index} is missing required line(s): {', '.join(missing)}.",
                 })
                 continue
-            if len(missing_path) == 2:
+            phases = FrontendMockBackend._extract_phases(normalized)
+            if not phases:
+                errors.append({
+                    "message": f"Rule block {index}: PHASES must include at least one supported phase.",
+                })
+                continue
+            if (
+                any(phase in FrontendMockBackend._TOOL_PHASES for phase in phases)
+                and not any(line.startswith(("TRACE:", "ON:")) for line in lines)
+            ):
                 errors.append({
                     "message": f"Rule block {index} is missing required line(s): ON or TRACE.",
                 })
                 continue
 
             tool_pattern = FrontendMockBackend._extract_tool_pattern(normalized)
-            if tool_pattern == "*":
+            if tool_pattern == "*" and any(phase in FrontendMockBackend._TOOL_PHASES for phase in phases):
                 warnings.append({
                     "message": f"Rule block {index} applies to all tools because no specific tool pattern was found.",
                 })
@@ -684,12 +696,14 @@ class FrontendMockBackend:
                 FrontendMockBackend._extract_optional_line(normalized, "Reason")
             )
             tool_pattern = FrontendMockBackend._extract_tool_pattern(normalized)
+            phases = FrontendMockBackend._extract_phases(normalized)
             rules.append({
                 "id": name,
                 "name": name,
                 "status": "published",
                 "rule_id": name,
                 "tool_pattern": tool_pattern,
+                "phases": phases,
                 "action": action,
                 "version": "mock-v1",
                 "severity": severity,
@@ -755,6 +769,15 @@ class FrontendMockBackend:
         if normalized.startswith("DENY"):
             return "DENY"
         return normalized or "DENY"
+
+    @staticmethod
+    def _extract_phases(block: str) -> list[str]:
+        phases_line = FrontendMockBackend._extract_optional_line(block, "PHASES")
+        phases: list[str] = []
+        for phase in [item.strip() for item in phases_line.split(",")]:
+            if phase in FrontendMockBackend._PHASE_TO_EVENT_TYPE and phase not in phases:
+                phases.append(phase)
+        return phases
 
     @staticmethod
     def _extract_tool_pattern(block: str) -> str:
@@ -1073,6 +1096,7 @@ class FrontendMockBackend:
         return "\n\n".join([
             "\n".join([
                 "RULE: alpha_shell_review",
+                "PHASES: tool_before",
                 "TRACE: A -> B",
                 'CONDITION: A.name == "shell.exec"',
                 "POLICY: HUMAN_CHECK",
@@ -1082,6 +1106,7 @@ class FrontendMockBackend:
             ]),
             "\n".join([
                 "RULE: beta_external_fetch_trace",
+                "PHASES: tool_before",
                 "TRACE: A -> B",
                 "ON: tool_call(http.get)",
                 'CONDITION: A.name == "http.get"',

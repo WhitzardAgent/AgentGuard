@@ -1,5 +1,6 @@
 (function () {
-  const RULE_LIST_KEY = "agentguard.ruleList";
+  const RULE_LIST_KEY = "agentguard.ruleList.v2";
+  const LEGACY_RULE_LIST_KEY = "agentguard.ruleList";
   const RULE_STATUS_PUBLISHED = "published";
   const RULE_STATUS_UNPUBLISHED = "unpublished";
 
@@ -17,6 +18,7 @@
 
   function loadList() {
     try {
+      localStorage.removeItem(LEGACY_RULE_LIST_KEY);
       const raw = localStorage.getItem(RULE_LIST_KEY);
       const parsed = raw ? JSON.parse(raw) : null;
       return Array.isArray(parsed) && parsed.length ? parsed.map(normalizeStoredRule) : [];
@@ -27,6 +29,7 @@
 
   function saveList(rules) {
     const normalized = Array.isArray(rules) ? rules.map(normalizeStoredRule) : [];
+    localStorage.removeItem(LEGACY_RULE_LIST_KEY);
     localStorage.setItem(RULE_LIST_KEY, JSON.stringify(normalized));
   }
 

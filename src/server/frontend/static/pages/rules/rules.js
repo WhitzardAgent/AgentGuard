@@ -66,7 +66,7 @@ const extractPublishedRuleSource = ruleParser.extractPublishedRuleSource || func
 };
 
 const extractRuleMetadata = ruleParser.extractRuleMetadata || function fallbackExtractRuleMetadata() {
-  return { onClause: "", severity: "", category: "", reason: "", prompt: "" };
+  return { phases: "", onClause: "", severity: "", category: "", reason: "", prompt: "" };
 };
 
 const actionTone = uiHelpers.actionTone || function fallbackActionTone(action) {
@@ -127,7 +127,7 @@ const elements = {
   rulePromptInput: getElement("rule-prompt-input"),
   ruleDegradeTargetInput: getElement("rule-degrade-target-input"),
   ruleDescriptionInput: getElement("rule-description-input"),
-  ruleOnSubtypeInput: getElement("rule-on-subtype-input"),
+  rulePhaseInputs: queryElements("input[name='rule-phase']"),
   ruleOnInput: getElement("rule-on-input"),
   ruleSeverityInput: getElement("rule-severity-input"),
   ruleCategoryInput: getElement("rule-category-input"),
@@ -464,11 +464,13 @@ function normalizeActiveRule(rule) {
   const ruleSource = extractPublishedRuleSource(rule?.source || "", name);
   const metadata = extractRuleMetadata(ruleSource);
   const path = String(ruleSource || "").match(/^TRACE:\s+(.+)$/m)?.[1]?.trim() || "";
+  const phases = ruleUtils.normalizeRulePhases(String(metadata.phases || "").split(","));
   return ruleUtils.withRuleStatus({
     id: String(rule?.id || name).trim(),
     name,
     rule_id: name,
-    entryMode: metadata.onClause ? "on" : "trace",
+    entryMode: path ? "trace" : "on",
+    phases,
     path,
     tool_pattern: String(rule?.tool_pattern || "*").trim() || "*",
     action: String(rule?.action || "").trim().toUpperCase(),

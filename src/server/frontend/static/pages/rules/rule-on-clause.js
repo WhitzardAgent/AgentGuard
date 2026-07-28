@@ -1,7 +1,5 @@
 (function () {
   const ruleDsl = window.AgentGuardRuleDSL || {};
-  const supportedOnSubtypes = ["requested", "completed", "failed"];
-  const supportedOnSubtypeSet = new Set(supportedOnSubtypes);
 
   function deriveOnClause(rule) {
     const explicit = ruleDsl.normalizeOnClause ? ruleDsl.normalizeOnClause(rule) : String(rule?.onClause || "").trim();
@@ -22,24 +20,18 @@
     if (!matched) {
       return { subtype: "", toolPattern: "" };
     }
-    const subtype = supportedOnSubtypeSet.has(String(matched[1] || "").trim()) ? String(matched[1] || "").trim() : "";
+    const subtype = String(matched[1] || "").trim();
     const toolPattern = String(matched[2] || "").trim();
     return { subtype, toolPattern };
   }
 
-  function buildOnClause(subtype, toolName) {
-    const normalizedSubtype = String(subtype || "").trim();
+  function buildOnClause(toolName, subtype = "") {
     const normalizedToolName = String(toolName || "").trim();
-    if (!normalizedSubtype && !normalizedToolName) {
+    const normalizedSubtype = String(subtype || "").trim();
+    if (!normalizedToolName) {
       return "";
     }
-    if (normalizedSubtype && normalizedToolName) {
-      return `tool_call.${normalizedSubtype}(${normalizedToolName})`;
-    }
-    if (normalizedSubtype) {
-      return `tool_call.${normalizedSubtype}`;
-    }
-    return `tool_call(${normalizedToolName})`;
+    return normalizedSubtype ? `tool_call.${normalizedSubtype}(${normalizedToolName})` : `tool_call(${normalizedToolName})`;
   }
 
   window.AgentGuardRuleOnClause = {
@@ -47,6 +39,5 @@
     deriveDegradeTarget,
     deriveOnClause,
     parseOnClauseParts,
-    supportedOnSubtypes,
   };
 })();

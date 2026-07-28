@@ -45,10 +45,7 @@ The `ON` clause syntax is:
 ```text
 <event_match> :=
     tool_call(<tool_pattern>)
-  | tool_call.<subtype>
-  | tool_call.<subtype>(<tool_pattern>)
-
-<subtype> := requested | completed | failed
+  | tool_call(*)
 <tool_pattern> := tool_name
 ```
 
@@ -56,7 +53,7 @@ Valid examples:
 
 ```text
 ON: tool_call(shell.exec)
-ON: tool_call.requested(http.post)
+ON: tool_call(http.post)
 ```
 
 The `TRACE` path syntax is:
@@ -210,7 +207,8 @@ Example 6: ON-only rule for the result stage
 
 ```text
 RULE: audit_failed_external_post
-ON: tool_call.failed(http.post)
+PHASES: tool_after
+ON: tool_call(http.post)
 CONDITION: tool.boundary == "external"
 POLICY: ALLOW
 Severity: info

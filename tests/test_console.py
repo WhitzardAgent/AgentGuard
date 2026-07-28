@@ -12,14 +12,16 @@ from shared.schemas.policy import PolicyEffect, PolicyRule, RuleCondition
 
 _DENY_RULE = (
     "RULE: block_shell\n"
-    "ON: tool_call.requested(shell.exec)\n"
+    "PHASES: tool_before\n"
+    "ON: tool_call(shell.exec)\n"
     'CONDITION: A.name == "shell.exec"\n'
     "POLICY: DENY\n"
     'Reason: "no shell"'
 )
 _LLM_RULE = (
     "RULE: review_sql\n"
-    "ON: tool_call.requested(database_query)\n"
+    "PHASES: tool_before\n"
+    "ON: tool_call(database_query)\n"
     'CONDITION: tool.sql MATCHES ".*password.*"\n'
     "POLICY: LLM_CHECK\n"
     'Prompt: "Decide allow or deny based on sensitivity."\n'
@@ -27,7 +29,8 @@ _LLM_RULE = (
 )
 _NO_CONDITION_RULE = (
     "RULE: allow_safe_read\n"
-    "ON: tool_call.requested(read_file)\n"
+    "PHASES: tool_before\n"
+    "ON: tool_call(read_file)\n"
     "POLICY: ALLOW\n"
     'Reason: "safe read allowed"'
 )
@@ -101,6 +104,7 @@ def test_dsl_parse_allows_rule_without_condition():
 def test_dsl_parse_preserves_multiline_and_boolean_condition_expression():
     parsed, report = parse_source(
         "RULE: review_high_sensitivity\n"
+        "PHASES: tool_before\n"
         "TRACE: A -> ... -> C\n"
         'CONDITION: (A.sensitivity == "high"\n'
         "  OR principal.trust_level < 2)\n"
@@ -702,7 +706,7 @@ def test_audit_recent_keeps_plugin_outcomes():
 
     assert len(audit) == 1
     outcomes = audit[0]["decision"].get("plugin_outcomes") or []
-    assert [item["plugin"] for item in outcomes] == ["console_human_check", "console_second"]
+    assert [item["plugin"] for item in outcomes] == ["console_human_check", "console_second", "rule_based_plugin"]
 
 
 def test_console_exposes_processed_content_for_review_decisions():

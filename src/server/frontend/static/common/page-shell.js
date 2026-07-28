@@ -26,10 +26,6 @@
     "/rules.html",
     "/runtime.html",
   ]);
-  const RULE_BASED_REQUIRED_PATHS = new Set([
-    "/labels.html",
-    "/rules.html",
-  ]);
 
   function getElement(id) {
     if (typeof document === "undefined" || typeof document.getElementById !== "function") {
@@ -89,14 +85,6 @@
   function enforceSelectedAgentAccess() {
     if (!state.selectedAgentId && isAgentRequiredPage()) {
       redirectToAgentSelection();
-      return false;
-    }
-    if (
-      state.selectedPluginName
-      && state.selectedPluginName !== "rule_based_plugin"
-      && RULE_BASED_REQUIRED_PATHS.has(currentPath())
-    ) {
-      redirectToPluginSelection();
       return false;
     }
     return true;
@@ -185,9 +173,6 @@
     if (typeof document !== "undefined" && typeof document.querySelectorAll === "function") {
       document.querySelectorAll("[data-agent-required='true']").forEach((element) => {
         element.hidden = !state.selectedAgentId;
-      });
-      document.querySelectorAll("[data-rule-based-required='true']").forEach((element) => {
-        element.hidden = !state.selectedAgentId || state.selectedPluginName !== "rule_based_plugin";
       });
       document.querySelectorAll("[data-admin-required='true']").forEach((element) => {
         element.hidden = !state.isAdmin;

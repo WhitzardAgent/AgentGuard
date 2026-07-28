@@ -1656,7 +1656,8 @@ def test_user_page_group_forms_use_group_schema_fields():
     assert 'id="join-modal-backdrop" hidden' in body
     assert 'id="join-group-form"' in body
     assert 'id="join-group-token"' in body
-    assert 'id="submit-join-modal-button" type="submit">Join</button>' in body
+    assert 'id="submit-join-modal-button"' in body
+    assert 'data-i18n="Join">Join</button>' in body
     assert "openJoinModal()" in body
     assert "window.prompt(" not in body
     assert ".compact-form[hidden]" in body
@@ -1748,7 +1749,7 @@ def test_home_page_renders_intro_and_home_active_nav():
     assert 'href="/plugins.html"' in body
     assert '<a class="sidebar-nav-item active" href="/home.html">Home</a>' in body
     assert 'href="/labels.html"' in body
-    assert 'data-rule-based-required="true"' in body
+    assert 'data-agent-required="true"' in body
 
 
 def test_agents_page_renders_agent_selection_workspace():
@@ -1880,13 +1881,13 @@ def test_mock_mode_checks_rule_source():
                 "POST",
                 preview.url,
                 "/api/rules/check",
-                {"source": 'RULE: sample\nTRACE: A -> B\nCONDITION: A.name == "shell.exec"\nPOLICY: DENY'},
+                {"source": 'RULE: sample\nPHASES: tool_before\nTRACE: A -> B\nCONDITION: A.name == "shell.exec"\nPOLICY: DENY'},
             )
             bad_status, bad_payload = _json_request(
                 "POST",
                 preview.url,
                 "/api/rules/check",
-                {"source": "RULE: broken\nTRACE: A -> B\nPOLICY: DENY"},
+                {"source": "RULE: broken\nPHASES: tool_before\nTRACE: A -> B\nPOLICY: DENY"},
             )
 
     assert ok_status == 200
@@ -1902,6 +1903,7 @@ def test_mock_mode_reload_updates_published_rules():
     source = "\n\n".join([
         "\n".join([
             "RULE: alpha_email_guard",
+            "PHASES: tool_before",
             "TRACE: A -> B",
             "ON: tool_call(email.send)",
             'CONDITION: A.name == "email.send"',
@@ -1912,6 +1914,7 @@ def test_mock_mode_reload_updates_published_rules():
         ]),
         "\n".join([
             "RULE: beta_query_review",
+            "PHASES: tool_before",
             "TRACE: A -> B",
             'CONDITION: A.name == "db.query"',
             "POLICY: HUMAN_CHECK",
@@ -1947,7 +1950,7 @@ def test_mock_mode_supports_agent_scoped_rule_create_and_delete():
                 "POST",
                 preview.url,
                 "/api/agents/agent-alpha/rules",
-                {"source": 'RULE: alpha_agent_only\nTRACE: A -> B\nCONDITION: A.name == "shell.exec"\nPOLICY: DENY'},
+                {"source": 'RULE: alpha_agent_only\nPHASES: tool_before\nTRACE: A -> B\nCONDITION: A.name == "shell.exec"\nPOLICY: DENY'},
             )
             list_status, listed_rules = _json_request("GET", preview.url, "/api/agents/agent-alpha/rules")
             delete_status, delete_payload = _json_request(

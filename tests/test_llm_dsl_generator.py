@@ -53,7 +53,8 @@ def _tool_catalog() -> list[dict[str, object]]:
 def _good_payload(*, reason: str = "Block external email", prompt: str = "") -> str:
     dsl_lines = [
         "RULE: review_external_email",
-        "ON: tool_call.requested(email.send)",
+        "PHASES: tool_before",
+        "ON: tool_call(email.send)",
         'CONDITION: tool.boundary == "external"',
         "POLICY: DENY" if not prompt else "POLICY: LLM_CHECK",
     ]
@@ -96,7 +97,8 @@ def test_generate_repairs_after_validation_failure() -> None:
             "warnings": [],
             "rules": (
                 "RULE: review_external_email\n"
-                "ON: tool_call.requested(imaginary.tool)\n"
+                "PHASES: tool_before\n"
+                "ON: tool_call(imaginary.tool)\n"
                 'CONDITION: tool.boundary == "external"\n'
                 "POLICY: DENY\n"
                 'Reason: "Block external email"'

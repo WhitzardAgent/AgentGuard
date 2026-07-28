@@ -54,6 +54,14 @@ function createSelect() {
   return element;
 }
 
+function createCheckbox(value) {
+  const element = createElement("input");
+  element.type = "checkbox";
+  element.value = value;
+  element.checked = false;
+  return element;
+}
+
 function setupController() {
   const elementsById = {};
   const ids = [
@@ -150,10 +158,14 @@ function setupController() {
   degradeTargetField.appendChild(ruleDegradeTargetInput);
 
   const onField = createElement("div");
-  const ruleOnSubtypeInput = createSelect();
   const ruleOnInput = createSelect();
-  onField.appendChild(ruleOnSubtypeInput);
   onField.appendChild(ruleOnInput);
+  const rulePhaseInputs = [
+    createCheckbox("llm_before"),
+    createCheckbox("llm_after"),
+    createCheckbox("tool_before"),
+    createCheckbox("tool_after"),
+  ];
 
   const pathField = createElement("div");
   const rulePreviewBlock = createElement("pre");
@@ -164,7 +176,7 @@ function setupController() {
     rulePromptInput,
     ruleDegradeTargetInput,
     ruleDescriptionInput: createElement("textarea"),
-    ruleOnSubtypeInput,
+    rulePhaseInputs,
     ruleOnInput,
     ruleSeverityInput: createSelect(),
     ruleCategoryInput: createElement("input"),
@@ -232,23 +244,14 @@ function setupController() {
           prompt: String(rule?.prompt || "").trim(),
           description: String(rule?.description || "").trim(),
           degradeTarget: String(rule?.degradeTarget || "").trim(),
+          phases: Array.isArray(rule?.phases) ? rule.phases : [],
         };
       },
     },
     onClause: {
-      buildOnClause(subtype, toolName) {
-        const normalizedSubtype = String(subtype || "").trim();
+      buildOnClause(toolName) {
         const normalizedToolName = String(toolName || "").trim();
-        if (normalizedSubtype && normalizedToolName) {
-          return `tool_call.${normalizedSubtype}(${normalizedToolName})`;
-        }
-        if (normalizedSubtype) {
-          return `tool_call.${normalizedSubtype}`;
-        }
-        if (normalizedToolName) {
-          return `tool_call(${normalizedToolName})`;
-        }
-        return "";
+        return normalizedToolName ? `tool_call(${normalizedToolName})` : "";
       },
       parseOnClauseParts(value) {
         const source = String(value || "").trim();
@@ -295,7 +298,7 @@ test("rule form controller shows prompt only for llm_check and preserves its val
     action: "LLM_CHECK",
     description: "",
     prompt: "Escalate ambiguous outbound HTTP requests.",
-    onSubtype: "",
+    phases: ["llm_before"],
     onToolKey: "",
     severity: "",
     category: "",
@@ -323,7 +326,7 @@ test("rule form controller clears prompt on reset", () => {
     action: "LLM_CHECK",
     description: "",
     prompt: "Escalate ambiguous outbound HTTP requests.",
-    onSubtype: "",
+    phases: ["llm_before"],
     onToolKey: "",
     severity: "",
     category: "",
@@ -339,10 +342,16 @@ test("rule form controller clears prompt on reset", () => {
   assert.equal(elements.promptField.hidden, true);
 });
 
-test("rule form controller keeps ON inputs visible in trace mode", () => {
+test("rule form controller hides tool matching until a tool phase is selected", () => {
   const { controller, elements } = setupController();
 
   controller.resetRuleForm();
+
+  assert.equal(elements.onField.hidden, true);
+  assert.equal(elements.pathField.hidden, true);
+
+  elements.rulePhaseInputs[2].checked = true;
+  elements.rulePhaseInputs[2].dispatchEvent("change");
 
   assert.equal(elements.onField.hidden, false);
   assert.equal(elements.pathField.hidden, false);
@@ -351,12 +360,11 @@ test("rule form controller keeps ON inputs visible in trace mode", () => {
 test("rule form controller does not clear trace-mode ON selections during preview refresh", () => {
   const { controller, elements } = setupController();
 
-  elements.ruleOnSubtypeInput.value = "requested";
+  elements.rulePhaseInputs[2].checked = true;
   elements.ruleOnInput.value = "tool://mailer";
 
   controller.renderPreview();
 
-  assert.equal(elements.ruleOnSubtypeInput.value, "requested");
   assert.equal(elements.ruleOnInput.value, "tool://mailer");
 });
 
@@ -364,13 +372,14 @@ test("rule form controller includes ON clause in trace mode rules", () => {
   const { controller, elements } = setupController();
 
   elements.ruleNameInput.value = "trace_with_on";
-  elements.ruleOnSubtypeInput.value = "requested";
+  elements.rulePhaseInputs[2].checked = true;
   elements.ruleOnInput.value = "tool://mailer";
 
   const rule = controller.currentRule();
 
   assert.equal(rule.entryMode, "trace");
-  assert.equal(rule.onClause, "tool_call.requested(email.send)");
+  assert.deepEqual(rule.phases, ["tool_before"]);
+  assert.equal(rule.onClause, "tool_call(email.send)");
 });
 
 

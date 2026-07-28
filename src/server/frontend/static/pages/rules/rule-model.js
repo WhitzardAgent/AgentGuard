@@ -119,6 +119,7 @@
   function normalizeRuleMetadata(rule) {
     return {
       onClause: onClause.deriveOnClause(rule),
+      phases: utils.normalizeRulePhases(rule?.phases),
       severity: utils.normalizeSeverityValue(rule?.severity),
       category: String(rule?.category || "").trim(),
       reason: String(rule?.reason || "").trim(),

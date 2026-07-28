@@ -3,7 +3,8 @@
 The console (ported from the legacy frontend) authors rules in a small DSL:
 
     RULE: <name>
-    ON: tool_call.<subtype>(<tool_pattern>)     # optional
+    PHASES: llm_before, llm_after, tool_before, tool_after
+    ON: tool_call(<tool_pattern>)               # optional
     TRACE: A -> B                                # optional
     CONDITION: A.name == "tool" [AND/OR ...]
     POLICY: DENY | HUMAN_CHECK | LLM_CHECK | ALLOW | DEGRADE TO "target"
@@ -53,6 +54,14 @@ _ON_SUBTYPE_EVENTS = {
     "result": "tool_result",
     "failed": "tool_result",
 }
+_PHASE_TO_EVENT_TYPE = {
+    "llm_before": "llm_input",
+    "llm_after": "llm_output",
+    "tool_before": "tool_invoke",
+    "tool_after": "tool_result",
+}
+_EVENT_TYPE_TO_PHASE = {value: key for key, value in _PHASE_TO_EVENT_TYPE.items()}
+_TOOL_PHASES = {"tool_before", "tool_after"}
 _PRIORITY_BY_ACTION = {
     "DENY": 90,
     "HUMAN_CHECK": 70,
@@ -170,7 +179,12 @@ def _tool_pattern(block: str) -> str:
     return "*"
 
 
-def _on_event_types(block: str) -> list[str]:
+def _phase_event_types(block: str) -> list[str]:
+    phases_line = _named(block, "PHASES")
+    if phases_line:
+        phases = _phase_names_from_text(phases_line)
+        if phases:
+            return [_PHASE_TO_EVENT_TYPE[phase] for phase in phases]
     on = _named(block, "ON")
     m = re.search(r"tool_call\.(\w+)", on)
     if m:
@@ -178,6 +192,31 @@ def _on_event_types(block: str) -> list[str]:
         if et:
             return [et]
     return ["tool_invoke"]
+
+
+def _phase_names_for_rule(rule: PolicyRule) -> list[str]:
+    return _phase_names_from_event_types(rule.event_types or [])
+
+
+def _phase_names_from_event_types(event_types: list[str]) -> list[str]:
+    phases: list[str] = []
+    for event_type in event_types:
+        phase = _EVENT_TYPE_TO_PHASE.get(str(event_type or "").strip())
+        if phase and phase not in phases:
+            phases.append(phase)
+    return phases or ["tool_before"]
+
+
+def _phase_names_from_text(phases_text: str) -> list[str]:
+    phases: list[str] = []
+    for phase in [item.strip() for item in str(phases_text or "").split(",")]:
+        if phase in _PHASE_TO_EVENT_TYPE and phase not in phases:
+            phases.append(phase)
+    return phases
+
+
+def _has_tool_phases(phases: list[str]) -> bool:
+    return any(phase in _TOOL_PHASES for phase in phases)
 
 
 def _parse_conditions(cond_text: str) -> tuple[list[RuleCondition], list[dict[str, Any]]]:
@@ -217,17 +256,24 @@ def parse_source(source: str) -> tuple[list[ParsedRule], CheckReport]:
         normalized = _normalize_header(block).strip()
         lines = [ln.strip() for ln in normalized.splitlines() if ln.strip()]
 
-        missing = [
-            p.rstrip(":")
-            for p in ("RULE:", "POLICY:")
-            if not any(ln.startswith(p) for ln in lines)
-        ]
+        missing = [p.rstrip(":") for p in ("RULE:", "PHASES:", "POLICY:") if not any(ln.startswith(p) for ln in lines)]
         if missing:
             report.errors.append(
                 {"message": f"Rule block {index} is missing required line(s): {', '.join(missing)}."}
             )
             continue
-        if not any(ln.startswith(("ON:", "TRACE:")) for ln in lines):
+        phases = _phase_names_from_text(_named(normalized, "PHASES"))
+        if not phases:
+            report.errors.append({"message": f"Rule block {index}: PHASES must include at least one supported phase."})
+            continue
+        has_tool_phases = _has_tool_phases(phases)
+        has_formal_match = any(ln.startswith(("ON:", "TRACE:")) for ln in lines)
+        if has_tool_phases and not has_formal_match:
+            report.errors.append(
+                {"message": f"Rule block {index} is missing required line(s): ON or TRACE."}
+            )
+            continue
+        if not has_tool_phases and not has_formal_match:
             report.warnings.append(
                 {"message": f"Rule block {index} has no ON/TRACE match; add one for precise targeting."}
             )
@@ -254,11 +300,13 @@ def parse_source(source: str) -> tuple[list[ParsedRule], CheckReport]:
         degrade_target = _degrade_target(policy_line)
         condition_text = _named(normalized, "CONDITION")
         conditions, raw_conditions = _parse_conditions(condition_text)
+        event_types = [_PHASE_TO_EVENT_TYPE[phase] for phase in phases]
 
         tool_names = [] if tool_pattern in ("", "*") else [tool_pattern]
         metadata = {
             "source": "console",
             "tool_pattern": tool_pattern,
+            "phases": list(phases),
             "trace_pattern": _named(normalized, "TRACE"),
             "severity": severity,
             "category": category,
@@ -275,7 +323,7 @@ def parse_source(source: str) -> tuple[list[ParsedRule], CheckReport]:
             effect=ACTION_TO_EFFECT[action],
             reason=reason or f"{action} for {tool_pattern}",
             priority=_PRIORITY_BY_ACTION.get(action, 50),
-            event_types=_on_event_types(normalized),
+            event_types=event_types,
             tool_names=tool_names,
             conditions=conditions,
             condition_expr=condition_text,
@@ -307,11 +355,13 @@ def policy_rule_to_source(rule: PolicyRule) -> str:
     meta = rule.metadata or {}
     tool_pattern = meta.get("tool_pattern") or (rule.tool_names[0] if rule.tool_names else "*")
     action = EFFECT_TO_ACTION.get(rule.effect, "DENY")
-    subtype = "completed" if "tool_result" in (rule.event_types or []) else "requested"
+    phases = _phase_names_for_rule(rule)
+    has_tool_phases = _has_tool_phases(phases)
 
     lines = [f"RULE: {rule.rule_id}"]
-    if tool_pattern or not rule.trace_clause:
-        lines.append(f"ON: tool_call.{subtype}({tool_pattern})")
+    lines.append(f"PHASES: {', '.join(phases)}")
+    if has_tool_phases and (tool_pattern != "*" or not rule.trace_clause):
+        lines.append(f"ON: tool_call({tool_pattern})")
     if rule.trace_clause is not None and rule.trace_clause.steps:
         lines.append(f"TRACE: {trace_steps_to_pattern(rule.trace_clause.steps)}")
     cond = _condition_source(rule, tool_pattern)
@@ -356,12 +406,14 @@ def rule_to_console_dict(
     meta = rule.metadata or {}
     tool_pattern = meta.get("tool_pattern") or (rule.tool_names[0] if rule.tool_names else "*")
     action = EFFECT_TO_ACTION.get(rule.effect, "DENY")
+    phases = meta.get("phases") or _phase_names_for_rule(rule)
     return {
         "id": rule.rule_id,
         "name": rule.rule_id,
         "rule_id": rule.rule_id,
         "status": status,
         "tool_pattern": tool_pattern,
+        "phases": list(phases),
         "action": action,
         "version": "v1",
         "severity": meta.get("severity") or _severity_for(action),

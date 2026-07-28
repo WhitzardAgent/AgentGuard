@@ -12,6 +12,7 @@
 
   function extractRuleMetadata(text) {
     const source = String(text || "").trim();
+    const phases = source.match(/^PHASES:\s+(.+)$/m)?.[1]?.trim() || "";
     const onClause = source.match(/^ON(?::\s*|\s+)(.+)$/m)?.[1]?.trim() || "";
     const severity = source.match(/^Severity:\s+(.+)$/m)?.[1]?.trim() || "";
     const category = source.match(/^Category:\s+(.+)$/m)?.[1]?.trim() || "";
@@ -19,7 +20,7 @@
     const promptRaw = source.match(/^Prompt:\s+(.+)$/m)?.[1]?.trim() || "";
     const reason = reasonRaw ? parseConditionValue(reasonRaw) : "";
     const prompt = promptRaw ? parseConditionValue(promptRaw) : "";
-    return { onClause, severity, category, reason, prompt };
+    return { phases, onClause, severity, category, reason, prompt };
   }
 
   function parseConditionExpression(expression) {
@@ -75,7 +76,7 @@
 
     const contextParsed = core.match(
       new RegExp(
-        `^((?:tool|target|principal|caller|event|mcp)\\.[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)*)\\s+${operatorPattern}\\s+(.+)$`,
+        `^((?:tool|target|principal|caller|event|mcp|payload)\\.[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)*)\\s+${operatorPattern}\\s+(.+)$`,
       ),
     );
     if (!contextParsed) {
@@ -193,15 +194,21 @@
     const conditionMatch = text.match(/^CONDITION:\s+([\s\S]*?)\nPOLICY:/m);
     const conditionItems = parseConditionItems(conditionMatch?.[1] || "");
 
-    if (!ruleName || (!path && !metadata.onClause) || !actionLine || !conditionItems.length) {
+    const phases = String(metadata.phases || "")
+      .split(",")
+      .map((item) => String(item || "").trim())
+      .filter(Boolean);
+
+    if (!ruleName || !actionLine || !conditionItems.length || !phases.length) {
       return null;
     }
 
     const rule = {
       name: ruleName,
       status: publishedStatus,
-      entryMode: metadata.onClause ? "on" : "trace",
+      entryMode: path ? "trace" : "on",
       path,
+      phases,
       onClause: metadata.onClause,
       conditionItems,
       action: actionLine[1],

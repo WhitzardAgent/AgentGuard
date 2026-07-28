@@ -9,13 +9,8 @@
     (function () {
       try {
         const agentId = String(window.localStorage.getItem("agentguard.selectedAgentId") || "").trim();
-        const pluginName = String(window.localStorage.getItem("agentguard.selectedPluginName") || "").trim();
         if (!agentId) {
           window.location.replace("/agents.html");
-          return;
-        }
-        if (pluginName !== "rule_based_plugin") {
-          window.location.replace("/plugins.html");
         }
       } catch {
         window.location.replace("/agents.html");
@@ -63,7 +58,7 @@
         <span id="agentguard-copy-rules-enter-name">Please enter a rule name first.</span>
         <span id="agentguard-copy-rules-select-action">Please select an action first.</span>
         <span id="agentguard-copy-rules-select-degrade">Please select a DEGRADE target first.</span>
-        <span id="agentguard-copy-rules-trace-hint">Build Tool TRACE by adding one or more concrete or wildcard segments. Any tool or trigger stage filter refers to the final tool on the trace.</span>
+        <span id="agentguard-copy-rules-trace-hint">Build Tool TRACE by adding one or more concrete or wildcard segments. Any selected tool or runtime phase filter refers to the final tool on the trace.</span>
         <span id="agentguard-copy-rules-path-label">PATH:</span>
         <span id="agentguard-copy-rules-trace-empty">TRACE is empty. Click + to add the first segment.</span>
         <span id="agentguard-copy-rules-start">Start</span>
@@ -136,31 +131,31 @@
                     <label class="match-mode-card">
                       <input id="match-mode-trace" name="rule-match-mode" type="radio" value="trace" checked>
                       <span class="match-mode-title">Tool Trace</span>
-                      <span class="subtle">I want to monitor an execution chain. In trace mode, any tool / trigger stage filter refers to the last tool on the tool trace.</span>
+                      <span class="subtle">I want to monitor an execution chain. In trace mode, any tool / runtime phase filter refers to the last tool on the tool trace.</span>
                     </label>
                   </div>
                 </div>
                 <div class="field" id="on-field">
-                  <label for="rule-on-subtype-input">Select Target Tool and Trigger Stage</label>
+                  <label>Select Runtime Phases and Target Tool</label>
                   <p class="subtle" id="trace-on-field-hint" data-i18n-html="Rules Trace On Hint">
-                    When you use <strong>Tool Trace</strong>, the <strong>Tool</strong> and <strong>Trigger Stage</strong> here apply to the <strong>last tool</strong> on that trace.
+                    When you use <strong>Tool Trace</strong>, the <strong>Tool</strong> and selected <strong>Runtime Phases</strong> here apply to the <strong>last tool</strong> on that trace.
                   </p>
                   <div class="on-filter-row">
                     <div class="on-filter-help-row">
-                      <span class="subtle">Trigger Stage</span>
+                      <span class="subtle">Runtime Phases</span>
                       <div class="hint-wrap">
                         <span class="hint-dot">i</span>
                         <div class="hint-bubble">
-                          Choose when the rule should trigger in the tool invocation lifecycle.
+                          Choose which runtime stages this rule should evaluate against.
                         </div>
                       </div>
                     </div>
-                    <select id="rule-on-subtype-input">
-                      <option value="" selected>Trigger stage (optional)</option>
-                      <option value="requested">requested (pre call)</option>
-                      <option value="completed">completed (post call)</option>
-                      <option value="failed">failed (call failed)</option>
-                    </select>
+                    <div class="pill-row" id="rule-phase-group">
+                      <label><input type="checkbox" name="rule-phase" value="llm_before"> llm_before</label>
+                      <label><input type="checkbox" name="rule-phase" value="llm_after"> llm_after</label>
+                      <label><input type="checkbox" name="rule-phase" value="tool_before"> tool_before</label>
+                      <label><input type="checkbox" name="rule-phase" value="tool_after"> tool_after</label>
+                    </div>
                   </div>
                   <div class="on-filter-row">
                     <div class="on-filter-help-row">
@@ -168,7 +163,7 @@
                       <div class="hint-wrap">
                         <span class="hint-dot">i</span>
                         <div class="hint-bubble">
-                          Optionally narrow the rule to one specific tool under the selected trigger stage.
+                          Optionally narrow tool-phase rules to one specific tool.
                         </div>
                       </div>
                     </div>
@@ -183,7 +178,7 @@
                     <div class="path-builder-segments" id="path-builder-segments"></div>
                     <div class="path-builder-controls">
                       <p class="subtle path-builder-hint" id="path-builder-hint">
-                        TRACE is required in trace mode. The first PATH segment must be concrete, the final segment cannot be a wildcard, and any tool / trigger stage filter refers to the final tool on the trace.
+                        TRACE is required in trace mode. The first PATH segment must be concrete, the final segment cannot be a wildcard, and any tool / runtime phase filter refers to the final tool on the trace.
                       </p>
                       <button class="icon-label" id="path-continue-button" type="button" aria-label="Add path segment" title="Add path segment">
                         <img class="btn-icon-image" src="/assets/add.png" alt="">

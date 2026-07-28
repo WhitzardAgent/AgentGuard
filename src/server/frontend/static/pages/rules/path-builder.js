@@ -122,7 +122,7 @@
 
     function syncHint() {
       if (!segments.length) {
-        hint.textContent = getCopy("rules-trace-hint", "Build Tool TRACE by adding one or more concrete or wildcard segments. Any tool or trigger stage filter refers to the final tool on the trace.");
+        hint.textContent = getCopy("rules-trace-hint", "Build Tool TRACE by adding one or more concrete or wildcard segments. Any selected tool or runtime phase filter refers to the final tool on the trace.");
         hint.classList.remove("path-builder-error");
         return;
       }

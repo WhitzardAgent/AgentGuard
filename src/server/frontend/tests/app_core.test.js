@@ -1205,7 +1205,7 @@ test("shared app core builds multi-plugin config while preserving unrelated phas
       },
       tool_before: {
         client: ["client_tool_guard"],
-        server: ["custom_hidden_plugin", "tool_invoke", "rule_based_plugin"],
+        server: ["custom_hidden_plugin", "tool_invoke"],
       },
       tool_after: {
         client: ["tool_result"],
@@ -1385,7 +1385,7 @@ test("shared app core derives active plugin names and primary plugin from config
 
   assert.deepEqual(
     global.window.AgentGuardData.selectedPluginsFromConfig(configResponse),
-    ["jailbreak_check", "tool_invoke", "rule_based_plugin", "tool_result"],
+    ["jailbreak_check", "tool_invoke", "tool_result"],
   );
   assert.deepEqual(
     global.window.AgentGuardData.selectedPluginsFromConfig(configResponse, "client"),
@@ -1396,7 +1396,6 @@ test("shared app core derives active plugin names and primary plugin from config
     [
       "jailbreak_check",
       "tool_invoke",
-      "rule_based_plugin",
       "tool_result",
       "client_prompt_guard",
       "client_tool_result_guard",
@@ -1406,15 +1405,15 @@ test("shared app core derives active plugin names and primary plugin from config
     global.window.AgentGuardData.collapsePluginSelection(
       global.window.AgentGuardData.selectedPluginsFromConfig(configResponse),
     ),
-    ["jailbreak_check", "tool_invoke", "rule_based_plugin", "tool_result"],
+    ["jailbreak_check", "tool_invoke", "tool_result"],
   );
   assert.deepEqual(
-    global.window.AgentGuardData.expandPluginSelection(["rule_based_plugin", "tool_result"]),
-    ["rule_based_plugin", "tool_result"],
+    global.window.AgentGuardData.expandPluginSelection(["tool_result"]),
+    ["tool_result"],
   );
   assert.equal(
     global.window.AgentGuardData.selectedPluginFromConfig(configResponse),
-    "rule_based_plugin",
+    "jailbreak_check",
   );
 });
 
@@ -1465,7 +1464,7 @@ test("shared app core hides internal plugin options from the plugins catalog", a
   const catalog = await global.window.AgentGuardData.listAgentAvailablePlugins("agent-a");
 
   assert.deepEqual(catalog.local_plugins.map((item) => item.name), ["client_prompt_guard"]);
-  assert.deepEqual(catalog.remote_plugins.map((item) => item.name), ["rule_based_plugin"]);
+  assert.deepEqual(catalog.remote_plugins.map((item) => item.name), []);
 });
 
 test("shared app core preserves plugin config source from the agent config endpoint", async () => {
@@ -1516,5 +1515,5 @@ test("shared app core preserves plugin config source from the agent config endpo
 
   assert.equal(config.agent_id, "agent-a");
   assert.equal(config.config_source, "server_default");
-  assert.deepEqual(config.plugin_config?.phases?.tool_before?.server, ["rule_based_plugin"]);
+  assert.deepEqual(config.plugin_config, { phases: {} });
 });

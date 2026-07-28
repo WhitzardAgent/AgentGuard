@@ -40,7 +40,14 @@
     const normalized = model.normalizeRule(rule, {
       currentCallToolKey: deriveCurrentCallToolKey(rule),
     });
-    if (normalized.name && normalized.conditionItems.length && normalized.action && (normalized.path || normalized.onClause)) {
+    const hasToolPhase = utils.hasToolPhase ? utils.hasToolPhase(normalized) : false;
+    if (
+      normalized.name
+      && normalized.conditionItems.length
+      && normalized.action
+      && normalized.phases?.length
+      && (!hasToolPhase || normalized.path || normalized.onClause)
+    ) {
       try {
         return ruleDsl.serializeRule(normalized);
       } catch (error) {
@@ -53,6 +60,7 @@
       : "<condition pending>";
     const lines = [
       `RULE: ${normalized.name || "unnamed_rule"}`,
+      `PHASES: ${(normalized.phases || []).join(", ") || "<phase pending>"}`,
       ...(normalized.onClause ? [`ON: ${onClause.deriveOnClause(normalized)}`] : []),
       ...(normalized.path
         ? [`TRACE: ${normalized.path.split("->").map((segment) => segment.trim()).filter(Boolean).join(" -> ")}`]

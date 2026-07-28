@@ -32,6 +32,7 @@ _PRIORITY_BY_ACTION = {
 
 _HEADER_NAMES = (
     "RULE",
+    "PHASES",
     "ON",
     "TRACE",
     "CONDITION",
@@ -41,6 +42,13 @@ _HEADER_NAMES = (
     "Category",
     "Reason",
 )
+_PHASE_TO_EVENT_TYPE = {
+    "llm_before": "llm_input",
+    "llm_after": "llm_output",
+    "tool_before": "tool_invoke",
+    "tool_after": "tool_result",
+}
+_TOOL_PHASES = {"tool_before", "tool_after"}
 
 
 @dataclass
@@ -124,6 +132,29 @@ def _action_of(policy_line: str) -> str:
 def _degrade_target(policy_line: str) -> str:
     match = re.search(r'DEGRADE\s+TO\s+"([^"]*)"', policy_line or "", flags=re.IGNORECASE)
     return match.group(1).strip() if match else ""
+
+
+def _phase_names(fields: dict[str, str]) -> list[str]:
+    phases: list[str] = []
+    phases_line = str(fields.get("PHASES", "")).strip()
+    if phases_line:
+        for phase in [item.strip() for item in phases_line.split(",")]:
+            if phase in _PHASE_TO_EVENT_TYPE and phase not in phases:
+                phases.append(phase)
+        if phases:
+            return phases
+    on_line = str(fields.get("ON", "")).strip()
+    if not on_line:
+        return ["tool_before"]
+    match = re.search(r"tool_call(?:\.(\w+))?", on_line, flags=re.IGNORECASE)
+    subtype = (match.group(1) or "").lower() if match else ""
+    if subtype in {"completed", "failed", "result"}:
+        return ["tool_after"]
+    return ["tool_before"]
+
+
+def _event_types_for_fields(fields: dict[str, str]) -> list[str]:
+    return [_PHASE_TO_EVENT_TYPE[phase] for phase in _phase_names(fields)]
 
 
 def _on_event_types(on_line: str) -> list[str]:
@@ -240,6 +271,7 @@ def _runtime_rule(fields: dict[str, str], action: str) -> PolicyRule:
         "source": "dsl_runtime",
         "dsl_rule": fields,
         "tool_pattern": tool_pattern,
+        "phases": _phase_names(fields),
         "trace_pattern": fields.get("TRACE", ""),
         "severity": fields.get("Severity", ""),
         "category": fields.get("Category", ""),
@@ -256,7 +288,7 @@ def _runtime_rule(fields: dict[str, str], action: str) -> PolicyRule:
         effect=_ACTION_TO_EFFECT[action],
         reason=_unquote(fields.get("Reason", "")) or f"{action} for DSL rule",
         priority=_PRIORITY_BY_ACTION.get(action, 50),
-        event_types=_on_event_types(fields.get("ON", "")),
+        event_types=_event_types_for_fields(fields),
         tool_names=[] if tool_pattern in ("", "*") else [tool_pattern],
         conditions=conditions,
         condition_expr=condition_text,
@@ -302,7 +334,12 @@ def parse_legacy_rules(source: str) -> tuple[list[PolicyRule], DSLCompatReport]:
             report.errors.append({"message": f"Rule block {index}: unsupported POLICY '{action}'."})
             continue
 
-        if not fields.get("ON") and not fields.get("TRACE"):
+        phases = _phase_names(fields)
+        has_tool_phases = any(phase in _TOOL_PHASES for phase in phases)
+        if has_tool_phases and not fields.get("ON") and not fields.get("TRACE"):
+            report.errors.append({"message": f"Rule block {index} is missing required line(s): ON or TRACE."})
+            continue
+        if not has_tool_phases and not fields.get("ON") and not fields.get("TRACE"):
             report.warnings.append(
                 {"message": f"Rule block {index} has no ON/TRACE match; add one for precise targeting."}
             )

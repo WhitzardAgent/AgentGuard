@@ -1,7 +1,7 @@
 (function () {
   const SUPPORTED_ACTIONS = new Set(["DENY", "HUMAN_CHECK", "LLM_CHECK", "ALLOW", "DEGRADE"]);
-  const CONTEXT_PREFIXES = new Set(["tool", "principal", "mcp"]);
-  const ON_SUBTYPES = ["requested", "completed", "failed"];
+  const CONTEXT_PREFIXES = new Set(["tool", "principal", "mcp", "payload"]);
+  const RULE_PHASES = ["llm_before", "llm_after", "tool_before", "tool_after"];
 
   function escapeString(value) {
     return String(value)
@@ -35,18 +35,22 @@
     if (explicit) {
       return explicit;
     }
-    const onSubtype = String(rule?.onSubtype || rule?.on?.subtype || "").trim();
     const onTool = String(rule?.onToolPattern || rule?.on?.tool_pattern || rule?.on?.tool || "").trim();
-    if (!onSubtype && !onTool) {
-      return "";
-    }
-    if (onSubtype && onTool) {
-      return `tool_call.${onSubtype}(${onTool})`;
-    }
-    if (onSubtype) {
-      return `tool_call.${onSubtype}`;
-    }
-    return `tool_call(${onTool})`;
+    return onTool ? `tool_call(${onTool})` : "";
+  }
+
+  function normalizePhases(rule) {
+    const seen = new Set();
+    return (Array.isArray(rule?.phases) ? rule.phases : [])
+      .map((phase) => String(phase || "").trim())
+      .filter((phase) => RULE_PHASES.includes(phase))
+      .filter((phase) => {
+        if (seen.has(phase)) {
+          return false;
+        }
+        seen.add(phase);
+        return true;
+      });
   }
 
   function isValidOnClause(value) {
@@ -56,12 +60,8 @@
     }
 
     const toolPattern = "(?:\\*|[^()\\s]+)";
-    const subtype = `(?:${ON_SUBTYPES.join("|")})`;
     const directPattern = new RegExp(`^tool_call\\(${toolPattern}\\)$`);
-    const subtypeOnlyPattern = new RegExp(`^tool_call\\.${subtype}$`);
-    const subtypeWithPattern = new RegExp(`^tool_call\\.${subtype}\\(${toolPattern}\\)$`);
-
-    return directPattern.test(candidate) || subtypeOnlyPattern.test(candidate) || subtypeWithPattern.test(candidate);
+    return directPattern.test(candidate);
   }
 
   function normalizePath(path) {
@@ -177,9 +177,13 @@
     const degradeTarget = normalizeDegradeTarget(rule);
     const rawPath = String(rule?.path || "").trim();
     const onClause = normalizeOnClause(rule);
+    const phases = normalizePhases(rule);
     const path = normalizePath(rawPath);
     const condition = serializeConditionItems(rule?.conditionItems || []);
-    if (!path && !onClause) {
+    if (!phases.length) {
+      throw new Error("At least one runtime phase is required before publishing.");
+    }
+    if (phases.some((phase) => phase.startsWith("tool_")) && !path && !onClause) {
       throw new Error("At least one formal match is required before publishing.");
     }
     if (onClause && !isValidOnClause(onClause)) {
@@ -190,6 +194,7 @@
     }
     const lines = [
       `RULE: ${name}`,
+      `PHASES: ${phases.join(", ")}`,
       ...(onClause ? [`ON: ${onClause}`] : []),
       ...(path ? [`TRACE: ${path}`] : []),
       `CONDITION: ${condition}`,
@@ -225,6 +230,7 @@
     isValidOnClause,
     normalizeDegradeTarget,
     normalizeOnClause,
+    normalizePhases,
     serializeRule,
     serializeRules,
   };
