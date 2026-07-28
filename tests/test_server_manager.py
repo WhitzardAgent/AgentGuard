@@ -1002,6 +1002,120 @@ def test_resolve_effective_plugin_config_prefers_agent_override_then_session_the
     assert resolved["phases"]["llm_before"]["server"] == ["rule_based_plugin"]
 
 
+def test_agent_override_hydrates_sparse_server_plugin_specs_from_default():
+    m = RuntimeManager(
+        plugin_config={
+            "phases": {
+                "llm_after": {
+                    "client": [],
+                    "server": [
+                        {
+                            "name": "thought_aligner",
+                            "env": {
+                                "base_url": "https://thought-aligner.example/v1",
+                                "api_key": "$THOUGHT_ALIGNER_API_KEY",
+                                "model": "thought-aligner-7b",
+                            },
+                            "kwargs": {
+                                "implementation": "mock",
+                                "mock_mode": "rewrite",
+                                "failure_mode": "allow",
+                            },
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    m.set_agent_plugin_config(
+        "agent-1",
+        {
+            "phases": {
+                "llm_after": {
+                    "client": [],
+                    "server": ["thought_aligner"],
+                }
+            }
+        },
+    )
+
+    stored = m.get_agent_plugin_config("agent-1")
+
+    assert stored is not None
+    remote_spec = stored["remote_plugin_config"]["phases"]["llm_after"]["server"][0]
+    assert remote_spec["name"] == "thought_aligner"
+    assert remote_spec["kwargs"]["implementation"] == "mock"
+    assert remote_spec["kwargs"]["mock_mode"] == "rewrite"
+    assert remote_spec["env"]["model"] == "thought-aligner-7b"
+
+
+def test_decide_uses_hydrated_sparse_thought_aligner_override():
+    m = RuntimeManager(
+        plugin_config={
+            "phases": {
+                "llm_after": {
+                    "client": [],
+                    "server": [
+                        {
+                            "name": "thought_aligner",
+                            "kwargs": {
+                                "implementation": "mock",
+                                "mock_mode": "rewrite",
+                                "failure_mode": "allow",
+                            },
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    m.set_agent_plugin_config(
+        "agent-1",
+        {
+            "phases": {
+                "llm_after": {
+                    "client": [],
+                    "server": ["thought_aligner"],
+                }
+            }
+        },
+    )
+
+    res = m.decide(
+        {
+            "request_id": "thought-aligner-hydrated",
+            "context": {"session_id": "s-thought-aligner", "agent_id": "agent-1"},
+            "current_event": {
+                "event_type": "llm_output",
+                "payload": {
+                    "thought": "先检查用户请求是否安全。",
+                    "output": "<think>先检查用户请求是否安全。</think>可以继续。",
+                    "final_output": "可以继续。",
+                },
+                "risk_signals": [],
+                "metadata": {"thought_regeneration_supported": True},
+            },
+            "trajectory_window": [
+                {
+                    "event_type": "llm_input",
+                    "payload": {
+                        "messages": [
+                            {"role": "user", "content": "分析这个请求并说明下一步。"},
+                        ]
+                    },
+                    "risk_signals": [],
+                }
+            ],
+            "local_signals": [],
+        }
+    )
+
+    assert res["decision"]["decision_type"] == "loop_back_to_llm"
+    assert res["decision"]["processed_content"].endswith("[mock aligned]")
+    assert res["plugin_result"]["metadata"]["thought_alignment"] == "aligned"
+
+
 def test_manager_stops_remote_plugin_chain_on_first_decision():
     m = RuntimeManager(
         plugin_config={

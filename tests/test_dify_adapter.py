@@ -520,6 +520,16 @@ def _event_types(guard) -> list[str]:
     return [entry.event.event_type.value for entry in guard.trace.entries]
 
 
+def _workflow_specialized_result_with_fallback(dify_adapter, completed_event, fallback_output):
+    turn_state = dify_adapter._current_workflow_llm_turn.get()
+    turn_state.fallback_output = dict(fallback_output)
+
+    def generate():
+        yield completed_event
+
+    return generate()
+
+
 def test_dify_legacy_llm_call_binds_args_and_kwargs():
     from agentguard.adapters.agent.dify_shared import DifyLegacyLLMCall
 
@@ -2411,6 +2421,252 @@ def test_workflow_llm_loopback_retries_with_aligned_thought(monkeypatch):
     assert guard.runtime.events[1][2]["thought_regeneration_supported"] is True
     assert guard.runtime.events[2][2]["thought_alignment_attempt"] == 1
     assert guard.runtime.events[3][2]["thought_alignment_attempt"] == 1
+
+
+def test_workflow_specialized_turn_suppresses_low_level_llm_after(monkeypatch):
+    dify_adapter = _fresh_adapter(monkeypatch)
+    from agentguard.adapters.agent.dify_shared import DifyLegacyLLMCall
+
+    class RecordingRuntime:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def guard(self, event, phase="before"):
+            self.calls.append((event.event_type.value, phase))
+            return types.SimpleNamespace(decision=GuardDecision.allow())
+
+    guard = types.SimpleNamespace(
+        runtime=RecordingRuntime(),
+        context=types.SimpleNamespace(session_id="workflow-specialized-suppress", agent_id="agent"),
+    )
+    turn_state = dify_adapter._WorkflowSpecializedLLMTurnState(prompt_messages=[], extra_metadata={})
+    token_guard = dify_adapter._current_guard.set(guard)
+    token_meta = dify_adapter._current_metadata.set({"dify_runtime": "workflow_api"})
+    token_turn = dify_adapter._current_workflow_llm_turn.set(turn_state)
+    try:
+        decision = dify_adapter._guard_legacy_llm_output(
+            types.SimpleNamespace(model_name="gpt-4o-mini", provider="openai"),
+            {"output": "visible answer", "reasoning_content": "fallback reasoning"},
+            DifyLegacyLLMCall(prompt_messages=[types.SimpleNamespace(content="query")], stream=True),
+        )
+    finally:
+        dify_adapter._current_workflow_llm_turn.reset(token_turn)
+        dify_adapter._current_metadata.reset(token_meta)
+        dify_adapter._current_guard.reset(token_guard)
+
+    assert decision.is_allow
+    assert turn_state.fallback_output == {
+        "output": "visible answer",
+        "final_output": "visible answer",
+        "thought": "fallback reasoning",
+    }
+    assert guard.runtime.calls == []
+
+
+def test_workflow_specialized_llm_after_prefers_completed_reasoning_content(monkeypatch):
+    dify_adapter = _fresh_adapter(monkeypatch)
+    recorded = []
+
+    class ModelInvokeCompletedEvent:
+        def __init__(self, text, reasoning_content, structured_output=None):
+            self.text = text
+            self.reasoning_content = reasoning_content
+            self.structured_output = structured_output
+
+    def fake_guard_output(model, output, *, prompt_messages, fallback_payload=None, error=None, extra_metadata=None):
+        recorded.append(
+            (
+                dify_adapter._workflow_specialized_llm_output_payload(
+                    output,
+                    fallback_payload=fallback_payload,
+                ),
+                prompt_messages,
+                fallback_payload,
+                extra_metadata,
+            )
+        )
+        return GuardDecision.allow()
+
+    monkeypatch.setattr(dify_adapter, "_guard_workflow_specialized_llm_output", fake_guard_output)
+    token_guard = dify_adapter._current_guard.set(object())
+    token_meta = dify_adapter._current_metadata.set({"dify_runtime": "workflow_api"})
+    try:
+        result = list(
+            dify_adapter._run_workflow_specialized_llm_turn(
+                lambda **_kwargs: _workflow_specialized_result_with_fallback(
+                    dify_adapter,
+                    ModelInvokeCompletedEvent(
+                        text="visible answer",
+                        reasoning_content="authoritative reasoning",
+                        structured_output={"secret": "value"},
+                    ),
+                    fallback_output={
+                        "output": "<think>fallback reasoning</think><final>fallback answer</final>",
+                        "final_output": "fallback answer",
+                        "thought": "fallback reasoning",
+                    },
+                ),
+                model_instance=types.SimpleNamespace(model_name="gpt-4o-mini", provider="openai"),
+                prompt_messages=[types.SimpleNamespace(content="query")],
+                node_id="llm-node-1",
+            )
+        )
+    finally:
+        dify_adapter._current_metadata.reset(token_meta)
+        dify_adapter._current_guard.reset(token_guard)
+
+    assert len(recorded) == 1
+    assert recorded[0][0] == {
+        "output": "visible answer",
+        "final_output": "visible answer",
+        "thought": "authoritative reasoning",
+    }
+    assert len(result) == 1
+    assert result[0].reasoning_content == "authoritative reasoning"
+
+
+def test_workflow_specialized_llm_loopback_rebuilds_graphon_prompt_messages(monkeypatch):
+    dify_adapter = _fresh_adapter(monkeypatch)
+    graphon_pkg = types.ModuleType("graphon")
+    model_runtime_pkg = types.ModuleType("graphon.model_runtime")
+    entities_pkg = types.ModuleType("graphon.model_runtime.entities")
+    message_entities_mod = types.ModuleType("graphon.model_runtime.entities.message_entities")
+
+    class AssistantPromptMessage:
+        def __init__(self, content, tool_calls=None):
+            self.role = "assistant"
+            self.content = content
+            self.tool_calls = list(tool_calls or [])
+
+    message_entities_mod.AssistantPromptMessage = AssistantPromptMessage
+    monkeypatch.setitem(sys.modules, "graphon", graphon_pkg)
+    monkeypatch.setitem(sys.modules, "graphon.model_runtime", model_runtime_pkg)
+    monkeypatch.setitem(sys.modules, "graphon.model_runtime.entities", entities_pkg)
+    monkeypatch.setitem(sys.modules, "graphon.model_runtime.entities.message_entities", message_entities_mod)
+
+    class ModelInvokeCompletedEvent:
+        def __init__(self, text, reasoning_content):
+            self.text = text
+            self.reasoning_content = reasoning_content
+            self.structured_output = None
+
+    seen_prompt_messages = []
+    guarded = []
+
+    def fake_original(**kwargs):
+        seen_prompt_messages.append(list(kwargs["prompt_messages"]))
+        attempt = len(seen_prompt_messages)
+
+        def generate():
+            yield ModelInvokeCompletedEvent(
+                text=f"answer-{attempt}",
+                reasoning_content=f"reasoning-{attempt}",
+            )
+
+        return generate()
+
+    def fake_guard_output(model, output, *, prompt_messages, fallback_payload=None, error=None, extra_metadata=None):
+        guarded.append((output, prompt_messages, extra_metadata))
+        if len(guarded) == 1:
+            return GuardDecision(
+                decision_type=DecisionType.LOOP_BACK_TO_LLM,
+                reason="retry",
+                processed_content="aligned thought",
+                metadata={"protocol": "thought_alignment_v1"},
+            )
+        return GuardDecision.allow()
+
+    monkeypatch.setattr(dify_adapter, "_guard_workflow_specialized_llm_output", fake_guard_output)
+    token_guard = dify_adapter._current_guard.set(object())
+    token_meta = dify_adapter._current_metadata.set({"dify_runtime": "workflow_api"})
+    try:
+        result = list(
+            dify_adapter._run_workflow_specialized_llm_turn(
+                fake_original,
+                model_instance=types.SimpleNamespace(model_name="gpt-4o-mini", provider="openai"),
+                prompt_messages=[types.SimpleNamespace(role="user", content="query")],
+                node_id="llm-node-1",
+            )
+        )
+    finally:
+        dify_adapter._current_metadata.reset(token_meta)
+        dify_adapter._current_guard.reset(token_guard)
+
+    assert len(seen_prompt_messages) == 2
+    assert seen_prompt_messages[1][-1].role == "assistant"
+    assert seen_prompt_messages[1][-1].content == "aligned thought"
+    assert guarded[1][2] == {"thought_alignment_attempt": 1}
+    assert result[0].text == "answer-2"
+
+
+def test_workflow_specialized_llm_modify_output_rewrites_stream_and_completed_event(monkeypatch):
+    dify_adapter = _fresh_adapter(monkeypatch)
+
+    class StreamChunkEvent:
+        def __init__(self, selector, chunk, is_final=False):
+            self.selector = list(selector)
+            self.chunk = chunk
+            self.is_final = is_final
+
+    class StreamReasoningEvent:
+        def __init__(self, selector, chunk, is_final=False):
+            self.selector = list(selector)
+            self.chunk = chunk
+            self.is_final = is_final
+
+    class LLMStructuredOutput:
+        def __init__(self, structured_output):
+            self.structured_output = structured_output
+
+    class ModelInvokeCompletedEvent:
+        def __init__(self, text, reasoning_content, structured_output=None):
+            self.text = text
+            self.reasoning_content = reasoning_content
+            self.structured_output = structured_output
+
+    def fake_original(**_kwargs):
+        def generate():
+            yield StreamChunkEvent(["llm-node-1", "text"], "original answer")
+            yield StreamReasoningEvent(["llm-node-1", "reasoning_content"], "original reasoning", is_final=True)
+            yield LLMStructuredOutput({"secret": "value"})
+            yield ModelInvokeCompletedEvent("original answer", "original reasoning", structured_output={"secret": "value"})
+
+        return generate()
+
+    def fake_guard_output(model, output, *, prompt_messages, fallback_payload=None, error=None, extra_metadata=None):
+        return GuardDecision.modify_llm_output(
+            "rewrite workflow llm output",
+            processed_content='{"output": "rewritten answer", "thought": "rewritten reasoning"}',
+        )
+
+    monkeypatch.setattr(dify_adapter, "_guard_workflow_specialized_llm_output", fake_guard_output)
+    token_guard = dify_adapter._current_guard.set(object())
+    token_meta = dify_adapter._current_metadata.set({"dify_runtime": "workflow_api"})
+    try:
+        result = list(
+            dify_adapter._run_workflow_specialized_llm_turn(
+                fake_original,
+                model_instance=types.SimpleNamespace(model_name="gpt-4o-mini", provider="openai"),
+                prompt_messages=[types.SimpleNamespace(content="query")],
+                node_id="llm-node-1",
+            )
+        )
+    finally:
+        dify_adapter._current_metadata.reset(token_meta)
+        dify_adapter._current_guard.reset(token_guard)
+
+    assert [type(item).__name__ for item in result] == [
+        "StreamReasoningEvent",
+        "StreamChunkEvent",
+        "ModelInvokeCompletedEvent",
+    ]
+    assert result[0].selector == ["llm-node-1", "reasoning_content"]
+    assert result[0].chunk == "rewritten reasoning"
+    assert result[1].selector == ["llm-node-1", "text"]
+    assert result[1].chunk == "rewritten answer"
+    assert result[2].text == "rewritten answer"
+    assert result[2].reasoning_content == "rewritten reasoning"
+    assert result[2].structured_output is None
 
 
 def test_legacy_llm_tool_call_only_output_is_null(monkeypatch):

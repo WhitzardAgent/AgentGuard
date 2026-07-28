@@ -732,6 +732,57 @@ test("catalogContextForWorkflow uses n8n workflow owner as user", () => {
   assert.equal(context.metadata.n8n_project_name, "Personal");
 });
 
+test("registerN8nWorkflowAgent includes client plugin catalog in agent registration", async (t) => {
+  const oldServerUrl = process.env.AGENTGUARD_SERVER_URL;
+  const oldKeyDir = process.env.AGENTGUARD_AGENT_KEY_DIR;
+  const keyDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-n8n-register-"));
+  process.env.AGENTGUARD_SERVER_URL = "http://agentguard.test";
+  process.env.AGENTGUARD_AGENT_KEY_DIR = keyDir;
+  let captured = null;
+
+  t.after(() => {
+    restoreEnv("AGENTGUARD_SERVER_URL", oldServerUrl);
+    restoreEnv("AGENTGUARD_AGENT_KEY_DIR", oldKeyDir);
+    fs.rmSync(keyDir, { recursive: true, force: true });
+  });
+
+  const registration = await _private.registerN8nWorkflowAgent(
+    {
+      workflow_id: "wf-client-plugin-register",
+      workflow_name: "Client Plugin Workflow",
+      n8n_user_email: "owner@example.com",
+    },
+    {
+      remote: {
+        enabled: true,
+        async register_agent(payload) {
+          captured = payload;
+          return {
+            status: "ok",
+            agent: {
+              agent_id: "ag_n8n_client_plugins",
+            },
+          };
+        },
+      },
+      reason: "runtime",
+    }
+  );
+
+  assert.equal(registration.agent.agent_id, "ag_n8n_client_plugins");
+  assert.ok(Array.isArray(captured.client_plugins));
+  assert.equal(captured.client_plugins.some((plugin) => plugin.name === "llm_output"), true);
+  assert.deepEqual(
+    captured.client_plugins.find((plugin) => plugin.name === "llm_output"),
+    {
+      name: "llm_output",
+      description: "",
+      event_types: ["llm_output"],
+      phases: ["llm_after"],
+    }
+  );
+});
+
 test("syncWorkflowCatalog registers n8n workflow agent before syncing tools", async (t) => {
   const calls = [];
   const oldFetch = global.fetch;
@@ -754,6 +805,8 @@ test("syncWorkflowCatalog registers n8n workflow agent before syncing tools", as
       assert.equal(body.account_email, "owner@example.com");
       assert.equal(body.metadata.display_agent_id, "n8n:wf-register-test");
       assert.equal(body.public_key_jwk.kty, "OKP");
+      assert.equal(Array.isArray(body.client_plugins), true);
+      assert.equal(body.client_plugins.some((plugin) => plugin.name === "tool_invoke"), true);
       return {
         ok: true,
         json: async () => ({

@@ -4,7 +4,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const { pluginDescriptions } = require("./plugins/registry");
-const { builtinPluginEntries } = require("./plugins/manager");
+const { builtinPluginEntries, PHASE_ORDER } = require("./plugins/manager");
 
 const PLUGIN_CONFIG_PATH = "/v1/client/plugins/config";
 const PLUGIN_LIST_PATH = "/v1/client/plugins/list";
@@ -176,7 +176,7 @@ class ClientConfigAPIServer {
   }
 }
 
-function listRegisteredPlugins() {
+function buildClientPluginCatalog() {
   const { registeredPlugins } = require("./plugins/registry");
   const descriptions = pluginDescriptions();
   const deprecated = new Set(["memory", "llm_thought", "final_response"]);
@@ -187,21 +187,58 @@ function listRegisteredPlugins() {
       name: plugin.name,
       description: plugin.description || "",
       event_types: [...(plugin.event_types || [])],
+      phases: phasesForEventTypes(plugin.event_types || []),
     });
   }
 
   for (const [name, PluginClass] of Object.entries(registeredPlugins())) {
     const instance = new PluginClass();
+    const eventTypes = [...(instance.event_types || [])].map((eventType) => String(eventType || "")).filter(Boolean);
     plugins.set(name, {
       name,
       description: descriptions[name] || instance.description || "",
-      event_types: [...(instance.event_types || [])].map((eventType) => String(eventType || "")).filter(Boolean),
+      event_types: eventTypes,
+      phases: phasesForEventTypes(eventTypes),
     });
   }
 
   return [...plugins.values()]
     .filter((plugin) => !deprecated.has(plugin.name))
     .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function listRegisteredPlugins() {
+  return buildClientPluginCatalog();
+}
+
+function phasesForEventTypes(eventTypes = []) {
+  const phases = [];
+  for (const phase of PHASE_ORDER) {
+    if (phase === "global") {
+      continue;
+    }
+    if ((eventTypes || []).some((eventType) => eventPhase(eventType) === phase)) {
+      phases.push(phase);
+    }
+  }
+  return phases;
+}
+
+function eventPhase(eventType) {
+  const raw = String(eventType || "").trim();
+  if (raw === "llm_input") {
+    return "llm_before";
+  }
+  if (raw === "llm_output") {
+    return "llm_after";
+  }
+  if (raw === "tool_invoke") {
+    return "tool_before";
+  }
+  if (raw === "tool_result") {
+    return "tool_after";
+  }
+  return null;
 }
 
 function readJson(req) {
@@ -253,6 +290,7 @@ module.exports = {
   PLUGIN_LIST_PATH,
   CLIENT_HEALTH_PATH,
   CLIENT_SESSION_CONTROL_PATH,
+  buildClientPluginCatalog,
   listRegisteredPlugins,
   defaultAdvertisedHost,
 };

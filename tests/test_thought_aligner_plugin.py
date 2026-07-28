@@ -129,3 +129,66 @@ def test_thought_aligner_mock_implementation_passthrough_allows():
     assert result.decision_candidate is None
     assert result.risk_signals == []
     assert result.metadata == {"thought_alignment": "unchanged"}
+
+
+def test_thought_aligner_context_unavailable_reports_payload_diagnostics():
+    plugin = ThoughtAlignerPlugin(implementation="mock", mock_mode="rewrite")
+    context = _ctx()
+    event = ev.llm_output(
+        context,
+        {"output": "plain answer without thought", "final_output": "plain answer without thought"},
+        thought_regeneration_supported=True,
+    )
+    trajectory = [
+        ev.llm_input(
+            context,
+            [{"role": "user", "content": "请先思考再回答。"}],
+        )
+    ]
+
+    result = plugin.check(event, context, trajectory)
+
+    assert result.decision_candidate is None
+    assert result.metadata["thought_alignment"] == "context_unavailable"
+    debug = result.metadata["thought_alignment_debug"]
+    assert debug["implementation"] == "mock"
+    assert debug["mock_mode"] == "rewrite"
+    assert debug["payload_thought_present"] is False
+    assert debug["payload_output_preview"] == "plain answer without thought"
+    assert debug["last_user_instruction_preview"] == "请先思考再回答。"
+
+
+def test_thought_aligner_failure_reports_exception_and_field_diagnostics():
+    class _ExplodingAligner:
+        def align(self, instruction: str, thought: str) -> str:
+            raise RuntimeError(f"boom:{len(instruction)}:{len(thought)}")
+
+    plugin = ThoughtAlignerPlugin(aligner=_ExplodingAligner(), failure_mode="allow")
+    context = _ctx()
+    thought = "先判断是否需要调用外部工具。"
+    event = ev.llm_output(
+        context,
+        {"thought": thought, "output": f"<think>{thought}</think>最终回答"},
+        thought_regeneration_supported=True,
+    )
+    trajectory = [
+        ev.llm_input(
+            context,
+            [{"role": "user", "content": "分析请求后给出你的下一步动作。"}],
+        )
+    ]
+
+    result = plugin.check(event, context, trajectory)
+
+    assert result.decision_candidate is None
+    assert result.risk_signals == ["thought_alignment_error"]
+    assert result.metadata["thought_alignment"] == "error_allowed"
+    assert result.metadata["thought_alignment_error_type"] == "RuntimeError"
+    assert result.metadata["thought_alignment_error"].startswith("boom:")
+    debug = result.metadata["thought_alignment_debug"]
+    assert debug["payload_thought_present"] is True
+    assert debug["payload_thought_preview"] == thought
+    assert debug["payload_output_has_think_tag"] is True
+    assert debug["last_user_instruction_preview"] == "分析请求后给出你的下一步动作。"
+    assert debug["alignment_instruction_len"] > 0
+    assert debug["alignment_thought_len"] == len(thought)

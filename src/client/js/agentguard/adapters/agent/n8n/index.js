@@ -7,6 +7,7 @@ const path = require("path");
 const { createRequire } = require("module");
 
 const { AgentGuard } = require("../../../guard");
+const { buildClientPluginCatalog } = require("../../../config_api");
 const ev = require("../../../schemas/events");
 const { RuntimeContext } = require("../../../schemas/context");
 const { DecisionType } = require("../../../schemas/decisions");
@@ -677,6 +678,7 @@ async function registerN8nWorkflowAgent(context = {}, { remote = null, tools = n
     account_email: accountEmail,
     metadata,
   });
+  payload.client_plugins = buildClientPluginCatalog();
   const client = remote || new RemoteGuardClient(process.env.AGENTGUARD_SERVER_URL || null, {
     api_key: process.env.AGENTGUARD_API_KEY || null,
     timeout_s: numberEnv("AGENTGUARD_N8N_AGENT_REGISTER_TIMEOUT_S", 5.0),

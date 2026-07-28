@@ -1,6 +1,7 @@
 """Server-side Thought-Aligner intervention for LLM outputs."""
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from backend.runtime.plugins.base import BasePlugin, CheckResult
@@ -8,6 +9,7 @@ from backend.runtime.plugins.llm_after.thought_alignment import (
     ThoughtAlignerClient,
     ThoughtAlignmentError,
     build_alignment_context,
+    extract_thought,
 )
 from backend.runtime.plugins.registry import register
 from shared.schemas.context import RuntimeContext
@@ -41,6 +43,11 @@ class ThoughtAlignerPlugin(BasePlugin):
         if _as_int(event.metadata.get("thought_alignment_attempt"), 0) > 0:
             return CheckResult(metadata={"thought_alignment": "retry_skipped"})
 
+        diagnostics = _alignment_diagnostics(
+            self,
+            event,
+            trajectory_window,
+        )
         alignment = build_alignment_context(
             event,
             context,
@@ -55,7 +62,12 @@ class ThoughtAlignerPlugin(BasePlugin):
             max_history_items=_as_int(getattr(self, "max_history_items", 8), 8),
         )
         if alignment is None:
-            return CheckResult(metadata={"thought_alignment": "context_unavailable"})
+            return CheckResult(
+                metadata={
+                    "thought_alignment": "context_unavailable",
+                    "thought_alignment_debug": diagnostics,
+                }
+            )
 
         if event.metadata.get("thought_regeneration_supported") is not True:
             return CheckResult(
@@ -68,8 +80,18 @@ class ThoughtAlignerPlugin(BasePlugin):
             )
 
         try:
+            formatted_instruction = alignment.formatted_instruction
+            diagnostics.update(
+                {
+                    "alignment_instruction_len": len(formatted_instruction),
+                    "alignment_instruction_preview": _preview_text(formatted_instruction),
+                    "alignment_thought_len": len(alignment.thought),
+                    "alignment_thought_preview": _preview_text(alignment.thought),
+                    "alignment_history_items": len(alignment.history),
+                }
+            )
             aligned = self._aligner().align(
-                alignment.formatted_instruction,
+                formatted_instruction,
                 alignment.thought,
             )
             thought_limit = max(
@@ -79,8 +101,8 @@ class ThoughtAlignerPlugin(BasePlugin):
             aligned = str(aligned).strip()[:thought_limit].strip()
             if not aligned:
                 raise ThoughtAlignmentError("Thought-Aligner returned empty text")
-        except Exception:
-            return self._failure_result()
+        except Exception as exc:
+            return self._failure_result(error=exc, diagnostics=diagnostics)
 
         if aligned == alignment.thought.strip():
             return CheckResult(metadata={"thought_alignment": "unchanged"})
@@ -118,12 +140,22 @@ class ThoughtAlignerPlugin(BasePlugin):
             timeout_s=_as_float(getattr(self, "timeout_s", 30.0), 30.0),
         )
 
-    def _failure_result(self) -> CheckResult:
+    def _failure_result(
+        self,
+        *,
+        error: Exception,
+        diagnostics: dict[str, Any] | None = None,
+    ) -> CheckResult:
+        failure_metadata = {
+            "thought_alignment_error_type": type(error).__name__,
+            "thought_alignment_error": str(error) or type(error).__name__,
+            "thought_alignment_debug": dict(diagnostics or {}),
+        }
         failure_mode = str(getattr(self, "failure_mode", "allow") or "allow").lower()
         if failure_mode != "deny":
             return CheckResult(
                 risk_signals=["thought_alignment_error"],
-                metadata={"thought_alignment": "error_allowed"},
+                metadata={"thought_alignment": "error_allowed", **failure_metadata},
             )
         return CheckResult(
             decision_candidate=GuardDecision.deny(
@@ -132,7 +164,7 @@ class ThoughtAlignerPlugin(BasePlugin):
             ),
             risk_signals=["thought_alignment_error"],
             is_final=True,
-            metadata={"thought_alignment": "error_denied"},
+            metadata={"thought_alignment": "error_denied", **failure_metadata},
         )
 
 
@@ -165,6 +197,96 @@ class _MockThoughtAligner:
         if not base:
             return "Mock aligned thought"
         return f"{base} [mock aligned]"
+
+
+def _alignment_diagnostics(
+    plugin: ThoughtAlignerPlugin,
+    event: RuntimeEvent,
+    trajectory_window: list[RuntimeEvent] | None,
+) -> dict[str, Any]:
+    payload = _payload_mapping(event.payload)
+    thought_text = _optional_text(payload.get("thought")) or extract_thought(payload)
+    output_text = _optional_text(payload.get("output"))
+    final_output_text = _optional_text(payload.get("final_output"))
+    return {
+        "implementation": str(getattr(plugin, "implementation", "remote") or "remote"),
+        "mock_mode": str(getattr(plugin, "mock_mode", "") or ""),
+        "failure_mode": str(getattr(plugin, "failure_mode", "allow") or "allow"),
+        "event_node_id": str(event.metadata.get("node_id") or ""),
+        "event_model": str(event.metadata.get("model") or ""),
+        "event_model_provider": str(event.metadata.get("model_provider") or ""),
+        "payload_keys": sorted(str(key) for key in payload),
+        "payload_thought_present": thought_text is not None,
+        "payload_thought_len": len(thought_text) if thought_text is not None else 0,
+        "payload_thought_preview": _preview_text(thought_text),
+        "payload_output_len": len(output_text) if output_text is not None else 0,
+        "payload_output_preview": _preview_text(output_text),
+        "payload_final_output_len": len(final_output_text) if final_output_text is not None else 0,
+        "payload_final_output_preview": _preview_text(final_output_text),
+        "payload_output_has_think_tag": bool(output_text and "<think" in output_text.lower()),
+        "trajectory_event_count": len(trajectory_window or []),
+        "trajectory_llm_input_count": sum(
+            1 for item in (trajectory_window or []) if item.event_type == EventType.LLM_INPUT
+        ),
+        "last_user_instruction_preview": _last_user_instruction_preview(trajectory_window),
+    }
+
+
+def _payload_mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return {str(key): item for key, item in value.items()}
+    to_dict = getattr(value, "to_dict", None)
+    if callable(to_dict):
+        try:
+            dumped = to_dict()
+        except Exception:
+            dumped = None
+        if isinstance(dumped, Mapping):
+            return {str(key): item for key, item in dumped.items()}
+    result: dict[str, Any] = {}
+    for key in ("thought", "output", "final_output", "messages", "content", "text"):
+        item = getattr(value, key, None)
+        if item is not None:
+            result[key] = item
+    return result
+
+
+def _last_user_instruction_preview(trajectory_window: list[RuntimeEvent] | None) -> str | None:
+    for item in reversed(list(trajectory_window or [])):
+        if item.event_type != EventType.LLM_INPUT:
+            continue
+        payload = _payload_mapping(item.payload)
+        messages = payload.get("messages")
+        if isinstance(messages, Sequence) and not isinstance(messages, (str, bytes, bytearray)):
+            for message in reversed(messages):
+                normalized = _payload_mapping(message)
+                role = str(normalized.get("role") or "").strip().lower()
+                if role not in {"user", "human"}:
+                    continue
+                preview = _preview_text(_optional_text(normalized.get("content")))
+                if preview:
+                    return preview
+    return None
+
+
+def _optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        return text or None
+    return None
+
+
+def _preview_text(value: str | None, *, limit: int = 240) -> str | None:
+    if value is None:
+        return None
+    compact = " ".join(value.split())
+    if not compact:
+        return None
+    if len(compact) <= limit:
+        return compact
+    return f"{compact[:limit]}..."
 
 
 def _aligner_implementation_and_mock_mode(plugin: ThoughtAlignerPlugin) -> tuple[str, str]:

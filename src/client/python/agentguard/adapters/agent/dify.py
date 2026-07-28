@@ -16,7 +16,7 @@ import secrets
 import sys
 import threading
 import time
-from collections.abc import Generator, Iterable
+from collections.abc import Generator, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -42,6 +42,10 @@ _current_metadata: contextvars.ContextVar[dict[str, Any]] = contextvars.ContextV
 )
 _current_run_key: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "agentguard_dify_run_key",
+    default=None,
+)
+_current_workflow_llm_turn: contextvars.ContextVar["_WorkflowSpecializedLLMTurnState | None"] = contextvars.ContextVar(
+    "agentguard_dify_workflow_llm_turn",
     default=None,
 )
 _catalog_sync_started = False
@@ -105,6 +109,14 @@ _WORKFLOW_RUNTIME_SPEC = _shared.DifyRuntimeSpec(
     ),
     external_agent_id_for_app=lambda app_id: _workflow_agent_id(app_id),
 )
+_WORKFLOW_SPECIALIZED_LLM_LOOPBACK_ATTEMPTS = 1
+
+
+@dataclass
+class _WorkflowSpecializedLLMTurnState:
+    prompt_messages: list[Any]
+    extra_metadata: dict[str, Any]
+    fallback_output: dict[str, Any] | None = None
 
 
 def install_dify_adapter() -> dict[str, Any]:
@@ -274,10 +286,16 @@ def _install_workflow_api_hooks() -> dict[str, Any]:
             "error": str(exc),
         }
 
+    try:
+        from graphon.nodes.llm.node import LLMNode  # type: ignore
+    except Exception:
+        LLMNode = None
+
     patched: dict[str, bool] = {
         "node_factory_create_node": _patch_workflow_node_factory(DifyNodeFactory),
         "model_invoke_llm": _patch_legacy_model_invoke_llm(ModelInstance),
         "tool_generic_invoke": _patch_workflow_tool_generic_invoke(ToolEngine),
+        "llm_node_invoke_llm": _patch_workflow_llm_node_invoke_llm(LLMNode) if LLMNode is not None else False,
     }
     return {
         "patched": any(patched.values()),
@@ -469,6 +487,23 @@ def _patch_legacy_model_invoke_llm(model_instance_cls: Any) -> bool:
     return True
 
 
+def _patch_workflow_llm_node_invoke_llm(llm_node_cls: Any) -> bool:
+    descriptor = llm_node_cls.__dict__.get("invoke_llm")
+    original = descriptor.__func__ if isinstance(descriptor, staticmethod) else descriptor
+    if original is None:
+        original = getattr(llm_node_cls, "invoke_llm", None)
+    if not callable(original) or _is_patched(original):
+        return False
+
+    @functools.wraps(original)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        return _run_workflow_specialized_llm_turn(original, *args, **kwargs)
+
+    _mark_patched(wrapper, original)
+    setattr(llm_node_cls, "invoke_llm", _restore_descriptor(descriptor, wrapper))
+    return True
+
+
 def _run_legacy_llm_with_runtime_guard(
     model: Any,
     args: tuple[Any, ...],
@@ -524,6 +559,289 @@ def _run_legacy_llm_call(
         modify_output=_shared.modified_message_llm_output_value,
         stream_result_builder=_synthetic_llm_stream,
     )
+
+
+def _run_workflow_specialized_llm_turn(original: Any, *args: Any, **kwargs: Any) -> Any:
+    if _active_guard() is None or _optional_text(_current_metadata.get({}).get("dify_runtime")) != "workflow_api":
+        return original(*args, **kwargs)
+
+    prompt_messages = kwargs.get("prompt_messages")
+    if not isinstance(prompt_messages, Sequence) or isinstance(prompt_messages, str | bytes):
+        return original(*args, **kwargs)
+
+    current_kwargs = dict(kwargs)
+    attempt = 0
+    loopback_metadata: dict[str, Any] = {}
+
+    while True:
+        current_prompt_messages = _workflow_prompt_messages_list(current_kwargs.get("prompt_messages"))
+        if current_prompt_messages is None:
+            return original(*args, **current_kwargs)
+        turn_state = _WorkflowSpecializedLLMTurnState(
+            prompt_messages=current_prompt_messages,
+            extra_metadata=dict(loopback_metadata),
+        )
+        token_turn = _current_workflow_llm_turn.set(turn_state)
+        try:
+            result = original(*args, **current_kwargs)
+            if not _is_generator_like(result):
+                return result
+            items = list(result)
+        except Exception as exc:
+            _guard_workflow_specialized_llm_output(
+                kwargs.get("model_instance"),
+                {"error": str(exc)},
+                prompt_messages=current_prompt_messages,
+                fallback_payload=turn_state.fallback_output,
+                error=str(exc),
+                extra_metadata=loopback_metadata or None,
+            )
+            raise
+        finally:
+            _current_workflow_llm_turn.reset(token_turn)
+
+        completed_event = _workflow_model_invoke_completed_event(items)
+        if completed_event is None:
+            return _workflow_replay_generator(items)
+
+        decision = _guard_workflow_specialized_llm_output(
+            kwargs.get("model_instance"),
+            completed_event,
+            prompt_messages=current_prompt_messages,
+            fallback_payload=turn_state.fallback_output,
+            extra_metadata=loopback_metadata or None,
+        )
+        if decision.decision_type == DecisionType.LOOP_BACK_TO_LLM:
+            if attempt >= _WORKFLOW_SPECIALIZED_LLM_LOOPBACK_ATTEMPTS:
+                decision = GuardDecision.allow("llm loopback limit reached; allowing current workflow response")
+            else:
+                rebuilt_prompt_messages = _workflow_loopback_prompt_messages(
+                    current_prompt_messages,
+                    decision,
+                )
+                if rebuilt_prompt_messages is None:
+                    raise AdapterError("AgentGuard Dify workflow LLM loopback could not rebuild prompt messages")
+                current_kwargs["prompt_messages"] = rebuilt_prompt_messages
+                loopback_metadata = _shared.loopback_metadata_from_decision(decision)
+                attempt += 1
+                continue
+
+        return _workflow_finalize_specialized_llm_events(
+            items,
+            completed_event=completed_event,
+            decision=decision,
+            fallback_payload=turn_state.fallback_output,
+            node_id=str(kwargs.get("node_id") or ""),
+        )
+
+
+def _guard_workflow_specialized_llm_output(
+    model: Any,
+    output: Any,
+    *,
+    prompt_messages: list[Any],
+    fallback_payload: dict[str, Any] | None = None,
+    error: str | None = None,
+    extra_metadata: dict[str, Any] | None = None,
+) -> GuardDecision:
+    guard = _active_guard()
+    if guard is None:
+        return GuardDecision.allow("AgentGuard Dify workflow adapter inactive.")
+    metadata = _event_metadata(
+        {
+            "phase": "llm_after",
+            "dify_runtime": "workflow_api",
+            "stream": True,
+            "model": str(getattr(model, "model_name", "") or ""),
+            "model_provider": _legacy_model_provider(model),
+            "thought_regeneration_supported": _shared.supports_dify_thought_loopback(prompt_messages),
+        }
+    )
+    specialized_metadata = _workflow_specialized_turn_extra_metadata()
+    if specialized_metadata:
+        metadata.update(specialized_metadata)
+    if error is not None:
+        metadata["error"] = error
+    if extra_metadata:
+        metadata.update(extra_metadata)
+    event = ev.llm_output(
+        guard.context,
+        _workflow_specialized_llm_output_payload(output, fallback_payload=fallback_payload),
+        **metadata,
+    )
+    return guard.runtime.guard(event, phase="after").decision
+
+
+def _workflow_specialized_turn_extra_metadata() -> dict[str, Any]:
+    turn_state = _current_workflow_llm_turn.get()
+    if turn_state is None:
+        return {}
+    return dict(turn_state.extra_metadata)
+
+
+def _workflow_prompt_messages_list(prompt_messages: Any) -> list[Any] | None:
+    if not isinstance(prompt_messages, Sequence) or isinstance(prompt_messages, str | bytes):
+        return None
+    return list(prompt_messages)
+
+
+def _workflow_model_invoke_completed_event(items: list[Any]) -> Any | None:
+    for item in reversed(items):
+        if type(item).__name__ == "ModelInvokeCompletedEvent":
+            return item
+    return None
+
+
+def _workflow_specialized_llm_output_payload(
+    output: Any,
+    *,
+    fallback_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if type(output).__name__ != "ModelInvokeCompletedEvent":
+        return _llm_output_payload(output)
+
+    raw_output = _content_to_optional_text(getattr(output, "text", None))
+    fallback_output = _content_to_optional_text((fallback_payload or {}).get("output"))
+    resolved_output = raw_output if raw_output is not None else fallback_output
+    parsed = _parse_tagged_llm_output(resolved_output or "") if resolved_output else _ParsedLLMOutput(None, None)
+    thought = (
+        _content_to_optional_text(getattr(output, "reasoning_content", None))
+        or _content_to_optional_text((fallback_payload or {}).get("thought"))
+        or parsed.thought
+    )
+    fallback_final_output = _content_to_optional_text((fallback_payload or {}).get("final_output"))
+    final_output = parsed.final_output or resolved_output or fallback_final_output
+    payload: dict[str, Any] = {
+        "output": resolved_output,
+        "final_output": final_output,
+    }
+    if thought is not None:
+        payload["thought"] = thought
+    return payload
+
+
+def _workflow_loopback_prompt_messages(
+    prompt_messages: list[Any],
+    decision: GuardDecision,
+) -> list[Any] | None:
+    aligned_thought = _workflow_loopback_aligned_thought(decision)
+    if aligned_thought is None:
+        raise AdapterError("AgentGuard Dify workflow LLM loopback requires aligned thought text")
+    try:
+        from graphon.model_runtime.entities.message_entities import AssistantPromptMessage  # type: ignore
+
+        return [*prompt_messages, AssistantPromptMessage(content=aligned_thought, tool_calls=[])]
+    except Exception:
+        return _shared.build_dify_thought_loopback_prompt_messages(
+            prompt_messages,
+            aligned_thought,
+            output_template=prompt_messages[-1] if prompt_messages else None,
+        )
+
+
+def _workflow_loopback_aligned_thought(decision: GuardDecision) -> str | None:
+    payload = _decision_payload(decision)
+    if isinstance(payload, dict):
+        for key in ("agentguard_loopback_thought", "aligned_thought", "thought", "output"):
+            text = _content_to_optional_text(payload.get(key))
+            if text:
+                return text
+    if isinstance(payload, str):
+        text = _optional_text(payload)
+        if text:
+            return text
+    return None
+
+
+def _workflow_finalize_specialized_llm_events(
+    items: list[Any],
+    *,
+    completed_event: Any,
+    decision: GuardDecision,
+    fallback_payload: dict[str, Any] | None = None,
+    node_id: str,
+) -> Generator[Any, None, None]:
+    original_payload = _workflow_specialized_llm_output_payload(
+        completed_event,
+        fallback_payload=fallback_payload,
+    )
+    payload = dict(original_payload)
+    if decision.decision_type == DecisionType.MODIFY_LLM_OUTPUT:
+        payload = _llm_output_payload(_decision_payload(decision))
+    else:
+        blocked = _blocked_llm_value(decision)
+        if blocked is not None:
+            payload = {
+                "output": blocked,
+                "final_output": blocked,
+            }
+
+    if payload != original_payload:
+        yield from _workflow_replay_generator(
+            _workflow_rewritten_specialized_llm_events(
+                items,
+                completed_event=completed_event,
+                payload=payload,
+                node_id=node_id,
+            )
+        )
+        return
+
+    yield from _workflow_replay_generator(items)
+
+
+def _workflow_rewritten_specialized_llm_events(
+    items: list[Any],
+    *,
+    completed_event: Any,
+    payload: dict[str, Any],
+    node_id: str,
+) -> list[Any]:
+    rewritten: list[Any] = []
+    chunk_cls = next((type(item) for item in items if type(item).__name__ == "StreamChunkEvent"), None)
+    reasoning_cls = next((type(item) for item in items if type(item).__name__ == "StreamReasoningEvent"), None)
+    for item in items:
+        item_name = type(item).__name__
+        if item_name in {"ModelInvokeCompletedEvent", "StreamChunkEvent", "StreamReasoningEvent", "LLMStructuredOutput"}:
+            continue
+        rewritten.append(item)
+
+    thought = _content_to_optional_text(payload.get("thought"))
+    if thought and reasoning_cls is not None:
+        rewritten.append(
+            reasoning_cls(
+                selector=[node_id, "reasoning_content"],
+                chunk=thought,
+                is_final=True,
+            )
+        )
+    text = _content_to_optional_text(payload.get("final_output")) or _content_to_optional_text(payload.get("output"))
+    if text and chunk_cls is not None:
+        rewritten.append(
+            chunk_cls(
+                selector=[node_id, "text"],
+                chunk=text,
+                is_final=False,
+            )
+        )
+    rewritten.append(_workflow_rewrite_completed_event(completed_event, payload))
+    return rewritten
+
+
+def _workflow_rewrite_completed_event(completed_event: Any, payload: dict[str, Any]) -> Any:
+    updated = _deepcopy(completed_event)
+    text = _content_to_optional_text(payload.get("final_output")) or _content_to_optional_text(payload.get("output")) or ""
+    thought = _content_to_optional_text(payload.get("thought"))
+    setattr(updated, "text", text)
+    setattr(updated, "reasoning_content", thought)
+    if hasattr(updated, "structured_output"):
+        setattr(updated, "structured_output", None)
+    return updated
+
+
+def _workflow_replay_generator(items: list[Any]) -> Generator[Any, None, None]:
+    for item in items:
+        yield item
 
 
 def _should_replace_legacy_guard_for_dpop(metadata: dict[str, Any]) -> bool:
@@ -725,6 +1043,9 @@ def _guard_legacy_llm_input(
             ],
         }
     )
+    specialized_metadata = _workflow_specialized_turn_extra_metadata()
+    if specialized_metadata:
+        metadata.update(specialized_metadata)
     if extra_metadata:
         metadata.update(extra_metadata)
     event = ev.llm_input(
@@ -742,6 +1063,10 @@ def _guard_legacy_llm_output(
     error: str | None = None,
     extra_metadata: dict[str, Any] | None = None,
 ) -> GuardDecision:
+    specialized_turn = _current_workflow_llm_turn.get()
+    if specialized_turn is not None and _optional_text(_current_metadata.get({}).get("dify_runtime")) == "workflow_api":
+        specialized_turn.fallback_output = _llm_output_payload(output)
+        return GuardDecision.allow("AgentGuard Dify workflow llm_after deferred to graphon LLMNode.")
     guard = _active_guard()
     if guard is None:
         return GuardDecision.allow("AgentGuard Dify legacy adapter inactive.")
@@ -757,6 +1082,9 @@ def _guard_legacy_llm_output(
             ),
         }
     )
+    specialized_metadata = _workflow_specialized_turn_extra_metadata()
+    if specialized_metadata:
+        metadata.update(specialized_metadata)
     if error is not None:
         metadata["error"] = error
     if extra_metadata:

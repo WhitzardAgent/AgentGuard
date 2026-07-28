@@ -6,6 +6,7 @@ const test = require("node:test");
 
 const {
   CLIENT_SESSION_CONTROL_PATH,
+  buildClientPluginCatalog,
   ClientConfigAPIServer,
   listRegisteredPlugins,
 } = require("./config_api");
@@ -26,6 +27,19 @@ test("listRegisteredPlugins includes builtin JS runtime plugins", () => {
     plugins.map((plugin) => plugin.event_types),
     [["llm_input"], ["llm_output"], ["llm_input"], ["llm_output"], ["tool_invoke"], ["tool_result"]],
   );
+});
+
+test("buildClientPluginCatalog includes derived phases for client plugins", () => {
+  const plugins = buildClientPluginCatalog();
+  const llmOutput = plugins.find((plugin) => plugin.name === "llm_output");
+  const toolInvoke = plugins.find((plugin) => plugin.name === "tool_invoke");
+
+  assert.equal(typeof llmOutput.description, "string");
+  assert.equal(typeof toolInvoke.description, "string");
+  assert.deepEqual(llmOutput.event_types, ["llm_output"]);
+  assert.deepEqual(llmOutput.phases, ["llm_after"]);
+  assert.deepEqual(toolInvoke.event_types, ["tool_invoke"]);
+  assert.deepEqual(toolInvoke.phases, ["tool_before"]);
 });
 
 test("ClientConfigAPIServer uses advertised host and port in plugin urls", () => {

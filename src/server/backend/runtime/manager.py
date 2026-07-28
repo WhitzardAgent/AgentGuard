@@ -17,7 +17,11 @@ from backend.database import DatabaseUnavailable, get_mysql_config
 from backend.runtime.degrade.planner import DegradePlanner
 from backend.runtime.plugins import server_plugin_manager
 from backend.runtime.plugins.base import CheckResult
-from backend.runtime.plugins.config_utils import merge_plugin_configs, normalize_plugin_config
+from backend.runtime.plugins.config_utils import (
+    hydrate_plugin_config,
+    merge_plugin_configs,
+    normalize_plugin_config,
+)
 from backend.runtime.plugins.manager import decision_type_rank
 from backend.runtime.policy.engine import PolicyEngine
 from backend.runtime.review import ReviewQueue
@@ -149,8 +153,18 @@ class RuntimeManager:
         normalized_agent_id = str(agent_id or "").strip()
         if not normalized_agent_id:
             raise ValueError("agent_id is required")
-        normalized_remote = normalize_plugin_config(plugin_config)
-        normalized_client = normalize_plugin_config(client_config or plugin_config)
+        current = self._agent_plugin_configs.get(normalized_agent_id) or {}
+        default_config = self.default_plugin_config()
+        normalized_remote = hydrate_plugin_config(
+            plugin_config,
+            current.get("remote") if isinstance(current.get("remote"), dict) else None,
+            default_config,
+        )
+        normalized_client = hydrate_plugin_config(
+            client_config or plugin_config,
+            current.get("client") if isinstance(current.get("client"), dict) else None,
+            default_config,
+        )
         self._agent_plugin_configs[normalized_agent_id] = {
             "remote": normalized_remote,
             "client": normalized_client,
@@ -167,8 +181,15 @@ class RuntimeManager:
         current = self._agent_plugin_configs.get(normalized_agent_id)
         if not current:
             return None
-        remote_config = copy.deepcopy(current.get("remote"))
-        client_config = copy.deepcopy(current.get("client"))
+        default_config = self.default_plugin_config()
+        remote_config = hydrate_plugin_config(
+            current.get("remote") if isinstance(current.get("remote"), dict) else None,
+            default_config,
+        )
+        client_config = hydrate_plugin_config(
+            current.get("client") if isinstance(current.get("client"), dict) else None,
+            default_config,
+        )
         return {
             "remote_plugin_config": remote_config,
             "client_plugin_config": client_config,
@@ -199,6 +220,7 @@ class RuntimeManager:
         if not normalized_agent_id:
             return None, "none"
 
+        default_config = self.default_plugin_config()
         stored = self.get_agent_plugin_config(normalized_agent_id)
         if stored and isinstance(stored.get("plugin_config"), dict):
             return copy.deepcopy(stored["plugin_config"]), "agent_override"
@@ -223,9 +245,9 @@ class RuntimeManager:
                 session.get("client_plugin_config") if isinstance(session.get("client_plugin_config"), dict) else None,
             )
             if isinstance(merged, dict):
-                return merged, "agent_override"
+                hydrated = hydrate_plugin_config(merged, default_config)
+                return hydrated if isinstance(hydrated, dict) else merged, "agent_override"
 
-        default_config = self.default_plugin_config()
         if isinstance(default_config, dict):
             return default_config, "server_default"
         return None, "none"
@@ -240,23 +262,35 @@ class RuntimeManager:
     ) -> list[AuditTraceEntry]:
         matches = self.session_pool.find_by_principal(principal)
         updates: list[dict[str, Any]] = []
+        default_config = self.default_plugin_config()
         for session in matches:
             session_id = session.get("session_id")
             agent_id = session.get("agent_id")
             user_id = session.get("user_id")
-            config_copy = copy.deepcopy(plugin_config)
-            remote_copy = copy.deepcopy(remote_plugin_config if remote_plugin_config is not None else plugin_config)
+            agent_override = self.get_agent_plugin_config(str(agent_id) if agent_id is not None else "")
+            config_copy = hydrate_plugin_config(
+                plugin_config,
+                session.get("client_plugin_config") if isinstance(session.get("client_plugin_config"), dict) else None,
+                agent_override.get("client_plugin_config") if isinstance(agent_override, dict) else None,
+                default_config,
+            ) or {"phases": {}}
+            remote_copy = hydrate_plugin_config(
+                remote_plugin_config if remote_plugin_config is not None else plugin_config,
+                session.get("remote_plugin_config") if isinstance(session.get("remote_plugin_config"), dict) else None,
+                agent_override.get("remote_plugin_config") if isinstance(agent_override, dict) else None,
+                default_config,
+            ) or {"phases": {}}
             self.session_pool.set_client_plugin_config(
                 str(session_id) if session_id else None,
                 str(agent_id) if agent_id is not None else None,
                 str(user_id) if user_id is not None else None,
-                config_copy,
+                copy.deepcopy(config_copy),
             )
             self.session_pool.set_remote_plugin_config(
                 str(session_id) if session_id else None,
                 str(agent_id) if agent_id is not None else None,
                 str(user_id) if user_id is not None else None,
-                remote_copy,
+                copy.deepcopy(remote_copy),
             )
             url = session.get("client_config_url")
             if not url:
@@ -270,7 +304,7 @@ class RuntimeManager:
                 continue
             pushed = _push_client_plugin_config(
                 str(url),
-                config_copy,
+                copy.deepcopy(config_copy),
                 timeout_s,
                 client_key=session.get("client_key"),
             )
@@ -540,6 +574,7 @@ class RuntimeManager:
             agent_id=context.agent_id,
             user_id=context.user_id,
         )
+        default_config = self.default_plugin_config()
         effective_plugin_config = session_cfg.get("remote_plugin_config") if session_cfg else None
         agent_plugin_config = self.get_agent_plugin_config(context.agent_id or "")
         if agent_plugin_config and agent_plugin_config.get("remote_plugin_config") is not None:
@@ -547,7 +582,13 @@ class RuntimeManager:
         effective_plugins = self.plugins
         effective_policy = self.policy
         if effective_plugin_config is not None:
-            effective_plugins = server_plugin_manager(effective_plugin_config)
+            hydrated_effective_plugin_config = hydrate_plugin_config(
+                effective_plugin_config,
+                default_config,
+            )
+            effective_plugins = server_plugin_manager(
+                hydrated_effective_plugin_config if hydrated_effective_plugin_config is not None else effective_plugin_config
+            )
             effective_policy = self._policy_for_plugin_manager(effective_plugins) or self.policy
             self._bind_rule_based_plugins_for(effective_plugins, policy=effective_policy)
         else:
