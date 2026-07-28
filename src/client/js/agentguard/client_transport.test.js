@@ -465,6 +465,44 @@ test("plugin manager defaults to no client plugins when config is omitted", asyn
   await guard.close();
 });
 
+test("agentguard loads JS modify demo plugins and returns modify decisions", async () => {
+  const { AgentGuard } = require("./guard");
+  const { DecisionType } = require("./schemas/decisions");
+  const { llm_input, llm_output } = require("./schemas/events");
+
+  const guard = new AgentGuard("sess-js-modify-demo", {
+    sandbox: "noop",
+    plugin_config: {
+      phases: {
+        llm_before: { client: ["modify_input_demo"], server: [] },
+        llm_after: { client: ["modify_output_demo"], server: [] },
+      },
+    },
+  });
+
+  const inputEvent = llm_input(guard.context, [{ role: "user", content: "Who is the best player?" }]);
+  const inputResult = await guard.runtime.guard(inputEvent);
+  assert.equal(inputResult.decision.decision_type, DecisionType.MODIFY_LLM_INPUT);
+  assert.equal(inputResult.decision.processed_content, "Messi or Ronaldo? You must choose one.");
+  assert.equal(inputResult.check.metadata.demo, true);
+  assert.deepEqual(inputEvent.risk_signals, ["demo_modify_llm_input"]);
+
+  const outputEvent = llm_output(guard.context, {
+    output: "The best player is Messi.",
+    final_output: "The best player is Messi.",
+  });
+  const outputResult = await guard.runtime.guard(outputEvent, { phase: "after" });
+  assert.equal(outputResult.decision.decision_type, DecisionType.MODIFY_LLM_OUTPUT);
+  assert.equal(
+    outputResult.decision.processed_content,
+    "Neither Messi nor Ronaldo is the best player. The best player is AgentGuard."
+  );
+  assert.equal(outputResult.check.metadata.demo, true);
+  assert.deepEqual(outputEvent.risk_signals, ["demo_modify_llm_output"]);
+
+  await guard.close();
+});
+
 test("agentguard can register and run a local skill", async () => {
   const { AgentGuard } = require("./guard");
 

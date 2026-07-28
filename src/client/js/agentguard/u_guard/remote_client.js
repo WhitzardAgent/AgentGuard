@@ -59,6 +59,7 @@ class RemoteGuardClient {
     this.runtime_session_create_path = options.runtime_session_create_path || options.runtimeSessionCreatePath || "/v1/server/session/create";
     this.runtime_session_refresh_path = options.runtime_session_refresh_path || options.runtimeSessionRefreshPath || "/v1/server/session/refresh";
     this.runtime_session_close_path = options.runtime_session_close_path || options.runtimeSessionClosePath || "/v1/server/session/close";
+    this.runtime_plugin_config_path = options.runtime_plugin_config_path || options.runtimePluginConfigPath || "/v1/server/session/plugin-config";
     this.approval_path = options.approval_path || "/v1/server/approvals/{ticket_id}";
     this.register_path = options.register_path || "/v1/server/session/register";
     this.unregister_path = options.unregister_path || "/v1/server/session/unregister";
@@ -187,6 +188,11 @@ class RemoteGuardClient {
   refresh_runtime_session() {
     this.requireRuntimeAuth("runtime session refresh");
     return this.post(this.runtime_session_refresh_path, {});
+  }
+
+  fetch_runtime_plugin_config() {
+    this.requireRuntimeAuth("runtime plugin-config fetches");
+    return this.get(this.runtime_plugin_config_path);
   }
 
   close_runtime_session() {

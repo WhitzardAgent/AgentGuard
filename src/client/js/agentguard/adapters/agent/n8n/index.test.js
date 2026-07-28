@@ -256,6 +256,59 @@ test("guardOptions forwards AGENTGUARD_PLUGIN_CONFIG to AgentGuard", () => {
   restoreEnv("AGENTGUARD_PLUGIN_CONFIG", oldValue);
 });
 
+test("fetchRuntimePluginConfig fetches and caches runtime plugin config", async (t) => {
+  const calls = [];
+  const oldFetch = global.fetch;
+  const oldServerUrl = process.env.AGENTGUARD_SERVER_URL;
+  const oldApiKey = process.env.AGENTGUARD_API_KEY;
+  process.env.AGENTGUARD_SERVER_URL = "http://agentguard.test";
+  process.env.AGENTGUARD_API_KEY = "test-api-key";
+  global.fetch = async (url, options = {}) => {
+    calls.push({ url: String(url), options });
+    assert.match(String(options.headers.Authorization || ""), /^DPoP token-runtime-config$/);
+    assert.match(String(options.headers.DPoP || ""), /^proof:GET:/);
+    return {
+      ok: true,
+      async json() {
+        return {
+          status: "ok",
+          plugin_config: {
+            phases: {
+              llm_before: { client: ["modify_input_demo"], server: [] },
+            },
+          },
+        };
+      },
+    };
+  };
+  t.after(() => {
+    global.fetch = oldFetch;
+    restoreEnv("AGENTGUARD_SERVER_URL", oldServerUrl);
+    restoreEnv("AGENTGUARD_API_KEY", oldApiKey);
+  });
+
+  const runtimeAuth = {
+    session_id: "ags_runtime_plugin_config",
+    session_token: "token-runtime-config",
+    agent_id: "ag_runtime_plugin_config",
+    canonical_user_id: "7",
+    proof(method, url, token) {
+      return `proof:${method}:${url}:${token}`;
+    },
+  };
+
+  const first = await _private.fetchRuntimePluginConfig({ workflow_id: "wf-runtime-plugin-config" }, runtimeAuth);
+  const second = await _private.fetchRuntimePluginConfig({ workflow_id: "wf-runtime-plugin-config" }, runtimeAuth);
+
+  assert.deepEqual(first, {
+    phases: {
+      llm_before: { client: ["modify_input_demo"], server: [] },
+    },
+  });
+  assert.deepEqual(second, first);
+  assert.deepEqual(calls.map((call) => new URL(call.url).pathname), ["/v1/server/session/plugin-config"]);
+});
+
 test("isThoughtAlignmentLoopbackDecision matches protocol-tagged loopback decisions", () => {
   assert.equal(
     _private.isThoughtAlignmentLoopbackDecision(new GuardDecision({
@@ -1110,6 +1163,104 @@ test("ensureN8nRuntimeAuth loads workflow owner identity on cache miss before cr
   assert.equal(
     calls.map((call) => new URL(call.url).pathname).join(","),
     "/v1/server/agents/register,/v1/server/session/create"
+  );
+});
+
+test("getGuardForRuntime loads runtime client plugins so modify demo decisions apply locally", async (t) => {
+  const { llm_input, llm_output } = require("../../../schemas/events");
+  const calls = [];
+  const oldFetch = global.fetch;
+  const oldServerUrl = process.env.AGENTGUARD_SERVER_URL;
+  const oldApiKey = process.env.AGENTGUARD_API_KEY;
+  const oldKeyDir = process.env.AGENTGUARD_AGENT_KEY_DIR;
+  const keyDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-n8n-runtime-plugin-keys-"));
+  process.env.AGENTGUARD_SERVER_URL = "http://agentguard.test";
+  process.env.AGENTGUARD_API_KEY = "test-api-key";
+  process.env.AGENTGUARD_AGENT_KEY_DIR = keyDir;
+  global.fetch = async (url, options = {}) => {
+    const body = options.body ? JSON.parse(options.body) : {};
+    calls.push({ url: String(url), body });
+    if (String(url).endsWith("/v1/server/agents/register")) {
+      return {
+        ok: true,
+        json: async () => ({
+          status: "ok",
+          agent: {
+            agent_id: "ag_n8n_runtime_plugin_guard",
+            agent_identity_code: "agic_runtime_plugin_guard",
+            public_key_thumbprint: body.metadata.agent_public_key_thumbprint,
+          },
+          credential: {},
+          user_agent: { bound: true, user_id: 7 },
+        }),
+      };
+    }
+    if (String(url).endsWith("/v1/server/session/create")) {
+      return {
+        ok: true,
+        json: async () => ({
+          session_id: "ags_n8n_runtime_plugin_guard",
+          session_token: "token-runtime-plugin-guard",
+          user_id: "7",
+          expires_at: Math.floor(Date.now() / 1000) + 600,
+        }),
+      };
+    }
+    if (String(url).endsWith("/v1/server/session/plugin-config")) {
+      return {
+        ok: true,
+        json: async () => ({
+          status: "ok",
+          plugin_config: {
+            phases: {
+              llm_before: { client: ["modify_input_demo"], server: [] },
+              llm_after: { client: ["modify_output_demo"], server: [] },
+            },
+          },
+        }),
+      };
+    }
+    assert.fail(`unexpected fetch: ${url}`);
+  };
+  t.after(() => {
+    global.fetch = oldFetch;
+    restoreEnv("AGENTGUARD_SERVER_URL", oldServerUrl);
+    restoreEnv("AGENTGUARD_API_KEY", oldApiKey);
+    restoreEnv("AGENTGUARD_AGENT_KEY_DIR", oldKeyDir);
+    fs.rmSync(keyDir, { recursive: true, force: true });
+  });
+
+  const guard = await _private.getGuardForRuntime({
+    workflow_id: "wf-runtime-plugin-guard",
+    workflow_name: "Runtime plugin guard workflow",
+    execution_id: "exec-runtime-plugin-guard",
+    n8n_session_id: "session-runtime-plugin-guard",
+    n8n_user_id: "owner-runtime-plugin-guard",
+    n8n_user_email: "owner-runtime-plugin-guard@example.com",
+  });
+
+  const inputResult = await guard.runtime.guard(
+    llm_input(guard.context, [{ role: "user", content: "Original prompt" }]),
+  );
+  assert.equal(inputResult.decision.decision_type, DecisionType.MODIFY_LLM_INPUT);
+  assert.equal(inputResult.decision.processed_content, "Messi or Ronaldo? You must choose one.");
+
+  const outputResult = await guard.runtime.guard(
+    llm_output(guard.context, { output: "Original output", final_output: "Original output", thought: null }),
+    { phase: "after" },
+  );
+  assert.equal(outputResult.decision.decision_type, DecisionType.MODIFY_LLM_OUTPUT);
+  assert.equal(
+    outputResult.decision.processed_content,
+    "Neither Messi nor Ronaldo is the best player. The best player is AgentGuard.",
+  );
+  assert.deepEqual(
+    calls.map((call) => new URL(call.url).pathname),
+    [
+      "/v1/server/agents/register",
+      "/v1/server/session/create",
+      "/v1/server/session/plugin-config",
+    ],
   );
 });
 

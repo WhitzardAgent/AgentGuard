@@ -18,6 +18,8 @@ test("listRegisteredPlugins includes builtin JS runtime plugins", () => {
   assert.deepEqual(names, [
     "jailbreak_check",
     "llm_output",
+    "modify_input_demo",
+    "modify_output_demo",
     "qwen3guard_input",
     "qwen3guard_output",
     "tool_invoke",
@@ -25,19 +27,36 @@ test("listRegisteredPlugins includes builtin JS runtime plugins", () => {
   ]);
   assert.deepEqual(
     plugins.map((plugin) => plugin.event_types),
-    [["llm_input"], ["llm_output"], ["llm_input"], ["llm_output"], ["tool_invoke"], ["tool_result"]],
+    [
+      ["llm_input"],
+      ["llm_output"],
+      ["llm_input"],
+      ["llm_output"],
+      ["llm_input"],
+      ["llm_output"],
+      ["tool_invoke"],
+      ["tool_result"],
+    ],
   );
 });
 
 test("buildClientPluginCatalog includes derived phases for client plugins", () => {
   const plugins = buildClientPluginCatalog();
   const llmOutput = plugins.find((plugin) => plugin.name === "llm_output");
+  const modifyInput = plugins.find((plugin) => plugin.name === "modify_input_demo");
+  const modifyOutput = plugins.find((plugin) => plugin.name === "modify_output_demo");
   const toolInvoke = plugins.find((plugin) => plugin.name === "tool_invoke");
 
   assert.equal(typeof llmOutput.description, "string");
+  assert.equal(modifyInput.description, "Demo plugin that rewrites LLM input.");
+  assert.equal(modifyOutput.description, "Demo plugin that rewrites LLM output.");
   assert.equal(typeof toolInvoke.description, "string");
   assert.deepEqual(llmOutput.event_types, ["llm_output"]);
   assert.deepEqual(llmOutput.phases, ["llm_after"]);
+  assert.deepEqual(modifyInput.event_types, ["llm_input"]);
+  assert.deepEqual(modifyInput.phases, ["llm_before"]);
+  assert.deepEqual(modifyOutput.event_types, ["llm_output"]);
+  assert.deepEqual(modifyOutput.phases, ["llm_after"]);
   assert.deepEqual(toolInvoke.event_types, ["tool_invoke"]);
   assert.deepEqual(toolInvoke.phases, ["tool_before"]);
 });

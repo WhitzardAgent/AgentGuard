@@ -14,6 +14,7 @@ const { DecisionType } = require("../../../schemas/decisions");
 const { ToolMetadata } = require("../../../tools/metadata");
 const { RemoteGuardClient } = require("../../../u_guard/remote_client");
 const { DPoPKey, loadOrCreateDPoPKey } = require("../../../u_guard/dpop");
+const { stableStringify } = require("../../../utils/hash");
 const {
   agentIdentityKeyId,
   buildAgentRegistrationPayload,
@@ -131,6 +132,23 @@ function pluginConfigFromEnv() {
   } catch (_) {
     return raw;
   }
+}
+
+function clonePluginConfig(config) {
+  if (config == null || typeof config !== "object") {
+    return config;
+  }
+  return JSON.parse(JSON.stringify(config));
+}
+
+function pluginConfigSignature(config) {
+  if (config == null) {
+    return "null";
+  }
+  if (typeof config === "string") {
+    return `path:${config}`;
+  }
+  return `json:${stableStringify(config)}`;
 }
 
 function log(level, message, extra = null) {
@@ -408,11 +426,15 @@ function enrichContextWithN8nSession(context = {}, ...sources) {
 }
 
 function guardOptions(context, runtimeAuth = null) {
+  return buildGuardOptions(context, runtimeAuth, pluginConfigFromEnv());
+}
+
+function buildGuardOptions(context, runtimeAuth = null, pluginConfig = null) {
   return {
     server_url: process.env.AGENTGUARD_SERVER_URL || null,
     api_key: process.env.AGENTGUARD_API_KEY || null,
     policy: process.env.AGENTGUARD_POLICY || null,
-    plugin_config: pluginConfigFromEnv(),
+    plugin_config: pluginConfig,
     user_id: (runtimeAuth && runtimeAuth.canonical_user_id) || context.user_id || process.env.AGENTGUARD_USER_ID || null,
     agent_id: (runtimeAuth && runtimeAuth.agent_id) || context.agentguard_agent_id || agentId(context),
     environment: "n8n",
@@ -425,16 +447,29 @@ function guardOptions(context, runtimeAuth = null) {
   };
 }
 
-function getGuard(context = {}, runtimeAuth = null) {
+function getGuard(context = {}, runtimeAuth = null, pluginConfig = pluginConfigFromEnv()) {
   const key = stableContextId(context);
+  const pluginSignature = pluginConfigSignature(pluginConfig);
+  const runtimeSessionId = optionalString(runtimeAuth && runtimeAuth.session_id);
   if (GUARDS.has(key)) {
     const guard = GUARDS.get(key);
-    if (runtimeAuth && runtimeAuth.session_token && !(guard.remote && guard.remote.use_dpop_auth)) {
+    const usesRuntimeAuth = Boolean(guard && guard.remote && guard.remote.use_dpop_auth);
+    const guardSessionId = optionalString(guard && guard.__agentguard_n8n_runtime_session_id);
+    if (
+      (runtimeAuth && runtimeAuth.session_token && (!usesRuntimeAuth || guardSessionId !== runtimeSessionId))
+      || (!runtimeAuth && usesRuntimeAuth)
+    ) {
       if (guard && typeof guard.close === "function") {
         guard.close().catch(() => {});
       }
       GUARDS.delete(key);
     } else {
+      if (guard.__agentguard_n8n_plugin_signature !== pluginSignature) {
+        guard.update_plugin_config(pluginConfig, { syncRemote: false });
+        guard.__agentguard_n8n_plugin_signature = pluginSignature;
+        guard.__agentguard_n8n_plugin_config = clonePluginConfig(pluginConfig);
+      }
+      guard.__agentguard_n8n_runtime_session_id = runtimeSessionId;
       refreshGuardMetadata(guard, context, runtimeAuth);
       return guard;
     }
@@ -446,10 +481,60 @@ function getGuard(context = {}, runtimeAuth = null) {
       oldestGuard.close().catch(() => {});
     }
   }
-  const guard = new AgentGuard((runtimeAuth && runtimeAuth.session_id) || key, guardOptions(context, runtimeAuth));
+  const guard = new AgentGuard((runtimeAuth && runtimeAuth.session_id) || key, buildGuardOptions(context, runtimeAuth, pluginConfig));
+  guard.__agentguard_n8n_plugin_signature = pluginSignature;
+  guard.__agentguard_n8n_plugin_config = clonePluginConfig(pluginConfig);
+  guard.__agentguard_n8n_runtime_session_id = runtimeSessionId;
   refreshGuardMetadata(guard, context, runtimeAuth);
   GUARDS.set(key, guard);
   return guard;
+}
+
+async function fetchRuntimePluginConfig(context = {}, runtimeAuth = null) {
+  const fallback = pluginConfigFromEnv();
+  if (!runtimeAuth || !runtimeAuth.session_token || typeof runtimeAuth.proof !== "function") {
+    return clonePluginConfig(fallback);
+  }
+  if (
+    runtimeAuth.runtime_plugin_config_loaded
+    && runtimeAuth.runtime_plugin_config_session_id === runtimeAuth.session_id
+  ) {
+    return clonePluginConfig(runtimeAuth.runtime_plugin_config_effective);
+  }
+  const remote = new RemoteGuardClient(process.env.AGENTGUARD_SERVER_URL || null, {
+    api_key: process.env.AGENTGUARD_API_KEY || null,
+    session_id: runtimeAuth.session_id || null,
+    agent_id: runtimeAuth.agent_id || null,
+    user_id: runtimeAuth.canonical_user_id || null,
+    session_token: runtimeAuth.session_token,
+    dpop_proof_factory: runtimeAuth.proof,
+    use_dpop_auth: true,
+    legacy_identity_headers: false,
+    timeout_s: numberEnv("AGENTGUARD_N8N_RUNTIME_AUTH_TIMEOUT_S", 5.0),
+    retries: numberEnv("AGENTGUARD_N8N_RUNTIME_AUTH_RETRIES", 1),
+  });
+  try {
+    const payload = await remote.fetch_runtime_plugin_config();
+    const effective = isPlainObject(payload && payload.plugin_config)
+      ? payload.plugin_config
+      : fallback;
+    runtimeAuth.runtime_plugin_config_loaded = true;
+    runtimeAuth.runtime_plugin_config_session_id = runtimeAuth.session_id || null;
+    runtimeAuth.runtime_plugin_config_effective = clonePluginConfig(effective);
+    return clonePluginConfig(effective);
+  } catch (error) {
+    log(
+      "warn",
+      "runtime plugin config fetch failed",
+      {
+        workflow_id: optionalString(context.workflow_id),
+        agent_id: optionalString(runtimeAuth.agent_id),
+        session_id: optionalString(runtimeAuth.session_id),
+        error: error && error.message ? error.message : String(error),
+      },
+    );
+    return clonePluginConfig(fallback);
+  }
 }
 
 async function getGuardForRuntime(context = {}) {
@@ -464,7 +549,9 @@ async function getGuardForRuntime(context = {}) {
       `AgentGuard n8n runtime auth did not produce a session token for workflow ${workflowId}.`
     );
   }
-  return getGuard(enrichContextWithAuth(effectiveContext, runtimeAuth), runtimeAuth);
+  const contextWithAuth = enrichContextWithAuth(effectiveContext, runtimeAuth);
+  const runtimePluginConfig = await fetchRuntimePluginConfig(contextWithAuth, runtimeAuth);
+  return getGuard(contextWithAuth, runtimeAuth, runtimePluginConfig);
 }
 
 function refreshGuardMetadata(guard, context = {}, runtimeAuth = null) {
@@ -4679,6 +4766,7 @@ module.exports = {
     applyModifyToEngineActionResult,
     extractProviderBuiltInTools,
     extractWorkflowTools,
+    fetchRuntimePluginConfig,
     guardOptions,
     hasNonMainConnection,
     cacheWorkflowIdentity,
@@ -4687,6 +4775,7 @@ module.exports = {
     enrichContextWithN8nSession,
     enrichContextWithRegistration,
     ensureN8nRuntimeAuth,
+    getGuardForRuntime,
     hydrateWorkflowIdentityContext,
     buildConnectedToolSourceContext,
     eventMetadata,
