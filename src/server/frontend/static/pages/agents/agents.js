@@ -109,39 +109,45 @@
       }
 
       card.innerHTML = `
-        <button class="agent-card-select" type="button" data-agent-action="select">
-          <div class="agent-list-top">
-            <div class="agent-list-heading">
-              <strong>${escapeHtml(displayName)}</strong>
+        <div class="agent-card-layout">
+          <button class="agent-card-select" type="button" data-agent-action="select">
+            <div class="agent-list-top">
+              <div class="agent-list-heading">
+                <strong>${escapeHtml(displayName)}</strong>
+              </div>
+              <div class="agent-list-counts" aria-label="Agent resource counts">
+                <span class="pill agent-count-pill">${escapeHtml(locationTagLabel(locationTag))}</span>
+                <span class="pill agent-count-pill">${toolCount} tool${toolCount === 1 ? "" : "s"}</span>
+                <span class="pill agent-count-pill">${skillCount} skill${skillCount === 1 ? "" : "s"}</span>
+                <span class="pill agent-count-pill">${mcpCount} MCP${mcpCount === 1 ? "" : "s"}</span>
+              </div>
             </div>
-            <div class="agent-list-counts" aria-label="Agent resource counts">
-              <span class="pill agent-count-pill">${escapeHtml(locationTagLabel(locationTag))}</span>
-              <span class="pill agent-count-pill">${toolCount} tool${toolCount === 1 ? "" : "s"}</span>
-              <span class="pill agent-count-pill">${skillCount} skill${skillCount === 1 ? "" : "s"}</span>
-              <span class="pill agent-count-pill">${mcpCount} MCP${mcpCount === 1 ? "" : "s"}</span>
+            ${subtitle ? `<p class="subtle">${escapeHtml(subtitle)}</p>` : ""}
+            <div class="agent-card-details">
+              <p class="subtle">${escapeHtml(toolPreviewText || copy("no-tools-registered", "No tools registered."))}</p>
+              <p class="subtle">${escapeHtml(skillPreviewText ? copy("skills-preview", "Skills: {items}", { items: skillPreviewText }) : copy("no-skills-registered", "No skills registered."))}</p>
+              <p class="subtle">${escapeHtml(mcpPreviewText ? copy("mcps-preview", "MCP: {items}", { items: mcpPreviewText }) : copy("no-mcps-registered", "No MCP services registered."))}</p>
             </div>
-          </div>
-          ${subtitle ? `<p class="subtle">${escapeHtml(subtitle)}</p>` : ""}
-          <p class="subtle">${escapeHtml(toolPreviewText || copy("no-tools-registered", "No tools registered."))}</p>
-          <p class="subtle">${escapeHtml(skillPreviewText ? copy("skills-preview", "Skills: {items}", { items: skillPreviewText }) : copy("no-skills-registered", "No skills registered."))}</p>
-          <p class="subtle">${escapeHtml(mcpPreviewText ? copy("mcps-preview", "MCP: {items}", { items: mcpPreviewText }) : copy("no-mcps-registered", "No MCP services registered."))}</p>
-        </button>
-        <div class="agent-card-actions">
-          <label class="subtle" for="agent-location-tag-${escapeHtml(agentId)}">${escapeHtml(copy("agent-location-tag", "Location tag"))}</label>
-          <select class="agent-location-tag-select" id="agent-location-tag-${escapeHtml(agentId)}" data-agent-action="location-tag" ${updatingLocationTagAgentIds.has(agentId) ? "disabled" : ""}>
-            <option value="">${escapeHtml(copy("agent-location-tag-empty", "Unlabeled"))}</option>
-            <option value="local" ${locationTag === "local" ? "selected" : ""}>${escapeHtml(copy("agent-location-tag-local", "Local"))}</option>
-            <option value="domestic" ${locationTag === "domestic" ? "selected" : ""}>${escapeHtml(copy("agent-location-tag-domestic", "Domestic"))}</option>
-            <option value="overseas" ${locationTag === "overseas" ? "selected" : ""}>${escapeHtml(copy("agent-location-tag-overseas", "Overseas"))}</option>
-          </select>
+          </button>
+          <aside class="agent-card-side" aria-label="${escapeHtml(displayName)} controls">
+            <div class="field agent-location-tag-field">
+              <label for="agent-location-tag-${escapeHtml(agentId)}">${escapeHtml(copy("agent-location-tag", "Location tag"))}</label>
+              <select class="agent-location-tag-select" id="agent-location-tag-${escapeHtml(agentId)}" data-agent-action="location-tag" ${updatingLocationTagAgentIds.has(agentId) ? "disabled" : ""}>
+                <option value="">${escapeHtml(copy("agent-location-tag-empty", "Unlabeled"))}</option>
+                <option value="local" ${locationTag === "local" ? "selected" : ""}>${escapeHtml(copy("agent-location-tag-local", "Local"))}</option>
+                <option value="domestic" ${locationTag === "domestic" ? "selected" : ""}>${escapeHtml(copy("agent-location-tag-domestic", "Domestic"))}</option>
+                <option value="overseas" ${locationTag === "overseas" ? "selected" : ""}>${escapeHtml(copy("agent-location-tag-overseas", "Overseas"))}</option>
+              </select>
+            </div>
+            ${showDelete ? `
+              <div class="agent-card-actions agent-card-actions-danger">
+                <button class="link-button danger agent-delete-button" type="button" data-agent-action="delete" ${deletingAgentIds.has(agentId) ? "disabled" : ""}>
+                  ${deletingAgentIds.has(agentId) ? copy("deleting", "Deleting...") : copy("delete", "Delete")}
+                </button>
+              </div>
+            ` : ""}
+          </aside>
         </div>
-        ${showDelete ? `
-          <div class="agent-card-actions">
-            <button class="link-button danger agent-delete-button" type="button" data-agent-action="delete" ${deletingAgentIds.has(agentId) ? "disabled" : ""}>
-              ${deletingAgentIds.has(agentId) ? copy("deleting", "Deleting...") : copy("delete", "Delete")}
-            </button>
-          </div>
-        ` : ""}
       `;
 
       card.querySelector('[data-agent-action="select"]')?.addEventListener("click", () => {

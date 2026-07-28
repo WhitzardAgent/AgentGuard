@@ -158,8 +158,10 @@ function setupController() {
   degradeTargetField.appendChild(ruleDegradeTargetInput);
 
   const onField = createElement("div");
+  const onToolFilterRow = createElement("div");
   const ruleOnInput = createSelect();
-  onField.appendChild(ruleOnInput);
+  onToolFilterRow.appendChild(ruleOnInput);
+  onField.appendChild(onToolFilterRow);
   const rulePhaseInputs = [
     createCheckbox("llm_before"),
     createCheckbox("llm_after"),
@@ -183,6 +185,7 @@ function setupController() {
     ruleReasonInput: createElement("textarea"),
     pathField,
     onField,
+    onToolFilterRow,
     promptField,
     degradeTargetField,
     generateRuleButton: createElement("button"),
@@ -342,18 +345,20 @@ test("rule form controller clears prompt on reset", () => {
   assert.equal(elements.promptField.hidden, true);
 });
 
-test("rule form controller hides tool matching until a tool phase is selected", () => {
+test("rule form controller keeps phase selection visible and hides tool matching until a tool phase is selected", () => {
   const { controller, elements } = setupController();
 
   controller.resetRuleForm();
 
-  assert.equal(elements.onField.hidden, true);
+  assert.equal(elements.onField.hidden, false);
+  assert.equal(elements.onToolFilterRow.hidden, true);
   assert.equal(elements.pathField.hidden, true);
 
   elements.rulePhaseInputs[2].checked = true;
   elements.rulePhaseInputs[2].dispatchEvent("change");
 
   assert.equal(elements.onField.hidden, false);
+  assert.equal(elements.onToolFilterRow.hidden, false);
   assert.equal(elements.pathField.hidden, false);
 });
 

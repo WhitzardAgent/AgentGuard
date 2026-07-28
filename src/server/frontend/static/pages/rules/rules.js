@@ -154,6 +154,7 @@ const elements = {
   traceOnFieldHint: getElement("trace-on-field-hint"),
   pathField: getElement("path-field"),
   onField: getElement("on-field"),
+  onToolFilterRow: getElement("on-tool-filter-row"),
   promptField: getElement("prompt-field"),
   degradeTargetField: getElement("degrade-target-field"),
   generateRuleButton: getElement("generate-rule-button"),

@@ -34,6 +34,7 @@
       traceOnFieldHint,
       pathField,
       onField,
+      onToolFilterRow,
       promptField,
       degradeTargetField,
       generateRuleButton,
@@ -167,6 +168,10 @@
     }
 
     function modeShowsOnOptions() {
+      return true;
+    }
+
+    function showsToolFilterOptions() {
       return hasToolPhaseSelected();
     }
 
@@ -237,6 +242,7 @@
     function syncBuilderUI() {
       setFieldVisibility(pathField, modeNeedsTrace());
       setFieldVisibility(onField, modeShowsOnOptions());
+      setFieldVisibility(onToolFilterRow, showsToolFilterOptions());
       if (traceOnFieldHint) {
         traceOnFieldHint.hidden = !modeNeedsTrace();
       }
@@ -245,7 +251,7 @@
       const optionCount = Array.isArray(ruleOnInput.options) || typeof ruleOnInput.options?.length === "number"
         ? ruleOnInput.options.length
         : 0;
-      ruleOnInput.disabled = !modeShowsOnOptions() || (!currentValue && optionCount <= 1);
+      ruleOnInput.disabled = !showsToolFilterOptions() || (!currentValue && optionCount <= 1);
 
       syncConditionLock(pathBuilder.getValue());
     }
