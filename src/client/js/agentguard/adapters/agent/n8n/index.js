@@ -1746,11 +1746,19 @@ function applyModifyToNodeParameters(parameters = {}, processedContent = "") {
 function applyModifyToRunNodeArgs(args = {}, processedContent = "") {
   const node = args && args.node;
   const parameters = isPlainObject(node && node.parameters) ? node.parameters : {};
+  const nextParameters = applyModifyToNodeParameters(parameters, processedContent);
   return {
     ...(args || {}),
     node: {
       ...(node || {}),
-      parameters: applyModifyToNodeParameters(parameters, processedContent),
+      parameters: nextParameters,
+    },
+    executionData: {
+      ...((args && args.executionData) || {}),
+      node: {
+        ...(((args && args.executionData) || {}).node || {}),
+        parameters: nextParameters,
+      },
     },
   };
 }

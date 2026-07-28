@@ -514,6 +514,18 @@ test("applyModifyToRunNodeArgs rewrites messages and preserves other node parame
         },
       },
       executionData: {
+        node: {
+          parameters: {
+            modelId: { value: "chatgpt-4o-latest" },
+            responses: {
+              values: [
+                { role: "system", content: "原始 system" },
+                { role: "user", content: "原始 user" },
+              ],
+            },
+            builtInTools: { webSearch: true },
+          },
+        },
         data: {
           main: [[{ json: { chatInput: "原始输入" } }]],
         },
@@ -531,6 +543,12 @@ test("applyModifyToRunNodeArgs rewrites messages and preserves other node parame
   assert.equal(rewritten.node.parameters.modelId.value, "gpt-4.1-mini");
   assert.deepEqual(rewritten.node.parameters.builtInTools, { webSearch: true });
   assert.deepEqual(rewritten.node.parameters.responses.values, [
+    { role: "system", content: "重写 system" },
+    { role: "user", content: "重写 user" },
+  ]);
+  assert.equal(rewritten.executionData.node.parameters.modelId.value, "gpt-4.1-mini");
+  assert.deepEqual(rewritten.executionData.node.parameters.builtInTools, { webSearch: true });
+  assert.deepEqual(rewritten.executionData.node.parameters.responses.values, [
     { role: "system", content: "重写 system" },
     { role: "user", content: "重写 user" },
   ]);
