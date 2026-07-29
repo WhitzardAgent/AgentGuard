@@ -6,7 +6,6 @@ import json
 import time
 from collections.abc import Callable
 from typing import Any
-from urllib.parse import urlparse
 
 from backend.llm import LLMClient
 from backend.runtime.plugins.base import BasePlugin, CheckResult
@@ -112,6 +111,7 @@ class RuleBasedPlugin(BasePlugin):
         context: RuntimeContext,
         trajectory_window: list[RuntimeEvent] | None = None,
     ) -> CheckResult:
+        _hydrate_llm_input_model_tag(event)
         match = match_rules(self.rules(context), event, trajectory_window)
         metadata = {
             "rule_based_plugin": match.to_dict(),
@@ -368,6 +368,23 @@ def _fallback_rules() -> list[PolicyRule]:
         #     capabilities=[CAP_EXTERNAL_SEND],
         # ),
     ]
+
+
+def _hydrate_llm_input_model_tag(event: RuntimeEvent) -> None:
+    if event.event_type.value != "llm_input":
+        return
+    metadata = dict(event.metadata or {})
+    _optional_text(metadata.get("model"))
+    _optional_text(metadata.get("model_provider"))
+    _optional_text(metadata.get("model_base_url"))
+    metadata["model_tag"] = "overseas"
+    event.metadata = metadata
+
+
+def _optional_text(value: Any) -> str | None:
+    raw = value.get("value") if isinstance(value, dict) and "value" in value else value
+    text = str(raw or "").strip()
+    return text or None
 
 
 _REVIEW_CONTEXT_METADATA_EXCLUDE = {

@@ -120,7 +120,7 @@ def test_manager_has_policy_version():
     assert m.policy_version
 
 
-def test_manager_uses_agent_location_tag_for_model_tag_rules(monkeypatch):
+def test_manager_uses_agent_location_tag_for_agent_tag_rules(monkeypatch):
     class _FakeAgentStore:
         def get_agent(self, agent_id: str):
             if agent_id == "agent-local":
@@ -144,13 +144,13 @@ def test_manager_uses_agent_location_tag_for_model_tag_rules(monkeypatch):
     m.policy.store.set_rules(
         [
             PolicyRule(
-                rule_id="deny_local_model",
+                rule_id="deny_local_agent",
                 effect=PolicyEffect.DENY,
-                reason="Local-tagged model calls are blocked.",
+                reason="Local-tagged agents are blocked.",
                 priority=90,
                 event_types=["llm_input"],
-                conditions=[RuleCondition(field="model.tag", op="eq", value="local")],
-                condition_expr='model.tag == "local"',
+                conditions=[RuleCondition(field="agent.tag", op="eq", value="local")],
+                condition_expr='agent.tag == "local"',
             )
         ]
     )
@@ -171,10 +171,71 @@ def test_manager_uses_agent_location_tag_for_model_tag_rules(monkeypatch):
     )
 
     assert res["decision"]["decision_type"] == "deny"
-    assert res["plugin_result"]["metadata"]["rule_based_plugin"]["rule_id"] == "deny_local_model"
+    assert res["plugin_result"]["metadata"]["rule_based_plugin"]["rule_id"] == "deny_local_agent"
 
 
-def test_manager_agent_location_tag_overrides_event_supplied_model_tag(monkeypatch):
+def test_manager_uses_fixed_overseas_model_tag_for_llm_input(monkeypatch):
+    class _FakeAgentStore:
+        def get_agent(self, agent_id: str):
+            if agent_id == "agent-local":
+                return AgentRecord(
+                    agent_id="agent-local",
+                    agent_identity_code="agic_local",
+                    location_tag="overseas",
+                    status="active",
+                )
+            return None
+
+    monkeypatch.setattr("backend.agents.store.AgentStore", lambda: _FakeAgentStore())
+
+    m = RuntimeManager(
+        plugin_config={
+            "phases": {
+                "llm_before": {"client": [], "server": ["rule_based_plugin"]},
+            }
+        }
+    )
+    m.policy.store.set_rules(
+        [
+            PolicyRule(
+                rule_id="deny_overseas_model",
+                effect=PolicyEffect.DENY,
+                reason="Overseas models are blocked.",
+                priority=90,
+                event_types=["llm_input"],
+                conditions=[RuleCondition(field="model.tag", op="eq", value="overseas")],
+                condition_expr='model.tag == "overseas"',
+            )
+        ]
+    )
+
+    res = m.decide(
+        {
+            "request_id": "llm-overseas-model-tag",
+            "context": {
+                "session_id": "s-overseas-model-tag",
+                "agent_id": "agent-local",
+            },
+            "current_event": {
+                "event_type": "llm_input",
+                "payload": {"messages": [{"role": "user", "content": "hello"}]},
+                "risk_signals": [],
+                "metadata": {
+                    "model": "deepseek-v4-pro",
+                    "model_provider": "deepseek",
+                    "model_base_url": "https://api.deepseek.com/v1",
+                },
+            },
+            "trajectory_window": [],
+            "local_signals": [],
+        }
+    )
+
+    assert res["decision"]["decision_type"] == "deny"
+    assert res["plugin_result"]["metadata"]["rule_based_plugin"]["rule_id"] == "deny_overseas_model"
+
+
+def test_manager_agent_tag_and_model_tag_are_independent(monkeypatch):
     class _FakeAgentStore:
         def get_agent(self, agent_id: str):
             if agent_id == "agent-local":
@@ -200,28 +261,37 @@ def test_manager_agent_location_tag_overrides_event_supplied_model_tag(monkeypat
             PolicyRule(
                 rule_id="deny_local_model",
                 effect=PolicyEffect.DENY,
-                reason="Local-tagged model calls are blocked.",
-                priority=90,
+                reason="Local models are blocked.",
+                priority=100,
                 event_types=["llm_input"],
                 conditions=[RuleCondition(field="model.tag", op="eq", value="local")],
                 condition_expr='model.tag == "local"',
-            )
+            ),
+            PolicyRule(
+                rule_id="deny_local_agent",
+                effect=PolicyEffect.DENY,
+                reason="Local agents are blocked.",
+                priority=90,
+                event_types=["llm_input"],
+                conditions=[RuleCondition(field="agent.tag", op="eq", value="local")],
+                condition_expr='agent.tag == "local"',
+            ),
         ]
     )
 
     res = m.decide(
         {
-            "request_id": "llm-local-tag-override",
-            "context": {
-                "session_id": "s-local-override",
-                "agent_id": "agent-local",
-                "metadata": {"location_tag": "overseas"},
-            },
+            "request_id": "llm-agent-model-tag-independent",
+            "context": {"session_id": "s-agent-model-tag-independent", "agent_id": "agent-local"},
             "current_event": {
                 "event_type": "llm_input",
                 "payload": {"messages": [{"role": "user", "content": "hello"}]},
                 "risk_signals": [],
-                "metadata": {"location_tag": "overseas", "model": {"tag": "overseas"}},
+                "metadata": {
+                    "model": "gpt-5.2",
+                    "model_provider": "openai",
+                    "model_base_url": "https://api.openai.com/v1",
+                },
             },
             "trajectory_window": [],
             "local_signals": [],
@@ -229,7 +299,7 @@ def test_manager_agent_location_tag_overrides_event_supplied_model_tag(monkeypat
     )
 
     assert res["decision"]["decision_type"] == "deny"
-    assert res["plugin_result"]["metadata"]["rule_based_plugin"]["rule_id"] == "deny_local_model"
+    assert res["plugin_result"]["metadata"]["rule_based_plugin"]["rule_id"] == "deny_local_agent"
 
 
 def test_manager_allows_benign_read():

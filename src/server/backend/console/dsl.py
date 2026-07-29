@@ -228,15 +228,16 @@ def _parse_conditions(cond_text: str) -> tuple[list[RuleCondition], list[dict[st
     OR/NOT/parenthesized groups), kept on the rule for introspection only --
     `PolicyRule.matches()` evaluates `condition_expr` itself, not this list.
     """
+    canonical_text = str(cond_text or "").strip()
     raw: list[dict[str, Any]] = []
-    if str(cond_text or "").strip() == "*":
+    if canonical_text == "*":
         return [], [{"expr": "*"}]
-    parts = re.split(r"\s+AND\s+", cond_text, flags=re.IGNORECASE)
+    parts = re.split(r"\s+AND\s+", canonical_text, flags=re.IGNORECASE)
     for part in parts:
         expr = part.strip()
         if expr:
             raw.append({"expr": expr})
-    enforce = extract_condition_atoms(cond_text)
+    enforce = extract_condition_atoms(canonical_text)
     return enforce, raw
 
 
@@ -294,7 +295,7 @@ def parse_source(source: str) -> tuple[list[ParsedRule], CheckReport]:
         reason = _unquote(_named(normalized, "Reason"))
         prompt = _unquote(_named(normalized, "Prompt"))
         degrade_target = _degrade_target(policy_line)
-        condition_text = _named(normalized, "CONDITION")
+        condition_text = str(_named(normalized, "CONDITION") or "").strip()
         conditions, raw_conditions = _parse_conditions(condition_text)
         event_types = [_PHASE_TO_EVENT_TYPE[phase] for phase in phases]
 
@@ -384,7 +385,7 @@ def _condition_source(rule: PolicyRule, tool_pattern: str) -> str:
     raw = metadata.get("dsl_conditions") or []
     exprs = [c.get("expr") for c in raw if c.get("expr")]
     if exprs:
-        return " AND ".join(exprs)
+        return str(" AND ".join(exprs)).strip()
     if "dsl_conditions" in metadata:
         return ""
     if tool_pattern and tool_pattern != "*":

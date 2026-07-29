@@ -154,15 +154,15 @@ def test_trace_rule_supports_not_expression():
     assert rule.matches(current, trace_window=[previous]) is True
 
 
-def test_rule_matches_model_tag_from_location_tag_metadata():
+def test_rule_matches_agent_tag_from_location_tag_metadata():
     rule = PolicyRule(
-        rule_id="domestic_model_rule",
+        rule_id="domestic_agent_rule",
         effect=PolicyEffect.DENY,
-        reason="domestic model only",
+        reason="domestic agent only",
         priority=90,
         event_types=["tool_invoke"],
-        conditions=[RuleCondition(field="model.tag", op="eq", value="domestic")],
-        condition_expr='model.tag == "domestic"',
+        conditions=[RuleCondition(field="agent.tag", op="eq", value="domestic")],
+        condition_expr='agent.tag == "domestic"',
     )
 
     current = _tool_invoke("email_send", {"to": "partner@example.com"})
@@ -174,6 +174,34 @@ def test_rule_matches_model_tag_from_location_tag_metadata():
     )
 
     assert rule.matches(current, trace_window=[]) is True
+
+
+def test_rule_matches_model_tag_from_model_metadata():
+    rule = PolicyRule(
+        rule_id="domestic_model_rule",
+        effect=PolicyEffect.DENY,
+        reason="domestic model only",
+        priority=90,
+        event_types=["llm_input"],
+        conditions=[RuleCondition(field="model.tag", op="eq", value="domestic")],
+        condition_expr='model.tag == "domestic"',
+    )
+
+    event = RuntimeEvent.from_dict(
+        {
+            "event_type": "llm_input",
+            "context": {"session_id": "s1", "agent_id": "a1", "user_id": "u1"},
+            "payload": {"messages": [{"role": "user", "content": "hello"}]},
+            "metadata": {
+                "model": "deepseek-v4-pro",
+                "model_provider": "deepseek",
+                "model_base_url": "https://api.deepseek.com/v1",
+                "model_tag": "domestic",
+            },
+        }
+    )
+
+    assert rule.matches(event, trace_window=[]) is True
 
 
 def test_rule_matches_unconditional_wildcard_expression():

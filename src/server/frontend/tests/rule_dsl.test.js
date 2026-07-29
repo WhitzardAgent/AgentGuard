@@ -213,9 +213,41 @@ test("serializeRule preserves IN and MATCHES operators with expected right-hand 
   assert.match(dsl, /AND tool\.url MATCHES ".*127\\\\\\\\\.0\\\\\\\\\.0\\\\\\\\\.1\.\*"/);
 });
 
-test("serializeRule supports model tag context conditions", () => {
+test("serializeRule supports agent tag context conditions", () => {
   const dsl = serializeRule({
     name: "review_domestic_model",
+    phases: ["llm_before"],
+    action: "HUMAN_CHECK",
+    conditionItems: [
+      {
+        connector: "",
+        openParen: "",
+        closeParen: "",
+        sourceType: "context",
+        contextPrefix: "agent",
+        contextField: "agent.tag",
+        contextFieldName: "",
+        contextPath: "agent.tag",
+        operator: "==",
+        value: "domestic",
+      },
+    ],
+  });
+
+  assert.equal(
+    dsl,
+    [
+      "RULE: review_domestic_model",
+      "PHASES: llm_before",
+      'CONDITION: agent.tag == "domestic"',
+      "POLICY: HUMAN_CHECK",
+    ].join("\n"),
+  );
+});
+
+test("serializeRule supports model tag context conditions", () => {
+  const dsl = serializeRule({
+    name: "review_overseas_model",
     phases: ["llm_before"],
     action: "HUMAN_CHECK",
     conditionItems: [
@@ -229,7 +261,7 @@ test("serializeRule supports model tag context conditions", () => {
         contextFieldName: "",
         contextPath: "model.tag",
         operator: "==",
-        value: "domestic",
+        value: "overseas",
       },
     ],
   });
@@ -237,9 +269,9 @@ test("serializeRule supports model tag context conditions", () => {
   assert.equal(
     dsl,
     [
-      "RULE: review_domestic_model",
+      "RULE: review_overseas_model",
       "PHASES: llm_before",
-      'CONDITION: model.tag == "domestic"',
+      'CONDITION: model.tag == "overseas"',
       "POLICY: HUMAN_CHECK",
     ].join("\n"),
   );

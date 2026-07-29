@@ -9,6 +9,7 @@
   };
 
   const principalRoleValues = ["basic", "default", "privileged", "system"];
+  const agentTagValues = ["local", "domestic", "overseas"];
   const modelTagValues = ["local", "domestic", "overseas"];
 
   const traceFeatureOperators = {
@@ -47,6 +48,9 @@
       { value: "mcp.transport", label: "mcp.transport", kind: "text", operators: ["==", "!=", "IN", "NOT IN"] },
       { value: "mcp.remote", label: "mcp.remote", kind: "enum", enumValues: ["true", "false"], operators: ["==", "!="] },
     ],
+    agent: [
+      { value: "agent.tag", label: "agent.tag", kind: "enum", enumValues: agentTagValues, operators: ["==", "!=", "IN", "NOT IN"] },
+    ],
     model: [
       { value: "model.tag", label: "model.tag", kind: "enum", enumValues: modelTagValues, operators: ["==", "!=", "IN", "NOT IN"] },
     ],
@@ -63,6 +67,7 @@
     { value: "payload", label: "payload" },
     { value: "mcp", label: "mcp" },
     { value: "principal", label: "user" },
+    { value: "agent", label: "agent" },
     { value: "model", label: "model" },
   ];
 
@@ -86,6 +91,10 @@
     { value: "payload.final_output", label: "final_output" },
     { value: "payload.tool_name", label: "tool_name" },
     { value: "payload.result", label: "result" },
+  ];
+
+  const agentContextSubpropertyGroups = [
+    { value: "agent.tag", label: "tag" },
   ];
 
   const modelContextSubpropertyGroups = [
@@ -313,9 +322,11 @@
   }
 
   function contextDefinitionForPath(path, prefixHint = "") {
-    if (path) {
-      const prefix = String(path).split(".")[0];
-      const exact = (contextDefinitions[prefix] || []).find((item) => item.value === path);
+    const normalizedPath = String(path || "").trim();
+    const normalizedPrefixHint = String(prefixHint || "").trim();
+    if (normalizedPath) {
+      const prefix = String(normalizedPath).split(".")[0];
+      const exact = (contextDefinitions[prefix] || []).find((item) => item.value === normalizedPath);
       if (exact) {
         return exact;
       }
@@ -323,7 +334,7 @@
         return contextDefinitions.tool.find((item) => item.value === "tool.syntax");
       }
     }
-    const hinted = (contextDefinitions[prefixHint] || [])[0];
+    const hinted = (contextDefinitions[normalizedPrefixHint] || [])[0];
     return hinted || contextDefinitions.tool[0];
   }
 
@@ -618,13 +629,14 @@
   }
 
   function normalizeContextItem(raw, index, options = {}) {
-    const prefix = String(raw?.contextPrefix || String(raw?.contextPath || "").split(".")[0] || "tool");
-    const definition = contextDefinitionForPath(raw?.contextPath || raw?.contextField, prefix);
-    const fieldValue = String(raw?.contextField || definition.value || "");
+    const normalizedContextPath = String(raw?.contextPath || raw?.contextField || "").trim();
+    const prefix = String(raw?.contextPrefix || normalizedContextPath.split(".")[0] || "tool");
+    const definition = contextDefinitionForPath(normalizedContextPath || raw?.contextField, prefix);
+    const fieldValue = String(raw?.contextField || definition.value || "").trim();
     const toolKey = String(options.currentCallToolKey || "");
     const params = inputParamsForTool(toolKey);
-    const pathSegment = prefix === "tool" && String(raw?.contextPath || "").startsWith("tool.")
-      ? String(raw.contextPath).slice("tool.".length)
+    const pathSegment = prefix === "tool" && normalizedContextPath.startsWith("tool.")
+      ? normalizedContextPath.slice("tool.".length)
       : "";
     let syntaxField = String(raw?.syntaxField || "");
 
@@ -1604,6 +1616,25 @@
       if (prefix === "mcp") {
         detailSection.appendChild(createField("Sub-property", createSelect(
           [{ value: "", label: "Select sub-property" }, ...mcpContextSubpropertyGroups],
+          item.contextField,
+          (event) => {
+            const nextField = event.target.value;
+            updateDraft({
+              contextField: nextField,
+              contextFieldName: "",
+              contextPath: buildContextPath(nextField, ""),
+              syntaxField: "",
+              operator: "",
+              value: "",
+            });
+          },
+        )));
+        return;
+      }
+
+      if (prefix === "agent") {
+        detailSection.appendChild(createField("Sub-property", createSelect(
+          [{ value: "", label: "Select sub-property" }, ...agentContextSubpropertyGroups],
           item.contextField,
           (event) => {
             const nextField = event.target.value;

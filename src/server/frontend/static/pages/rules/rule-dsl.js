@@ -1,6 +1,6 @@
 (function () {
   const SUPPORTED_ACTIONS = new Set(["DENY", "HUMAN_CHECK", "LLM_CHECK", "ALLOW", "DEGRADE"]);
-  const CONTEXT_PREFIXES = new Set(["tool", "principal", "mcp", "payload", "model"]);
+  const CONTEXT_PREFIXES = new Set(["tool", "principal", "mcp", "payload", "agent", "model"]);
   const RULE_PHASES = ["llm_before", "llm_after", "tool_before", "tool_after"];
 
   function escapeString(value) {

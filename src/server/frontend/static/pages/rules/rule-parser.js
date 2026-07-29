@@ -95,14 +95,15 @@
 
     const contextParsed = core.match(
       new RegExp(
-        `^((?:tool|target|principal|caller|event|mcp|payload|model)\\.[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)*)\\s+${operatorPattern}\\s+(.+)$`,
+        `^((?:tool|target|principal|caller|event|mcp|payload|agent|model)\\.[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)*)\\s+${operatorPattern}\\s+(.+)$`,
       ),
     );
     if (!contextParsed) {
       return null;
     }
 
-    const [, contextPath, operator, rawValue] = contextParsed;
+    const [, rawContextPath, operator, rawValue] = contextParsed;
+    const contextPath = String(rawContextPath || "").trim();
     const parts = contextPath.split(".");
     const contextPrefix = parts[0];
     let contextField = contextPath;

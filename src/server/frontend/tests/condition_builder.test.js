@@ -348,11 +348,11 @@ test("single tool builder offers the available context property groups", () => {
   assert.ok(propertySelect);
   assert.deepEqual(
     propertySelect.options.map((option) => option.value),
-    ["", "tool", "payload", "mcp", "principal", "model"],
+    ["", "tool", "payload", "mcp", "principal", "agent", "model"],
   );
   assert.deepEqual(
     propertySelect.options.map((option) => option.textContent),
-    ["Select property", "tool", "payload", "mcp", "user", "model"],
+    ["Select property", "tool", "payload", "mcp", "user", "agent", "model"],
   );
 });
 
@@ -533,6 +533,45 @@ test("membership target values use checkboxes for enum-based IN comparisons", ()
   assert.equal(builder.getValue().savedConditions[0].expression, 'principal.role IN {"basic", "system"}');
 });
 
+test("condition builder supports agent.tag with fixed location choices", () => {
+  const root = createElement("div");
+  const hint = createElement("p");
+  const addButton = createElement("button");
+  const builder = createConditionBuilder({
+    root,
+    hint,
+    addButton,
+    pathSymbols: ["A"],
+    allowedSourceTypes: ["context"],
+    value: { items: [] },
+  });
+
+  addButton.dispatchEvent("click");
+  let selects = collectElements(root, (element) => element.tagName === "SELECT");
+  assert.equal(selects[0].options.some((option) => option.value === "agent"), true);
+  selects[0].value = "agent";
+  selects[0].dispatchEvent("change");
+
+  selects = collectElements(root, (element) => element.tagName === "SELECT");
+  selects[1].value = "agent.tag";
+  selects[1].dispatchEvent("change");
+  buttonByText(root, ">").dispatchEvent("click");
+
+  selects = collectElements(root, (element) => element.tagName === "SELECT");
+  selects[0].value = "==";
+  selects[0].dispatchEvent("change");
+  selects = collectElements(root, (element) => element.tagName === "SELECT");
+  assert.deepEqual(
+    selects[1].options.map((option) => option.value),
+    ["", "local", "domestic", "overseas"],
+  );
+  selects[1].value = "domestic";
+  selects[1].dispatchEvent("change");
+  buttonByText(root, "Create >").dispatchEvent("click");
+
+  assert.equal(builder.getValue().savedConditions[0].expression, 'agent.tag == "domestic"');
+});
+
 test("condition builder supports model.tag with fixed location choices", () => {
   const root = createElement("div");
   const hint = createElement("p");
@@ -565,11 +604,11 @@ test("condition builder supports model.tag with fixed location choices", () => {
     selects[1].options.map((option) => option.value),
     ["", "local", "domestic", "overseas"],
   );
-  selects[1].value = "domestic";
+  selects[1].value = "overseas";
   selects[1].dispatchEvent("change");
   buttonByText(root, "Create >").dispatchEvent("click");
 
-  assert.equal(builder.getValue().savedConditions[0].expression, 'model.tag == "domestic"');
+  assert.equal(builder.getValue().savedConditions[0].expression, 'model.tag == "overseas"');
 });
 
 test("condition builder supports unconditional always-match via *", () => {

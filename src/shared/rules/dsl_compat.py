@@ -199,7 +199,7 @@ def _condition_field(path: str) -> str | None:
         return None
     if re.match(r"^[A-Za-z_][A-Za-z0-9_-]*\.", normalized):
         return normalized
-    if normalized.startswith(("principal.", "tool.", "target.", "payload.", "model.")):
+    if normalized.startswith(("principal.", "agent.", "tool.", "target.", "payload.", "model.")):
         return normalized
     return None
 

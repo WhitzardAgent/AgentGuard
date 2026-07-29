@@ -97,7 +97,7 @@ def _resolve_trace_binding(binding: dict[str, Any], parts: list[str]) -> Any:
     return (binding.get("arguments") or {}).get(head)
 
 
-def _normalize_model_tag(value: Any) -> str | None:
+def _normalize_runtime_tag(value: Any) -> str | None:
     normalized = str(value or "").strip().lower()
     if normalized in {"local", "domestic", "overseas"}:
         return normalized
@@ -237,6 +237,7 @@ class PolicyRule:
 
         event_dict = event.to_dict()
         principal = _principal_view(event)
+        agent = _agent_view(event)
         tool = _tool_view(event)
         target = _target_view(tool)
         mcp = _mcp_view(event)
@@ -247,6 +248,7 @@ class PolicyRule:
         match_root = {
             **event_dict,
             "principal": principal,
+            "agent": agent,
             "tool": tool,
             "target": target,
             "mcp": mcp,
@@ -290,6 +292,23 @@ def _principal_view(event: RuntimeEvent) -> dict[str, Any]:
     if "trust_level" not in principal and isinstance(context.metadata, dict):
         principal["trust_level"] = context.metadata.get("trust_level")
     return principal
+
+
+def _agent_view(event: RuntimeEvent) -> dict[str, Any]:
+    context_metadata = event.context.metadata if isinstance(event.context.metadata, dict) else {}
+    event_metadata = event.metadata if isinstance(event.metadata, dict) else {}
+    context_agent = dict(context_metadata.get("agent") or {}) if isinstance(context_metadata.get("agent"), dict) else {}
+    event_agent = dict(event_metadata.get("agent") or {}) if isinstance(event_metadata.get("agent"), dict) else {}
+    return {
+        **context_agent,
+        **event_agent,
+        "tag": (
+            _normalize_runtime_tag(event_metadata.get("location_tag"))
+            or _normalize_runtime_tag(context_metadata.get("location_tag"))
+            or _normalize_runtime_tag(event_agent.get("tag"))
+            or _normalize_runtime_tag(context_agent.get("tag"))
+        ),
+    }
 
 
 def _tool_view(event: RuntimeEvent) -> dict[str, Any]:
@@ -345,12 +364,33 @@ def _model_view(event: RuntimeEvent) -> dict[str, Any]:
     context_metadata = event.context.metadata if isinstance(event.context.metadata, dict) else {}
     event_model = dict(event_metadata.get("model") or {}) if isinstance(event_metadata.get("model"), dict) else {}
     context_model = dict(context_metadata.get("model") or {}) if isinstance(context_metadata.get("model"), dict) else {}
-    tag = _normalize_model_tag(event_metadata.get("location_tag")) or _normalize_model_tag(
-        context_metadata.get("location_tag")
+    name = event_metadata.get("model") if not isinstance(event_metadata.get("model"), dict) else None
+    if name in (None, ""):
+        name = event_model.get("name") or event_model.get("id") or context_model.get("name") or context_model.get("id")
+    provider = (
+        event_metadata.get("model_provider")
+        or event_model.get("provider")
+        or context_metadata.get("model_provider")
+        or context_model.get("provider")
+    )
+    base_url = (
+        event_metadata.get("model_base_url")
+        or event_model.get("base_url")
+        or context_metadata.get("model_base_url")
+        or context_model.get("base_url")
+    )
+    tag = (
+        _normalize_runtime_tag(event_metadata.get("model_tag"))
+        or _normalize_runtime_tag(event_model.get("tag"))
+        or _normalize_runtime_tag(context_metadata.get("model_tag"))
+        or _normalize_runtime_tag(context_model.get("tag"))
     )
     return {
         **context_model,
         **event_model,
+        "name": name,
+        "provider": provider,
+        "base_url": base_url,
         "tag": tag,
     }
 

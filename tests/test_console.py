@@ -132,6 +132,56 @@ def test_dsl_parse_supports_model_tag_condition():
     assert any(cond.field == "model.tag" for cond in rule.conditions)
 
 
+def test_dsl_parse_supports_agent_tag_condition():
+    parsed, report = parse_source(
+        "RULE: review_local_agent\n"
+        "PHASES: llm_before\n"
+        'CONDITION: agent.tag == "local"\n'
+        "POLICY: HUMAN_CHECK\n"
+    )
+
+    assert report.ok and len(parsed) == 1
+    rule = parsed[0].rule
+    assert rule.condition_expr == 'agent.tag == "local"'
+    assert any(cond.field == "agent.tag" for cond in rule.conditions)
+
+
+def test_policy_rule_to_source_preserves_agent_tag_name():
+    rule = PolicyRule(
+        rule_id="review_local_agent",
+        effect=PolicyEffect.REQUIRE_APPROVAL,
+        reason="review local agent",
+        priority=70,
+        event_types=["llm_input"],
+        conditions=[RuleCondition(field="agent.tag", op="eq", value="local")],
+        condition_expr='agent.tag == "local"',
+        metadata={"dsl_conditions": [{"expr": 'agent.tag == "local"'}], "phases": ["llm_before"]},
+    )
+
+    source = policy_rule_to_source(rule)
+
+    assert 'CONDITION: agent.tag == "local"' in source
+    assert "model.tag" not in source
+
+
+def test_policy_rule_to_source_preserves_model_tag_name():
+    rule = PolicyRule(
+        rule_id="review_domestic_model",
+        effect=PolicyEffect.REQUIRE_APPROVAL,
+        reason="review domestic model",
+        priority=70,
+        event_types=["llm_input"],
+        conditions=[RuleCondition(field="model.tag", op="eq", value="domestic")],
+        condition_expr='model.tag == "domestic"',
+        metadata={"dsl_conditions": [{"expr": 'model.tag == "domestic"'}], "phases": ["llm_before"]},
+    )
+
+    source = policy_rule_to_source(rule)
+
+    assert 'CONDITION: model.tag == "domestic"' in source
+    assert "agent.tag" not in source
+
+
 def test_dsl_parse_supports_unconditional_wildcard_condition():
     parsed, report = parse_source(
         "RULE: always_before_llm\n"
