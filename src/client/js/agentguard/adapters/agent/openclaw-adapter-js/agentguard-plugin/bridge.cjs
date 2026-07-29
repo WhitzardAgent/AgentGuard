@@ -761,40 +761,14 @@ function buildLlmInputMessages(event = {}) {
   return messages;
 }
 
-function buildOpenClawModelMetadata(event = {}) {
+function buildOpenClawModelEventMetadata(event = {}) {
   const provider = asNonEmptyString(event.modelProvider);
   const name = asNonEmptyString(event.model);
   const baseUrl = asNonEmptyString(event.modelBaseUrl || event.model_base_url);
-  if (!provider && !name && !baseUrl) {
-    return undefined;
-  }
   return {
-    ...(provider ? { provider } : {}),
-    ...(name ? { name } : {}),
-    ...(baseUrl ? { base_url: baseUrl } : {}),
-    source: "openclaw-runtime",
-  };
-}
-
-function applyOpenClawModelMetadata(context, event = {}) {
-  const model = buildOpenClawModelMetadata(event);
-  if (!model || !context || typeof context !== "object") {
-    return;
-  }
-  const metadata =
-    context.metadata && typeof context.metadata === "object" && !Array.isArray(context.metadata)
-      ? context.metadata
-      : {};
-  const existingModel =
-    metadata.model && typeof metadata.model === "object" && !Array.isArray(metadata.model)
-      ? metadata.model
-      : {};
-  context.metadata = {
-    ...metadata,
-    model: {
-      ...existingModel,
-      ...model,
-    },
+    ...(name ? { model: name } : {}),
+    ...(provider ? { model_provider: provider } : {}),
+    ...(baseUrl ? { model_base_url: baseUrl } : {}),
   };
 }
 
@@ -3613,7 +3587,6 @@ class AgentGuardOpenClawBridge {
       runId: ctx.runId,
       channelId: ctx.channelId,
     });
-    applyOpenClawModelMetadata(state.context, event);
     const runtimeEvent = createRuntimeEvent({
       eventType: EventType.LLM_INPUT,
       context: state.context,
@@ -3625,6 +3598,7 @@ class AgentGuardOpenClawBridge {
         runId: ctx.runId,
         ...(event.prompt ? { prompt: event.prompt } : {}),
         ...(event.systemPrompt ? { systemPrompt: event.systemPrompt } : {}),
+        ...buildOpenClawModelEventMetadata(event),
       },
     });
     const result = await this.enforce(state, runtimeEvent, { phase: "llm_before" });
@@ -3770,7 +3744,7 @@ module.exports = {
     decisionPayload,
     buildRuntimeContext,
     buildLlmInputMessages,
-    buildOpenClawModelMetadata,
+    buildOpenClawModelEventMetadata,
     buildLlmOutputText,
     buildMcpRuntimeMetadata,
     buildUserBlockMessage,

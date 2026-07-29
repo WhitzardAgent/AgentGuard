@@ -653,6 +653,7 @@ def _guard_workflow_specialized_llm_output(
             "dify_runtime": "workflow_api",
             "stream": True,
             "model": str(getattr(model, "model_name", "") or ""),
+            "model_base_url": _shared.dify_model_base_url(model),
             "model_provider": _legacy_model_provider(model),
             "thought_regeneration_supported": _shared.supports_dify_thought_loopback(prompt_messages),
         }
@@ -1033,6 +1034,7 @@ def _guard_legacy_llm_input(
             "dify_runtime": _current_metadata.get({}).get("dify_runtime") or "legacy_api",
             "stream": bool(call.get("stream")),
             "model": str(getattr(model, "model_name", "") or ""),
+            "model_base_url": _shared.dify_model_base_url(model),
             "model_provider": _legacy_model_provider(model),
             "thought_regeneration_supported": _shared.supports_dify_thought_loopback(
                 call.get("prompt_messages")
@@ -1076,6 +1078,7 @@ def _guard_legacy_llm_output(
             "dify_runtime": _current_metadata.get({}).get("dify_runtime") or "legacy_api",
             "stream": bool(call.get("stream")),
             "model": str(getattr(model, "model_name", "") or ""),
+            "model_base_url": _shared.dify_model_base_url(model),
             "model_provider": _legacy_model_provider(model),
             "thought_regeneration_supported": _shared.supports_dify_thought_loopback(
                 call.get("prompt_messages")

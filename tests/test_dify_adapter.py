@@ -2898,3 +2898,81 @@ def test_legacy_tool_before_deny_skips_original_tool(monkeypatch):
     assert response[1] == []
     assert fake.ToolEngine.calls == []
     assert guard.runtime.calls == [("tool_invoke", "before")]
+
+
+@pytest.mark.parametrize(
+    ("credentials", "expected_base_url"),
+    [
+        (
+            {
+                "openai_api_base": "https://preferred.example/v1",
+                "api_base": "https://fallback.example/v1",
+            },
+            "https://preferred.example/v1",
+        ),
+        (
+            {"google_base_url": "https://generativelanguage.googleapis.com"},
+            "https://generativelanguage.googleapis.com",
+        ),
+        (
+            {"anthropic_api_url": "https://api.anthropic.com"},
+            "https://api.anthropic.com",
+        ),
+    ],
+)
+def test_dify_model_metadata_extracts_provider_specific_base_urls(monkeypatch, credentials, expected_base_url):
+    dify_adapter = _fresh_adapter(monkeypatch)
+
+    base_url = dify_adapter._shared.dify_model_base_url(
+        types.SimpleNamespace(credentials=credentials)
+    )
+
+    assert base_url == expected_base_url
+
+
+def test_legacy_llm_input_sets_model_base_url_metadata(monkeypatch):
+    dify_adapter = _fresh_adapter(monkeypatch)
+
+    class RecordingRuntime:
+        def __init__(self) -> None:
+            self.event = None
+
+        def guard(self, event, phase="before"):
+            self.event = event
+            return types.SimpleNamespace(decision=GuardDecision.allow())
+
+    runtime = RecordingRuntime()
+    guard = types.SimpleNamespace(
+        runtime=runtime,
+        context=types.SimpleNamespace(
+            session_id="legacy-model-meta",
+            agent_id="agent",
+            metadata={"existing": "value"},
+        ),
+    )
+    token_guard = dify_adapter._current_guard.set(guard)
+    token_meta = dify_adapter._current_metadata.set({"dify_runtime": "workflow_api", "app_id": "app-1"})
+    try:
+        decision = dify_adapter._guard_legacy_llm_input(
+            types.SimpleNamespace(
+                model_name="gpt-4o-mini",
+                provider="langgenius/openai/openai",
+                credentials={
+                    "openai_api_base": "https://preferred.example/v1",
+                    "api_base": "https://fallback.example/v1",
+                },
+            ),
+            dify_adapter._shared.DifyLegacyLLMCall(
+                prompt_messages=[types.SimpleNamespace(content="query")],
+                stream=True,
+            ),
+        )
+    finally:
+        dify_adapter._current_metadata.reset(token_meta)
+        dify_adapter._current_guard.reset(token_guard)
+
+    assert decision.is_allow
+    assert guard.context.metadata["existing"] == "value"
+    assert runtime.event.metadata["model"] == "gpt-4o-mini"
+    assert runtime.event.metadata["model_base_url"] == "https://preferred.example/v1"
+    assert runtime.event.metadata["model_provider"] == "langgenius/openai/openai"

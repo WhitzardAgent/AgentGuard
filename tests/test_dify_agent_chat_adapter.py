@@ -1528,3 +1528,43 @@ def test_agent_chat_tool_modify_result_rewrites_tool_observation(monkeypatch):
 
     assert response[0] == "Sunday"
     assert response[1] == []
+
+
+def test_agent_chat_llm_input_sets_model_base_url_metadata(monkeypatch):
+    adapter = _fresh_adapter(monkeypatch)
+
+    class RecordingRuntime:
+        def __init__(self) -> None:
+            self.event = None
+
+        def guard(self, event, phase="before"):
+            self.event = event
+            return types.SimpleNamespace(decision=GuardDecision.allow())
+
+    runtime = RecordingRuntime()
+    guard = types.SimpleNamespace(
+        runtime=runtime,
+        context=types.SimpleNamespace(session_id="agent-chat-model-meta", agent_id="agent"),
+    )
+    token_guard = adapter._current_guard.set(guard)
+    token_meta = adapter._current_metadata.set({"app_id": "app-1"})
+    try:
+        decision = adapter._guard_llm_input(
+            types.SimpleNamespace(
+                model_name="gemini-2.5-flash",
+                model_provider="langgenius/google/google",
+                credentials={"google_base_url": "https://generativelanguage.googleapis.com"},
+            ),
+            adapter._shared.DifyLegacyLLMCall(
+                prompt_messages=[types.SimpleNamespace(content="query")],
+                stream=True,
+            ),
+        )
+    finally:
+        adapter._current_metadata.reset(token_meta)
+        adapter._current_guard.reset(token_guard)
+
+    assert decision.is_allow
+    assert runtime.event.metadata["model"] == "gemini-2.5-flash"
+    assert runtime.event.metadata["model_base_url"] == "https://generativelanguage.googleapis.com"
+    assert runtime.event.metadata["model_provider"] == "langgenius/google/google"

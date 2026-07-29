@@ -44,6 +44,14 @@ _EVENT_PHASE = {
     "final_response": "llm_after",
 }
 _DEPRECATED_PLUGIN_NAMES = {"memory", "llm_thought", "final_response"}
+_MODEL_BASE_URL_KEYS = (
+    "openai_api_base",
+    "api_base",
+    "google_base_url",
+    "anthropic_api_url",
+    "api_base_url",
+    "base_url",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +81,16 @@ def optional_text(value: Any) -> str | None:
     raw = getattr(value, "value", value)
     text = str(raw).strip()
     return text or None
+
+
+def dify_model_base_url(model: Any) -> str | None:
+    credentials = getattr(model, "credentials", None)
+    if isinstance(credentials, dict):
+        for key in _MODEL_BASE_URL_KEYS:
+            base_url = optional_text(credentials.get(key))
+            if base_url is not None:
+                return base_url
+    return None
 
 
 def env_csv(name: str) -> set[str]:
@@ -1923,6 +1941,7 @@ __all__ = [
     "catalog_sync_process_allowed",
     "clear_catalog_fingerprints",
     "decision_payload",
+    "dify_model_base_url",
     "dify_account_email_for_app",
     "dify_app_info_for_runtime_registration",
     "dify_provider_instance_id",

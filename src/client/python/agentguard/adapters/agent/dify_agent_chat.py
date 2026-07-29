@@ -360,6 +360,7 @@ def _guard_llm_input(
             "dify_runtime": "agent_chat",
             "stream": bool(call.get("stream")),
             "model": str(getattr(model, "model_name", "") or ""),
+            "model_base_url": _shared.dify_model_base_url(model),
             "model_provider": _model_provider(model),
             "thought_regeneration_supported": _shared.supports_dify_thought_loopback(
                 call.get("prompt_messages")
@@ -389,6 +390,7 @@ def _guard_llm_output(
             "dify_runtime": "agent_chat",
             "stream": bool(call.get("stream")),
             "model": str(getattr(model, "model_name", "") or ""),
+            "model_base_url": _shared.dify_model_base_url(model),
             "model_provider": _model_provider(model),
             "thought_regeneration_supported": _shared.supports_dify_thought_loopback(
                 call.get("prompt_messages")

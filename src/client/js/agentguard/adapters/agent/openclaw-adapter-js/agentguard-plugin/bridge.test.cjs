@@ -2313,7 +2313,7 @@ test("before_agent_run returns OpenClaw-supported block context for a risky prom
   assert.match(result.prependContext, /This prompt violates policy/);
 });
 
-test("before_agent_run injects runtime model metadata into context metadata", async () => {
+test("before_agent_run injects runtime model metadata into event metadata", async () => {
   class InspectPromptPlugin extends BasePlugin {
     constructor() {
       super();
@@ -2321,12 +2321,10 @@ test("before_agent_run injects runtime model metadata into context metadata", as
     }
 
     check(event) {
-      assert.deepEqual(event.context.metadata.model, {
-        provider: "openai",
-        name: "gpt-5.2",
-        base_url: "https://api.gpt.ge/v1",
-        source: "openclaw-runtime",
-      });
+      assert.equal(event.metadata.model, "gpt-5.2");
+      assert.equal(event.metadata.model_provider, "openai");
+      assert.equal(event.metadata.model_base_url, "https://api.gpt.ge/v1");
+      assert.equal(event.context.metadata.model, undefined);
       return CheckResult.empty();
     }
   }
@@ -2361,6 +2359,9 @@ test("before_agent_run leaves model metadata unset when OpenClaw hook does not p
     }
 
     check(event) {
+      assert.equal(event.metadata.model, undefined);
+      assert.equal(event.metadata.model_provider, undefined);
+      assert.equal(event.metadata.model_base_url, undefined);
       assert.equal(event.context.metadata.model, undefined);
       return CheckResult.empty();
     }
