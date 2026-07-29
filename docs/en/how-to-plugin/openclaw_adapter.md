@@ -93,13 +93,43 @@ So the JSON file referenced by `configPath` only needs runtime settings such as:
 
 When a remote AgentGuard server is configured, the adapter also:
 
-- auto-registers each new session when no user ticket is configured
-- creates an AgentGuard DPoP runtime session when `userTicket` or `userTicketEnvVar` is configured
+- requires `userTicket` or `userTicketEnvVar` at startup and fails to load if no ticket value is available
+- creates an AgentGuard DPoP runtime session from that ticket
 - reports a baseline set of built-in OpenClaw tools
 
 This helps older OpenClaw versions still expose a useful tool inventory even when wrapped tool metadata is not available.
 
-For AgentGuard user binding, create a temporary user ticket in AgentGuard, export it as `AGENTGUARD_USER_TICKET`, then start OpenClaw. The ticket is consumed once and binds the OpenClaw runtime agent/session to the AgentGuard user; after that, guard and report requests use the returned DPoP session token instead of legacy identity headers.
+When the OpenClaw runtime provides `modelProvider`, `model`, and `modelBaseUrl`
+on the `before_agent_start` hook, the adapter forwards them into AgentGuard
+`llm_input.context.metadata.model` as `provider`, `name`, `base_url`, and
+`source: "openclaw-runtime"`. This keeps the prompt payload unchanged while
+making model-aware policy matching available through the standard `model.*`
+rule context.
+
+For AgentGuard user binding, create a temporary user ticket in AgentGuard, export it as `AGENTGUARD_USER_TICKET`, then start OpenClaw. If `serverUrl` is configured and the ticket is missing, the plugin now fails fast during startup instead of falling back to legacy identity headers. The ticket is consumed once and binds the OpenClaw runtime agent/session to the AgentGuard user; after that, guard and report requests use the returned DPoP session token instead of legacy identity headers.
+
+## Start OpenClaw
+
+Generate a fresh user ticket in the AgentGuard console, then inject it into the same shell where you start OpenClaw:
+
+```bash
+export AGENTGUARD_USER_TICKET="agt_xxx"
+openclaw gateway
+```
+
+Open the OpenClaw dashboard from another terminal:
+
+```bash
+openclaw dashboard
+```
+
+If you only want the URL without auto-opening the browser, use:
+
+```bash
+openclaw dashboard --no-open
+```
+
+For long-running development sessions, run `openclaw gateway` under `tmux` or a process manager, but still inject a fresh ticket before the process starts. Do not reuse an old ticket after it has expired or has already been consumed.
 
 ## Test
 

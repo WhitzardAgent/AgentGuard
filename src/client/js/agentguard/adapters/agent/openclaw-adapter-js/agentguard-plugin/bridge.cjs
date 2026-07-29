@@ -322,12 +322,13 @@ function normalizeIdentity(value) {
 }
 
 function normalizeRuntimeAuthConfig(config) {
-  const userTicket = resolveUserTicket(config || {});
   const userTicketEnvVar = asNonEmptyString(config && config.userTicketEnvVar);
+  const userTicket = resolveUserTicket(config || {});
   return {
     provider: "openclaw",
     userTicket,
-    configured: Boolean(userTicket || userTicketEnvVar),
+    userTicketEnvVar,
+    configured: Boolean(userTicket),
   };
 }
 
@@ -366,6 +367,22 @@ function resolveOpenClawConfigPath(config) {
   }
   const home = process.env.HOME || process.env.USERPROFILE;
   return home ? path.join(home, ".openclaw", "openclaw.json") : undefined;
+}
+
+function assertRemoteUserTicketConfigured(config) {
+  if (!config || !config.hasRemoteConfigured) {
+    return;
+  }
+  const runtimeAuth = config.runtimeAuth;
+  if (runtimeAuth && runtimeAuth.configured) {
+    return;
+  }
+  const guidance = runtimeAuth && runtimeAuth.userTicketEnvVar
+    ? `Export ${runtimeAuth.userTicketEnvVar} with a valid AgentGuard user ticket before starting OpenClaw.`
+    : "Set userTicket or userTicketEnvVar to a valid AgentGuard user ticket before starting OpenClaw.";
+  throw new Error(
+    `AgentGuard OpenClaw plugin requires a user ticket when serverUrl is configured. ${guidance}`,
+  );
 }
 
 function asNonEmptyString(value) {
@@ -742,6 +759,43 @@ function buildLlmInputMessages(event = {}) {
     messages.push({ role: "user", content: event.prompt });
   }
   return messages;
+}
+
+function buildOpenClawModelMetadata(event = {}) {
+  const provider = asNonEmptyString(event.modelProvider);
+  const name = asNonEmptyString(event.model);
+  const baseUrl = asNonEmptyString(event.modelBaseUrl || event.model_base_url);
+  if (!provider && !name && !baseUrl) {
+    return undefined;
+  }
+  return {
+    ...(provider ? { provider } : {}),
+    ...(name ? { name } : {}),
+    ...(baseUrl ? { base_url: baseUrl } : {}),
+    source: "openclaw-runtime",
+  };
+}
+
+function applyOpenClawModelMetadata(context, event = {}) {
+  const model = buildOpenClawModelMetadata(event);
+  if (!model || !context || typeof context !== "object") {
+    return;
+  }
+  const metadata =
+    context.metadata && typeof context.metadata === "object" && !Array.isArray(context.metadata)
+      ? context.metadata
+      : {};
+  const existingModel =
+    metadata.model && typeof metadata.model === "object" && !Array.isArray(metadata.model)
+      ? metadata.model
+      : {};
+  context.metadata = {
+    ...metadata,
+    model: {
+      ...existingModel,
+      ...model,
+    },
+  };
 }
 
 function buildLlmOutputText(event = {}) {
@@ -1991,6 +2045,7 @@ class AgentGuardOpenClawBridge {
   constructor(options = {}) {
     this.pluginId = options.pluginId || "agentguard";
     this.config = normalizePluginConfig(options.pluginConfig || {});
+    assertRemoteUserTicketConfigured(this.config);
     this.logger = options.logger || console;
     this.openclawRuntime = options.openclawRuntime || null;
     this.openclawAgents = discoverOpenClawAgents(this.config, this.openclawRuntime, this.logger);
@@ -2481,7 +2536,7 @@ class AgentGuardOpenClawBridge {
       session_token: runtimeAuth && runtimeAuth.session_token,
       dpop_proof_factory: runtimeAuth && runtimeAuth.proof,
       use_dpop_auth: Boolean(runtimeAuth),
-      legacy_identity_headers: !runtimeAuth,
+      legacy_identity_headers: false,
       timeout_s: this.config.remoteTimeoutS,
       retries: this.config.remoteRetries,
     });
@@ -3558,6 +3613,7 @@ class AgentGuardOpenClawBridge {
       runId: ctx.runId,
       channelId: ctx.channelId,
     });
+    applyOpenClawModelMetadata(state.context, event);
     const runtimeEvent = createRuntimeEvent({
       eventType: EventType.LLM_INPUT,
       context: state.context,
@@ -3714,6 +3770,7 @@ module.exports = {
     decisionPayload,
     buildRuntimeContext,
     buildLlmInputMessages,
+    buildOpenClawModelMetadata,
     buildLlmOutputText,
     buildMcpRuntimeMetadata,
     buildUserBlockMessage,

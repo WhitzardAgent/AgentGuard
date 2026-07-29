@@ -364,7 +364,7 @@ def _event_view(event: RuntimeEvent, entry: AuditTraceEntry) -> dict[str, Any]:
 
 def _runtime_state_view(event: RuntimeEvent) -> dict[str, Any]:
     payload = event.payload.to_dict()
-    metadata = dict(event.metadata or {})
+    metadata = _runtime_state_metadata(event)
     return {
         "event_type": event.event_type.value,
         "tool_name": payload.get("tool_name"),
@@ -373,6 +373,7 @@ def _runtime_state_view(event: RuntimeEvent) -> dict[str, Any]:
         "source": metadata.get("toolSource") or metadata.get("sourceFramework"),
         "mcp": _mcp_metadata(metadata),
         "payload": payload,
+        "model": metadata.get("model"),
         "metadata": metadata,
     }
 
@@ -428,6 +429,19 @@ def _plugin_summary(plugin_result: dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
     return summary
+
+
+def _runtime_state_metadata(event: RuntimeEvent) -> dict[str, Any]:
+    metadata = dict(event.metadata or {})
+    model = _runtime_state_model(event)
+    if model is not None and "model" not in metadata:
+        metadata["model"] = model
+    return metadata
+
+
+def _runtime_state_model(event: RuntimeEvent) -> dict[str, Any] | None:
+    model = dict(event.context.metadata or {}).get("model")
+    return dict(model) if isinstance(model, dict) and model else None
 
 
 def _mcp_metadata(metadata: dict[str, Any]) -> dict[str, Any]:

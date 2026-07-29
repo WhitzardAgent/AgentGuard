@@ -371,39 +371,38 @@ test("mcpScan can be enabled without sources and reports a local diagnostic", ()
   assert.equal(state.context.metadata.mcp_scan.diagnostic_count, 1);
 });
 
-test("remote-enabled sessions without a ticket skip runtime-auth reports", async () => {
-  const originalFetch = globalThis.fetch;
-  const calls = [];
-  let bridge = null;
-  globalThis.fetch = async (url, options = {}) => {
-    calls.push({
-      url: String(url),
-      body: options.body ? JSON.parse(options.body) : null,
-    });
-    return {
-      ok: true,
-      async json() {
-        return {};
-      },
-    };
-  };
-
-  try {
-    bridge = new AgentGuardOpenClawBridge({
+test("remote-enabled sessions fail fast when no AgentGuard user ticket is configured", () => {
+  assert.throws(
+    () => new AgentGuardOpenClawBridge({
       pluginConfig: {
         serverUrl: "http://server.test",
         phases: buildPhases(),
       },
-    });
+    }),
+    /requires a user ticket/i,
+  );
+});
 
-    const state = bridge.getState(buildToolContext({ skipAutoReports: true }));
-    const reported = await bridge.ensureDefaultToolReports(state);
-
-    assert.equal(reported, false);
-    assert.deepEqual(calls, []);
+test("remote-enabled sessions fail fast when the configured ticket env var is unset", () => {
+  const originalUserTicket = process.env.AGENTGUARD_USER_TICKET;
+  delete process.env.AGENTGUARD_USER_TICKET;
+  try {
+    assert.throws(
+      () => new AgentGuardOpenClawBridge({
+        pluginConfig: {
+          serverUrl: "http://server.test",
+          userTicketEnvVar: "AGENTGUARD_USER_TICKET",
+          phases: buildPhases(),
+        },
+      }),
+      /requires a user ticket/i,
+    );
   } finally {
-    bridge?.clearAll();
-    globalThis.fetch = originalFetch;
+    if (originalUserTicket === undefined) {
+      delete process.env.AGENTGUARD_USER_TICKET;
+    } else {
+      process.env.AGENTGUARD_USER_TICKET = originalUserTicket;
+    }
   }
 });
 
@@ -1026,14 +1025,16 @@ test("ticket-enabled sessions persist runtime auth into the OpenClaw session sto
   }
 });
 
-test("ticket-enabled sessions restore persisted runtime auth without a fresh ticket", async () => {
+test("ticket-enabled sessions restore persisted runtime auth when the ticket is supplied via env", async () => {
   const originalFetch = globalThis.fetch;
   const originalAgentKeyDir = process.env.AGENTGUARD_AGENT_KEY_DIR;
+  const originalUserTicket = process.env.AGENTGUARD_USER_TICKET;
   const keyDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-openclaw-keys-"));
   const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentguard-openclaw-runtime-restore-"));
   const storePath = path.join(configDir, "sessions.json");
   const dpopKeyId = ["openclaw", "ag_openclaw_canonical", "openclaw-real-session-1"].join("\x1f");
   process.env.AGENTGUARD_AGENT_KEY_DIR = keyDir;
+  process.env.AGENTGUARD_USER_TICKET = "agt-ticket-openclaw";
   fs.writeFileSync(
     storePath,
     JSON.stringify({
@@ -1120,6 +1121,11 @@ test("ticket-enabled sessions restore persisted runtime auth without a fresh tic
       delete process.env.AGENTGUARD_AGENT_KEY_DIR;
     } else {
       process.env.AGENTGUARD_AGENT_KEY_DIR = originalAgentKeyDir;
+    }
+    if (originalUserTicket === undefined) {
+      delete process.env.AGENTGUARD_USER_TICKET;
+    } else {
+      process.env.AGENTGUARD_USER_TICKET = originalUserTicket;
     }
   }
 });
@@ -2146,7 +2152,7 @@ test("MCP runtime tool calls carry scanned MCP metadata through existing tool ho
   });
 });
 
-test("before_tool_call blocks when remote review is unavailable and fail_closed is enabled", async () => {
+test("before_tool_call blocks when runtime auth cannot be established and fail_closed is enabled", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => {
     throw new Error("network down");
@@ -2157,6 +2163,7 @@ test("before_tool_call blocks when remote review is unavailable and fail_closed 
     bridge = new AgentGuardOpenClawBridge({
       pluginConfig: {
         serverUrl: "http://127.0.0.1:1",
+        userTicket: "agt-ticket-openclaw",
         phases: buildPhases(),
       },
     });
@@ -2170,7 +2177,7 @@ test("before_tool_call blocks when remote review is unavailable and fail_closed 
     });
 
     assert.equal(result.block, true);
-    assert.match(result.blockReason, /Remote decision unavailable/i);
+    assert.match(result.blockReason, /AgentGuard closed this OpenClaw session/i);
   } finally {
     bridge?.clearAll();
     globalThis.fetch = originalFetch;
@@ -2304,6 +2311,78 @@ test("before_agent_run returns OpenClaw-supported block context for a risky prom
   assert.match(result.prependContext, /AgentGuard policy blocked this request/);
   assert.match(result.prependContext, /unsafe prompt/);
   assert.match(result.prependContext, /This prompt violates policy/);
+});
+
+test("before_agent_run injects runtime model metadata into context metadata", async () => {
+  class InspectPromptPlugin extends BasePlugin {
+    constructor() {
+      super();
+      this.event_types = [EventType.LLM_INPUT];
+    }
+
+    check(event) {
+      assert.deepEqual(event.context.metadata.model, {
+        provider: "openai",
+        name: "gpt-5.2",
+        base_url: "https://api.gpt.ge/v1",
+        source: "openclaw-runtime",
+      });
+      return CheckResult.empty();
+    }
+  }
+
+  const bridge = new AgentGuardOpenClawBridge({
+    pluginConfig: {
+      phases: buildPhases({
+        llm_before: { client: [InspectPromptPlugin], server: [] },
+      }),
+    },
+  });
+
+  const result = await bridge.runBeforeAgentRun({
+    ctx: buildAgentContext(),
+    event: {
+      prompt: "hello",
+      messages: [],
+      modelProvider: "openai",
+      model: "gpt-5.2",
+      modelBaseUrl: "https://api.gpt.ge/v1",
+    },
+  });
+
+  assert.equal(result, undefined);
+});
+
+test("before_agent_run leaves model metadata unset when OpenClaw hook does not provide it", async () => {
+  class InspectPromptPlugin extends BasePlugin {
+    constructor() {
+      super();
+      this.event_types = [EventType.LLM_INPUT];
+    }
+
+    check(event) {
+      assert.equal(event.context.metadata.model, undefined);
+      return CheckResult.empty();
+    }
+  }
+
+  const bridge = new AgentGuardOpenClawBridge({
+    pluginConfig: {
+      phases: buildPhases({
+        llm_before: { client: [InspectPromptPlugin], server: [] },
+      }),
+    },
+  });
+
+  const result = await bridge.runBeforeAgentRun({
+    ctx: buildAgentContext(),
+    event: {
+      prompt: "hello",
+      messages: [],
+    },
+  });
+
+  assert.equal(result, undefined);
 });
 
 test("ticket-enabled runtime auth fail-closed maps revoked sessions to OpenClaw-supported hook results", async () => {

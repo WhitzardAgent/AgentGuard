@@ -7,7 +7,7 @@ from backend.runtime.manager import RuntimeManager
 from backend.runtime.plugins.base import BasePlugin, CheckResult
 
 from shared.schemas.decisions import GuardDecision
-from shared.schemas.events import EventType, RuntimeContext, tool_event
+from shared.schemas.events import EventType, RuntimeContext, llm_input, tool_event
 from shared.schemas.policy import PolicyEffect, PolicyRule, RuleCondition
 
 _DENY_RULE = (
@@ -356,6 +356,41 @@ def test_audit_recent_exposes_runtime_payload_and_mcp_metadata():
     assert runtime_state["metadata"]["toolSource"] == "mcp"
     assert runtime_state["mcp"]["mcp_name"] == "local_mcp"
     assert runtime_state["mcp"]["mcp_tool_name"] == "read_file"
+
+
+def test_audit_recent_exposes_model_metadata_from_context():
+    con = _console()
+    event = llm_input(
+        RuntimeContext(
+            session_id="s-llm-model",
+            agent_id="agent-alpha",
+            metadata={
+                "model": {
+                    "provider": "openai",
+                    "name": "gpt-5.2",
+                    "base_url": "https://api.gpt.ge/v1",
+                    "source": "openclaw-runtime",
+                }
+            },
+        ),
+        [{"role": "user", "content": "hello"}],
+        phase="llm_before",
+    )
+
+    con._observe(  # noqa: SLF001
+        event,
+        GuardDecision.allow("ok"),
+        {"plugin_result": {"is_final": False, "metadata": {}}},
+    )
+
+    runtime_state = con.audit_recent("agent-alpha")[0]["runtime_state"]
+    assert runtime_state["model"] == {
+        "provider": "openai",
+        "name": "gpt-5.2",
+        "base_url": "https://api.gpt.ge/v1",
+        "source": "openclaw-runtime",
+    }
+    assert runtime_state["metadata"]["model"] == runtime_state["model"]
 
 
 def test_health_reports_rule_counts():

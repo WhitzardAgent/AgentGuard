@@ -1157,7 +1157,7 @@ class ConsoleState:
     @staticmethod
     def _build_runtime_state_dict(event: RuntimeEvent) -> dict[str, Any]:
         payload = event.payload.to_dict()
-        metadata = dict(event.metadata or {})
+        metadata = _runtime_state_metadata(event)
         return {
             "event_type": event.event_type.value,
             "tool_name": payload.get("tool_name"),
@@ -1177,6 +1177,7 @@ class ConsoleState:
                 if metadata.get(key) not in (None, "")
             },
             "payload": payload,
+            "model": metadata.get("model"),
             "metadata": metadata,
         }
 
@@ -1277,6 +1278,19 @@ class ConsoleState:
 
 def _safe_dict(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
+
+
+def _runtime_state_metadata(event: RuntimeEvent) -> dict[str, Any]:
+    metadata = dict(event.metadata or {})
+    model = _runtime_state_model(event)
+    if model is not None and "model" not in metadata:
+        metadata["model"] = model
+    return metadata
+
+
+def _runtime_state_model(event: RuntimeEvent) -> dict[str, Any] | None:
+    model = dict(event.context.metadata or {}).get("model")
+    return dict(model) if isinstance(model, dict) and model else None
 
 
 def _optional_string(value: Any) -> str | None:

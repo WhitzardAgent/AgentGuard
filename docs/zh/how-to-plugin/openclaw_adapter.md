@@ -93,13 +93,42 @@ OpenClaw adapter 会从下面这个共享仓库配置中读取 phase wiring：
 
 如果配置了远端 AgentGuard server，这个 adapter 还会：
 
-- 未配置用户 ticket 时，自动注册每个新 session
-- 配置了 `userTicket` 或 `userTicketEnvVar` 时，创建 AgentGuard DPoP runtime session
+- 启动时强制要求提供 `userTicket` 或 `userTicketEnvVar`，拿不到 ticket 值就直接加载失败
+- 基于这个 ticket 创建 AgentGuard DPoP runtime session
 - 上报一组基础的内置 OpenClaw tool 清单
 
 这样即使在较老的 OpenClaw 版本里没有包装后的 tool metadata，AgentGuard 仍然能拿到一份有意义的工具清单。
 
-如果需要绑定 AgentGuard 用户，先在 AgentGuard 中创建一个临时用户 ticket，把它导出为 `AGENTGUARD_USER_TICKET`，再启动 OpenClaw。这个 ticket 只会被消费一次，用来把 OpenClaw runtime agent/session 绑定到 AgentGuard 用户；之后 guard 和 report 请求会使用返回的 DPoP session token，不再发送 legacy identity headers。
+当 OpenClaw runtime 在 `before_agent_start` hook 上提供 `modelProvider`、
+`model` 和 `modelBaseUrl` 时，这个 adapter 会把它们转发到 AgentGuard 的
+`llm_input.context.metadata.model`，字段名分别为 `provider`、`name`、
+`base_url`，以及 `source: "openclaw-runtime"`。这样既不需要改动 prompt
+payload，也能直接通过标准 `model.*` 规则上下文做模型相关的策略匹配。
+
+如果需要绑定 AgentGuard 用户，先在 AgentGuard 中创建一个临时用户 ticket，把它导出为 `AGENTGUARD_USER_TICKET`，再启动 OpenClaw。如果已经配置 `serverUrl` 但启动时没有拿到 ticket，这个插件现在会在启动阶段直接失败，不再回退到 legacy identity headers。这个 ticket 只会被消费一次，用来把 OpenClaw runtime agent/session 绑定到 AgentGuard 用户；之后 guard 和 report 请求会使用返回的 DPoP session token，不再发送 legacy identity headers。
+
+## 启动 OpenClaw
+
+先在 AgentGuard 控制台生成一个新的用户 ticket，然后在启动 OpenClaw 的同一个终端里注入环境变量：
+
+```bash
+export AGENTGUARD_USER_TICKET="agt_xxx"
+openclaw gateway
+```
+
+再开一个终端打开 OpenClaw 控制台：
+
+```bash
+openclaw dashboard
+```
+
+如果你只想打印访问地址而不自动打开浏览器，可以用：
+
+```bash
+openclaw dashboard --no-open
+```
+
+开发时如果要长期运行，可以把 `openclaw gateway` 放到 `tmux` 或进程管理器里，但仍然必须在进程启动前注入一个新的 ticket。不要复用已经过期或已经被消费过的旧 ticket。
 
 ## 测试
 

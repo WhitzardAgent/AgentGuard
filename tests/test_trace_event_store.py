@@ -9,7 +9,7 @@ from backend.runtime.trace_store import TraceEventStore
 
 from shared.schemas.context import RuntimeContext
 from shared.schemas.decisions import GuardDecision
-from shared.schemas.events import tool_event
+from shared.schemas.events import llm_input, tool_event
 
 
 class FakeTraceDB:
@@ -189,6 +189,48 @@ def test_runtime_manager_double_writes_trace_store(monkeypatch):
     reasons = {record.reason for record in persistent.records}
     assert "decision_sync" in reasons
     assert "guard_decide" in reasons
+
+
+def test_recent_audit_exposes_model_metadata_from_context():
+    db = FakeTraceDB()
+    db.agent_ids.add("agent-a")
+    db.session_ids.add("session-a")
+    store = TraceEventStore(db=db)  # type: ignore[arg-type]
+    event = llm_input(
+        RuntimeContext(
+            session_id="session-a",
+            agent_id="agent-a",
+            metadata={
+                "model": {
+                    "provider": "openai",
+                    "name": "gpt-5.2",
+                    "base_url": "https://api.gpt.ge/v1",
+                    "source": "openclaw-runtime",
+                }
+            },
+        ),
+        [{"role": "user", "content": "hello"}],
+        phase="llm_before",
+    )
+
+    store.upsert_trace_entry(
+        "session-a",
+        AuditTraceEntry(
+            session_id="session-a",
+            agent_id="agent-a",
+            event=event,
+            decision=GuardDecision.allow("ok"),
+        ),
+    )
+
+    runtime_state = store.recent_audit("agent-a")[0]["runtime_state"]
+    assert runtime_state["model"] == {
+        "provider": "openai",
+        "name": "gpt-5.2",
+        "base_url": "https://api.gpt.ge/v1",
+        "source": "openclaw-runtime",
+    }
+    assert runtime_state["metadata"]["model"] == runtime_state["model"]
 
 
 def test_console_falls_back_to_memory_when_persistent_store_fails(monkeypatch):

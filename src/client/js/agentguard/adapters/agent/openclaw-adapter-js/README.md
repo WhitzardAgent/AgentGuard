@@ -129,14 +129,42 @@ client side removes the stale MCP from AgentGuard after the next monitor refresh
 inventory; otherwise the adapter infers targets from OpenClaw workspace paths
 when possible.
 
-When a remote AgentGuard server is configured, the adapter auto-registers each
-new session unless `userTicket` or `userTicketEnvVar` is configured. With a user
-ticket, the adapter consumes that ticket through `/v1/server/session/create`,
-binds the OpenClaw runtime agent/session to the AgentGuard user, then uses the
-returned DPoP session token for guard and reporting requests. In both modes it
-reports a baseline set of built-in OpenClaw tools so older OpenClaw versions
-without wrapped tool metadata still expose a useful tool inventory to
-AgentGuard, including top-level `input_params` for each catalog entry.
+When a remote AgentGuard server is configured, every remote OpenClaw session
+requires `userTicket` or `userTicketEnvVar`. If `serverUrl` is configured and
+no ticket value is available at startup, the plugin fails to load instead of
+falling back to legacy identity headers. With a user ticket, the adapter
+consumes that ticket through `/v1/server/session/create`, binds the OpenClaw
+runtime agent/session to the AgentGuard user, then uses the returned DPoP
+session token for guard and reporting requests. It also reports a baseline set
+of built-in OpenClaw tools so older OpenClaw versions without wrapped tool
+metadata still expose a useful tool inventory to AgentGuard, including
+top-level `input_params` for each catalog entry.
+
+## Start OpenClaw
+
+Generate a fresh user ticket in the AgentGuard console, then inject it into the
+same shell where you start OpenClaw:
+
+```bash
+export AGENTGUARD_USER_TICKET="agt_xxx"
+openclaw gateway
+```
+
+Open the OpenClaw dashboard from another terminal:
+
+```bash
+openclaw dashboard
+```
+
+If you only want the URL without auto-opening the browser, use:
+
+```bash
+openclaw dashboard --no-open
+```
+
+For long-running development sessions, run `openclaw gateway` under `tmux` or a
+process manager, but still inject a fresh ticket before the process starts. Do
+not reuse an old ticket after it has expired or has already been consumed.
 
 ## Test
 
